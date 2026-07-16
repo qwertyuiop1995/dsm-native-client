@@ -1,0 +1,43 @@
+name: 缺陷报告
+description: 报告可复现的功能问题，请勿提交任何凭据或真实文件数据
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      options:
+        - macOS
+        - iPhone
+        - iPad
+        - Android
+        - Windows
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 请使用脱敏信息描述现象
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+    validations:
+      required: true
+  - type: input
+    id: dsm
+    attributes:
+      label: DSM build
+      description: 只填写版本，不填写序列号、地址或账号
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我已确认内容不包含密码、SID、Token、NAS 地址、真实路径或用户文件
+          required: true

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/file-item.schema.json",
+  "title": "FileItem",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "path", "kind", "isRecyclePath"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^/"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["file", "directory", "symlink", "unknown"]
+    },
+    "sizeBytes": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "mimeType": {
+      "type": ["string", "null"]
+    },
+    "extension": {
+      "type": ["string", "null"]
+    },
+    "thumbnailAvailable": {
+      "type": ["boolean", "null"]
+    },
+    "isRecyclePath": {
+      "type": "boolean"
+    },
+    "rawType": {
+      "type": ["string", "null"]
+    }
+  }
+}

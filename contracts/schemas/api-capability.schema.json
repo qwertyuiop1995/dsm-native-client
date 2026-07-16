@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/api-capability.schema.json",
+  "title": "ApiCapability",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "path", "minVersion", "maxVersion", "requestFormat"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "minVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "maxVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "requestFormat": {
+      "type": "string",
+      "enum": ["FORM", "JSON"]
+    },
+    "selectedVersion": {
+      "type": ["integer", "null"],
+      "minimum": 1
+    },
+    "verified": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}

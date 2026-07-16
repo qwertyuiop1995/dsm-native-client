@@ -1,0 +1,61 @@
+# DSM Native Client
+
+面向 Windows、macOS、Android、iPhone 和 iPad 的 Synology DSM 原生客户端项目。
+
+项目坚持平台原生实现：
+
+- macOS、iPhone、iPad：Swift、SwiftUI；共享 Apple 原生 Swift Package。
+- Android：Kotlin、Jetpack Compose。
+- Windows：C#、WinUI 3。
+- 三套技术栈共享 API 契约、脱敏样本、错误语义和验收标准，不共享跨平台 UI 运行时。
+
+## 当前阶段
+
+当前里程碑：`M0 - 工程基础、能力发现与登录`。
+
+第一阶段目标：
+
+1. DSM 登录与安全会话。
+2. 文件和共享目录浏览。
+3. 图片、文本和 PDF 预览。
+4. 文件下载和上传。
+5. 安全删除。
+6. 经过实机验证的回收站恢复。
+
+## 文档
+
+- [DSM Web API 参考](docs/api/DSM_WEB_API_REFERENCE_ZH.md)
+- [第一阶段开发文档](docs/development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)
+- [当前进度](docs/progress/STATUS.md)
+- [产品路线图](docs/progress/ROADMAP.md)
+- [平台功能矩阵](docs/progress/PLATFORM_MATRIX.md)
+- [总体架构](docs/architecture/ARCHITECTURE.md)
+- [DSM 兼容矩阵](docs/compatibility/DSM_COMPATIBILITY_MATRIX.md)
+- [安全基线](docs/security/SECURITY_BASELINE.md)
+
+## 目录
+
+```text
+apple/       macOS 与通用 iPhone/iPad 原生工程
+android/     Android 原生工程
+windows/     Windows 原生工程
+contracts/   三端共同遵循的协议契约与脱敏样本
+docs/        API、开发、架构、进度、安全和兼容文档
+tools/       契约校验和样本脱敏工具
+```
+
+## 开发原则
+
+- 官方 API 优先，内部 API 必须经过能力探测、抓包验证和版本隔离。
+- 密码不持久化；SID、SynoToken 和 DID 使用系统安全存储。
+- Release 构建只允许 HTTPS，不提供全局忽略证书错误的选项。
+- 删除和恢复必须有确认、冲突保护和结果校验。
+- 仓库禁止提交真实 NAS 地址、账号、文件路径、SID、抓包和用户文件。
+
+## 构建状态
+
+平台工程将在对应里程碑开始时初始化。当前 GitHub Actions 只检查仓库结构、文档和契约 JSON；各平台工程生成后再分别增加 Apple、Android 和 Windows 构建工作流。
+
+## 许可证
+
+当前尚未选择开源许可证。公开访问不代表自动授予复制、修改或分发权限；确定对外授权方式后再添加正式许可证。

@@ -1,0 +1,32 @@
+name: 功能建议
+description: 提议新的客户端能力
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: 使用目标
+      description: 说明希望解决的问题，而不只是接口名称
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 影响范围
+      options:
+        - 所有平台
+        - Apple 平台
+        - Android
+        - Windows
+        - API 或协议契约
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 期望结果
+      description: 描述可验收的结果
+    validations:
+      required: true

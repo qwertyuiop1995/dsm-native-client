@@ -1,0 +1,21 @@
+{
+  "100": "unknown",
+  "101": "invalid_request",
+  "102": "api_unavailable",
+  "103": "method_unavailable",
+  "104": "version_unsupported",
+  "105": "permission_denied",
+  "106": "session_timeout",
+  "107": "session_interrupted",
+  "108": "upload_failed",
+  "109": "server_busy",
+  "110": "server_busy",
+  "111": "server_busy",
+  "114": "missing_parameter",
+  "115": "upload_not_allowed",
+  "116": "demo_operation_denied",
+  "117": "server_busy",
+  "118": "server_busy",
+  "119": "invalid_session",
+  "150": "source_ip_mismatch"
+}

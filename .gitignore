@@ -1,0 +1,60 @@
+# macOS
+.DS_Store
+
+# 通用编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 本地环境和秘密
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+*.mobileprovision
+*.keystore
+*.jks
+
+# 抓包和原始响应
+*.har
+*.pcap
+*.pcapng
+captures/
+fixtures-raw/
+
+# Apple
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+.build/
+
+# Android
+android/.gradle/
+android/local.properties
+android/**/build/
+android/captures/
+android/.externalNativeBuild/
+android/.cxx/
+
+# Windows / .NET
+windows/.vs/
+windows/**/bin/
+windows/**/obj/
+*.user
+*.suo
+
+# 通用构建和临时文件
+build/
+dist/
+out/
+tmp/
+temp/
+*.log
+*.part

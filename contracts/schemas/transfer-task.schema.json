@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/transfer-task.schema.json",
+  "title": "TransferTask",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "direction", "displayName", "completedBytes", "state", "retryCount", "createdAt"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "direction": {
+      "type": "string",
+      "enum": ["upload", "download"]
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "totalBytes": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "completedBytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "state": {
+      "type": "string",
+      "enum": ["queued", "running", "paused", "cancelling", "succeeded", "failed", "cancelled"]
+    },
+    "retryCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

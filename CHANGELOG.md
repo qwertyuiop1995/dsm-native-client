@@ -15,6 +15,7 @@
 - 初始化 macOS SwiftUI App、Xcode workspace 与 Apple 共享 Swift Package。
 - 实现 `DsmCore`、`DsmNetwork`、API 能力发现、密码/OTP 登录和 Keychain 会话存储。
 - 添加 Apple 单元测试与构建工作流。
+- 添加 UI UX Pro Max 自动路由、新设备引导安装脚本和离线测试。
 
 ### 变更
 

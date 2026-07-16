@@ -32,6 +32,9 @@ jobs:
             python -m json.tool "$file" >/dev/null
           done < <(find contracts -type f -name '*.json' -print0)
 
+      - name: 校验 Codex Skill 引导脚本
+        run: python -m unittest discover -s tools/codex/tests -p 'test_*.py'
+
       - name: 禁止敏感文件类型
         shell: bash
         run: |

@@ -4,6 +4,7 @@
 
 - [DSM Web API 参考](api/DSM_WEB_API_REFERENCE_ZH.md)
 - [第一阶段开发文档](development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)
+- [UI UX Pro Max 项目接入说明](development/UI_UX_PRO_MAX_INTEGRATION_ZH.md)
 - [当前开发进度](progress/STATUS.md)
 - [产品路线图](progress/ROADMAP.md)
 - [平台功能矩阵](progress/PLATFORM_MATRIX.md)

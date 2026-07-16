@@ -8,6 +8,10 @@
 *.swo
 *~
 
+# Python 工具缓存
+__pycache__/
+*.py[cod]
+
 # 本地环境和秘密
 .env
 .env.*

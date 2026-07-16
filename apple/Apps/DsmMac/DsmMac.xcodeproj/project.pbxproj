@@ -8,21 +8,29 @@
 
 /* Begin PBXBuildFile section */
 		04BF49113047E6A5BFDD0565 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = CB5D2FCD484E6C915A3AF4BB /* Localizable.strings */; };
+		14FC3E3514D229F473EFFD96 /* DemoFileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C747DA6C9D7C82DDC020E1 /* DemoFileRepository.swift */; };
+		15984B33D2FC6DC271096E4A /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D43383FD609AFA6A0605CEA /* WorkspaceView.swift */; };
 		3F7B3902FFF181AEC9D25BEE /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 55636F64951E9DD6841A1586 /* InfoPlist.strings */; };
 		3FCADE45FE1B6CE377E360BA /* DsmMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */; };
 		4440F05E83E5ED0F48DAC304 /* DsmNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = 6A578FB6D5B34A59438162B6 /* DsmNetwork */; };
 		46CE97C3D80547D7061224F2 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE9DB7D94AFC947DE39DF8D1 /* LoginView.swift */; };
 		A8947CF70F1CC5F62D83C33C /* DsmCore in Frameworks */ = {isa = PBXBuildFile; productRef = CDFB3D25D6035AB51E143261 /* DsmCore */; };
+		AC6936BB386C9A829A221F34 /* WorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6DF22565675FC82D7CC686 /* WorkspaceModel.swift */; };
+		C3AFE337248691D6883C0CE7 /* FilePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 852694B5E54505BB153EF98A /* FilePreviewView.swift */; };
 		F06931669E2EB893B31BBBE0 /* LoginViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D54FCCE59BEF04898E541CE /* LoginViewModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		1DE7697E655CBAC946BEBF3F /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		1F6DF22565675FC82D7CC686 /* WorkspaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceModel.swift; sourceTree = "<group>"; };
 		226606003B75B91F9FA03683 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		3D43383FD609AFA6A0605CEA /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
 		46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DsmMacApp.swift; sourceTree = "<group>"; };
 		4D54FCCE59BEF04898E541CE /* LoginViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModel.swift; sourceTree = "<group>"; };
 		4E1F96609F0323DC19D30EC7 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		73A190EAB72D1587728A072E /* LanStash.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LanStash.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		852694B5E54505BB153EF98A /* FilePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePreviewView.swift; sourceTree = "<group>"; };
+		90C747DA6C9D7C82DDC020E1 /* DemoFileRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoFileRepository.swift; sourceTree = "<group>"; };
 		9C86C1E7AC50E2616225F51D /* apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = apple; path = ../..; sourceTree = SOURCE_ROOT; };
 		9D89D62711D2351506A6E681 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		DE9DB7D94AFC947DE39DF8D1 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
@@ -69,9 +77,13 @@
 		6FE02D5A3AD87DF10918B39E /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				90C747DA6C9D7C82DDC020E1 /* DemoFileRepository.swift */,
 				46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */,
+				852694B5E54505BB153EF98A /* FilePreviewView.swift */,
 				DE9DB7D94AFC947DE39DF8D1 /* LoginView.swift */,
 				4D54FCCE59BEF04898E541CE /* LoginViewModel.swift */,
+				1F6DF22565675FC82D7CC686 /* WorkspaceModel.swift */,
+				3D43383FD609AFA6A0605CEA /* WorkspaceView.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -164,9 +176,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				14FC3E3514D229F473EFFD96 /* DemoFileRepository.swift in Sources */,
 				3FCADE45FE1B6CE377E360BA /* DsmMacApp.swift in Sources */,
+				C3AFE337248691D6883C0CE7 /* FilePreviewView.swift in Sources */,
 				46CE97C3D80547D7061224F2 /* LoginView.swift in Sources */,
 				F06931669E2EB893B31BBBE0 /* LoginViewModel.swift in Sources */,
+				AC6936BB386C9A829A221F34 /* WorkspaceModel.swift in Sources */,
+				15984B33D2FC6DC271096E4A /* WorkspaceView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -265,7 +281,7 @@
 				CODE_SIGN_ENTITLEMENTS = SupportingFiles/DsmMac.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 7;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SupportingFiles/Info.plist;
@@ -273,7 +289,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.6;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.qwertyuiop1995.dsmnativeclient.macos;
 				PRODUCT_NAME = LanStash;
 				SDKROOT = macosx;
@@ -287,7 +303,7 @@
 				CODE_SIGN_ENTITLEMENTS = SupportingFiles/DsmMac.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 7;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SupportingFiles/Info.plist;
@@ -295,7 +311,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.6;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.qwertyuiop1995.dsmnativeclient.macos;
 				PRODUCT_NAME = LanStash;
 				SDKROOT = macosx;

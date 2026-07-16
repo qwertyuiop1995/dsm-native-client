@@ -20,7 +20,11 @@ Packages/DsmTransferFeature/   下载、上传、删除和恢复任务
 - macOS 安装产物：`LanStash.app`；中文系统显示为“岚仓”。
 - 最低系统：macOS 14；共享包同时声明 iOS 17。
 - macOS App 使用 SwiftUI 和 App Sandbox。
-- 当前网络层仅接受系统信任的 HTTPS 证书；自签名证书首次信任尚未实现。
+- 支持系统信任的 HTTPS 证书，以及核对 SHA-256 指纹后的自签名证书首次信任。
+- 支持使用 IP、域名、QuickConnect ID 连接，也可以粘贴浏览器最终地址；QuickConnect 仅解析直连地址，不包含中继隧道。
+- 已实现共享与目录浏览、图片/文本/PDF 预览、上传、下载、安全删除和传输中心。
+- 回收站可浏览和下载；恢复引擎只有在当前 DSM build 通过兼容验证后才开放正式入口。
+- 提供本地演示模式，不连接 NAS 即可检查完整三栏界面和文件操作流程。
 
 ## 构建
 
@@ -33,6 +37,16 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
+
+直接生成 macOS App 和 DMG，并在完成后运行：
+
+```bash
+cd apple/Apps/DsmMac
+./package.sh
+```
+
+脚本无需参数，启动后可从菜单选择构建类型、目标架构、签名方式和打包后是否运行。产物位于 `apple/Apps/DsmMac/dist/`。
+新安装包验证成功后，脚本会自动清理该目录中更早版本的 DMG，并保留当前版本的不同架构。
 
 `Apps/DsmMac/project.yml` 是 XcodeGen 工程定义。修改工程结构后运行：
 

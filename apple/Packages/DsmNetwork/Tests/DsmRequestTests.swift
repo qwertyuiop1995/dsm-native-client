@@ -14,16 +14,18 @@ final class DsmRequestTests: XCTestCase {
             requestFormat: .form,
             parameters: ["account": .string("中文 #+&=\"😀")],
             credential: DsmSessionCredential(
-                sid: "<REDACTED_SESSION>",
-                synoToken: "<REDACTED_SESSION>"
+                sid: "REDACTED_SESSION",
+                synoToken: "REDACTED_TOKEN"
             )
         )
 
         XCTAssertNil(request.url?.query)
         let fields = try decodeForm(request.httpBody)
         XCTAssertEqual(fields["account"], "中文 #+&=\"😀")
-        XCTAssertEqual(fields["_sid"], "<REDACTED_SESSION>")
-        XCTAssertEqual(fields["SynoToken"], "<REDACTED_SESSION>")
+        XCTAssertEqual(fields["_sid"], "REDACTED_SESSION")
+        XCTAssertEqual(fields["SynoToken"], "REDACTED_TOKEN")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "id=REDACTED_SESSION")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-SYNO-TOKEN"), "REDACTED_TOKEN")
     }
 
     func testJSON请求格式编码字符串和布尔值() throws {
@@ -44,6 +46,42 @@ final class DsmRequestTests: XCTestCase {
         let encodedPath = try XCTUnwrap(fields["path"]?.data(using: .utf8))
         XCTAssertEqual(try JSONDecoder().decode(String.self, from: encodedPath), "/测试目录")
         XCTAssertEqual(fields["overwrite"], "false")
+    }
+
+    func testGET请求格式编码参数并拼接URL() throws {
+        let request = try DsmRequestBuilder.build(
+            baseURL: try XCTUnwrap(URL(string: "https://nas.example.invalid:5001")),
+            path: "entry.cgi",
+            api: "SYNO.FileStation.Download",
+            version: 2,
+            method: "download",
+            requestFormat: .form,
+            parameters: [
+                "path": .string("/video/movie.mp4"),
+                "mode": .string("download")
+            ],
+            credential: DsmSessionCredential(
+                sid: "REDACTED_SESSION",
+                synoToken: "REDACTED_TOKEN"
+            ),
+            httpMethod: "GET"
+        )
+
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertNil(request.httpBody)
+        
+        let components = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+        let queryDict = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(queryDict["api"], "SYNO.FileStation.Download")
+        XCTAssertEqual(queryDict["version"], "2")
+        XCTAssertEqual(queryDict["method"], "download")
+        XCTAssertEqual(queryDict["path"], "/video/movie.mp4")
+        XCTAssertEqual(queryDict["mode"], "download")
+        XCTAssertEqual(queryDict["_sid"], "REDACTED_SESSION")
+        XCTAssertEqual(queryDict["SynoToken"], "REDACTED_TOKEN")
+        
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "id=REDACTED_SESSION")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-SYNO-TOKEN"), "REDACTED_TOKEN")
     }
 
     private func decodeForm(_ data: Data?) throws -> [String: String] {

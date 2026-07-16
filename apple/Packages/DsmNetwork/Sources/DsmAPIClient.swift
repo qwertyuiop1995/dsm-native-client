@@ -35,6 +35,11 @@ private struct DsmErrorPayload: Decodable, Sendable {
     let code: Int
 }
 
+private struct DsmVoidEnvelope: Decodable, Sendable {
+    let success: Bool
+    let error: DsmErrorPayload?
+}
+
 public struct DsmAPIClient: Sendable {
     private let baseURL: URL
     private let transport: any DsmHTTPTransport
@@ -83,6 +88,8 @@ public struct DsmAPIClient: Sendable {
             response = try await transport.send(request)
         } catch is CancellationError {
             throw DsmNetworkError.cancelled(requestID: requestID)
+        } catch let error as DsmCertificateTrustError {
+            throw error
         } catch let error as URLError {
             throw DsmNetworkError.transport(code: error.errorCode, requestID: requestID)
         } catch let error as DsmNetworkError {
@@ -118,5 +125,69 @@ public struct DsmAPIClient: Sendable {
             throw DsmNetworkError.invalidResponse(requestID: requestID)
         }
         return payload
+    }
+
+    func callVoid(
+        path: String,
+        api: String,
+        version: Int,
+        method: String,
+        requestFormat: DsmRequestFormat,
+        parameters: [String: DsmParameterValue],
+        credential: DsmSessionCredential? = nil
+    ) async throws {
+        let requestID = UUID()
+        let request: URLRequest
+
+        do {
+            request = try DsmRequestBuilder.build(
+                baseURL: baseURL,
+                path: path,
+                api: api,
+                version: version,
+                method: method,
+                requestFormat: requestFormat,
+                parameters: parameters,
+                credential: credential
+            )
+        } catch {
+            throw DsmNetworkError.invalidRequest(requestID: requestID)
+        }
+
+        let response: DsmHTTPResponse
+        do {
+            response = try await transport.send(request)
+        } catch is CancellationError {
+            throw DsmNetworkError.cancelled(requestID: requestID)
+        } catch let error as DsmCertificateTrustError {
+            throw error
+        } catch let error as URLError {
+            throw DsmNetworkError.transport(code: error.errorCode, requestID: requestID)
+        } catch {
+            throw DsmNetworkError.transport(
+                code: URLError.unknown.rawValue,
+                requestID: requestID
+            )
+        }
+
+        guard (200..<300).contains(response.statusCode) else {
+            throw DsmNetworkError.httpStatus(code: response.statusCode, requestID: requestID)
+        }
+        guard response.data.count <= maximumJSONResponseBytes else {
+            throw DsmNetworkError.responseTooLarge(requestID: requestID)
+        }
+
+        let envelope: DsmVoidEnvelope
+        do {
+            envelope = try JSONDecoder().decode(DsmVoidEnvelope.self, from: response.data)
+        } catch {
+            throw DsmNetworkError.invalidResponse(requestID: requestID)
+        }
+        if let error = envelope.error {
+            throw DsmNetworkError.api(code: error.code, requestID: requestID)
+        }
+        guard envelope.success else {
+            throw DsmNetworkError.invalidResponse(requestID: requestID)
+        }
     }
 }

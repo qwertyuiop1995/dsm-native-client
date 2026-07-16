@@ -27,11 +27,13 @@ final class DsmAuthenticationServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(session.sid, "<REDACTED_SESSION>")
-        XCTAssertNil(session.did)
+        XCTAssertEqual(session.did, "<REDACTED_DEVICE>")
         let requests = await transport.recordedRequests()
         let request = try XCTUnwrap(requests.first)
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertNil(request.url?.query)
+        let fields = try decodeForm(request.httpBody)
+        XCTAssertEqual(fields["format"], "sid")
     }
 
     func test需要OTP时映射统一错误() async throws {
@@ -69,6 +71,15 @@ final class DsmAuthenticationServiceTests: XCTestCase {
             maxVersion: 7,
             requestFormat: .form,
             selectedVersion: 6
+        )
+    }
+
+    private func decodeForm(_ data: Data?) throws -> [String: String] {
+        let body = try XCTUnwrap(data.flatMap { String(data: $0, encoding: .utf8) })
+        var components = URLComponents()
+        components.percentEncodedQuery = body
+        return Dictionary(
+            uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") }
         )
     }
 }

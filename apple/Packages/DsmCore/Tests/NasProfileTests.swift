@@ -23,4 +23,15 @@ final class NasProfileTests: XCTestCase {
             )
         )
     }
+
+    func test规范化证书指纹() throws {
+        let profile = try NasProfile(
+            displayName: "测试设备",
+            host: "nas.example.invalid",
+            port: 5_001,
+            pinnedCertificateSHA256: "aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa:aa"
+        )
+
+        XCTAssertEqual(profile.pinnedCertificateSHA256, String(repeating: "AA", count: 32))
+    }
 }

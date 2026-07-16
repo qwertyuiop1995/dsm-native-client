@@ -3,12 +3,15 @@ import Foundation
 
 public actor DsmAuthRepository: AuthRepository {
     private let sessionStore: any SessionSecureStoring
-    private let transportFactory: @Sendable () -> any DsmHTTPTransport
+    private let transportFactory: @Sendable (NasProfile) -> any DsmHTTPTransport
 
     public init(
         sessionStore: any SessionSecureStoring = KeychainSessionStore(),
-        transportFactory: @escaping @Sendable () -> any DsmHTTPTransport = {
-            URLSessionTransport()
+        transportFactory: @escaping @Sendable (NasProfile) -> any DsmHTTPTransport = { profile in
+            URLSessionTransport(
+                expectedHost: profile.host,
+                pinnedCertificateSHA256: profile.pinnedCertificateSHA256
+            )
         }
     ) {
         self.sessionStore = sessionStore
@@ -31,7 +34,7 @@ public actor DsmAuthRepository: AuthRepository {
             throw AppError(
                 category: .apiUnavailable,
                 isRetryable: false,
-                safeUserMessage: "此 DSM 没有发现登录 API。"
+                safeUserMessage: "这台 NAS 暂时无法使用岚仓登录，请确认 DSM 和 File Station 已启用并更新。"
             )
         }
 
@@ -49,7 +52,7 @@ public actor DsmAuthRepository: AuthRepository {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "无法将会话安全保存到钥匙串。"
+                safeUserMessage: "无法在这台 Mac 上保存登录状态。"
             )
         }
         return session
@@ -57,12 +60,19 @@ public actor DsmAuthRepository: AuthRepository {
 
     public func restoreSession(for profileID: UUID) async throws -> AuthSession? {
         do {
-            return try await sessionStore.load(for: profileID)
+            guard let session = try await sessionStore.load(for: profileID) else {
+                return nil
+            }
+            guard session.transportVersion >= AuthSession.currentTransportVersion else {
+                try await sessionStore.remove(for: profileID)
+                return nil
+            }
+            return session
         } catch {
             throw AppError(
                 category: .authenticationRequired,
                 isRetryable: false,
-                safeUserMessage: "无法从钥匙串恢复 DSM 会话。"
+                safeUserMessage: "无法读取已保存的登录状态，请重新登录。"
             )
         }
     }
@@ -74,8 +84,32 @@ public actor DsmAuthRepository: AuthRepository {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "无法清理钥匙串中的 DSM 会话。"
+                safeUserMessage: "无法删除这台 Mac 上保存的登录状态。"
             )
+        }
+    }
+
+    public func logout(
+        profile: NasProfile,
+        capabilities: CapabilitySet,
+        session: AuthSession
+    ) async throws {
+        var remoteError: Error?
+        if let capability = capabilities[DsmAPIName.authentication] {
+            do {
+                let client = try makeClient(for: profile)
+                try await DsmAuthenticationService(client: client).logout(
+                    capability: capability,
+                    session: session
+                )
+            } catch {
+                remoteError = error
+            }
+        }
+
+        try await clearSession(for: profile.id)
+        if let remoteError {
+            throw remoteError
         }
     }
 
@@ -83,13 +117,13 @@ public actor DsmAuthRepository: AuthRepository {
         do {
             return DsmAPIClient(
                 baseURL: try DsmEndpoint.baseURL(for: profile),
-                transport: transportFactory()
+                transport: transportFactory(profile)
             )
         } catch {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "NAS 连接地址无效。"
+                safeUserMessage: "NAS 地址或端口不正确，请检查后重试。"
             )
         }
     }

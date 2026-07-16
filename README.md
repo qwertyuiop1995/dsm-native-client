@@ -11,7 +11,7 @@
 
 ## 当前阶段
 
-当前里程碑：`M0 - 工程基础、能力发现与登录`。
+当前里程碑：`macOS 第一阶段实现与 DSM 实机验证`。
 
 第一阶段目标：
 
@@ -54,7 +54,7 @@ tools/       契约校验和样本脱敏工具
 
 ## 构建状态
 
-macOS 参考工程和 Apple 共享 Swift Package 已初始化，当前包含 `DsmCore`、`DsmNetwork`、`SYNO.API.Info` 能力发现与 `SYNO.API.Auth` 登录最小闭环。Android 与 Windows 工程将在后续批次初始化。
+macOS 参考工程已完成第一阶段源码闭环，包含多 NAS 配置、证书指纹信任、能力发现、密码/OTP 登录、共享与目录浏览、图片/文本/PDF 预览、上传、下载、安全删除、传输中心和受兼容开关保护的回收站恢复。应用提供不访问网络的演示模式，方便直接检查完整界面。Android 与 Windows 工程将在后续批次初始化。
 
 Apple 本地验证：
 
@@ -68,7 +68,7 @@ xcodebuild \
   build
 ```
 
-能力发现和登录尚需在记录了 DSM build 与 File Station 版本的专用测试 NAS 上完成实机验证。
+所有 DSM 行为仍需在记录了 DSM build、File Station 版本和证书类型的专用测试 NAS 上完成实机验证。未通过兼容验证时，正式连接不会开放“恢复到原位置”。
 
 ## 许可证
 

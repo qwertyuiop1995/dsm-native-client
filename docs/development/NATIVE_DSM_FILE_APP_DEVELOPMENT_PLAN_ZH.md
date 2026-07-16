@@ -429,11 +429,13 @@ version=<selectedVersion>
 method=login
 account=<username>
 passwd=<password>
-session=NativeFileClient
+session=FileStation
 format=sid
 enable_syno_token=yes
 otp_code=<仅需要时发送>
 ```
+
+macOS 后续请求在 HTTPS 请求头中发送 `Cookie: id=<SID>`，同时在 POST 正文保留 `_sid=<SID>` 作为 DSM 版本兼容路径。两者必须一致，且不得进入 URL、日志或持久化 Cookie 存储。iPhone/iPad 复用该 Apple 共享实现；Android 和 Windows 后续按同一安全边界实现。
 
 成功后读取：
 
@@ -576,7 +578,7 @@ canDownload
 | A | PDF | 下载到安全临时文件后使用平台原生 PDF 组件 | 限制并发和缓存大小 |
 | A | TXT、JSON、XML、日志、常见代码文件 | 下载有限大小后只读显示 | 默认最大预览 5 MiB，可配置 |
 | B | 音频 | 后续使用受控缓存或认证资源加载器 | 不把 SID 放入播放器 URL |
-| B | 视频 | 后续验证 Range/流式行为后实现 | 未验证前先下载后播放 |
+| B | 视频 | macOS 已实现带认证的 Range 分段读取，其他平台后续适配 | NAS 不返回 `206` 时停止流式播放并提示下载 |
 | C | Office、压缩包、未知格式 | 展示详情并允许下载/系统打开 | 不在应用内解析 |
 
 ### 12.2 缩略图
@@ -1539,12 +1541,13 @@ DSM 6 兼容不作为第一批发布阻塞项，除非用户的实际 NAS 正在
 - 单文件和缓存的预期最大容量。
 - 是否允许保存账号名和可信设备 DID。
 
-默认决策：DSM 7 优先、局域网/VPN、macOS 参考实现、先做 A 级预览、不保存密码、不启用 QuickConnect 专用逻辑。
+当前决策：DSM 7 优先、macOS 参考实现、先做 A 级预览、不保存密码。macOS 已加入 QuickConnect ID 的直连地址解析；iPhone/iPad 复用 Apple 共享实现，Android 和 Windows 按同一安全边界后续实现。第一阶段不实现 QuickConnect 中继隧道，解析失败时回退到用户提供的 IP、域名或浏览器最终地址。
 
 ## 31. 参考资料
 
 - [DSM Login Web API Guide](https://global.download.synology.com/download/Document/Software/DeveloperGuide/Os/DSM/All/enu/DSM_Login_Web_API_Guide_enu.pdf)
 - [File Station Official API Guide](https://global.download.synology.com/download/Document/Software/DeveloperGuide/Package/FileStation/All/enu/Synology_File_Station_API_Guide.pdf)
+- [Synology QuickConnect White Paper](https://global.download.synology.com/download/Document/Software/WhitePaper/Os/DSM/All/enu/Synology_QuickConnect_White_Paper_enu.pdf)
 - [Synology 知识库：启用回收站](https://kb.synology.com/zh-tw/DSM/help/DSM/AdminCenter/file_share_recycle?version=7)
 - [Synology 知识库：恢复误删文件](https://kb.synology.com/zh-tw/DSM/tutorial/How_do_I_restore_files_deleted_from_Synology_NAS)
 - [`dsm_helper` dev 分支](https://gitee.com/apaipai/dsm_helper/tree/dev/)

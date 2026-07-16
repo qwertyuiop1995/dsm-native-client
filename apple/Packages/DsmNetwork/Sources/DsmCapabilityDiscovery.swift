@@ -100,7 +100,7 @@ public struct DsmCapabilityDiscovery: Sendable {
                 throw AppError(
                     category: .invalidResponse,
                     isRetryable: false,
-                    safeUserMessage: "DSM 返回了无效的 API 能力信息。"
+                    safeUserMessage: "NAS 返回的信息无法读取，请确认 DSM 已更新到受支持版本。"
                 )
             }
 
@@ -112,8 +112,8 @@ public struct DsmCapabilityDiscovery: Sendable {
                 requestFormat: payload.requestFormat
             )
 
-            if name == DsmAPIName.authentication {
-                capability = (try? capability.selectingVersion(in: 3...6)) ?? capability
+            if let supportedRange = Self.supportedRanges[name] {
+                capability = (try? capability.selectingVersion(in: supportedRange)) ?? capability
             }
             capabilities[name] = capability
         }
@@ -130,4 +130,16 @@ public struct DsmCapabilityDiscovery: Sendable {
             return false
         }
     }
+
+    private static let supportedRanges: [String: ClosedRange<Int>] = [
+        DsmAPIName.authentication: 3...6,
+        DsmAPIName.fileStationInfo: 1...2,
+        DsmAPIName.fileStationList: 1...2,
+        DsmAPIName.fileStationThumbnail: 1...2,
+        DsmAPIName.fileStationCheckPermission: 1...3,
+        DsmAPIName.fileStationDownload: 1...2,
+        DsmAPIName.fileStationUpload: 1...2,
+        DsmAPIName.fileStationDelete: 1...2,
+        DsmAPIName.fileStationCopyMove: 1...3
+    ]
 }

@@ -10,7 +10,8 @@ let package = Package(
     ],
     products: [
         .library(name: "DsmCore", targets: ["DsmCore"]),
-        .library(name: "DsmNetwork", targets: ["DsmNetwork"])
+        .library(name: "DsmNetwork", targets: ["DsmNetwork"]),
+        .executable(name: "LanStash", targets: ["DsmMacExecutable"])
     ],
     targets: [
         .target(
@@ -25,6 +26,15 @@ let package = Package(
                 .linkedFramework("Security")
             ]
         ),
+        .executableTarget(
+            name: "DsmMacExecutable",
+            dependencies: ["DsmCore", "DsmNetwork"],
+            path: "Apps/DsmMac/Sources",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("PDFKit")
+            ]
+        ),
         .testTarget(
             name: "DsmCoreTests",
             dependencies: ["DsmCore"],
@@ -34,6 +44,11 @@ let package = Package(
             name: "DsmNetworkTests",
             dependencies: ["DsmCore", "DsmNetwork"],
             path: "Packages/DsmNetwork/Tests"
+        ),
+        .testTarget(
+            name: "DsmMacTests",
+            dependencies: ["DsmCore", "DsmMacExecutable"],
+            path: "Apps/DsmMac/Tests"
         )
     ]
 )

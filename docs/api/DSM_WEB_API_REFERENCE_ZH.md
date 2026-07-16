@@ -25,6 +25,7 @@
 - [Download Station Web API Guide](https://global.download.synology.com/download/Document/Software/DeveloperGuide/Package/DownloadStation/All/enu/Synology_Download_Station_Web_API.pdf)
 - [Virtual Machine Manager API Guide](https://global.download.synology.com/download/Document/Software/DeveloperGuide/Package/Virtualization/All/enu/Synology_Virtual_Machine_Manager_API_Guide.pdf)
 - [DSM Developer Guide 7](https://global.download.synology.com/download/Document/Software/DeveloperGuide/Os/DSM/All/enu/DSM_Developer_Guide_7_enu.pdf)
+- [Synology QuickConnect White Paper](https://global.download.synology.com/download/Document/Software/WhitePaper/Os/DSM/All/enu/Synology_QuickConnect_White_Paper_enu.pdf)
 - [`dsm_helper` 项目源码](https://gitee.com/apaipai/dsm_helper/tree/dev/)
 - 项目集中式接口实现：[`lib/utils/api.dart`](https://gitee.com/apaipai/dsm_helper/blob/dev/lib/utils/api.dart)
 - 项目模型与分模块接口：[`lib/models/Syno`](https://gitee.com/apaipai/dsm_helper/tree/dev/lib/models/Syno)
@@ -60,6 +61,31 @@ https://<NAS_HOST>:5001/webapi/<API_PATH>
 
 不要硬编码业务 API 路径。启动时先在 `/webapi/entry.cgi` 调用 `SYNO.API.Info`；兼容较旧 DSM 时，如该入口明确不存在，再回退 `/webapi/query.cgi`。之后始终使用 NAS 返回的 `path`。
 
+### 2.1.1 QuickConnect 地址解析 - 内部、可降级
+
+群晖公开资料说明 QuickConnect ID 可以用于群晖移动应用，并会把浏览器入口重定向到可用的直连或中继地址，但没有找到面向第三方客户端的正式地址解析 API 规范：
+
+- [Synology NAS External Access Quick Start Guide](https://kb.synology.com/en-my/DSM/tutorial/Quick_Start_External_Access)
+- [Synology QuickConnect White Paper](https://global.download.synology.com/download/Document/Software/WhitePaper/Os/DSM/All/enu/Synology_QuickConnect_White_Paper_enu.pdf)
+
+macOS 参考实现使用 QuickConnect Web Portal 自身的内部解析入口作为可降级适配器：
+
+```text
+POST https://global.quickconnect.<region>/Serv.php
+command=get_server_info
+id=mainapp_https
+serverID=<QUICKCONNECT_ID>
+```
+
+安全与兼容边界：
+
+- 该入口标记为 `内部`，不视为群晖承诺兼容的公开 API。
+- 请求不携带 DSM 用户名、密码、SID、SynoToken、文件路径或其他会话数据。
+- 只接受 `smartdns.lan` 或 `smartdns.host` 中以 `.direct.quickconnect.cn`、`.direct.quickconnect.to` 结尾的地址，并校验端口范围。
+- 当前只使用可直接访问 DSM HTTPS 服务的地址，不实现 QuickConnect 中继隧道协议。
+- 解析失败时允许用户改为粘贴浏览器最终地址，或输入 NAS 的 IP、`.local`、DDNS 和自定义域名。
+- 解析结果只用于当前连接，不替换界面和本地配置中保存的 QuickConnect ID，也不写入日志。
+
 ### 2.2 通用请求字段
 
 | 字段 | 类型 | 说明 |
@@ -67,10 +93,13 @@ https://<NAS_HOST>:5001/webapi/<API_PATH>
 | `api` | String | API 名称，例如 `SYNO.FileStation.List` |
 | `version` | Int | API 版本，必须处于 `minVersion...maxVersion` 范围内 |
 | `method` | String | API 方法，例如 `list`、`get`、`start` |
-| `_sid` | String | 使用 SID 模式登录时的会话 ID |
+| `_sid` | String | POST 正文中的会话 ID；用于不依赖 Cookie 的兼容路径 |
+| `Cookie: id=<SID>` | Header | 官方 Cookie 会话方式；SID 只能进入请求头，不得进入 URL |
 | `SynoToken` | String | 开启 SynoToken 后的 CSRF 令牌，部分管理接口需要 |
 
 建议默认采用 `POST` 和 `application/x-www-form-urlencoded`。虽然官方示例经常使用 GET，但 GET 会把密码、SID、文件路径等写入 URL、代理日志和浏览器历史。
+
+macOS 参考实现使用 `format=sid` 登录，并在后续 HTTPS 请求中同时发送安全 Cookie 请求头和 POST 正文 `_sid`。两处必须是同一个 SID；这样既兼容 DSM 的 Cookie 会话，也兼容只识别 `_sid` 的版本。Cookie 不写入磁盘，由 Keychain 中的 SID 在内存中临时构造。
 
 ### 2.3 `requestFormat=JSON`
 
@@ -216,7 +245,7 @@ curl --fail --silent --show-error \
 | `account` | 是 | 3+ | DSM 用户名 |
 | `passwd` | 是 | 3+ | DSM 密码；只在内存中短暂存在 |
 | `session` | 否 | 3+ | 会话名，例如 `FileStation`、`DownloadStation` |
-| `format` | 否 | 3+ | `cookie` 或 `sid`；原生客户端推荐 `sid` |
+| `format` | 否 | 3+ | `cookie` 或 `sid`；macOS 参考实现使用 `sid` 并保留 Cookie 请求头兼容 |
 | `otp_code` | 否 | 3+ | 双重验证 OTP |
 | `enable_syno_token` | 否 | 6+ | 请求返回 SynoToken |
 | `enable_device_token` | 否 | 6+ | 请求可信设备 ID |
@@ -233,7 +262,7 @@ curl --fail --silent --show-error \
   --data-urlencode 'method=login' \
   --data-urlencode 'account=<USERNAME>' \
   --data-urlencode 'passwd=<PASSWORD>' \
-  --data-urlencode 'session=NativeClient' \
+  --data-urlencode 'session=FileStation' \
   --data-urlencode 'format=sid' \
   --data-urlencode 'enable_syno_token=yes' \
   'https://nas.example.com:5001/webapi/entry.cgi'
@@ -374,6 +403,8 @@ additional=["real_path","size","owner","time","perm","mount_point_type","volume_
 
 `SYNO.FileStation.Upload.upload` 必须使用 `multipart/form-data`，文件二进制部分必须位于最后。
 
+请求必须发送准确的 `Content-Length`。DSM 会核对声明长度与实际收到的数据；缺少该请求头或长度不一致时会返回错误 `1800`。客户端应保留上传临时文件直到服务器响应，并将 `1800` 至 `1805` 映射为可操作的用户提示。
+
 | part | 必需 | 说明 |
 | --- | --- | --- |
 | `api` | 是 | `SYNO.FileStation.Upload` |
@@ -403,6 +434,7 @@ _sid=<SID>
 - 多文件或目录返回动态生成的 ZIP 流。
 - `mode=open` 尝试返回真实 MIME；`mode=download` 返回附件。
 - 原生客户端应以流式方式写入临时文件，不能一次性读入内存。
+- 音乐和视频预览应通过受认证的请求头发送会话，并使用 `Range: bytes=<start>-<end>` 按需读取；服务端必须返回 `206 Partial Content`、正确的 `Content-Range` 和总长度。每次响应设置固定上限，避免 NAS 忽略 Range 时意外读取整个大文件。
 - 如果只能通过 URL 交给系统播放器，避免在 URL 中放 SID；优先使用应用内代理或带认证 Header 的播放器数据源。
 
 ### 5.8 共享链接

@@ -51,6 +51,17 @@ public struct DsmSessionCredential: Equatable, Sendable {
         self.sid = sid
         self.synoToken = synoToken
     }
+
+    var cookieHeaderValue: String? {
+        let allowed = CharacterSet(
+            charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
+        )
+        guard !sid.isEmpty,
+              sid.unicodeScalars.allSatisfy(allowed.contains) else {
+            return nil
+        }
+        return "id=\(sid)"
+    }
 }
 
 enum DsmRequestError: Error, Sendable {
@@ -92,7 +103,8 @@ enum DsmRequestBuilder {
         method: String,
         requestFormat: DsmRequestFormat,
         parameters: [String: DsmParameterValue],
-        credential: DsmSessionCredential? = nil
+        credential: DsmSessionCredential? = nil,
+        httpMethod: String = "POST"
     ) throws -> URLRequest {
         guard baseURL.scheme?.lowercased() == NasScheme.https.rawValue,
               baseURL.host != nil,
@@ -132,14 +144,35 @@ enum DsmRequestBuilder {
             }
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(
-            "application/x-www-form-urlencoded; charset=utf-8",
-            forHTTPHeaderField: "Content-Type"
-        )
+        var finalURL = url
+        if httpMethod == "GET" {
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            components?.queryItems = fields
+                .sorted { $0.key < $1.key }
+                .map { key, value in
+                    URLQueryItem(name: key, value: value)
+                }
+            if let resolvedURL = components?.url {
+                finalURL = resolvedURL
+            }
+        }
+
+        var request = URLRequest(url: finalURL)
+        request.httpMethod = httpMethod
+        if httpMethod == "POST" {
+            request.setValue(
+                "application/x-www-form-urlencoded; charset=utf-8",
+                forHTTPHeaderField: "Content-Type"
+            )
+            request.httpBody = try FormURLEncoder.encode(fields)
+        }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.httpBody = try FormURLEncoder.encode(fields)
+        if let cookie = credential?.cookieHeaderValue {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        if let synoToken = credential?.synoToken, !synoToken.isEmpty {
+            request.setValue(synoToken, forHTTPHeaderField: "X-SYNO-TOKEN")
+        }
         return request
     }
 }

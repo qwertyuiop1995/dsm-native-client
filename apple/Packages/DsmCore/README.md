@@ -2,7 +2,7 @@
 
 当前包含：
 
-- `NasProfile` 与 HTTPS 地址约束。
+- `NasProfile`、HTTPS 地址约束和浏览器地址/QuickConnect ID 解析。
 - `ApiCapability`、版本交集选择和 `CapabilitySet`。
 - `AuthSession`、安全存储协议与 `AuthRepository`。
 - 不含敏感上下文的统一 `AppError`。

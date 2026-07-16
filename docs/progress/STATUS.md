@@ -8,7 +8,7 @@
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | 单仓库初始化 | 已完成 | 文档、契约和平台目录已建立 |
-| GitHub 仓库 | 进行中 | 初始化完成后创建公开仓库 |
+| GitHub 仓库 | 已完成 | [公开仓库](https://github.com/qwertyuiop1995/dsm-native-client) 已创建，默认分支为 `main` |
 | API 参考 | 已完成 | 官方与内部 API 已分类 |
 | 第一阶段开发规格 | 已完成 | 登录与文件功能已拆分 |
 | Apple 工程 | 未开始 | 下一步初始化 Xcode workspace 和 Swift Package |

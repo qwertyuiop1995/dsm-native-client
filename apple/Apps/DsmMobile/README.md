@@ -1,6 +1,6 @@
 # DsmMobile
 
-iPhone/iPad 通用原生 App 目录。
+岚仓（LanStash）的 iPhone/iPad 通用原生 App 目录。
 
 - iPhone 使用导航栈。
 - iPad 使用 `NavigationSplitView`。

@@ -1,0 +1,51 @@
+name: DsmMac
+
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "14.0"
+
+packages:
+  DsmShared:
+    path: ../..
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+targets:
+  DsmMac:
+    type: application
+    platform: macOS
+    productName: LanStash
+    sources:
+      - path: Sources
+      - path: Resources
+    dependencies:
+      - package: DsmShared
+        product: DsmCore
+      - package: DsmShared
+        product: DsmNetwork
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.qwertyuiop1995.dsmnativeclient.macos
+        PRODUCT_NAME: LanStash
+        INFOPLIST_FILE: SupportingFiles/Info.plist
+        CODE_SIGN_ENTITLEMENTS: SupportingFiles/DsmMac.entitlements
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        ENABLE_HARDENED_RUNTIME: true
+        GENERATE_INFOPLIST_FILE: false
+
+schemes:
+  DsmMac:
+    build:
+      targets:
+        DsmMac: all
+    run:
+      config: Debug
+    archive:
+      config: Release

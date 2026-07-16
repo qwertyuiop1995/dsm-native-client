@@ -13,4 +13,4 @@ Dsm.Features.Files
 Dsm.Features.Transfer
 ```
 
-在应用名称、包标识和最低 Windows 版本最终确认后初始化 solution。
+已确定中文应用名为“岚仓”、英文应用名为 `LanStash`，MSIX Identity Name 保持为 `qwertyuiop1995.DsmNativeClient`。Publisher 由后续签名证书或商店身份决定；WinUI solution 将在 Windows 实现批次初始化。

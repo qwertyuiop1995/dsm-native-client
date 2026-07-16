@@ -16,5 +16,6 @@
 - [ADR-0001：使用单仓库](architecture/decisions/0001-monorepo.md)
 - [ADR-0002：使用平台原生技术栈](architecture/decisions/0002-native-stacks.md)
 - [ADR-0003：官方 API 优先](architecture/decisions/0003-official-api-first.md)
+- [ADR-0004：应用身份与首个参考平台](architecture/decisions/0004-app-identity-and-reference-platform.md)
 
 文档与源码放在同一个 Git 提交中维护，功能状态以 `progress/STATUS.md` 为准。

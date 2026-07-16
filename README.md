@@ -1,6 +1,6 @@
-# DSM Native Client
+# 岚仓（LanStash）
 
-面向 Windows、macOS、Android、iPhone 和 iPad 的 Synology DSM 原生客户端项目。
+岚仓（LanStash）是面向 Windows、macOS、Android、iPhone 和 iPad 的 Synology DSM 原生客户端项目。
 
 项目坚持平台原生实现：
 
@@ -54,7 +54,21 @@ tools/       契约校验和样本脱敏工具
 
 ## 构建状态
 
-平台工程将在对应里程碑开始时初始化。当前 GitHub Actions 只检查仓库结构、文档和契约 JSON；各平台工程生成后再分别增加 Apple、Android 和 Windows 构建工作流。
+macOS 参考工程和 Apple 共享 Swift Package 已初始化，当前包含 `DsmCore`、`DsmNetwork`、`SYNO.API.Info` 能力发现与 `SYNO.API.Auth` 登录最小闭环。Android 与 Windows 工程将在后续批次初始化。
+
+Apple 本地验证：
+
+```bash
+swift test --package-path apple
+xcodebuild \
+  -workspace apple/DsmNativeClient.xcworkspace \
+  -scheme DsmMac \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+能力发现和登录尚需在记录了 DSM build 与 File Station 版本的专用测试 NAS 上完成实机验证。
 
 ## 许可证
 

@@ -1,0 +1,33 @@
+name: Apple Build
+
+on:
+  push:
+    paths:
+      - "apple/**"
+      - ".github/workflows/apple-build.yml"
+  pull_request:
+    paths:
+      - "apple/**"
+      - ".github/workflows/apple-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: macos-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 运行共享包测试
+        run: swift test --package-path apple
+
+      - name: 构建 macOS App
+        run: |
+          xcodebuild \
+            -workspace apple/DsmNativeClient.xcworkspace \
+            -scheme DsmMac \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build

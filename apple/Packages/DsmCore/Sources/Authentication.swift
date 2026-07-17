@@ -47,6 +47,12 @@ public protocol SessionSecureStoring: Sendable {
     func remove(for profileID: UUID) async throws
 }
 
+public protocol PasswordSecureStoring: Sendable {
+    func save(_ password: String, for profileID: UUID) async throws
+    func load(for profileID: UUID) async throws -> String?
+    func remove(for profileID: UUID) async throws
+}
+
 public protocol AuthRepository: Sendable {
     func discover(profile: NasProfile) async throws -> CapabilitySet
 

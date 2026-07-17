@@ -1,6 +1,25 @@
 import DsmCore
 import Foundation
 
+private final class DownloadLocationBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var url: URL?
+
+    func store(_ url: URL) {
+        lock.lock()
+        self.url = url
+        lock.unlock()
+    }
+
+    func take() -> URL? {
+        lock.lock()
+        defer { lock.unlock() }
+        let value = url
+        url = nil
+        return value
+    }
+}
+
 public struct DsmHTTPResponse: Sendable {
     public let data: Data
     public let statusCode: Int
@@ -85,57 +104,68 @@ public final class URLSessionTransport: DsmBinaryHTTPTransport, @unchecked Senda
         progress: @escaping FileTransferProgress
     ) async throws -> DsmHTTPResponse {
         let task = session.downloadTask(with: request)
-        var tempURL: URL? = nil
+        let downloadedFile = DownloadLocationBox()
         
         do {
-            return try await withCheckedThrowingContinuation { continuation in
-                tlsDelegate.registerTask(task, progress: progress, completion: { httpResponse, error in
-                    self.tlsDelegate.unregisterTask(task)
-                    
-                    if let error = error {
-                        if let trustError = self.tlsDelegate.consumeFailure() {
-                            continuation.resume(throwing: trustError)
-                        } else {
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    tlsDelegate.registerTask(task, progress: progress, completion: { httpResponse, error in
+                        self.tlsDelegate.unregisterTask(task)
+
+                        if let error = error {
+                            if let trustError = self.tlsDelegate.consumeFailure() {
+                                continuation.resume(throwing: trustError)
+                            } else {
+                                continuation.resume(throwing: error)
+                            }
+                            return
+                        }
+                        guard let httpResponse = httpResponse else {
+                            continuation.resume(throwing: URLError(.badServerResponse))
+                            return
+                        }
+                        guard let srcURL = downloadedFile.take() else {
+                            continuation.resume(throwing: URLError(.badServerResponse))
+                            return
+                        }
+                        do {
+                            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                                try FileManager.default.removeItem(at: destinationURL)
+                            }
+                            try FileManager.default.moveItem(at: srcURL, to: destinationURL)
+                            let size = try? destinationURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
+                            let expected = httpResponse.expectedContentLength > 0
+                                ? httpResponse.expectedContentLength
+                                : size.map(Int64.init)
+                            progress(Int64(size ?? 0), expected)
+                            continuation.resume(returning: DsmHTTPResponse(
+                                data: Data(),
+                                statusCode: httpResponse.statusCode,
+                                headers: Self.headers(from: httpResponse)
+                            ))
+                        } catch {
                             continuation.resume(throwing: error)
                         }
-                        return
-                    }
-                    guard let httpResponse = httpResponse else {
-                        continuation.resume(throwing: URLError(.badServerResponse))
-                        return
-                    }
-                    guard let srcURL = tempURL else {
-                        continuation.resume(throwing: URLError(.badServerResponse))
-                        return
-                    }
-                    do {
-                        if FileManager.default.fileExists(atPath: destinationURL.path) {
-                            try FileManager.default.removeItem(at: destinationURL)
+                    }, onDownloadFinish: { location in
+                        let cacheURL = FileManager.default.temporaryDirectory
+                            .appendingPathComponent("LanStashDownloadTemp-\(UUID().uuidString)")
+                        do {
+                            try FileManager.default.moveItem(at: location, to: cacheURL)
+                            downloadedFile.store(cacheURL)
+                        } catch {
+                            try? FileManager.default.removeItem(at: cacheURL)
                         }
-                        try FileManager.default.moveItem(at: srcURL, to: destinationURL)
-                        let size = try? destinationURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
-                        let expected = httpResponse.expectedContentLength > 0
-                            ? httpResponse.expectedContentLength
-                            : size.map(Int64.init)
-                        progress(Int64(size ?? 0), expected)
-                        continuation.resume(returning: DsmHTTPResponse(
-                            data: Data(),
-                            statusCode: httpResponse.statusCode,
-                            headers: Self.headers(from: httpResponse)
-                        ))
-                    } catch {
-                        continuation.resume(throwing: error)
-                    }
-                }, onDownloadFinish: { location in
-                    let cacheURL = FileManager.default.temporaryDirectory
-                        .appendingPathComponent("LanStashDownloadTemp-\(UUID().uuidString)")
-                    try? FileManager.default.moveItem(at: location, to: cacheURL)
-                    tempURL = cacheURL
-                })
-                
-                task.resume()
+                    })
+
+                    task.resume()
+                }
+            } onCancel: {
+                task.cancel()
             }
         } catch {
+            if let url = downloadedFile.take() {
+                try? FileManager.default.removeItem(at: url)
+            }
             if let trustError = tlsDelegate.consumeFailure() {
                 throw trustError
             }
@@ -155,9 +185,10 @@ public final class URLSessionTransport: DsmBinaryHTTPTransport, @unchecked Senda
             let size = try? bodyFileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
             progress(0, size.map(Int64.init))
             
-            return try await withCheckedThrowingContinuation { continuation in
-                tlsDelegate.registerTask(task, progress: progress, completion: { httpResponse, error in
-                    self.tlsDelegate.unregisterTask(task)
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    tlsDelegate.registerTask(task, progress: progress, completion: { httpResponse, error in
+                        self.tlsDelegate.unregisterTask(task)
                     
                     if let error = error {
                         if let trustError = self.tlsDelegate.consumeFailure() {
@@ -177,11 +208,14 @@ public final class URLSessionTransport: DsmBinaryHTTPTransport, @unchecked Senda
                         statusCode: httpResponse.statusCode,
                         headers: Self.headers(from: httpResponse)
                     ))
-                }, onDataReceive: { data in
-                    responseData.append(data)
-                })
-                
-                task.resume()
+                    }, onDataReceive: { data in
+                        responseData.append(data)
+                    })
+
+                    task.resume()
+                }
+            } onCancel: {
+                task.cancel()
             }
         } catch {
             if let trustError = tlsDelegate.consumeFailure() {

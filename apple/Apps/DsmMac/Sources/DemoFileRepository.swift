@@ -106,6 +106,7 @@ actor DemoFileRepository: FileRepository {
     func download(
         remotePath: String,
         to localURL: URL,
+        expectedSize: Int64?,
         progress: @escaping FileTransferProgress
     ) async throws {
         guard let file = folders.values.flatMap({ $0 }).first(where: { $0.path == remotePath }) else {
@@ -135,6 +136,8 @@ actor DemoFileRepository: FileRepository {
         try data.write(to: localURL, options: .atomic)
         progress(Int64(data.count), Int64(data.count))
     }
+
+    func removePartialDownload(to localURL: URL) async {}
 
     func upload(
         localURL: URL,
@@ -191,10 +194,61 @@ actor DemoFileRepository: FileRepository {
         }
     }
 
+    func createFolder(parentPath: String, name: String) async throws {
+        guard folders[parentPath] != nil else {
+            throw AppError(
+                category: .notFound,
+                isRetryable: false,
+                safeUserMessage: "目标目录不存在。"
+            )
+        }
+        guard folders[parentPath]?.contains(where: { $0.name == name }) != true else {
+            throw AppError(
+                category: .conflict,
+                isRetryable: false,
+                safeUserMessage: "目标目录已有同名文件夹。"
+            )
+        }
+        let path = "\(parentPath)/\(name)"
+        folders[parentPath, default: []].append(item(name: name, path: path, kind: .directory))
+        folders[path] = []
+    }
+
     func move(
         paths: [String],
         to destinationFolder: String,
         overwrite: Bool,
+        progress: @escaping FileTransferProgress
+    ) async throws {
+        try await copyMove(
+            paths: paths,
+            to: destinationFolder,
+            overwrite: overwrite,
+            removeSource: true,
+            progress: progress
+        )
+    }
+
+    func copy(
+        paths: [String],
+        to destinationFolder: String,
+        overwrite: Bool,
+        progress: @escaping FileTransferProgress
+    ) async throws {
+        try await copyMove(
+            paths: paths,
+            to: destinationFolder,
+            overwrite: overwrite,
+            removeSource: false,
+            progress: progress
+        )
+    }
+
+    private func copyMove(
+        paths: [String],
+        to destinationFolder: String,
+        overwrite: Bool,
+        removeSource: Bool,
         progress: @escaping FileTransferProgress
     ) async throws {
         guard folders[destinationFolder] != nil else {
@@ -222,7 +276,9 @@ actor DemoFileRepository: FileRepository {
                 }
                 folders[destinationFolder]?.removeAll { $0.name == source.name }
             }
-            folders[parent]?.remove(at: itemIndex)
+            if removeSource {
+                folders[parent]?.remove(at: itemIndex)
+            }
             folders[destinationFolder, default: []].append(
                 item(
                     name: source.name,

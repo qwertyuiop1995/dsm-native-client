@@ -3,6 +3,8 @@ import Foundation
 public enum ActivityKind: String, Codable, Sendable {
     case upload
     case download
+    case copy
+    case move
     case delete
     case restore
 }
@@ -10,6 +12,7 @@ public enum ActivityKind: String, Codable, Sendable {
 public enum ActivityState: String, Codable, Sendable {
     case queued
     case running
+    case paused
     case cancelling
     case succeeded
     case failed
@@ -21,6 +24,7 @@ public struct ActivityTask: Identifiable, Codable, Hashable, Sendable {
     public let kind: ActivityKind
     public let displayName: String
     public let remotePath: String
+    public var fileSizeBytes: Int64?
     public var totalUnits: Int64?
     public var completedUnits: Int64
     public var bytesPerSecond: Double?
@@ -34,6 +38,7 @@ public struct ActivityTask: Identifiable, Codable, Hashable, Sendable {
         kind: ActivityKind,
         displayName: String,
         remotePath: String,
+        fileSizeBytes: Int64? = nil,
         totalUnits: Int64? = nil,
         completedUnits: Int64 = 0,
         bytesPerSecond: Double? = nil,
@@ -46,6 +51,7 @@ public struct ActivityTask: Identifiable, Codable, Hashable, Sendable {
         self.kind = kind
         self.displayName = displayName
         self.remotePath = remotePath
+        self.fileSizeBytes = fileSizeBytes
         self.totalUnits = totalUnits
         self.completedUnits = completedUnits
         self.bytesPerSecond = bytesPerSecond

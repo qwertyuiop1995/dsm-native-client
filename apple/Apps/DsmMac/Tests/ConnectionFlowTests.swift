@@ -140,7 +140,135 @@ private actor RecordingAuthRepository: AuthRepository {
     }
 }
 
+private actor MemoryPasswordStore: PasswordSecureStoring {
+    private var passwords: [UUID: String] = [:]
+
+    func save(_ password: String, for profileID: UUID) async throws {
+        passwords[profileID] = password
+    }
+
+    func load(for profileID: UUID) async throws -> String? {
+        passwords[profileID]
+    }
+
+    func remove(for profileID: UUID) async throws {
+        passwords[profileID] = nil
+    }
+}
+
 final class ConnectionFlowTests: XCTestCase {
+    @MainActor
+    func test登录后修改NAS显示名称并同步工作区() async throws {
+        let suiteName = "ConnectionFlowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = AppModel(
+            profileStore: NasProfileStore(defaults: defaults),
+            authRepository: RecordingAuthRepository(),
+            passwordStore: MemoryPasswordStore()
+        )
+        model.displayName = "修改前"
+        model.host = "home-nas.local"
+        model.account = "user"
+        model.password = "local-test-password"
+        await model.connect()
+
+        let error = model.renameCurrentNAS(to: "修改后")
+
+        XCTAssertNil(error)
+        XCTAssertEqual(model.profiles.first?.displayName, "修改后")
+        XCTAssertEqual(model.workspace?.profile.displayName, "修改后")
+        XCTAssertEqual(NasProfileStore(defaults: defaults).load().first?.displayName, "修改后")
+    }
+
+    @MainActor
+    func test选择记住密码后交给安全存储() async throws {
+        let suiteName = "ConnectionFlowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let passwordStore = MemoryPasswordStore()
+        let model = AppModel(
+            profileStore: NasProfileStore(defaults: defaults),
+            authRepository: RecordingAuthRepository(),
+            passwordStore: passwordStore
+        )
+        model.host = "home-nas.local"
+        model.account = "user"
+        model.password = "local-test-password"
+        model.rememberPassword = true
+
+        await model.connect()
+
+        let profileID = try XCTUnwrap(model.selectedProfileID)
+        let stored = try await passwordStore.load(for: profileID)
+        XCTAssertEqual(stored, "local-test-password")
+        XCTAssertEqual(model.password, "local-test-password")
+    }
+
+    @MainActor
+    func test登录后仍可进入新增NAS表单且保留已有配置() async {
+        let suiteName = "ConnectionFlowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = AppModel(
+            profileStore: NasProfileStore(defaults: defaults),
+            authRepository: RecordingAuthRepository()
+        )
+        model.displayName = "家庭 NAS"
+        model.host = "home-nas.local"
+        model.account = "user"
+        model.password = "password"
+        await model.connect()
+
+        XCTAssertNotNil(model.workspace)
+        XCTAssertEqual(model.profiles.count, 1)
+
+        model.newProfile()
+
+        XCTAssertNil(model.workspace)
+        XCTAssertNil(model.selectedProfileID)
+        XCTAssertEqual(model.profiles.count, 1)
+        XCTAssertEqual(model.displayName, "我的 NAS")
+        XCTAssertTrue(model.host.isEmpty)
+        XCTAssertTrue(model.account.isEmpty)
+    }
+
+    @MainActor
+    func test登录多台NAS后可以从工作区切换配置() async throws {
+        let suiteName = "ConnectionFlowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = AppModel(
+            profileStore: NasProfileStore(defaults: defaults),
+            authRepository: RecordingAuthRepository()
+        )
+        model.displayName = "家庭 NAS"
+        model.host = "home-nas.local"
+        model.account = "home-user"
+        model.password = "password"
+        await model.connect()
+        let firstProfileID = try XCTUnwrap(model.selectedProfileID)
+        let firstWorkspace = try XCTUnwrap(model.workspace)
+
+        model.newProfile()
+        model.displayName = "办公室 NAS"
+        model.host = "office-nas.local"
+        model.account = "office-user"
+        model.password = "password"
+        await model.connect()
+
+        XCTAssertEqual(model.profiles.count, 2)
+        XCTAssertNotNil(model.workspace)
+
+        model.selectProfile(id: firstProfileID)
+
+        XCTAssertTrue(model.workspace === firstWorkspace)
+        XCTAssertEqual(model.selectedProfileID, firstProfileID)
+        XCTAssertEqual(model.displayName, "家庭 NAS")
+        XCTAssertEqual(model.host, "home-nas.local")
+        XCTAssertEqual(model.account, "home-user")
+    }
+
     @MainActor
     func test无法自动验证证书时显示核对界面并保留本次密码() async {
         let suiteName = "ConnectionFlowTests.\(UUID().uuidString)"

@@ -3,6 +3,12 @@ import DsmNetwork
 import Foundation
 import Observation
 
+struct NASFileClipboard {
+    let sourceProfileID: UUID
+    let items: [FileItem]
+    let movesSource: Bool
+}
+
 struct CertificatePrompt: Identifiable {
     let id = UUID()
     let error: DsmCertificateTrustError
@@ -69,6 +75,12 @@ final class AppModel {
         let capabilities: CapabilitySet
     }
 
+    private struct ConnectionContext {
+        let connectionProfile: NasProfile
+        let capabilities: CapabilitySet
+        let session: AuthSession
+    }
+
     var profiles: [NasProfile] = []
     var selectedProfileID: UUID?
     var workspace: WorkspaceModel?
@@ -78,31 +90,42 @@ final class AppModel {
     var port = ""
     var account = ""
     var password = ""
+    var rememberPassword = false
     var otpCode = ""
     var requiresOTP = false
     var isBusy = false
     var statusMessage = "添加一台 NAS，或先看看示例。"
     var statusIsError = false
     var pendingCertificate: CertificatePrompt?
+    var fileClipboard: NASFileClipboard?
 
     private let profileStore: NasProfileStore
     private let authRepository: any AuthRepository
     private let quickConnectResolver: any QuickConnectResolving
+    private let passwordStore: any PasswordSecureStoring
     private var selectedProfile: NasProfile?
     private var activeConnectionProfile: NasProfile?
     private var capabilities: CapabilitySet?
     private var session: AuthSession?
     private var certificateRetryMode: CertificateRetryMode = .connect
     private var didLoad = false
+    private var workspacesByProfileID: [UUID: WorkspaceModel] = [:]
+    private var connectionContextsByProfileID: [UUID: ConnectionContext] = [:]
+
+    var connectedWorkspaces: [WorkspaceModel] {
+        profiles.compactMap { workspacesByProfileID[$0.id] }
+    }
 
     init(
         profileStore: NasProfileStore = NasProfileStore(),
         authRepository: any AuthRepository = DsmAuthRepository(),
-        quickConnectResolver: any QuickConnectResolving = DsmQuickConnectResolver()
+        quickConnectResolver: any QuickConnectResolving = DsmQuickConnectResolver(),
+        passwordStore: any PasswordSecureStoring = KeychainPasswordStore()
     ) {
         self.profileStore = profileStore
         self.authRepository = authRepository
         self.quickConnectResolver = quickConnectResolver
+        self.passwordStore = passwordStore
     }
 
     func load() {
@@ -117,16 +140,15 @@ final class AppModel {
     }
 
     func newProfile() {
+        closeCurrentWorkspace()
         selectedProfileID = nil
         selectedProfile = nil
-        activeConnectionProfile = nil
-        capabilities = nil
-        session = nil
         displayName = "我的 NAS"
         host = ""
         port = ""
         account = ""
         password = ""
+        rememberPassword = false
         otpCode = ""
         requiresOTP = false
         statusIsError = false
@@ -141,7 +163,83 @@ final class AppModel {
         guard selectedProfile?.id != id else {
             return
         }
+        closeCurrentWorkspace()
         chooseProfile(profile, attemptSessionRestore: true)
+    }
+
+    func placeOnClipboard(_ items: [FileItem], moveSource: Bool) {
+        guard let sourceProfileID = workspace?.profile.id, !items.isEmpty else { return }
+        fileClipboard = NASFileClipboard(
+            sourceProfileID: sourceProfileID,
+            items: items,
+            movesSource: moveSource
+        )
+        workspace?.statusIsError = false
+        workspace?.statusMessage = moveSource
+            ? "已准备移动 \(items.count) 个项目。请打开目标目录后选择“粘贴”。"
+            : "已复制 \(items.count) 个项目。请打开目标目录后选择“粘贴”。"
+    }
+
+    func pasteClipboardIntoCurrentFolder() {
+        guard let clipboard = fileClipboard,
+              let destination = workspace,
+              !destination.currentPath.isEmpty,
+              let source = workspacesByProfileID[clipboard.sourceProfileID] else {
+            return
+        }
+        if source.profile.id == destination.profile.id {
+            destination.enqueueFileOperation(
+                clipboard.items,
+                to: destination.currentPath,
+                moveSource: clipboard.movesSource
+            )
+        } else {
+            destination.enqueueCrossNASOperation(
+                from: source,
+                targets: clipboard.items,
+                to: destination.currentPath,
+                moveSource: clipboard.movesSource
+            )
+        }
+        if clipboard.movesSource {
+            fileClipboard = nil
+        }
+    }
+
+    func renameCurrentNAS(to newName: String) -> String? {
+        guard let profile = selectedProfile else {
+            return "当前没有可修改的 NAS。"
+        }
+        do {
+            let updated = try profile.updating(displayName: newName)
+            selectedProfile = updated
+            displayName = updated.displayName
+            workspace?.updateProfile(updated)
+            workspacesByProfileID[updated.id]?.updateProfile(updated)
+
+            if let context = connectionContextsByProfileID[updated.id] {
+                let connectionProfile = try context.connectionProfile.updating(
+                    displayName: updated.displayName
+                )
+                let updatedContext = ConnectionContext(
+                    connectionProfile: connectionProfile,
+                    capabilities: context.capabilities,
+                    session: context.session
+                )
+                connectionContextsByProfileID[updated.id] = updatedContext
+                if activeConnectionProfile?.id == updated.id {
+                    activeConnectionProfile = connectionProfile
+                }
+            }
+            upsertProfile(updated)
+            statusIsError = false
+            statusMessage = "NAS 名称已修改为“\(updated.displayName)”。"
+            return nil
+        } catch let error as NasProfileValidationError {
+            return error.localizedDescription
+        } catch {
+            return "无法修改 NAS 名称，请重试。"
+        }
     }
 
     func connect() async {
@@ -155,6 +253,7 @@ final class AppModel {
 
         do {
             let profile = try makeProfile()
+            let submittedPassword = password
             selectedProfile = profile
             upsertProfile(profile)
 
@@ -170,19 +269,35 @@ final class AppModel {
                 otpCode: requiresOTP ? otpCode : nil
             )
             session = authenticated
-            password = ""
             otpCode = ""
             requiresOTP = false
 
             let updated = try profile.updating(usernameHint: account)
             selectedProfile = updated
             upsertProfile(updated)
+            var passwordStorageFailed = false
+            do {
+                if rememberPassword {
+                    try await passwordStore.save(submittedPassword, for: updated.id)
+                    password = submittedPassword
+                } else {
+                    try await passwordStore.remove(for: updated.id)
+                    password = ""
+                }
+            } catch {
+                passwordStorageFailed = true
+                password = ""
+                rememberPassword = false
+            }
             try openWorkspace(
                 profile: updated,
                 connectionProfile: connection.profile,
                 capabilities: connection.capabilities,
                 session: authenticated
             )
+            if passwordStorageFailed {
+                statusMessage = "已连接，但无法在这台 Mac 上保存密码。下次需要重新输入。"
+            }
         } catch let error as DsmCertificateTrustError {
             certificateRetryMode = .connect
             pendingCertificate = CertificatePrompt(
@@ -245,6 +360,7 @@ final class AppModel {
     func cancelCertificateReview() {
         pendingCertificate = nil
         password = ""
+        rememberPassword = false
         otpCode = ""
     }
 
@@ -253,6 +369,10 @@ final class AppModel {
             return
         }
         try? await authRepository.clearSession(for: profile.id)
+        try? await passwordStore.remove(for: profile.id)
+        workspacesByProfileID[profile.id]?.cancelAllWork()
+        workspacesByProfileID[profile.id] = nil
+        connectionContextsByProfileID[profile.id] = nil
         profiles.removeAll { $0.id == profile.id }
         try? profileStore.save(profiles)
         newProfile()
@@ -286,10 +406,15 @@ final class AppModel {
         let discovered = capabilities
         let authenticated = session
         workspace?.cancelAllWork()
+        if let profile {
+            workspacesByProfileID[profile.id] = nil
+            connectionContextsByProfileID[profile.id] = nil
+        }
         workspace = nil
         session = nil
         activeConnectionProfile = nil
         password = ""
+        rememberPassword = false
         otpCode = ""
         requiresOTP = false
 
@@ -320,11 +445,16 @@ final class AppModel {
     func returnToLoginAfterSessionIssue(message: String) async {
         let profile = selectedProfile
         workspace?.cancelAllWork()
+        if let profile {
+            workspacesByProfileID[profile.id] = nil
+            connectionContextsByProfileID[profile.id] = nil
+        }
         workspace = nil
         session = nil
         activeConnectionProfile = nil
         capabilities = nil
         password = ""
+        rememberPassword = false
         otpCode = ""
         requiresOTP = false
 
@@ -345,16 +475,55 @@ final class AppModel {
         port = profile.portOverride.map(String.init) ?? ""
         account = profile.usernameHint ?? ""
         password = ""
+        rememberPassword = false
         otpCode = ""
         requiresOTP = false
         statusIsError = false
         statusMessage = "已选择 \(profile.displayName)，请输入密码后连接。"
 
+        if let cachedWorkspace = workspacesByProfileID[profile.id],
+           let context = connectionContextsByProfileID[profile.id] {
+            workspace = cachedWorkspace
+            activeConnectionProfile = context.connectionProfile
+            capabilities = context.capabilities
+            session = context.session
+            statusMessage = "已切换到 \(profile.displayName)。"
+            Task { await loadSavedPassword(for: profile) }
+            return
+        }
+
         guard attemptSessionRestore else {
+            Task { await loadSavedPassword(for: profile) }
             return
         }
         Task {
+            await loadSavedPassword(for: profile)
             await restoreSession(for: profile)
+        }
+    }
+
+    private func closeCurrentWorkspace() {
+        workspace = nil
+        activeConnectionProfile = nil
+        capabilities = nil
+        session = nil
+        pendingCertificate = nil
+    }
+
+    private func loadSavedPassword(for profile: NasProfile) async {
+        do {
+            let storedPassword = try await passwordStore.load(for: profile.id)
+            guard selectedProfile?.id == profile.id else {
+                return
+            }
+            password = storedPassword ?? ""
+            rememberPassword = storedPassword != nil
+        } catch {
+            guard selectedProfile?.id == profile.id else {
+                return
+            }
+            password = ""
+            rememberPassword = false
         }
     }
 
@@ -442,7 +611,14 @@ final class AppModel {
             session: session
         )
         activeConnectionProfile = connectionProfile
-        workspace = WorkspaceModel(profile: profile, repository: repository)
+        let openedWorkspace = WorkspaceModel(profile: profile, repository: repository)
+        workspacesByProfileID[profile.id] = openedWorkspace
+        connectionContextsByProfileID[profile.id] = ConnectionContext(
+            connectionProfile: connectionProfile,
+            capabilities: capabilities,
+            session: session
+        )
+        workspace = openedWorkspace
         statusIsError = false
         statusMessage = "已连接到 \(profile.displayName)。"
     }

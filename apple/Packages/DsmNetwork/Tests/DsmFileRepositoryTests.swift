@@ -1,4 +1,5 @@
 import DsmCore
+import CryptoKit
 import Foundation
 import XCTest
 @testable import DsmNetwork
@@ -46,7 +47,11 @@ final class DsmFileRepositoryTests: XCTestCase {
             .appendingPathComponent("DsmFileRepositoryTests-\(UUID().uuidString).txt")
         defer { try? FileManager.default.removeItem(at: destination) }
 
-        try await repository.download(remotePath: "/projects/a.txt", to: destination) { _, _ in }
+        try await repository.download(
+            remotePath: "/projects/a.txt",
+            to: destination,
+            expectedSize: 5
+        ) { _, _ in }
 
         XCTAssertEqual(try Data(contentsOf: destination), Data("hello".utf8))
         let requests = await transport.recordedRequests()
@@ -74,13 +79,81 @@ final class DsmFileRepositoryTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: destination) }
 
         do {
-            try await repository.download(remotePath: "/projects/a.txt", to: destination) { _, _ in }
+            try await repository.download(
+                remotePath: "/projects/a.txt",
+                to: destination,
+                expectedSize: nil
+            ) { _, _ in }
             XCTFail("应该抛出错误，但下载却被判定为成功")
         } catch let error as AppError {
             XCTAssertEqual(error.dsmCode, 119)
             XCTAssertEqual(error.category, .authenticationRequired)
             XCTAssertTrue(error.safeUserMessage.contains("登录已过期"))
         }
+    }
+
+    func test下载从已有分片继续() async throws {
+        let response = DsmHTTPResponse(
+            data: Data("llo".utf8),
+            statusCode: 206,
+            headers: ["content-type": "application/octet-stream"]
+        )
+        let transport = MockHTTPTransport(responses: [response])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDownload: capability(DsmAPIName.fileStationDownload, version: 2)
+            ]),
+            transport: transport
+        )
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DsmFileRepositoryTests-Resume-\(UUID().uuidString).txt")
+        let identity = "\(repository.profileID.uuidString)|/projects/a.txt|5"
+        let digest = SHA256.hash(data: Data(identity.utf8))
+        let suffix = digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+        let partURL = destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(destination.lastPathComponent).\(suffix).lanstash.part")
+        try Data("he".utf8).write(to: partURL)
+
+        try await repository.download(
+            remotePath: "/projects/a.txt",
+            to: destination,
+            expectedSize: 5
+        ) { _, _ in }
+
+        XCTAssertEqual(try Data(contentsOf: destination), Data("hello".utf8))
+        let requests = await transport.recordedRequests()
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Range"), "bytes=2-4")
+        try? FileManager.default.removeItem(at: destination)
+        try? FileManager.default.removeItem(at: partURL)
+    }
+
+    func test删除下载任务会清理对应分片() async throws {
+        let transport = MockHTTPTransport(responses: [])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDownload: capability(DsmAPIName.fileStationDownload, version: 2)
+            ]),
+            transport: transport
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DsmFileRepositoryTests-Cleanup-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("archive.zip")
+        let legacyPart = directory.appendingPathComponent(".archive.zip.lanstash.part")
+        let isolatedPart = directory.appendingPathComponent(".archive.zip.0123456789abcdef.lanstash.part")
+        let unrelatedPart = directory.appendingPathComponent(".other.zip.0123456789abcdef.lanstash.part")
+        try Data("legacy".utf8).write(to: legacyPart)
+        try Data("isolated".utf8).write(to: isolatedPart)
+        try Data("keep".utf8).write(to: unrelatedPart)
+
+        await repository.removePartialDownload(to: destination)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyPart.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: isolatedPart.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unrelatedPart.path))
     }
 
     func test媒体流使用认证请求头且会话不进入URL() async throws {

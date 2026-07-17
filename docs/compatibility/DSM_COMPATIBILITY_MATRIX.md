@@ -13,6 +13,15 @@
 | QuickConnect ID 直连 | macOS | 已通过 | 已通过 | 待用户复测 | 局域网与公网候选会在提交凭据前逐一探测；不记录 ID、解析地址和证书指纹 |
 | QuickConnect 中继 | macOS | 已通过 | 已通过 | 待用户使用新密码复测 | 已完成真实环境的隧道建立、NAS 身份核对和 `SYNO.API.Info` 探测；`request_tunnel` 属于内部、可降级契约 |
 
+## 文件操作验证
+
+| 能力 | 使用契约 | macOS 状态 | 实机要求 |
+| --- | --- | --- | --- |
+| 同 NAS 复制/移动 | `SYNO.FileStation.CopyMove` 官方 API | 已实现 | 验证文件夹、冲突、取消和权限不足 |
+| 跨 NAS 复制/移动 | Download + CreateFolder + Upload + 可选 Delete 官方 API | 已实现 12 MiB 有界内存中转 | 验证递归文件夹与背压；移动必须确认目标完成后源才删除 |
+| 下载断点续传 | Download 响应的 HTTP Range | 已实现、待验证 | 确认目标 DSM 返回 `206`，以及中断后字节一致 |
+| 上传断点续传 | Upload multipart | 不支持字节续传 | 公开 API 未提供 offset/token；暂停后从头重新上传 |
+
 ## 记录要求
 
 - 每次 DSM 或 File Station 升级后重新执行关键契约测试。

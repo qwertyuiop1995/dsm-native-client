@@ -219,8 +219,10 @@ public protocol FileRepository: Sendable {
     func download(
         remotePath: String,
         to localURL: URL,
+        expectedSize: Int64?,
         progress: @escaping FileTransferProgress
     ) async throws
+    func removePartialDownload(to localURL: URL) async
     func upload(
         localURL: URL,
         to folderPath: String,
@@ -228,6 +230,13 @@ public protocol FileRepository: Sendable {
         progress: @escaping FileTransferProgress
     ) async throws
     func delete(paths: [String], progress: @escaping FileTransferProgress) async throws
+    func createFolder(parentPath: String, name: String) async throws
+    func copy(
+        paths: [String],
+        to destinationFolder: String,
+        overwrite: Bool,
+        progress: @escaping FileTransferProgress
+    ) async throws
     func move(
         paths: [String],
         to destinationFolder: String,

@@ -1,4 +1,5 @@
 import DsmCore
+import CryptoKit
 import Foundation
 
 private struct FileListPayload: Decodable, Sendable {
@@ -119,6 +120,12 @@ private struct BinaryEnvelope: Decodable, Sendable {
 
     let success: Bool
     let error: ErrorPayload?
+}
+
+private struct StreamingUploadPlan: @unchecked Sendable {
+    var request: URLRequest
+    let prefix: Data
+    let suffix: Data
 }
 
 public actor DsmFileRepository: FileRepository {
@@ -333,10 +340,11 @@ public actor DsmFileRepository: FileRepository {
     public func download(
         remotePath: String,
         to localURL: URL,
+        expectedSize: Int64?,
         progress: @escaping FileTransferProgress
     ) async throws {
         let capability = try requireCapability(DsmAPIName.fileStationDownload)
-        let request = try DsmRequestBuilder.build(
+        let baseRequest = try DsmRequestBuilder.build(
             baseURL: baseURL,
             path: capability.path,
             api: capability.name,
@@ -350,30 +358,209 @@ public actor DsmFileRepository: FileRepository {
             credential: credential,
             httpMethod: "GET"
         )
-        let partURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(".\(UUID().uuidString).lanstash.part")
-
+        
+        let partURL = partialDownloadURL(
+            remotePath: remotePath,
+            localURL: localURL,
+            expectedSize: expectedSize
+        )
+        
         do {
-            let response = try await transport.download(request, to: partURL, progress: progress)
-            let contentType = response.headers["content-type"]?.lowercased() ?? ""
-            let needsErrorInspection = contentType.contains("application/json")
-                || contentType.contains("text/html")
-            let inspectionData: Data
-            if needsErrorInspection {
-                let handle = try FileHandle(forReadingFrom: partURL)
-                inspectionData = try handle.read(upToCount: 1_048_576) ?? Data()
-                try handle.close()
-            } else {
-                inspectionData = Data()
-            }
-            try validateBinaryResponse(response, data: inspectionData)
-            if FileManager.default.fileExists(atPath: localURL.path) {
-                try FileManager.default.removeItem(at: localURL)
-            }
-            try FileManager.default.moveItem(at: partURL, to: localURL)
+            try FileManager.default.createDirectory(
+                at: localURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
         } catch {
-            try? FileManager.default.removeItem(at: partURL)
             throw translate(error)
+        }
+        
+        var completed = Self.fileSize(at: partURL)
+        if let expectedSize, completed > expectedSize {
+            try? FileManager.default.removeItem(at: partURL)
+            completed = 0
+        }
+        
+        if completed == 0 {
+            // ==================== 直接一次性下载（非续传） ====================
+            do {
+                let response = try await transport.download(baseRequest, to: partURL, progress: progress)
+                let contentType = response.headers["content-type"]?.lowercased() ?? ""
+                let needsErrorInspection = contentType.contains("application/json") || contentType.contains("text/html")
+                let inspectionData: Data
+                if needsErrorInspection {
+                    let handle = try FileHandle(forReadingFrom: partURL)
+                    inspectionData = try handle.read(upToCount: 1_048_576) ?? Data()
+                    try handle.close()
+                } else {
+                    inspectionData = Data()
+                }
+                try validateBinaryResponse(response, data: inspectionData)
+                
+                try Self.safeReplaceFile(from: partURL, to: localURL)
+                try? FileManager.default.removeItem(at: partURL)
+            } catch {
+                try? FileManager.default.removeItem(at: partURL)
+                throw translate(error)
+            }
+        } else {
+            // ==================== 分片续传下载（续传） ====================
+            let savedChunkSize = UserDefaults.standard.integer(forKey: "LanStash_DownloadChunkSize")
+            let chunkSize: Int64 = (savedChunkSize >= 4 && savedChunkSize <= 64)
+                ? Int64(savedChunkSize) * 1024 * 1024
+                : 8 * 1024 * 1024
+            progress(completed, expectedSize)
+            
+            do {
+                repeat {
+                    try Task.checkCancellation()
+                    let segmentURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(".\(UUID().uuidString).lanstash.segment")
+                    defer { try? FileManager.default.removeItem(at: segmentURL) }
+
+                    var request = baseRequest
+                    if let expectedSize, expectedSize > 0 {
+                        let end = min(expectedSize - 1, completed + chunkSize - 1)
+                        request.setValue("bytes=\(completed)-\(end)", forHTTPHeaderField: "Range")
+                    }
+                    let completedBeforeRequest = completed
+                    let response = try await transport.download(request, to: segmentURL) { value, _ in
+                        progress(completedBeforeRequest + value, expectedSize)
+                    }
+                    let inspectionData = try binaryInspectionData(
+                        response: response,
+                        fileURL: segmentURL
+                    )
+                    try validateBinaryResponse(response, data: inspectionData)
+
+                    if response.statusCode == 206 {
+                        try Self.appendFile(at: segmentURL, to: partURL)
+                    } else {
+                        // 服务器忽略 Range 时会返回完整文件，直接替换残留片段以避免数据重复。
+                        if FileManager.default.fileExists(atPath: partURL.path) {
+                            try FileManager.default.removeItem(at: partURL)
+                        }
+                        try Self.safeReplaceFile(from: segmentURL, to: partURL)
+                    }
+                    completed = Self.fileSize(at: partURL)
+                    progress(completed, expectedSize)
+
+                    if response.statusCode != 206 || expectedSize == nil || expectedSize == 0 {
+                        break
+                    }
+                } while completed < (expectedSize ?? 0)
+
+                if let expectedSize, expectedSize > 0, completed != expectedSize {
+                    throw AppError(
+                        category: .partialFailure,
+                        isRetryable: true,
+                        safeUserMessage: "下载暂未完成，可以在传输中心继续。"
+                    )
+                }
+                try Self.safeReplaceFile(from: partURL, to: localURL)
+                try? FileManager.default.removeItem(at: partURL)
+            } catch {
+                throw translate(error)
+            }
+        }
+    }
+
+    public func removePartialDownload(to localURL: URL) async {
+        let prefix = ".\(localURL.lastPathComponent)."
+        let legacyName = ".\(localURL.lastPathComponent).lanstash.part"
+        
+        // 1. 清理临时目录下的分片（新逻辑）
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempUrls = (try? FileManager.default.contentsOfDirectory(
+            at: tempDir,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        for url in tempUrls where url.lastPathComponent.hasPrefix(prefix)
+            && url.lastPathComponent.hasSuffix(".lanstash.part") {
+            try? FileManager.default.removeItem(at: url)
+        }
+        
+        // 2. 清理目标目录下的分片（测试和旧版本兼容）
+        let targetDir = localURL.deletingLastPathComponent()
+        let targetUrls = (try? FileManager.default.contentsOfDirectory(
+            at: targetDir,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        for url in targetUrls where url.lastPathComponent == legacyName
+            || (url.lastPathComponent.hasPrefix(prefix)
+                && url.lastPathComponent.hasSuffix(".lanstash.part")) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func partialDownloadURL(
+        remotePath: String,
+        localURL: URL,
+        expectedSize: Int64?
+    ) -> URL {
+        let identity = "\(profileID.uuidString)|\(remotePath)|\(expectedSize ?? -1)"
+        let digest = SHA256.hash(data: Data(identity.utf8))
+        let suffix = digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent(".\(localURL.lastPathComponent).\(suffix).lanstash.part")
+    }
+
+    private func binaryInspectionData(
+        response: DsmHTTPResponse,
+        fileURL: URL
+    ) throws -> Data {
+        let contentType = response.headers["content-type"]?.lowercased() ?? ""
+        guard contentType.contains("application/json") || contentType.contains("text/html") else {
+            return Data()
+        }
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+        return try handle.read(upToCount: 1_048_576) ?? Data()
+    }
+
+    private static func fileSize(at url: URL) -> Int64 {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    private static func appendFile(at sourceURL: URL, to destinationURL: URL) throws {
+        if !FileManager.default.fileExists(atPath: destinationURL.path) {
+            guard FileManager.default.createFile(atPath: destinationURL.path, contents: nil) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+        }
+        let reader = try FileHandle(forReadingFrom: sourceURL)
+        let writer = try FileHandle(forWritingTo: destinationURL)
+        defer {
+            try? reader.close()
+            try? writer.close()
+        }
+        try writer.seekToEnd()
+        while let data = try reader.read(upToCount: 1_024 * 1_024), !data.isEmpty {
+            try Task.checkCancellation()
+            try writer.write(contentsOf: data)
+        }
+    }
+
+    private static func safeReplaceFile(from sourceURL: URL, to destinationURL: URL) throws {
+        if !FileManager.default.fileExists(atPath: destinationURL.path) {
+            guard FileManager.default.createFile(atPath: destinationURL.path, contents: nil) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+        } else {
+            let handle = try FileHandle(forWritingTo: destinationURL)
+            try handle.truncate(atOffset: 0)
+            try handle.close()
+        }
+        
+        let reader = try FileHandle(forReadingFrom: sourceURL)
+        let writer = try FileHandle(forWritingTo: destinationURL)
+        defer {
+            try? reader.close()
+            try? writer.close()
+        }
+        while let data = try reader.read(upToCount: 4 * 1024 * 1024), !data.isEmpty {
+            try Task.checkCancellation()
+            try writer.write(contentsOf: data)
         }
     }
 
@@ -444,6 +631,173 @@ public actor DsmFileRepository: FileRepository {
         }
     }
 
+    public func streamFileToNAS(
+        remotePath: String,
+        filename: String,
+        expectedSize: Int64,
+        target: DsmFileRepository,
+        destinationFolder: String,
+        progress: @escaping FileTransferProgress
+    ) async throws {
+        guard expectedSize >= 0 else {
+            throw AppError(
+                category: .invalidResponse,
+                isRetryable: false,
+                safeUserMessage: "无法确定文件大小，暂时不能使用内存中转。"
+            )
+        }
+        let downloadCapability = try requireCapability(DsmAPIName.fileStationDownload)
+        let baseRequest = try DsmRequestBuilder.build(
+            baseURL: baseURL,
+            path: downloadCapability.path,
+            api: downloadCapability.name,
+            version: try selectedVersion(downloadCapability),
+            method: "download",
+            requestFormat: downloadCapability.requestFormat,
+            parameters: [
+                "path": .stringArray([remotePath]),
+                "mode": .string("download")
+            ],
+            credential: credential,
+            httpMethod: "GET"
+        )
+        let uploadPlan = try await target.makeStreamingUploadPlan(
+            filename: filename,
+            fileSize: expectedSize,
+            destinationFolder: destinationFolder
+        )
+        let progressState = CrossNASProgressState(fileSize: expectedSize, progress: progress)
+        let pipe = BoundedMemoryPipe(
+            capacity: 12 * 1_024 * 1_024,
+            onFileBytesRead: { bytes in progressState.didUpload(bytes) }
+        )
+
+        let uploadTask = Task {
+            do {
+                try await target.performStreamingUpload(plan: uploadPlan, pipe: pipe)
+            } catch {
+                // 目标端提前拒绝上传时立即唤醒可能正在等待缓冲区空间的源端。
+                pipe.cancel(with: error)
+                throw error
+            }
+        }
+        do {
+            try pipe.write(uploadPlan.prefix, countsAsFileData: false)
+            var offset: Int64 = 0
+            let chunkSize: Int64 = 4 * 1_024 * 1_024
+            while offset < expectedSize {
+                try Task.checkCancellation()
+                let end = min(expectedSize - 1, offset + chunkSize - 1)
+                var request = baseRequest
+                request.setValue("bytes=\(offset)-\(end)", forHTTPHeaderField: "Range")
+                let response = try await transport.send(request)
+                try validateBinaryResponse(response, data: response.data)
+                guard response.statusCode == 206 else {
+                    throw AppError(
+                        category: .invalidResponse,
+                        isRetryable: false,
+                        safeUserMessage: "这台 NAS 不支持内存分段读取，跨 NAS 复制已停止。"
+                    )
+                }
+                let expectedChunkSize = Int(end - offset + 1)
+                guard response.data.count == expectedChunkSize else {
+                    throw AppError(
+                        category: .partialFailure,
+                        isRetryable: true,
+                        safeUserMessage: "源 NAS 返回的数据不完整，请重试跨 NAS 复制。"
+                    )
+                }
+                try pipe.write(response.data, countsAsFileData: true)
+                progressState.didDownload(response.data.count)
+                offset += Int64(response.data.count)
+            }
+            try pipe.write(uploadPlan.suffix, countsAsFileData: false)
+            pipe.finish()
+            try await uploadTask.value
+        } catch {
+            pipe.cancel(with: error)
+            uploadTask.cancel()
+            _ = try? await uploadTask.value
+            throw translate(error)
+        }
+    }
+
+    private func makeStreamingUploadPlan(
+        filename: String,
+        fileSize: Int64,
+        destinationFolder: String
+    ) async throws -> StreamingUploadPlan {
+        let capability = try requireCapability(DsmAPIName.fileStationUpload)
+        try await checkWritePermission(
+            folderPath: destinationFolder,
+            filename: filename,
+            createOnly: true
+        )
+        let boundary = "LanStash-\(UUID().uuidString)"
+        let fields = [
+            "api": capability.name,
+            "version": String(try selectedVersion(capability)),
+            "method": "upload",
+            "_sid": credential.sid,
+            "path": destinationFolder,
+            "create_parents": "false",
+            "overwrite": "false",
+            "SynoToken": credential.synoToken ?? "",
+            "synotoken": credential.synoToken ?? ""
+        ]
+        let safeFilename = filename
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\"", with: "'")
+        var prefix = Data()
+        for (name, value) in fields.sorted(by: { $0.key < $1.key }) where !value.isEmpty {
+            prefix.append(Data("--\(boundary)\r\n".utf8))
+            prefix.append(Data("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8))
+            prefix.append(Data("\(value)\r\n".utf8))
+        }
+        prefix.append(Data("--\(boundary)\r\n".utf8))
+        prefix.append(Data("Content-Disposition: form-data; name=\"file\"; filename=\"\(safeFilename)\"\r\n".utf8))
+        prefix.append(Data("Content-Type: application/octet-stream\r\n\r\n".utf8))
+        let suffix = Data("\r\n--\(boundary)--\r\n".utf8)
+
+        var uploadURL = apiURL(path: capability.path)
+        if var components = URLComponents(url: uploadURL, resolvingAgainstBaseURL: false) {
+            var queryItems = components.queryItems ?? []
+            queryItems.append(URLQueryItem(name: "api", value: capability.name))
+            queryItems.append(URLQueryItem(name: "version", value: String(try selectedVersion(capability))))
+            queryItems.append(URLQueryItem(name: "method", value: "upload"))
+            queryItems.append(URLQueryItem(name: "_sid", value: credential.sid))
+            if let synoToken = credential.synoToken, !synoToken.isEmpty {
+                queryItems.append(URLQueryItem(name: "SynoToken", value: synoToken))
+                queryItems.append(URLQueryItem(name: "synotoken", value: synoToken))
+            }
+            components.queryItems = queryItems
+            uploadURL = components.url ?? uploadURL
+        }
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(String(Int64(prefix.count) + fileSize + Int64(suffix.count)), forHTTPHeaderField: "Content-Length")
+        if let cookie = credential.cookieHeaderValue {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        if let synoToken = credential.synoToken, !synoToken.isEmpty {
+            request.setValue(synoToken, forHTTPHeaderField: "X-SYNO-TOKEN")
+        }
+        return StreamingUploadPlan(request: request, prefix: prefix, suffix: suffix)
+    }
+
+    private func performStreamingUpload(
+        plan: StreamingUploadPlan,
+        pipe: BoundedMemoryPipe
+    ) async throws {
+        var request = plan.request
+        request.httpBodyStream = pipe.makeInputStream()
+        let response = try await transport.send(request)
+        try validateUploadSuccess(response)
+    }
+
     public func delete(
         paths: [String],
         progress: @escaping FileTransferProgress
@@ -473,10 +827,62 @@ public actor DsmFileRepository: FileRepository {
         }
     }
 
+    public func createFolder(parentPath: String, name: String) async throws {
+        let capability = try requireCapability(DsmAPIName.fileStationCreateFolder)
+        do {
+            try await client.callVoid(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: "create",
+                requestFormat: capability.requestFormat,
+                parameters: [
+                    "folder_path": .string(parentPath),
+                    "name": .string(name),
+                    "force_parent": .boolean(false)
+                ],
+                credential: credential
+            )
+        } catch let error as DsmNetworkError {
+            throw DsmErrorMapper.map(error)
+        }
+    }
+
     public func move(
         paths: [String],
         to destinationFolder: String,
         overwrite: Bool,
+        progress: @escaping FileTransferProgress
+    ) async throws {
+        try await copyMove(
+            paths: paths,
+            to: destinationFolder,
+            overwrite: overwrite,
+            removeSource: true,
+            progress: progress
+        )
+    }
+
+    public func copy(
+        paths: [String],
+        to destinationFolder: String,
+        overwrite: Bool,
+        progress: @escaping FileTransferProgress
+    ) async throws {
+        try await copyMove(
+            paths: paths,
+            to: destinationFolder,
+            overwrite: overwrite,
+            removeSource: false,
+            progress: progress
+        )
+    }
+
+    private func copyMove(
+        paths: [String],
+        to destinationFolder: String,
+        overwrite: Bool,
+        removeSource: Bool,
         progress: @escaping FileTransferProgress
     ) async throws {
         guard !paths.isEmpty else {
@@ -493,7 +899,7 @@ public actor DsmFileRepository: FileRepository {
                 parameters: [
                     "path": .stringArray(paths),
                     "dest_folder_path": .string(destinationFolder),
-                    "remove_src": .boolean(true),
+                    "remove_src": .boolean(removeSource),
                     "overwrite": .boolean(overwrite),
                     "accurate_progress": .boolean(true)
                 ],
@@ -794,6 +1200,16 @@ public actor DsmFileRepository: FileRepository {
     }
 
     private func translate(_ error: Error) -> Error {
+        if Task.isCancelled {
+            return CancellationError()
+        }
+        if error is CancellationError || error is MemoryPipeError {
+            return CancellationError()
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return CancellationError()
+        }
         if error is AppError || error is DsmCertificateTrustError {
             return error
         }
@@ -802,6 +1218,7 @@ public actor DsmFileRepository: FileRepository {
                 .transport(code: error.errorCode, requestID: UUID())
             )
         }
+        print("LanStash debug: unknown transfer error: \(error), domain: \(nsError.domain), code: \(nsError.code)")
         return AppError(
             category: .unknown,
             isRetryable: false,

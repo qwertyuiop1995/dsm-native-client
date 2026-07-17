@@ -50,10 +50,8 @@ struct TransferProgressEstimator {
         }
 
         guard completed >= previousCompleted else {
-            lastCompleted = completed
-            lastDate = date
-            smoothedBytesPerSecond = nil
-            return (nil, nil)
+            // 忽略多线程异步回调乱序引起的过期进度更新，保留并返回当前速度指标，防止速度和剩余时间被重置为 nil
+            return metrics(completed: previousCompleted, total: total)
         }
 
         let elapsed = date.timeIntervalSince(previousDate)
@@ -91,7 +89,12 @@ struct TransferProgressEstimator {
 @MainActor
 @Observable
 final class WorkspaceModel {
-    let profile: NasProfile
+    private enum RestartableTransfer: Codable {
+        case download(item: FileItem, localURL: URL)
+        case upload(localURL: URL, folderPath: String, overwrite: Bool)
+    }
+
+    private(set) var profile: NasProfile
     let isDemo: Bool
     let allowsVerifiedRestore: Bool
 
@@ -111,6 +114,7 @@ final class WorkspaceModel {
     var statusIsError = false
     var requiresReauthentication = false
     var preview: FilePreviewState = .empty
+    var isPreviewPresented = false
     var transfers: [ActivityTask] = []
 
     @ObservationIgnored private let repository: any FileRepository
@@ -120,6 +124,7 @@ final class WorkspaceModel {
     @ObservationIgnored private var previewTask: Task<Void, Never>?
     @ObservationIgnored private var previewFileURL: URL?
     @ObservationIgnored private var runningTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var restartableTransfers: [UUID: RestartableTransfer] = [:]
     @ObservationIgnored private var progressEstimators: [UUID: TransferProgressEstimator] = [:]
 
     init(profile: NasProfile, repository: any FileRepository) {
@@ -128,6 +133,41 @@ final class WorkspaceModel {
         self.isDemo = repository.isDemo
         self.allowsVerifiedRestore = repository.allowsVerifiedRestore
         Self.purgeStalePreviewCache()
+        
+        // 加载已保存的任务列表
+        if let data = UserDefaults.standard.data(forKey: "LanStash_Transfers_\(profile.id.uuidString)"),
+           let savedTransfers = try? JSONDecoder().decode([ActivityTask].self, from: data) {
+            self.transfers = savedTransfers.map { task in
+                var updatedTask = task
+                // 异常退出的 running/queued 任务自动变为暂停状态
+                if updatedTask.state == .running || updatedTask.state == .queued {
+                    updatedTask.state = .paused
+                }
+                updatedTask.bytesPerSecond = nil
+                updatedTask.estimatedSecondsRemaining = nil
+                return updatedTask
+            }
+        }
+        
+        // 加载已保存的可重启任务参数
+        if let data = UserDefaults.standard.data(forKey: "LanStash_Restartable_\(profile.id.uuidString)"),
+           let savedRestartable = try? JSONDecoder().decode([UUID: RestartableTransfer].self, from: data) {
+            self.restartableTransfers = savedRestartable
+        }
+    }
+
+    private func saveTransfers() {
+        if let data = try? JSONEncoder().encode(transfers) {
+            UserDefaults.standard.set(data, forKey: "LanStash_Transfers_\(profile.id.uuidString)")
+        }
+        if let data = try? JSONEncoder().encode(restartableTransfers) {
+            UserDefaults.standard.set(data, forKey: "LanStash_Restartable_\(profile.id.uuidString)")
+        }
+    }
+
+    func updateProfile(_ profile: NasProfile) {
+        guard self.profile.id == profile.id else { return }
+        self.profile = profile
     }
 
     var filteredItems: [FileItem] {
@@ -162,7 +202,9 @@ final class WorkspaceModel {
     }
 
     var activeTransferCount: Int {
-        transfers.filter { $0.state == .queued || $0.state == .running || $0.state == .cancelling }.count
+        transfers.filter {
+            $0.state == .queued || $0.state == .running || $0.state == .paused || $0.state == .cancelling
+        }.count
     }
 
     func load() async {
@@ -294,7 +336,7 @@ final class WorkspaceModel {
     }
 
     func selectionChanged() {
-        preparePreview()
+        clearPreview()
     }
 
     func preparePreview() {
@@ -305,10 +347,11 @@ final class WorkspaceModel {
             return
         }
         guard !item.isDirectory else {
-            preview = .unsupported("文件夹包含 \(item.sizeBytes.map(String.init) ?? "未知") 字节数据。双击可打开。")
+            preview = .empty
             return
         }
 
+        isPreviewPresented = true
         preview = .loading
         let kind = PreviewKind.classify(item)
         previewTask = Task { [weak self] in
@@ -326,7 +369,11 @@ final class WorkspaceModel {
                         return
                     }
                     let url = temporaryPreviewURL(for: item)
-                    try await repository.download(remotePath: item.path, to: url) { _, _ in }
+                    try await repository.download(
+                        remotePath: item.path,
+                        to: url,
+                        expectedSize: item.sizeBytes
+                    ) { _, _ in }
                     try Task.checkCancellation()
                     let data = try Data(contentsOf: url)
                     let text = Self.decodeText(data) ?? "无法识别文本编码。"
@@ -334,7 +381,11 @@ final class WorkspaceModel {
                     preview = .text(text, truncated: false)
                 case .pdf:
                     let url = temporaryPreviewURL(for: item)
-                    try await repository.download(remotePath: item.path, to: url) { _, _ in }
+                    try await repository.download(
+                        remotePath: item.path,
+                        to: url,
+                        expectedSize: item.sizeBytes
+                    ) { _, _ in }
                     try Task.checkCancellation()
                     previewFileURL = url
                     preview = .pdf(url)
@@ -374,6 +425,12 @@ final class WorkspaceModel {
             remotePath: item.path,
             totalUnits: item.sizeBytes
         )
+        restartableTransfers[taskID] = .download(item: item, localURL: localURL)
+        saveTransfers()
+        startDownload(taskID: taskID, item: item, localURL: localURL)
+    }
+
+    private func startDownload(taskID: UUID, item: FileItem, localURL: URL) {
         let operation = Task { [weak self] in
             guard let self else { return }
             let scoped = localURL.startAccessingSecurityScopedResource()
@@ -386,16 +443,17 @@ final class WorkspaceModel {
                 try await repository.download(
                     remotePath: item.path,
                     to: localURL,
+                    expectedSize: item.sizeBytes,
                     progress: progressHandler(for: taskID)
                 )
                 finishTransfer(taskID)
                 statusIsError = false
                 statusMessage = "“\(item.name)”下载完成。"
             } catch is CancellationError {
-                setTransferState(taskID, .cancelled)
+                finishCancellation(taskID)
             } catch {
                 if Self.isCancellation(error) {
-                    setTransferState(taskID, .cancelled)
+                    finishCancellation(taskID)
                 } else {
                     failTransfer(taskID, error: error)
                 }
@@ -414,7 +472,262 @@ final class WorkspaceModel {
                 displayName: url.lastPathComponent,
                 remotePath: currentPath
             )
-            let operation = Task { [weak self] in
+            restartableTransfers[taskID] = .upload(
+                localURL: url,
+                folderPath: currentPath,
+                overwrite: overwrite
+            )
+            saveTransfers()
+            startUpload(
+                taskID: taskID,
+                localURL: url,
+                folderPath: currentPath,
+                overwrite: overwrite
+            )
+        }
+    }
+
+    func createFolder(named rawName: String) async {
+        guard let name = validatedNewItemName(rawName) else { return }
+        do {
+            try await repository.createFolder(parentPath: currentPath, name: name)
+            await refresh()
+            statusIsError = false
+            statusMessage = "文件夹“\(name)”已创建。"
+        } catch {
+            show(error)
+        }
+    }
+
+    func createEmptyFile(named rawName: String) async {
+        guard let name = validatedNewItemName(rawName) else { return }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LanStashNewFile-\(UUID().uuidString)", isDirectory: true)
+        let localURL = directory.appendingPathComponent(name)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            guard FileManager.default.createFile(atPath: localURL.path, contents: Data()) else {
+                throw AppError(
+                    category: .localStorageFull,
+                    isRetryable: false,
+                    safeUserMessage: "无法准备这个空白文件，请检查 Mac 的可用空间。"
+                )
+            }
+            try await repository.upload(
+                localURL: localURL,
+                to: currentPath,
+                overwrite: false
+            ) { _, _ in }
+            await refresh()
+            statusIsError = false
+            statusMessage = "文件“\(name)”已创建。"
+        } catch {
+            show(error)
+        }
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private func validatedNewItemName(_ rawName: String) -> String? {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != ".", name != "..", !name.contains("/") else {
+            statusIsError = true
+            statusMessage = "名称不能为空，也不能包含“/”。请换一个名称。"
+            return nil
+        }
+        return name
+    }
+
+    func enqueueFileOperation(
+        _ targets: [FileItem],
+        to destinationFolder: String,
+        moveSource: Bool
+    ) {
+        guard !targets.isEmpty else { return }
+        let taskID = addTransfer(
+            kind: moveSource ? .move : .copy,
+            displayName: targets.count == 1 ? targets[0].name : "\(targets.count) 个项目",
+            remotePath: destinationFolder,
+            totalUnits: Int64(targets.count)
+        )
+        let paths = targets.map(\.path)
+        runningTasks[taskID] = Task { [weak self] in
+            guard let self else { return }
+            defer { runningTasks[taskID] = nil }
+            do {
+                setTransferState(taskID, .running)
+                if moveSource {
+                    try await repository.move(
+                        paths: paths,
+                        to: destinationFolder,
+                        overwrite: false,
+                        progress: progressHandler(for: taskID)
+                    )
+                } else {
+                    try await repository.copy(
+                        paths: paths,
+                        to: destinationFolder,
+                        overwrite: false,
+                        progress: progressHandler(for: taskID)
+                    )
+                }
+                finishTransfer(taskID)
+                await refresh()
+                statusIsError = false
+                statusMessage = moveSource ? "移动完成。" : "复制完成。"
+            } catch is CancellationError {
+                setTransferState(taskID, .cancelled)
+            } catch {
+                Self.isCancellation(error)
+                    ? setTransferState(taskID, .cancelled)
+                    : failTransfer(taskID, error: error)
+            }
+        }
+    }
+
+    func enqueueCrossNASOperation(
+        from source: WorkspaceModel,
+        targets: [FileItem],
+        to destinationFolder: String,
+        moveSource: Bool
+    ) {
+        guard !targets.isEmpty else { return }
+        let total = targets.compactMap(\.sizeBytes).reduce(0, +)
+        let knownTotal = targets.contains(where: \.isDirectory) ? nil : (total > 0 ? total * 2 : nil)
+        let taskID = addTransfer(
+            kind: moveSource ? .move : .copy,
+            displayName: targets.count == 1 ? targets[0].name : "\(targets.count) 个文件",
+            remotePath: "\(source.profile.displayName) → \(profile.displayName)\(destinationFolder)",
+            fileSizeBytes: targets.contains(where: \.isDirectory) ? nil : total,
+            totalUnits: knownTotal
+        )
+        runningTasks[taskID] = Task { [weak self, weak source] in
+            guard let self, let source else { return }
+            defer { runningTasks[taskID] = nil }
+            do {
+                setTransferState(taskID, .running)
+                var completedBeforeFile: Int64 = 0
+                for item in targets {
+                    try Task.checkCancellation()
+                    completedBeforeFile += try await transferCrossNASItem(
+                        item,
+                        from: source,
+                        to: destinationFolder,
+                        taskID: taskID,
+                        completedBeforeItem: completedBeforeFile,
+                        knownTotal: knownTotal
+                    )
+                }
+                if moveSource {
+                    // 所有目标文件确认上传后才删除源文件，避免跨 NAS 移动造成数据丢失。
+                    try await source.repository.delete(paths: targets.map(\.path)) { _, _ in }
+                    await source.refresh()
+                }
+                finishTransfer(taskID)
+                await refresh()
+                statusIsError = false
+                statusMessage = moveSource ? "跨 NAS 移动完成。" : "跨 NAS 复制完成。"
+            } catch is CancellationError {
+                setTransferState(taskID, .cancelled)
+            } catch {
+                Self.isCancellation(error)
+                    ? setTransferState(taskID, .cancelled)
+                    : failTransfer(taskID, error: error)
+            }
+        }
+    }
+
+    private func transferCrossNASItem(
+        _ item: FileItem,
+        from source: WorkspaceModel,
+        to destinationFolder: String,
+        taskID: UUID,
+        completedBeforeItem: Int64,
+        knownTotal: Int64?
+    ) async throws -> Int64 {
+        if item.isDirectory {
+            try await repository.createFolder(parentPath: destinationFolder, name: item.name)
+            let childDestination = "\(destinationFolder)/\(item.name)"
+            var offset = 0
+            var completedChildren: Int64 = 0
+            while true {
+                let page = try await source.repository.listFolder(
+                    path: item.path,
+                    offset: offset,
+                    limit: 500
+                )
+                for child in page.items {
+                    completedChildren += try await transferCrossNASItem(
+                        child,
+                        from: source,
+                        to: childDestination,
+                        taskID: taskID,
+                        completedBeforeItem: completedBeforeItem + completedChildren,
+                        knownTotal: knownTotal
+                    )
+                }
+                guard page.hasMore, !page.items.isEmpty else { break }
+                offset = page.offset + page.items.count
+            }
+            return completedChildren
+        }
+
+        let size = item.sizeBytes ?? 0
+        let progress = progressHandler(for: taskID)
+        if let sourceRepository = source.repository as? DsmFileRepository,
+           let destinationRepository = repository as? DsmFileRepository,
+           let expectedSize = item.sizeBytes {
+            let base = completedBeforeItem
+            try await sourceRepository.streamFileToNAS(
+                remotePath: item.path,
+                filename: item.name,
+                expectedSize: expectedSize,
+                target: destinationRepository,
+                destinationFolder: destinationFolder
+            ) { completed, _ in
+                progress(base + completed, knownTotal)
+            }
+            return expectedSize * 2
+        }
+
+        guard source.isDemo, isDemo else {
+            throw AppError(
+                category: .invalidResponse,
+                isRetryable: false,
+                safeUserMessage: "无法确定文件大小，跨 NAS 内存中转已停止。"
+            )
+        }
+        // 演示模式不连接真实 NAS，仅使用短生命周期文件模拟流程。
+        let fileDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LanStashDemoCrossNAS-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: fileDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: fileDirectory) }
+        let localURL = fileDirectory.appendingPathComponent(item.name)
+        let downloadBase = completedBeforeItem
+        try await source.repository.download(
+            remotePath: item.path,
+            to: localURL,
+            expectedSize: item.sizeBytes
+        ) { completed, _ in
+            progress(downloadBase + completed, knownTotal)
+        }
+        let uploadBase = completedBeforeItem + size
+        try await repository.upload(
+            localURL: localURL,
+            to: destinationFolder,
+            overwrite: false
+        ) { completed, _ in
+            progress(uploadBase + completed, knownTotal)
+        }
+        return size * 2
+    }
+
+    private func startUpload(
+        taskID: UUID,
+        localURL url: URL,
+        folderPath: String,
+        overwrite: Bool
+    ) {
+        let operation = Task { [weak self] in
                 guard let self else { return }
                 let scoped = url.startAccessingSecurityScopedResource()
                 defer {
@@ -425,7 +738,7 @@ final class WorkspaceModel {
                     setTransferState(taskID, .running)
                     try await repository.upload(
                         localURL: url,
-                        to: currentPath,
+                        to: folderPath,
                         overwrite: overwrite,
                         progress: progressHandler(for: taskID)
                     )
@@ -434,17 +747,16 @@ final class WorkspaceModel {
                     statusIsError = false
                     statusMessage = "“\(url.lastPathComponent)”上传完成。"
                 } catch is CancellationError {
-                    setTransferState(taskID, .cancelled)
+                    finishCancellation(taskID)
                 } catch {
                     if Self.isCancellation(error) {
-                        setTransferState(taskID, .cancelled)
+                        finishCancellation(taskID)
                     } else {
                         failTransfer(taskID, error: error)
                     }
                 }
             }
             runningTasks[taskID] = operation
-        }
     }
 
     func deleteItems(_ targets: [FileItem]) {
@@ -572,8 +884,85 @@ final class WorkspaceModel {
         runningTasks[taskID]?.cancel()
     }
 
+    func pauseTransfer(_ taskID: UUID) {
+        guard restartableTransfers[taskID] != nil,
+              transfers.first(where: { $0.id == taskID })?.state == .running else {
+            return
+        }
+        setTransferState(taskID, .paused)
+        runningTasks[taskID]?.cancel()
+    }
+
+    func resumeTransfer(_ taskID: UUID) {
+        guard let transfer = restartableTransfers[taskID],
+              transfers.first(where: { $0.id == taskID })?.state == .paused else {
+            return
+        }
+        restart(taskID, transfer: transfer)
+    }
+
+    func retryTransfer(_ taskID: UUID) {
+        guard let transfer = restartableTransfers[taskID],
+              let state = transfers.first(where: { $0.id == taskID })?.state,
+              state == .failed || state == .cancelled else {
+            return
+        }
+        restart(taskID, transfer: transfer)
+    }
+
+    private func restart(_ taskID: UUID, transfer: RestartableTransfer) {
+        guard let index = transfers.firstIndex(where: { $0.id == taskID }) else {
+            return
+        }
+        transfers[index].failureMessage = nil
+        if case .upload = transfer {
+            // 群晖公开上传接口不提供字节偏移续传，继续上传会从头重新发送。
+            transfers[index].completedUnits = 0
+        }
+        setTransferState(taskID, .queued)
+        switch transfer {
+        case .download(let item, let localURL):
+            startDownload(taskID: taskID, item: item, localURL: localURL)
+        case .upload(let localURL, let folderPath, let overwrite):
+            startUpload(
+                taskID: taskID,
+                localURL: localURL,
+                folderPath: folderPath,
+                overwrite: overwrite
+            )
+        }
+    }
+
+    private func finishCancellation(_ taskID: UUID) {
+        let state = transfers.first(where: { $0.id == taskID })?.state
+        if state != .paused {
+            setTransferState(taskID, .cancelled)
+        }
+    }
+
     func clearCompletedTransfers() {
-        transfers.removeAll { $0.state == .succeeded || $0.state == .cancelled }
+        let taskIDs = transfers.compactMap { task in
+            task.state == .succeeded || task.state == .cancelled ? task.id : nil
+        }
+        taskIDs.forEach(deleteTransfer)
+    }
+
+    func deleteTransfer(_ taskID: UUID) {
+        let runningTask = runningTasks[taskID]
+        let restartableTransfer = restartableTransfers[taskID]
+        runningTask?.cancel()
+        Task { [weak self] in
+            await runningTask?.value
+            guard let self else { return }
+            if case .download(_, let localURL) = restartableTransfer {
+                await repository.removePartialDownload(to: localURL)
+            }
+            runningTasks[taskID] = nil
+            restartableTransfers[taskID] = nil
+            progressEstimators[taskID] = nil
+            transfers.removeAll { $0.id == taskID }
+            saveTransfers()
+        }
     }
 
     func cancelAllWork() {
@@ -614,6 +1003,7 @@ final class WorkspaceModel {
         previewTask?.cancel()
         clearPreviewFile()
         preview = .empty
+        isPreviewPresented = false
     }
 
     private func clearPreviewFile() {
@@ -627,15 +1017,18 @@ final class WorkspaceModel {
         kind: ActivityKind,
         displayName: String,
         remotePath: String,
+        fileSizeBytes: Int64? = nil,
         totalUnits: Int64? = nil
     ) -> UUID {
         let task = ActivityTask(
             kind: kind,
             displayName: displayName,
             remotePath: remotePath,
+            fileSizeBytes: fileSizeBytes,
             totalUnits: totalUnits
         )
         transfers.insert(task, at: 0)
+        saveTransfers()
         return task.id
     }
 
@@ -673,6 +1066,7 @@ final class WorkspaceModel {
             transfers[index].bytesPerSecond = nil
             transfers[index].estimatedSecondsRemaining = nil
         }
+        saveTransfers()
     }
 
     private func finishTransfer(_ taskID: UUID) {
@@ -686,6 +1080,7 @@ final class WorkspaceModel {
         transfers[index].bytesPerSecond = nil
         transfers[index].estimatedSecondsRemaining = nil
         progressEstimators[taskID] = nil
+        saveTransfers()
     }
 
     private func failTransfer(_ taskID: UUID, error: Error) {
@@ -697,6 +1092,7 @@ final class WorkspaceModel {
         transfers[index].bytesPerSecond = nil
         transfers[index].estimatedSecondsRemaining = nil
         progressEstimators[taskID] = nil
+        saveTransfers()
         show(error)
     }
 

@@ -10,6 +10,7 @@ public enum DsmAPIName {
     public static let fileStationDownload = "SYNO.FileStation.Download"
     public static let fileStationUpload = "SYNO.FileStation.Upload"
     public static let fileStationDelete = "SYNO.FileStation.Delete"
+    public static let fileStationCreateFolder = "SYNO.FileStation.CreateFolder"
     public static let fileStationCopyMove = "SYNO.FileStation.CopyMove"
 }
 
@@ -47,6 +48,7 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationDownload,
         DsmAPIName.fileStationUpload,
         DsmAPIName.fileStationDelete,
+        DsmAPIName.fileStationCreateFolder,
         DsmAPIName.fileStationCopyMove
     ]
 
@@ -140,6 +142,7 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationDownload: 1...2,
         DsmAPIName.fileStationUpload: 1...2,
         DsmAPIName.fileStationDelete: 1...2,
+        DsmAPIName.fileStationCreateFolder: 1...2,
         DsmAPIName.fileStationCopyMove: 1...3
     ]
 }

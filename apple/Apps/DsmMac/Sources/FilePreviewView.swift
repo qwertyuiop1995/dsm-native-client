@@ -333,22 +333,47 @@ struct FileDetailView: View {
     let onRestore: (FileItem) -> Void
 
     var body: some View {
-        Group {
-            if model.selection.count > 1 {
-                ContentUnavailableView(
-                    "已选择 \(model.selection.count) 个项目",
-                    systemImage: "checkmark.circle",
-                    description: Text("可从工具栏下载或删除所选项目。")
-                )
-            } else if let item = model.selectedItem {
-                detail(for: item)
-            } else {
-                ContentUnavailableView(
-                    "选择一个项目",
-                    systemImage: "sidebar.right",
-                    description: Text("文件详情和预览会显示在这里。")
-                )
+        VStack(spacing: 0) {
+            HStack {
+                Text("项目详情")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    model.isPreviewPresented = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.secondary)
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+                .help("关闭预览窗口")
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+            
+            Divider()
+
+            Group {
+                if model.selection.count > 1 {
+                    ContentUnavailableView(
+                        "已选择 \(model.selection.count) 个项目",
+                        systemImage: "checkmark.circle",
+                        description: Text("可从工具栏下载或删除所选项目。")
+                    )
+                } else if let item = model.selectedItem {
+                    detail(for: item)
+                } else {
+                    ContentUnavailableView(
+                        "选择一个项目",
+                        systemImage: "sidebar.right",
+                        description: Text("文件详情和预览会显示在这里。")
+                    )
+                }
+            }
+            .frame(maxHeight: .infinity)
         }
     }
 

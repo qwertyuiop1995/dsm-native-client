@@ -10,6 +10,16 @@ private enum FileViewMode: String, CaseIterable, Identifiable {
 
 struct WorkspaceView: View {
     @Bindable var model: WorkspaceModel
+    let profiles: [NasProfile]
+    let selectedProfileID: UUID?
+    let connectedWorkspaces: [WorkspaceModel]
+    let onAddNAS: () -> Void
+    let onSelectNAS: (UUID) -> Void
+    let hasFileClipboard: Bool
+    let onCopy: ([FileItem]) -> Void
+    let onCut: ([FileItem]) -> Void
+    let onPaste: () -> Void
+    let onRenameNAS: (String) -> String?
     let onLogout: () async -> Void
     let onSessionExpired: (String) async -> Void
 
@@ -18,32 +28,47 @@ struct WorkspaceView: View {
     @State private var viewMode: FileViewMode = .list
     @State private var sortOrder = [KeyPathComparator<FileItem>]()
     @State private var showingInfoItem: FileItem? = nil
+    @State private var showsPreviewInspector = false
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(model: model)
+            SidebarView(
+                model: model,
+                profiles: profiles,
+                selectedProfileID: selectedProfileID,
+                onAddNAS: onAddNAS,
+                onSelectNAS: { profile in onSelectNAS(profile.id) }
+            )
                 .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
-        } content: {
+        } detail: {
             contentColumn
                 .navigationSplitViewColumnWidth(min: 480, ideal: 680)
-        } detail: {
+        }
+        .inspector(isPresented: $showsPreviewInspector) {
             FileDetailView(
                 model: model,
                 onDownload: presentDownloadPanel,
                 onDelete: { deleteTargets = $0 },
                 onRestore: { restoreTarget = $0 }
             )
-            .navigationSplitViewColumnWidth(min: 250, ideal: 380, max: 1200)
+            .inspectorColumnWidth(min: 280, ideal: 380, max: 700)
         }
         .navigationSplitViewStyle(.balanced)
         .task {
             await model.load()
         }
         .onChange(of: model.section) { _, section in
+            if section == .transfers || section == .settings {
+                showsPreviewInspector = false
+            }
             Task { await model.activate(section) }
         }
         .onChange(of: model.selection) { _, _ in
             model.selectionChanged()
+            showsPreviewInspector = false
+        }
+        .onChange(of: model.isPreviewPresented) { _, isPresented in
+            showsPreviewInspector = isPresented && shouldShowPreviewInspector
         }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
@@ -66,67 +91,93 @@ struct WorkspaceView: View {
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    Label("刷新", systemImage: "arrow.clockwise")
-                }
-                .disabled(model.currentPath.isEmpty || model.isRefreshing)
-                .keyboardShortcut("r", modifiers: .command)
-
-                Menu {
-                    Button("选择文件上传…") {
-                        presentUploadPanel(overwrite: false)
+                if isFileSection {
+                    Button {
+                        Task { await model.refresh() }
+                    } label: {
+                        Label("刷新", systemImage: "arrow.clockwise")
                     }
-                    Button("上传并覆盖同名文件…") {
-                        presentUploadPanel(overwrite: true)
+                    .disabled(model.currentPath.isEmpty || model.isRefreshing)
+                    .keyboardShortcut("r", modifiers: .command)
+
+                    Menu {
+                        Button("选择文件上传…") {
+                            presentUploadPanel(overwrite: false)
+                        }
+                        Button("上传并覆盖同名文件…") {
+                            presentUploadPanel(overwrite: true)
+                        }
+                    } label: {
+                        Label("上传", systemImage: "square.and.arrow.up")
                     }
-                } label: {
-                    Label("上传", systemImage: "square.and.arrow.up")
-                }
-                .disabled(!isFileSection)
-                .help("上传文件到当前目录")
+                    .disabled(!isFileSection)
+                    .help("上传文件到当前目录")
 
-                Button {
-                    if let item = model.selectedItem, !item.isDirectory {
-                        presentDownloadPanel(item)
+                    Button {
+                        if let item = model.selectedItem, !item.isDirectory {
+                            presentDownloadPanel(item)
+                        }
+                    } label: {
+                        Label("下载", systemImage: "square.and.arrow.down")
                     }
-                } label: {
-                    Label("下载", systemImage: "square.and.arrow.down")
-                }
-                .disabled(model.selectedItem?.isDirectory != false)
+                    .disabled(model.selectedItem?.isDirectory != false)
 
-                Button {
-                    deleteTargets = model.selectedItems
-                } label: {
-                    Label("删除", systemImage: "trash")
-                }
-                .disabled(model.selectedItems.isEmpty)
-                .help("打开删除确认，不会直接删除")
-
-                Button {
-                    model.section = .transfers
-                } label: {
-                    Label("传输", systemImage: "arrow.up.arrow.down.circle")
-                }
-                .badge(model.activeTransferCount)
-
-                Picker("视图模式", selection: $viewMode) {
-                    Label("列表", systemImage: "list.bullet").tag(FileViewMode.list)
-                    Label("网格", systemImage: "grid").tag(FileViewMode.grid)
-                }
-                .pickerStyle(.segmented)
-                .disabled(!isFileSection)
-
-                Menu {
-                    Button("退出登录") {
-                        Task { await onLogout() }
+                    Button {
+                        deleteTargets = model.selectedItems
+                    } label: {
+                        Label("删除", systemImage: "trash")
                     }
-                    Button("设置") {
-                        model.section = .settings
+                    .disabled(model.selectedItems.isEmpty)
+                    .help("打开删除确认，不会直接删除")
+
+                    Button(action: onPaste) {
+                        Label("粘贴", systemImage: "doc.on.clipboard")
                     }
-                } label: {
-                    Label("更多", systemImage: "ellipsis.circle")
+                    .disabled(!hasFileClipboard || !isFileSection)
+                    .help("复制或移动到当前目录")
+                    .keyboardShortcut("v", modifiers: .command)
+
+                    Button {
+                        model.section = .transfers
+                    } label: {
+                        Label("传输", systemImage: "arrow.up.arrow.down.circle")
+                    }
+                    .badge(model.activeTransferCount)
+
+                    Picker("视图模式", selection: $viewMode) {
+                        Label("列表", systemImage: "list.bullet").tag(FileViewMode.list)
+                        Label("grid", systemImage: "grid").tag(FileViewMode.grid)
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!isFileSection)
+
+                    Menu {
+                        Button("退出登录") {
+                            Task { await onLogout() }
+                        }
+                        Button("设置") {
+                            model.section = .settings
+                        }
+                    } label: {
+                        Label("更多", systemImage: "ellipsis.circle")
+                    }
+                } else if model.section == .transfers {
+                    Button("清除已完成") {
+                        clearCompleted()
+                    }
+                    .disabled(!canClearCompleted)
+                    
+                    Button {
+                        model.section = nil
+                    } label: {
+                        Label("返回文件", systemImage: "folder")
+                    }
+                } else if model.section == .settings {
+                    Button {
+                        model.section = nil
+                    } label: {
+                        Label("返回文件", systemImage: "folder")
+                    }
                 }
             }
         }
@@ -172,15 +223,39 @@ struct WorkspaceView: View {
                 "\(model.statusMessage ?? "NAS 没有接受当前登录状态。")你可以先重试；如果仍然失败，请重新登录。"
             )
         }
+        .navigationTitle(navigationTitle)
+    }
+
+    private var navigationTitle: String {
+        switch model.section {
+        case .transfers:
+            return "传输中心"
+        case .settings:
+            return "这台 NAS"
+        default:
+            return model.currentPath.isEmpty ? model.profile.displayName : (model.currentPath.split(separator: "/").last.map(String.init) ?? model.currentPath)
+        }
+    }
+
+    private var canClearCompleted: Bool {
+        connectedWorkspaces.contains(where: { ws in
+            ws.transfers.contains(where: { $0.state == .succeeded || $0.state == .cancelled })
+        })
+    }
+
+    private func clearCompleted() {
+        for ws in connectedWorkspaces {
+            ws.clearCompletedTransfers()
+        }
     }
 
     @ViewBuilder
     private var contentColumn: some View {
         switch model.section {
         case .transfers:
-            TransferCenterView(model: model)
+            TransferCenterView(model: model, connectedWorkspaces: connectedWorkspaces)
         case .settings:
-            SettingsView(model: model, onLogout: onLogout)
+            SettingsView(model: model, onRenameNAS: onRenameNAS, onLogout: onLogout)
         default:
             FileBrowserView(
                 model: model,
@@ -188,7 +263,11 @@ struct WorkspaceView: View {
                 showingInfoItem: $showingInfoItem,
                 onDownload: presentDownloadPanel,
                 onDelete: { deleteTargets = $0 },
-                onRestore: { restoreTarget = $0 }
+                onRestore: { restoreTarget = $0 },
+                onCopy: onCopy,
+                onCut: onCut,
+                hasFileClipboard: hasFileClipboard,
+                onPaste: onPaste
             )
         }
     }
@@ -198,6 +277,16 @@ struct WorkspaceView: View {
         case .files, .recycle: true
         default: false
         }
+    }
+
+    private var shouldShowPreviewInspector: Bool {
+        guard isFileSection,
+              model.isPreviewPresented,
+              let item = model.selectedItem,
+              !item.isDirectory else {
+            return false
+        }
+        return PreviewKind.classify(item) != .unsupported
     }
 
     private var deleteAlertPresented: Binding<Bool> {
@@ -253,22 +342,66 @@ struct WorkspaceView: View {
 
 private struct SidebarView: View {
     @Bindable var model: WorkspaceModel
+    let profiles: [NasProfile]
+    let selectedProfileID: UUID?
+    let onAddNAS: () -> Void
+    let onSelectNAS: (NasProfile) -> Void
 
     var body: some View {
         List(selection: $model.section) {
-            Section {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.profile.displayName)
-                            .font(.headline)
-                        Text(model.isDemo ? "演示模式" : "已安全连接")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            Section("NAS") {
+                if model.isDemo {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(model.profile.displayName)
+                                .font(.headline)
+                            Text("演示模式")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "sparkles.rectangle.stack")
+                            .foregroundStyle(.blue)
                     }
-                } icon: {
-                    Image(systemName: model.isDemo ? "sparkles.rectangle.stack" : "externaldrive.fill.badge.checkmark")
-                        .foregroundStyle(.blue)
                 }
+
+                ForEach(profiles) { profile in
+                    Button {
+                        onSelectNAS(profile)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(profile.displayName)
+                                        .font(.headline)
+                                    Text(profile.id == selectedProfileID && !model.isDemo ? "当前连接" : profile.host)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(
+                                    systemName: profile.id == selectedProfileID && !model.isDemo
+                                        ? "externaldrive.fill.badge.checkmark"
+                                        : "externaldrive"
+                                )
+                                .foregroundStyle(.blue)
+                            }
+                            Spacer()
+                            if profile.id == selectedProfileID && !model.isDemo {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityLabel("当前 NAS")
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(profile.id == selectedProfileID && !model.isDemo)
+                }
+
+                Button(action: onAddNAS) {
+                    Label("添加 NAS", systemImage: "plus")
+                }
+                .buttonStyle(.plain)
             }
 
             Section("共享文件夹") {
@@ -319,8 +452,15 @@ private struct FileBrowserView: View {
     let onDownload: (FileItem) -> Void
     let onDelete: ([FileItem]) -> Void
     let onRestore: (FileItem) -> Void
+    let onCopy: ([FileItem]) -> Void
+    let onCut: ([FileItem]) -> Void
+    let hasFileClipboard: Bool
+    let onPaste: () -> Void
     
     @State private var sortOrder = [KeyPathComparator<FileItem>]()
+    @State private var showsCreateFolderPrompt = false
+    @State private var showsCreateFilePrompt = false
+    @State private var newItemName = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -393,6 +533,34 @@ private struct FileBrowserView: View {
             model.enqueueUploads(urls)
             return true
         }
+        .contextMenu {
+            blankAreaContextMenu
+        }
+        .alert("新建文件夹", isPresented: $showsCreateFolderPrompt) {
+            TextField("文件夹名称", text: $newItemName)
+            Button("取消", role: .cancel) { newItemName = "" }
+            Button("创建") {
+                let name = newItemName
+                newItemName = ""
+                Task { await model.createFolder(named: name) }
+            }
+            .disabled(newItemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("将在当前目录中创建一个文件夹。")
+        }
+        .alert("新建空白文件", isPresented: $showsCreateFilePrompt) {
+            TextField("文件名，例如 说明.txt", text: $newItemName)
+            Button("取消", role: .cancel) { newItemName = "" }
+            Button("创建") {
+                let name = newItemName
+                newItemName = ""
+                Task { await model.createEmptyFile(named: name) }
+            }
+            .disabled(newItemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("将创建一个 0 字节文件；文件类型由扩展名决定。")
+        }
+        .navigationTitle(model.currentPath.isEmpty ? "文件" : (model.currentPath as NSString).lastPathComponent)
     }
 
     private var sortedItems: [FileItem] {
@@ -409,11 +577,29 @@ private struct FileBrowserView: View {
 
     @ViewBuilder
     private func contextMenuForFile(_ item: FileItem) -> some View {
-        Button(item.isDirectory ? "打开" : "预览") {
-            Task { await model.open(item) }
+        if item.isDirectory {
+            Button("打开") {
+                Task { await model.open(item) }
+            }
+        } else if PreviewKind.classify(item) != .unsupported {
+            Button("预览") {
+                Task { await model.open(item) }
+            }
         }
         if !item.isDirectory {
             Button("下载…") { onDownload(item) }
+        }
+        Divider()
+        Button("复制") {
+            onCopy(contextTargets(for: item))
+        }
+        .keyboardShortcut("c", modifiers: .command)
+        Button("剪切") {
+            onCut(contextTargets(for: item))
+        }
+        .keyboardShortcut("x", modifiers: .command)
+        Button("移动…") {
+            onCut(contextTargets(for: item))
         }
         if item.isRecyclePath, model.allowsVerifiedRestore {
             Divider()
@@ -427,6 +613,35 @@ private struct FileBrowserView: View {
         Button(item.isRecyclePath ? "永久删除…" : "删除…", role: .destructive) {
             onDelete([item])
         }
+    }
+
+    private func contextTargets(for item: FileItem) -> [FileItem] {
+        model.selection.contains(item.id) && !model.selectedItems.isEmpty
+            ? model.selectedItems
+            : [item]
+    }
+
+    @ViewBuilder
+    private var blankAreaContextMenu: some View {
+        Button("粘贴") {
+            onPaste()
+        }
+        .disabled(!hasFileClipboard || !canCreateItems)
+        Divider()
+        Button("新建文件夹…") {
+            newItemName = "未命名文件夹"
+            showsCreateFolderPrompt = true
+        }
+        .disabled(!canCreateItems)
+        Button("新建空白文件…") {
+            newItemName = "未命名.txt"
+            showsCreateFilePrompt = true
+        }
+        .disabled(!canCreateItems)
+    }
+
+    private var canCreateItems: Bool {
+        !model.currentPath.isEmpty && !model.currentPath.split(separator: "/").contains("#recycle")
     }
 
     private var fileGrid: some View {
@@ -504,10 +719,27 @@ private struct FileBrowserView: View {
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .accessibilityLabel("\(model.currentPath) 文件列表")
+        .overlay {
+            BlankTableContextMenuArea(
+                canPaste: hasFileClipboard && canCreateItems,
+                canCreateItems: canCreateItems,
+                onPaste: onPaste,
+                onCreateFolder: {
+                    newItemName = "未命名文件夹"
+                    showsCreateFolderPrompt = true
+                },
+                onCreateFile: {
+                    newItemName = "未命名.txt"
+                    showsCreateFilePrompt = true
+                }
+            )
+        }
         .contextMenu(forSelectionType: FileItem.ID.self) { selectedIds in
             if let firstId = selectedIds.first,
                let item = sortedItems.first(where: { $0.id == firstId }) {
                 contextMenuForFile(item)
+            } else {
+                blankAreaContextMenu
             }
         }
         .simultaneousGesture(
@@ -517,6 +749,101 @@ private struct FileBrowserView: View {
                 }
             }
         )
+    }
+}
+
+/// 只接收表格空白区域的右键事件，文件行仍交给 SwiftUI Table 自己处理。
+private struct BlankTableContextMenuArea: NSViewRepresentable {
+    let canPaste: Bool
+    let canCreateItems: Bool
+    let onPaste: () -> Void
+    let onCreateFolder: () -> Void
+    let onCreateFile: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> BlankTableContextNSView {
+        let view = BlankTableContextNSView()
+        view.coordinator = context.coordinator
+        return view
+    }
+
+    func updateNSView(_ nsView: BlankTableContextNSView, context: Context) {
+        context.coordinator.canPaste = canPaste
+        context.coordinator.canCreateItems = canCreateItems
+        context.coordinator.onPaste = onPaste
+        context.coordinator.onCreateFolder = onCreateFolder
+        context.coordinator.onCreateFile = onCreateFile
+    }
+
+    final class Coordinator: NSObject {
+        var canPaste = false
+        var canCreateItems = false
+        var onPaste: () -> Void = {}
+        var onCreateFolder: () -> Void = {}
+        var onCreateFile: () -> Void = {}
+
+        func showMenu(for event: NSEvent, in view: NSView) {
+            let menu = NSMenu()
+            let pasteItem = NSMenuItem(title: "粘贴", action: #selector(paste), keyEquivalent: "")
+            pasteItem.target = self
+            pasteItem.isEnabled = canPaste
+            menu.addItem(pasteItem)
+            menu.addItem(.separator())
+
+            let folderItem = NSMenuItem(title: "新建文件夹…", action: #selector(createFolder), keyEquivalent: "")
+            folderItem.target = self
+            folderItem.isEnabled = canCreateItems
+            menu.addItem(folderItem)
+
+            let fileItem = NSMenuItem(title: "新建空白文件…", action: #selector(createFile), keyEquivalent: "")
+            fileItem.target = self
+            fileItem.isEnabled = canCreateItems
+            menu.addItem(fileItem)
+            NSMenu.popUpContextMenu(menu, with: event, for: view)
+        }
+
+        @objc private func paste() { onPaste() }
+        @objc private func createFolder() { onCreateFolder() }
+        @objc private func createFile() { onCreateFile() }
+    }
+}
+
+private final class BlankTableContextNSView: NSView {
+    weak var coordinator: BlankTableContextMenuArea.Coordinator?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let event = NSApp.currentEvent,
+              event.type == .rightMouseDown,
+              let table = tableView(atWindowPoint: event.locationInWindow) else {
+            return nil
+        }
+        let tablePoint = table.convert(event.locationInWindow, from: nil)
+        return table.row(at: tablePoint) == -1 ? self : nil
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        coordinator?.showMenu(for: event, in: self)
+    }
+
+    private func tableView(atWindowPoint windowPoint: NSPoint) -> NSTableView? {
+        guard let window else { return nil }
+        return window.contentView.flatMap { findTable(in: $0, windowPoint: windowPoint) }
+    }
+
+    private func findTable(in view: NSView, windowPoint: NSPoint) -> NSTableView? {
+        if let table = view as? NSTableView,
+           table.visibleRect.contains(table.convert(windowPoint, from: nil)) {
+            return table
+        }
+        for subview in view.subviews.reversed() {
+            if let table = findTable(in: subview, windowPoint: windowPoint) {
+                return table
+            }
+        }
+        return nil
     }
 }
 
@@ -560,39 +887,261 @@ struct FileIcon: View {
     }
 }
 
-private struct TransferCenterView: View {
-    @Bindable var model: WorkspaceModel
+private struct FilterChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("传输中心")
-                        .font(.title2.weight(.semibold))
-                    Text("上传、下载、删除和恢复任务")
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("清除已完成") {
-                    model.clearCompletedTransfers()
-                }
-                .disabled(!model.transfers.contains(where: { $0.state == .succeeded || $0.state == .cancelled }))
-            }
-            .padding(16)
-            Divider()
+        Button(action: action) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.medium)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(isSelected ? Color.blue : Color.secondary.opacity(0.12))
+                )
+                .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.85))
+        }
+        .buttonStyle(.plain)
+    }
+}
 
-            if model.transfers.isEmpty {
+private struct TransferCenterView: View {
+    @Bindable var model: WorkspaceModel
+    let connectedWorkspaces: [WorkspaceModel]
+
+    @State private var selectedNasID: UUID?
+    @State private var activeFilter: TaskFilterType? = nil
+
+    private enum TaskFilterType: Hashable {
+        case upload
+        case download
+        case fileOperation
+        case completed
+        case failed
+
+        var displayName: String {
+            switch self {
+            case .upload: return "上传"
+            case .download: return "下载"
+            case .fileOperation: return "文件操作"
+            case .completed: return "已完成"
+            case .failed: return "已失败"
+            }
+        }
+    }
+
+    private var allConnectedTasks: [ActivityTask] {
+        connectedWorkspaces.flatMap { $0.transfers }
+    }
+
+    private var baseTasks: [ActivityTask] {
+        if let selectedNasID {
+            if let ws = connectedWorkspaces.first(where: { $0.profile.id == selectedNasID }) {
+                return ws.transfers
+            }
+            return []
+        } else {
+            return allConnectedTasks
+        }
+    }
+
+    private func isTaskFinished(_ task: ActivityTask) -> Bool {
+        task.state == .succeeded || task.state == .failed || task.state == .cancelled
+    }
+
+    private var availableFilters: [TaskFilterType] {
+        var filters: [TaskFilterType] = []
+        if baseTasks.contains(where: { $0.kind == .upload && !isTaskFinished($0) }) {
+            filters.append(.upload)
+        }
+        if baseTasks.contains(where: { $0.kind == .download && !isTaskFinished($0) }) {
+            filters.append(.download)
+        }
+        if baseTasks.contains(where: { ($0.kind == .copy || $0.kind == .move || $0.kind == .delete || $0.kind == .restore) && !isTaskFinished($0) }) {
+            filters.append(.fileOperation)
+        }
+        if baseTasks.contains(where: { $0.state == .succeeded }) {
+            filters.append(.completed)
+        }
+        if baseTasks.contains(where: { $0.state == .failed || $0.state == .cancelled }) {
+            filters.append(.failed)
+        }
+        return filters
+    }
+
+    private var currentActiveFilter: TaskFilterType? {
+        let available = availableFilters
+        if let activeFilter, available.contains(activeFilter) {
+            return activeFilter
+        }
+        return nil
+    }
+
+    private var filteredTasks: [ActivityTask] {
+        let tasks = baseTasks
+        guard let filter = currentActiveFilter else {
+            return tasks
+        }
+        switch filter {
+        case .upload:
+            return tasks.filter { $0.kind == .upload && !isTaskFinished($0) }
+        case .download:
+            return tasks.filter { $0.kind == .download && !isTaskFinished($0) }
+        case .fileOperation:
+            return tasks.filter { ($0.kind == .copy || $0.kind == .move || $0.kind == .delete || $0.kind == .restore) && !isTaskFinished($0) }
+        case .completed:
+            return tasks.filter { $0.state == .succeeded }
+        case .failed:
+            return tasks.filter { $0.state == .failed || $0.state == .cancelled }
+        }
+    }
+
+    private func countForFilter(_ filter: TaskFilterType) -> Int {
+        switch filter {
+        case .upload:
+            return baseTasks.filter { $0.kind == .upload && !isTaskFinished($0) }.count
+        case .download:
+            return baseTasks.filter { $0.kind == .download && !isTaskFinished($0) }.count
+        case .fileOperation:
+            return baseTasks.filter { ($0.kind == .copy || $0.kind == .move || $0.kind == .delete || $0.kind == .restore) && !isTaskFinished($0) }.count
+        case .completed:
+            return baseTasks.filter { $0.state == .succeeded }.count
+        case .failed:
+            return baseTasks.filter { $0.state == .failed || $0.state == .cancelled }.count
+        }
+    }
+
+    private var canClearCompleted: Bool {
+        if let selectedNasID {
+            if let ws = connectedWorkspaces.first(where: { $0.profile.id == selectedNasID }) {
+                return ws.transfers.contains(where: { $0.state == .succeeded || $0.state == .cancelled })
+            }
+            return false
+        } else {
+            return connectedWorkspaces.contains(where: { ws in
+                ws.transfers.contains(where: { $0.state == .succeeded || $0.state == .cancelled })
+            })
+        }
+    }
+
+    private func clearCompleted() {
+        if let selectedNasID {
+            if let ws = connectedWorkspaces.first(where: { $0.profile.id == selectedNasID }) {
+                ws.clearCompletedTransfers()
+            }
+        } else {
+            for ws in connectedWorkspaces {
+                ws.clearCompletedTransfers()
+            }
+        }
+    }
+
+    var body: some View {
+        Group {
+            if allConnectedTasks.isEmpty {
                 ContentUnavailableView(
                     "暂无传输任务",
                     systemImage: "arrow.up.arrow.down.circle",
                     description: Text("上传、下载和文件操作会显示在这里。")
                 )
             } else {
-                List(model.transfers) { task in
-                    TransferRow(task: task) {
-                        model.cancelTransfer(task.id)
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("\(model.profile.displayName) · 上传、下载和文件操作")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 6)
+
+                    HStack(spacing: 12) {
+                        if connectedWorkspaces.count > 1 {
+                            HStack(spacing: 6) {
+                                Text("NAS:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                
+                                FilterChip(title: "全部", isSelected: selectedNasID == nil) {
+                                    selectedNasID = nil
+                                }
+                                
+                                ForEach(connectedWorkspaces, id: \.profile.id) { ws in
+                                    FilterChip(title: ws.profile.displayName, isSelected: selectedNasID == ws.profile.id) {
+                                        selectedNasID = ws.profile.id
+                                    }
+                                }
+                            }
+                            
+                            Divider()
+                                .frame(height: 14)
+                                .foregroundStyle(.secondary.opacity(0.3))
+                        }
+
+                        let activeFilters = availableFilters
+                        if !activeFilters.isEmpty {
+                            HStack(spacing: 6) {
+                                Text("类型:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                
+                                FilterChip(title: "全部", isSelected: currentActiveFilter == nil) {
+                                    activeFilter = nil
+                                }
+                                
+                                ForEach(activeFilters, id: \.self) { filter in
+                                    let count = countForFilter(filter)
+                                    FilterChip(title: "\(filter.displayName) (\(count))", isSelected: currentActiveFilter == filter) {
+                                        if activeFilter == filter {
+                                            activeFilter = nil
+                                        } else {
+                                            activeFilter = filter
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+
+                    Divider()
+
+                    if filteredTasks.isEmpty {
+                        ContentUnavailableView(
+                            "没有匹配的传输任务",
+                            systemImage: "arrow.up.arrow.down.circle",
+                            description: Text("当前过滤条件下没有任务显示，可尝试切换标签。")
+                        )
+                    } else {
+                        List(filteredTasks) { task in
+                            let taskWorkspace = connectedWorkspaces.first(where: { ws in
+                                ws.transfers.contains(where: { $0.id == task.id })
+                            }) ?? model
+
+                            TransferRow(
+                                task: task,
+                                onPause: { taskWorkspace.pauseTransfer(task.id) },
+                                onResume: { taskWorkspace.resumeTransfer(task.id) },
+                                onRetry: { taskWorkspace.retryTransfer(task.id) },
+                                onCancel: { taskWorkspace.cancelTransfer(task.id) },
+                                onDelete: { taskWorkspace.deleteTransfer(task.id) }
+                            )
+                        }
                     }
                 }
+            }
+        }
+        .onAppear {
+            if selectedNasID == nil {
+                selectedNasID = model.profile.id
             }
         }
     }
@@ -600,7 +1149,12 @@ private struct TransferCenterView: View {
 
 private struct TransferRow: View {
     let task: ActivityTask
+    let onPause: () -> Void
+    let onResume: () -> Void
+    let onRetry: () -> Void
     let onCancel: () -> Void
+    let onDelete: () -> Void
+    @State private var isConfirmingDeletion = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -630,36 +1184,100 @@ private struct TransferRow: View {
                     ProgressView()
                         .controlSize(.small)
                 }
-                if let transferDetails {
-                    Text(transferDetails)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let transferDetails {
+                            Text(transferDetails)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        if let failure = task.failureMessage {
+                            Text(failure)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        } else {
+                            Text(task.remotePath)
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    Spacer()
+                    HStack(spacing: 6) {
+                        if task.state == .running, task.kind == .download || task.kind == .upload {
+                            TransferActionButton(icon: "pause.fill", label: "暂停", color: .blue, action: onPause)
+                        } else if task.state == .paused {
+                            TransferActionButton(icon: "play.fill", label: task.kind == .upload ? "重传" : "继续", color: .green, action: onResume)
+                        } else if task.state == .failed || task.state == .cancelled {
+                            TransferActionButton(icon: "arrow.clockwise", label: "重试", color: .blue, action: onRetry)
+                        }
+                        
+                        if task.state == .queued || task.state == .running || task.state == .paused {
+                            TransferActionButton(icon: "xmark", label: "取消", color: .orange, action: onCancel)
+                        }
+                        
+                        TransferActionButton(icon: "trash", label: "删除", color: .red, action: {
+                            if task.state == .running || task.state == .queued || task.state == .paused {
+                                isConfirmingDeletion = true
+                            } else {
+                                onDelete()
+                            }
+                        })
+                    }
                 }
-                if let failure = task.failureMessage {
-                    Text(failure)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                } else {
-                    Text(task.remotePath)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            if task.state == .queued || task.state == .running {
-                Button("取消", action: onCancel)
-                    .buttonStyle(.borderless)
             }
         }
         .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
+        .contextMenu {
+            if task.state == .running, task.kind == .download || task.kind == .upload {
+                Button("暂停", action: onPause)
+            }
+            if task.state == .paused {
+                Button(task.kind == .upload ? "重新上传" : "继续", action: onResume)
+            }
+            if task.state == .failed || task.state == .cancelled {
+                Button("重试", action: onRetry)
+            }
+            if task.state == .queued || task.state == .running || task.state == .paused {
+                Button("取消任务", action: onCancel)
+            }
+            Divider()
+            Button(
+                task.state == .running || task.state == .queued || task.state == .paused
+                    ? "取消并删除任务"
+                    : "删除任务",
+                role: .destructive,
+                action: { isConfirmingDeletion = true }
+            )
+        }
+        .confirmationDialog(
+            "删除这个传输任务？",
+            isPresented: $isConfirmingDeletion,
+            titleVisibility: .visible
+        ) {
+            Button(
+                task.state == .running || task.state == .queued || task.state == .paused
+                    ? "取消并删除任务"
+                    : "删除任务",
+                role: .destructive,
+                action: onDelete
+            )
+            Button("保留任务", role: .cancel) {}
+        } message: {
+            Text(task.kind == .download
+                ? "任务记录和未下载完成的临时文件都会被删除。"
+                : "任务记录会被删除，正在进行的操作也会先取消。")
+        }
     }
 
     private var icon: String {
         switch task.kind {
         case .upload: "arrow.up.circle.fill"
         case .download: "arrow.down.circle.fill"
+        case .copy: "doc.on.doc.fill"
+        case .move: "folder.fill.badge.arrow.forward"
         case .delete: "trash.circle.fill"
         case .restore: "arrow.uturn.backward.circle.fill"
         }
@@ -669,6 +1287,7 @@ private struct TransferRow: View {
         switch task.state {
         case .succeeded: .green
         case .failed: .red
+        case .paused: .orange
         case .cancelled: .secondary
         default: .blue
         }
@@ -683,6 +1302,7 @@ private struct TransferRow: View {
                 return "\(min(max(percentage, 0), 100))%"
             }
             return "进行中"
+        case .paused: return task.kind == .upload ? "已暂停（继续时重新上传）" : "已暂停"
         case .cancelling: return "正在取消"
         case .succeeded: return "已完成"
         case .failed: return "失败"
@@ -691,13 +1311,27 @@ private struct TransferRow: View {
     }
 
     private var transferDetails: String? {
-        guard task.kind == .upload || task.kind == .download else {
+        guard task.kind == .upload
+                || task.kind == .download
+                || task.kind == .copy
+                || task.kind == .move else {
             return nil
         }
 
         var parts: [String] = []
+        if let fileSize = task.fileSizeBytes {
+            parts.append("文件大小 \(formatBytes(fileSize))")
+        }
         if let total = task.totalUnits, total > 0 {
-            parts.append("\(formatBytes(task.completedUnits)) / \(formatBytes(total))")
+            let prefix: String
+            if (task.kind == .copy || task.kind == .move), task.fileSizeBytes != nil {
+                prefix = "中转进度 "
+            } else if task.kind == .copy || task.kind == .move {
+                prefix = "已传输 "
+            } else {
+                prefix = ""
+            }
+            parts.append("\(prefix)\(formatBytes(task.completedUnits)) / \(formatBytes(total))")
         } else if task.completedUnits > 0 {
             parts.append("已传输 \(formatBytes(task.completedUnits))")
         }
@@ -732,6 +1366,37 @@ private struct TransferRow: View {
     private func progressAccessibilityValue(total: Int64) -> String {
         let percentage = Int((Double(task.completedUnits) / Double(total) * 100).rounded())
         return "\(min(max(percentage, 0), 100))%"
+    }
+}
+
+private struct TransferActionButton: View {
+    let icon: String
+    let label: String
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .bold))
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3.5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(color.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(color.opacity(0.22), lineWidth: 0.8)
+        )
+        .foregroundStyle(color)
     }
 }
 
@@ -791,26 +1456,16 @@ private struct SettingsRow: View {
 
 private struct SettingsView: View {
     @Bindable var model: WorkspaceModel
+    let onRenameNAS: (String) -> String?
     let onLogout: () async -> Void
+    @State private var showsRenamePrompt = false
+    @State private var renamedNAS = ""
+    @State private var renameError: String?
+    @AppStorage("LanStash_DownloadChunkSize") private var chunkSizeSetting = 8
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                // 页面大标题
-                HStack(spacing: 12) {
-                    Image(systemName: "square.stack.3d.up.fill")
-                        .font(.title)
-                        .foregroundStyle(.blue.gradient)
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("这台 NAS")
-                            .font(.title2.weight(.bold))
-                        Text("管理当前连接的 NAS 存储节点与安全配置")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.bottom, 8)
 
                 // 1. 连接信息
                 SettingsSectionCard(
@@ -818,7 +1473,24 @@ private struct SettingsView: View {
                     icon: "server.rack",
                     iconColor: .blue
                 ) {
-                    SettingsRow(label: "设备名称", value: model.profile.displayName)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("设备名称")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(model.profile.displayName)
+                            .textSelection(.enabled)
+                        Button("修改…") {
+                            renamedNAS = model.profile.displayName
+                            renameError = nil
+                            showsRenamePrompt = true
+                        }
+                        .disabled(model.isDemo)
+                    }
+                    if let renameError {
+                        Label(renameError, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                     Divider().opacity(0.3)
                     SettingsRow(label: "主机地址", value: "https://\(model.profile.host):\(model.profile.port)")
                     Divider().opacity(0.3)
@@ -880,7 +1552,37 @@ private struct SettingsView: View {
                     }
                 }
 
-                // 4. 操作区域
+                // 4. 传输设置
+                SettingsSectionCard(
+                    title: "传输设置",
+                    icon: "arrow.up.and.down.and.sparkles",
+                    iconColor: .orange
+                ) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("分片缓存大小")
+                                .font(.body)
+                            Spacer()
+                            Picker("", selection: $chunkSizeSetting) {
+                                Text("4 MB (弱网保底)").tag(4)
+                                Text("8 MB (默认值)").tag(8)
+                                Text("16 MB (推荐)").tag(16)
+                                Text("32 MB (千兆高速)").tag(32)
+                                Text("64 MB (极速万兆)").tag(64)
+                            }
+                            .pickerStyle(.menu)
+                            .frame(width: 155)
+                        }
+                        
+                        Text("调节断点续传的分片缓存大小。在高速局域网下，调大缓存能显著减少 HTTP 请求往返开销并提升吞吐量；在弱网或 QuickConnect 外网中继时，调小缓存能减少因超时或重连而导致的重传流量开销。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                // 5. 操作区域
                 HStack {
                     Spacer()
                     Button {
@@ -904,6 +1606,16 @@ private struct SettingsView: View {
             .padding(32)
             .frame(maxWidth: 680, alignment: .leading)
             .frame(maxWidth: .infinity)
+        }
+        .alert("修改 NAS 名称", isPresented: $showsRenamePrompt) {
+            TextField("设备名称", text: $renamedNAS)
+            Button("取消", role: .cancel) {}
+            Button("保存") {
+                renameError = onRenameNAS(renamedNAS)
+            }
+            .disabled(renamedNAS.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("这里只修改岚仓中的显示名称，不会更改 NAS 本身的名称。")
         }
     }
 }

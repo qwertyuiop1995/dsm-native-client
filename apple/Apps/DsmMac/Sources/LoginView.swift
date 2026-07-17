@@ -9,6 +9,20 @@ struct RootView: View {
             if let workspace = model.workspace {
                 WorkspaceView(
                     model: workspace,
+                    profiles: model.profiles,
+                    selectedProfileID: model.selectedProfileID,
+                    connectedWorkspaces: model.connectedWorkspaces,
+                    onAddNAS: {
+                        model.newProfile()
+                    },
+                    onSelectNAS: { profileID in
+                        model.selectProfile(id: profileID)
+                    },
+                    hasFileClipboard: model.fileClipboard != nil,
+                    onCopy: { items in model.placeOnClipboard(items, moveSource: false) },
+                    onCut: { items in model.placeOnClipboard(items, moveSource: true) },
+                    onPaste: { model.pasteClipboardIntoCurrentFolder() },
+                    onRenameNAS: { name in model.renameCurrentNAS(to: name) },
                     onLogout: {
                         await model.logout()
                     },
@@ -158,9 +172,17 @@ struct LoginView: View {
                                     .focused($focusedField, equals: .account)
                             }
                             formRow("密码") {
-                                SecureField("密码不会保存", text: $model.password)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    SecureField(
+                                        model.rememberPassword ? "已安全保存在这台 Mac 上" : "密码不会保存",
+                                        text: $model.password
+                                    )
                                     .textContentType(.password)
                                     .focused($focusedField, equals: .password)
+                                    Toggle("在这台 Mac 上记住密码", isOn: $model.rememberPassword)
+                                        .toggleStyle(.checkbox)
+                                        .font(.callout)
+                                }
                             }
                             if model.requiresOTP {
                                 formRow("验证码") {

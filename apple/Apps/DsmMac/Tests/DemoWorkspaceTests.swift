@@ -4,6 +4,58 @@ import XCTest
 
 final class DemoWorkspaceTests: XCTestCase {
     @MainActor
+    func test跨NAS复制任务记录文件大小和总传输字节() async throws {
+        let sourceProfile = try NasProfile(
+            displayName: "来源",
+            host: "source.example.invalid",
+            port: 5_001
+        )
+        let destinationProfile = try NasProfile(
+            displayName: "目标",
+            host: "destination.example.invalid",
+            port: 5_001
+        )
+        let source = WorkspaceModel(
+            profile: sourceProfile,
+            repository: DemoFileRepository(profileID: sourceProfile.id)
+        )
+        let destination = WorkspaceModel(
+            profile: destinationProfile,
+            repository: DemoFileRepository(profileID: destinationProfile.id)
+        )
+        await source.load()
+        await destination.load()
+        let file = try XCTUnwrap(source.items.first(where: { !$0.isDirectory && $0.sizeBytes != nil }))
+
+        destination.enqueueCrossNASOperation(
+            from: source,
+            targets: [file],
+            to: destination.currentPath,
+            moveSource: false
+        )
+
+        let task = try XCTUnwrap(destination.transfers.first)
+        XCTAssertEqual(task.fileSizeBytes, file.sizeBytes)
+        XCTAssertEqual(task.totalUnits, (file.sizeBytes ?? 0) * 2)
+        destination.cancelAllWork()
+    }
+
+    func test演示仓库可以新建文件夹和空白文件() async throws {
+        let profileID = UUID()
+        let repository = DemoFileRepository(profileID: profileID)
+        try await repository.createFolder(parentPath: "/home", name: "新目录")
+        let emptyFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DemoWorkspaceTests-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: emptyFile) }
+        try Data().write(to: emptyFile)
+        try await repository.upload(localURL: emptyFile, to: "/home", overwrite: false) { _, _ in }
+
+        let page = try await repository.listFolder(path: "/home", offset: 0, limit: 100)
+        XCTAssertTrue(page.items.contains(where: { $0.name == "新目录" && $0.isDirectory }))
+        XCTAssertTrue(page.items.contains(where: { $0.name == emptyFile.lastPathComponent && !$0.isDirectory }))
+    }
+
+    @MainActor
     func test演示工作区加载共享和首个目录() async throws {
         let profile = try NasProfile(
             displayName: "演示",

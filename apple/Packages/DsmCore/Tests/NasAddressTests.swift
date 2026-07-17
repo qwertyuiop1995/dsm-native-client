@@ -8,6 +8,7 @@ final class NasAddressTests: XCTestCase {
         XCTAssertEqual(address.host, "family-nas")
         XCTAssertEqual(address.port, 5_001)
         XCTAssertEqual(address.kind, .quickConnect)
+        XCTAssertFalse(address.hasExplicitPort)
     }
 
     func test识别IP和本地域名() throws {
@@ -29,6 +30,18 @@ final class NasAddressTests: XCTestCase {
 
         XCTAssertEqual(address.host, "192-168-1-20.family-nas.direct.quickconnect.to")
         XCTAssertEqual(address.port, 5_443)
+        XCTAssertEqual(address.kind, .direct)
+        XCTAssertTrue(address.hasExplicitPort)
+    }
+
+    func test完整HTTPS地址未指定端口时使用标准端口() throws {
+        let address = try NasAddressParser.parse(
+            "https://nas.example.invalid/webman/index.cgi",
+            defaultPort: 5_001
+        )
+
+        XCTAssertEqual(address.port, 443)
+        XCTAssertFalse(address.hasExplicitPort)
         XCTAssertEqual(address.kind, .direct)
     }
 

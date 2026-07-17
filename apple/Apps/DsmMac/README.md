@@ -5,8 +5,9 @@
 当前客户端支持：
 
 - 多 NAS 配置和安全会话恢复。
-- HTTPS NAS 主机和端口输入。
 - NAS 地址支持 IP、域名、QuickConnect ID，以及从浏览器地址栏粘贴完整 HTTPS 地址。
+- 端口默认自动选择；完整 URL 或高级连接设置可以提供用户端口覆盖。
+- QuickConnect 会在发送登录信息前依次验证局域网和公网直连候选，失败后建立中继并核对 NAS 身份。
 - `SYNO.API.Info` 能力发现。
 - 账号密码登录与 OTP 状态切换。
 - SID 和 SynoToken 写入 Keychain。

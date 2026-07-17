@@ -21,7 +21,7 @@ Packages/DsmTransferFeature/   下载、上传、删除和恢复任务
 - 最低系统：macOS 14；共享包同时声明 iOS 17。
 - macOS App 使用 SwiftUI 和 App Sandbox。
 - 支持系统信任的 HTTPS 证书，以及核对 SHA-256 指纹后的自签名证书首次信任。
-- 支持使用 IP、域名、QuickConnect ID 连接，也可以粘贴浏览器最终地址；QuickConnect 仅解析直连地址，不包含中继隧道。
+- 支持使用 IP、域名、QuickConnect ID 连接，也可以粘贴浏览器最终地址；QuickConnect 会优先探测直连候选，失败后建立并校验中继隧道。
 - 已实现共享与目录浏览、图片/文本/PDF 预览、上传、下载、安全删除和传输中心。
 - 回收站可浏览和下载；恢复引擎只有在当前 DSM build 通过兼容验证后才开放正式入口。
 - 提供本地演示模式，不连接 NAS 即可检查完整三栏界面和文件操作流程。

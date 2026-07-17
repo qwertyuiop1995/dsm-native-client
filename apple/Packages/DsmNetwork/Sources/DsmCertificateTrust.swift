@@ -87,6 +87,7 @@ enum DsmCertificateTrustPolicy {
 final class DsmTLSDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate, URLSessionDownloadDelegate, URLSessionDataDelegate, @unchecked Sendable {
     private let expectedHost: String?
     private let pinnedFingerprint: String?
+    private let requiresSystemTrust: Bool
     private let lock = NSLock()
     private var pendingFailure: DsmCertificateTrustError?
 
@@ -96,11 +97,16 @@ final class DsmTLSDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate
     private var dataHandlers = [Int: (Data) -> Void]()
     private var lastProgressUpdateTimes = [Int: Date]()
 
-    init(expectedHost: String?, pinnedFingerprint: String?) {
+    init(
+        expectedHost: String?,
+        pinnedFingerprint: String?,
+        requiresSystemTrust: Bool = false
+    ) {
         self.expectedHost = expectedHost
         self.pinnedFingerprint = pinnedFingerprint?
             .replacingOccurrences(of: ":", with: "")
             .uppercased()
+        self.requiresSystemTrust = requiresSystemTrust
     }
 
     func consumeFailure() -> DsmCertificateTrustError? {
@@ -152,6 +158,18 @@ final class DsmTLSDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate
         if systemTrusted,
            pinnedFingerprint == nil || pinnedFingerprint == fingerprint {
             completionHandler(.useCredential, URLCredential(trust: trust))
+            return
+        }
+
+        if requiresSystemTrust {
+            let review = DsmCertificateReview(
+                host: host,
+                subjectSummary: subject,
+                sha256Fingerprint: fingerprint,
+                canBePinned: false
+            )
+            store(.invalid(review))
+            completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
 

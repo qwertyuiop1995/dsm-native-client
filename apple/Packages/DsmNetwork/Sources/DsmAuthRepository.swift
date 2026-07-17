@@ -10,7 +10,10 @@ public actor DsmAuthRepository: AuthRepository {
         transportFactory: @escaping @Sendable (NasProfile) -> any DsmHTTPTransport = { profile in
             URLSessionTransport(
                 expectedHost: profile.host,
-                pinnedCertificateSHA256: profile.pinnedCertificateSHA256
+                pinnedCertificateSHA256: profile.pinnedCertificateSHA256,
+                requiresSystemCertificateTrust: DsmQuickConnectResolver.isTrustedRelayHost(
+                    profile.host
+                )
             )
         }
     ) {

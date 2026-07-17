@@ -39,7 +39,8 @@ public final class URLSessionTransport: DsmBinaryHTTPTransport, @unchecked Senda
     public init(
         configuration: URLSessionConfiguration = .ephemeral,
         expectedHost: String? = nil,
-        pinnedCertificateSHA256: String? = nil
+        pinnedCertificateSHA256: String? = nil,
+        requiresSystemCertificateTrust: Bool = false
     ) {
         configuration.timeoutIntervalForRequest = 120
         configuration.timeoutIntervalForResource = 60 * 60
@@ -49,7 +50,8 @@ public final class URLSessionTransport: DsmBinaryHTTPTransport, @unchecked Senda
         configuration.httpCookieAcceptPolicy = .never
         tlsDelegate = DsmTLSDelegate(
             expectedHost: expectedHost,
-            pinnedFingerprint: pinnedCertificateSHA256
+            pinnedFingerprint: pinnedCertificateSHA256,
+            requiresSystemTrust: requiresSystemCertificateTrust
         )
         session = URLSession(
             configuration: configuration,

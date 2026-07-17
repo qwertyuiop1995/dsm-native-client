@@ -34,4 +34,53 @@ final class NasProfileTests: XCTestCase {
 
         XCTAssertEqual(profile.pinnedCertificateSHA256, String(repeating: "AA", count: 32))
     }
+
+    func test保留用户自定义端口() throws {
+        let profile = try NasProfile(
+            displayName: "测试设备",
+            host: "nas.example.invalid",
+            port: 5_443,
+            portOverride: 5_443
+        )
+
+        let data = try JSONEncoder().encode(profile)
+        let decoded = try JSONDecoder().decode(NasProfile.self, from: data)
+
+        XCTAssertEqual(decoded.port, 5_443)
+        XCTAssertEqual(decoded.portOverride, 5_443)
+    }
+
+    func test旧配置的默认端口迁移为自动选择() throws {
+        let id = UUID()
+        let data = Data(
+            """
+            {
+              "id": "\(id.uuidString)",
+              "displayName": "旧设备",
+              "scheme": "https",
+              "host": "nas.example.invalid",
+              "port": 5001
+            }
+            """.utf8
+        )
+
+        let profile = try JSONDecoder().decode(NasProfile.self, from: data)
+
+        XCTAssertNil(profile.portOverride)
+    }
+
+    func test自动HTTPS端口重新加载后仍保持自动() throws {
+        let profile = try NasProfile(
+            displayName: "测试设备",
+            host: "nas.example.invalid",
+            port: 443,
+            portOverride: nil
+        )
+
+        let data = try JSONEncoder().encode(profile)
+        let decoded = try JSONDecoder().decode(NasProfile.self, from: data)
+
+        XCTAssertEqual(decoded.port, 443)
+        XCTAssertNil(decoded.portOverride)
+    }
 }

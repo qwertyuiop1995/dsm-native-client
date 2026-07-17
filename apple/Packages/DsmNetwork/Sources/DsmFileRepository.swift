@@ -142,7 +142,10 @@ public actor DsmFileRepository: FileRepository {
     ) throws {
         let resolvedTransport = transport ?? URLSessionTransport(
             expectedHost: profile.host,
-            pinnedCertificateSHA256: profile.pinnedCertificateSHA256
+            pinnedCertificateSHA256: profile.pinnedCertificateSHA256,
+            requiresSystemCertificateTrust: DsmQuickConnectResolver.isTrustedRelayHost(
+                profile.host
+            )
         )
         let baseURL = try DsmEndpoint.baseURL(for: profile)
         profileID = profile.id

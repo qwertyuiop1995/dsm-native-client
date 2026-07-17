@@ -32,6 +32,7 @@ public struct NasProfile: Identifiable, Codable, Hashable, Sendable {
     public let scheme: NasScheme
     public let host: String
     public let port: Int
+    public let portOverride: Int?
     public let usernameHint: String?
     public let pinnedCertificateSHA256: String?
     public let lastDsmBuild: String?
@@ -42,6 +43,7 @@ public struct NasProfile: Identifiable, Codable, Hashable, Sendable {
         scheme: NasScheme = .https,
         host: String,
         port: Int,
+        portOverride: Int? = nil,
         usernameHint: String? = nil,
         pinnedCertificateSHA256: String? = nil,
         lastDsmBuild: String? = nil
@@ -61,6 +63,9 @@ public struct NasProfile: Identifiable, Codable, Hashable, Sendable {
         }
 
         guard (1...65_535).contains(port) else {
+            throw NasProfileValidationError.invalidPort
+        }
+        if let portOverride, !(1...65_535).contains(portOverride) {
             throw NasProfileValidationError.invalidPort
         }
 
@@ -83,6 +88,7 @@ public struct NasProfile: Identifiable, Codable, Hashable, Sendable {
         self.scheme = scheme
         self.host = normalizedHost
         self.port = port
+        self.portOverride = portOverride
         self.usernameHint = normalizedUsername?.isEmpty == false ? normalizedUsername : nil
         self.pinnedCertificateSHA256 = normalizedFingerprint?.isEmpty == false
             ? normalizedFingerprint
@@ -94,6 +100,8 @@ public struct NasProfile: Identifiable, Codable, Hashable, Sendable {
         displayName: String? = nil,
         host: String? = nil,
         port: Int? = nil,
+        portOverride: Int? = nil,
+        clearPortOverride: Bool = false,
         usernameHint: String? = nil,
         pinnedCertificateSHA256: String? = nil,
         clearCertificatePin: Bool = false
@@ -104,11 +112,69 @@ public struct NasProfile: Identifiable, Codable, Hashable, Sendable {
             scheme: scheme,
             host: host ?? self.host,
             port: port ?? self.port,
+            portOverride: clearPortOverride ? nil : (portOverride ?? self.portOverride),
             usernameHint: usernameHint ?? self.usernameHint,
             pinnedCertificateSHA256: clearCertificatePin
                 ? nil
                 : (pinnedCertificateSHA256 ?? self.pinnedCertificateSHA256),
             lastDsmBuild: lastDsmBuild
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case scheme
+        case host
+        case port
+        case portOverride
+        case usernameHint
+        case pinnedCertificateSHA256
+        case lastDsmBuild
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedPort = try container.decode(Int.self, forKey: .port)
+        let decodedOverride: Int?
+        if container.contains(.portOverride) {
+            decodedOverride = try container.decodeIfPresent(Int.self, forKey: .portOverride)
+        } else {
+            decodedOverride = decodedPort == 5_001 ? nil : decodedPort
+        }
+        try self.init(
+            id: container.decode(UUID.self, forKey: .id),
+            displayName: container.decode(String.self, forKey: .displayName),
+            scheme: container.decodeIfPresent(NasScheme.self, forKey: .scheme) ?? .https,
+            host: container.decode(String.self, forKey: .host),
+            port: decodedPort,
+            portOverride: decodedOverride,
+            usernameHint: container.decodeIfPresent(String.self, forKey: .usernameHint),
+            pinnedCertificateSHA256: container.decodeIfPresent(
+                String.self,
+                forKey: .pinnedCertificateSHA256
+            ),
+            lastDsmBuild: container.decodeIfPresent(String.self, forKey: .lastDsmBuild)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(scheme, forKey: .scheme)
+        try container.encode(host, forKey: .host)
+        try container.encode(port, forKey: .port)
+        if let portOverride {
+            try container.encode(portOverride, forKey: .portOverride)
+        } else {
+            try container.encodeNil(forKey: .portOverride)
+        }
+        try container.encodeIfPresent(usernameHint, forKey: .usernameHint)
+        try container.encodeIfPresent(
+            pinnedCertificateSHA256,
+            forKey: .pinnedCertificateSHA256
+        )
+        try container.encodeIfPresent(lastDsmBuild, forKey: .lastDsmBuild)
     }
 }

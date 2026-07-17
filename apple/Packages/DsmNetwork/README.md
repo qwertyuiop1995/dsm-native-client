@@ -6,7 +6,8 @@
 - 统一表单与 `requestFormat=JSON` 参数编码。
 - DSM 通用响应信封和脱敏错误映射。
 - `SYNO.API.Info` 能力发现与受控旧入口回退。
-- QuickConnect ID 的受限直连地址解析；不实现中继隧道。
+- QuickConnect ID 的受限地址解析：依次验证局域网、公网直连候选，再通过内部控制请求建立中继。
+- 中继只接受群晖官方域名，使用 `pingpong` 身份响应核对目标，并强制采用系统证书信任；身份确认前不提交登录信息。
 - `SYNO.API.Auth` 密码/OTP 登录。
 - SID 和 SynoToken 的 Keychain 安全存储。
 - 使用内存 Cookie 请求头和 POST `_sid` 双路径传递同一会话，兼容不同 DSM 登录行为。

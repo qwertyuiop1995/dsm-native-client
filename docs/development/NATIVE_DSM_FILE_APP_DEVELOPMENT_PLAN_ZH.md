@@ -189,12 +189,15 @@ flowchart TD
 ```text
 scheme: https
 host: nas.example.com 或 IP
-port: 5001 或用户自定义端口
+port: 自动选择结果，直接地址默认 5001
+portOverride: 用户从完整 URL 或高级设置中明确指定时保存
 baseURL: https://nas.example.com:5001
 apiURL: <baseURL>/webapi/<SYNO.API.Info 返回的 path>
 ```
 
-保存 NAS 配置时必须将 scheme、host、port 分字段保存，不保存带密码、SID 或查询参数的 URL。
+保存 NAS 配置时必须区分用户输入的地址、可选端口覆盖与本次解析出的连接端点，不得把 QuickConnect 的临时候选地址回写成用户配置。不得保存带密码、SID 或查询参数的 URL。
+
+QuickConnect ID 使用以下顺序：先对局域网候选执行不含凭据的 HTTPS 与能力探测，再尝试公网直连候选；全部失败后，通过内部 `request_tunnel` 控制请求建立中继。中继主机必须匹配群晖官方域名，并用 `pingpong` 响应核对 NAS 身份；核对成功且能力探测通过后才允许提交登录信息。私有地址或相同网段不能单独证明目标属于当前局域网，因为不同网络可能使用重叠网段。中继临时地址不得回写用户配置，中继异常证书不得进入用户确认信任流程。
 
 ### 8.2 启动能力发现
 
@@ -388,7 +391,7 @@ computedOriginalPath = /share/folder/file.txt
 
 | 编号 | 需求 | 优先级 |
 | --- | --- | --- |
-| `AUTH-001` | 用户可新增 NAS，输入 HTTPS 地址、端口、账号和密码 | P0 |
+| `AUTH-001` | 用户可新增 NAS，输入 HTTPS 地址或 QuickConnect ID、账号和密码；端口默认自动选择并允许高级覆盖 | P0 |
 | `AUTH-002` | 连接前发现 API 能力并选择兼容版本 | P0 |
 | `AUTH-003` | 支持 DSM 普通账号登录 | P0 |
 | `AUTH-004` | 收到 403/406 时进入 OTP 流程 | P0 |
@@ -1541,7 +1544,7 @@ DSM 6 兼容不作为第一批发布阻塞项，除非用户的实际 NAS 正在
 - 单文件和缓存的预期最大容量。
 - 是否允许保存账号名和可信设备 DID。
 
-当前决策：DSM 7 优先、macOS 参考实现、先做 A 级预览、不保存密码。macOS 已加入 QuickConnect ID 的直连地址解析；iPhone/iPad 复用 Apple 共享实现，Android 和 Windows 按同一安全边界后续实现。第一阶段不实现 QuickConnect 中继隧道，解析失败时回退到用户提供的 IP、域名或浏览器最终地址。
+当前决策：DSM 7 优先、macOS 参考实现、先做 A 级预览、不保存密码。macOS 已实现 QuickConnect ID 的直连优先与中继回退，并完成真实环境下的中继身份核对和 DSM 能力发现；完整账号登录仍需使用已更换密码复测。iPhone/iPad 复用 Apple 共享实现，Android 和 Windows 后续按相同的域名约束、身份核对、系统证书信任和凭据延迟提交边界实现。
 
 ## 31. 参考资料
 

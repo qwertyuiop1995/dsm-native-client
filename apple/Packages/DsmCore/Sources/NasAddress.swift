@@ -9,11 +9,18 @@ public struct ParsedNasAddress: Equatable, Sendable {
     public let host: String
     public let port: Int
     public let kind: NasAddressKind
+    public let hasExplicitPort: Bool
 
-    public init(host: String, port: Int, kind: NasAddressKind) {
+    public init(
+        host: String,
+        port: Int,
+        kind: NasAddressKind,
+        hasExplicitPort: Bool = false
+    ) {
         self.host = host
         self.port = port
         self.kind = kind
+        self.hasExplicitPort = hasExplicitPort
     }
 }
 
@@ -47,7 +54,8 @@ public enum NasAddressParser {
             throw NasAddressInputError.empty
         }
 
-        let value = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        let hasExplicitScheme = trimmed.contains("://")
+        let value = hasExplicitScheme ? trimmed : "https://\(trimmed)"
         guard let components = URLComponents(string: value),
               let rawHost = components.host,
               !rawHost.isEmpty,
@@ -61,14 +69,19 @@ public enum NasAddressParser {
             guard isPotentialQuickConnectID(quickConnectID) else {
                 throw NasAddressInputError.invalid
             }
-            return ParsedNasAddress(host: quickConnectID, port: 5_001, kind: .quickConnect)
+            return ParsedNasAddress(
+                host: quickConnectID,
+                port: 5_001,
+                kind: .quickConnect,
+                hasExplicitPort: false
+            )
         }
 
         guard components.scheme?.lowercased() == "https" else {
             throw NasAddressInputError.insecure
         }
 
-        let port = components.port ?? defaultPort
+        let port = components.port ?? (hasExplicitScheme ? 443 : defaultPort)
         guard (1...65_535).contains(port) else {
             throw NasAddressInputError.invalid
         }
@@ -76,7 +89,8 @@ public enum NasAddressParser {
         return ParsedNasAddress(
             host: host,
             port: port,
-            kind: isPotentialQuickConnectID(host) ? .quickConnect : .direct
+            kind: isPotentialQuickConnectID(host) ? .quickConnect : .direct,
+            hasExplicitPort: components.port != nil
         )
     }
 

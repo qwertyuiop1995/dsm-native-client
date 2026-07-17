@@ -77,12 +77,24 @@ id=mainapp_https
 serverID=<QUICKCONNECT_ID>
 ```
 
+直连候选均不可用时，参考实现会向解析结果中的控制服务器请求中继：
+
+```text
+POST https://<CONTROL_HOST>/Serv.php
+command=request_tunnel
+version=1
+id=mainapp_https
+serverID=<QUICKCONNECT_ID>
+```
+
+`request_tunnel` 的字段和响应结构来自 QuickConnect 当前客户端实现，属于未公开的内部契约。客户端只接受 `*.relay.*.quickconnect.to` 或 `*.relay.*.quickconnect.cn` 中继主机，并在发送登录信息前请求控制响应给出的 `pingpong_path`；返回的 `ezid` 必须等于 NAS 标识的小写 MD5，否则立即终止连接。中继 HTTPS 必须通过系统证书信任，不能使用自签名证书确认流程绕过异常证书。
+
 安全与兼容边界：
 
 - 该入口标记为 `内部`，不视为群晖承诺兼容的公开 API。
 - 请求不携带 DSM 用户名、密码、SID、SynoToken、文件路径或其他会话数据。
 - 只接受 `smartdns.lan` 或 `smartdns.host` 中以 `.direct.quickconnect.cn`、`.direct.quickconnect.to` 结尾的地址，并校验端口范围。
-- 当前只使用可直接访问 DSM HTTPS 服务的地址，不实现 QuickConnect 中继隧道协议。
+- 先验证直连候选；全部失败后才请求中继，并在中继身份核对成功后执行 DSM 能力发现。
 - 解析失败时允许用户改为粘贴浏览器最终地址，或输入 NAS 的 IP、`.local`、DDNS 和自定义域名。
 - 解析结果只用于当前连接，不替换界面和本地配置中保存的 QuickConnect ID，也不写入日志。
 

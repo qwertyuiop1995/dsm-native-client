@@ -75,7 +75,7 @@ final class AppModel {
 
     var displayName = "我的 NAS"
     var host = ""
-    var port = "5001"
+    var port = ""
     var account = ""
     var password = ""
     var otpCode = ""
@@ -124,7 +124,7 @@ final class AppModel {
         session = nil
         displayName = "我的 NAS"
         host = ""
-        port = "5001"
+        port = ""
         account = ""
         password = ""
         otpCode = ""
@@ -342,7 +342,7 @@ final class AppModel {
         selectedProfileID = profile.id
         displayName = profile.displayName
         host = profile.host
-        port = String(profile.port)
+        port = profile.portOverride.map(String.init) ?? ""
         account = profile.usernameHint ?? ""
         password = ""
         otpCode = ""
@@ -448,20 +448,30 @@ final class AppModel {
     }
 
     private func makeProfile() throws -> NasProfile {
-        guard let parsedPort = Int(port) else {
-            throw NasProfileValidationError.invalidPort
+        let trimmedPort = port.trimmingCharacters(in: .whitespacesAndNewlines)
+        let manualPort: Int?
+        if trimmedPort.isEmpty {
+            manualPort = nil
+        } else {
+            guard let parsed = Int(trimmedPort), (1...65_535).contains(parsed) else {
+                throw NasProfileValidationError.invalidPort
+            }
+            manualPort = parsed
         }
-        let parsedAddress = try NasAddressParser.parse(host, defaultPort: parsedPort)
+        let parsedAddress = try NasAddressParser.parse(host, defaultPort: manualPort ?? 5_001)
+        let portOverride = parsedAddress.hasExplicitPort ? parsedAddress.port : manualPort
+        let effectivePort = portOverride ?? parsedAddress.port
         host = parsedAddress.host
-        port = String(parsedAddress.port)
+        port = portOverride.map(String.init) ?? ""
         let connectionChanged = selectedProfile.map {
-            $0.host != parsedAddress.host || $0.port != parsedAddress.port
+            $0.host != parsedAddress.host || $0.portOverride != portOverride
         } ?? false
         return try NasProfile(
             id: selectedProfile?.id ?? UUID(),
             displayName: displayName,
             host: parsedAddress.host,
-            port: parsedAddress.port,
+            port: effectivePort,
+            portOverride: portOverride,
             usernameHint: account,
             pinnedCertificateSHA256: connectionChanged ? nil : selectedProfile?.pinnedCertificateSHA256,
             lastDsmBuild: selectedProfile?.lastDsmBuild
@@ -470,17 +480,60 @@ final class AppModel {
 
     private func discoverConnection(for profile: NasProfile) async throws -> DiscoveredConnection {
         let parsedAddress = try NasAddressParser.parse(profile.host, defaultPort: profile.port)
-        let connectionProfile: NasProfile
-        if parsedAddress.kind == .quickConnect {
-            statusMessage = "正在通过 QuickConnect 查找 NAS…"
-            let endpoint = try await quickConnectResolver.resolve(id: parsedAddress.host)
-            connectionProfile = try profile.updating(host: endpoint.host, port: endpoint.port)
-        } else {
-            connectionProfile = profile
+        guard parsedAddress.kind == .quickConnect else {
+            let discovered = try await authRepository.discover(profile: profile)
+            return DiscoveredConnection(profile: profile, capabilities: discovered)
         }
 
-        let discovered = try await authRepository.discover(profile: connectionProfile)
-        return DiscoveredConnection(profile: connectionProfile, capabilities: discovered)
+        statusMessage = "正在通过 QuickConnect 查找 NAS…"
+        let endpoints: [QuickConnectEndpoint]
+        do {
+            endpoints = try await quickConnectResolver.resolve(id: parsedAddress.host)
+        } catch let error as QuickConnectResolutionError where error == .noDirectRoute {
+            // 没有直连候选时仍可继续请求中继，登录信息尚未发送。
+            endpoints = []
+        }
+        var certificateError: DsmCertificateTrustError?
+
+        for endpoint in endpoints {
+            statusMessage = endpoint.kind == .local
+                ? "正在尝试局域网连接…"
+                : "正在尝试外网直接连接…"
+            let endpointPort = profile.portOverride ?? endpoint.port
+            let connectionProfile = try profile.updating(host: endpoint.host, port: endpointPort)
+            do {
+                let discovered = try await authRepository.discover(profile: connectionProfile)
+                return DiscoveredConnection(profile: connectionProfile, capabilities: discovered)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as DsmCertificateTrustError {
+                certificateError = error
+            } catch {
+                // 当前候选不可用时继续尝试下一个候选，登录信息尚未发送。
+                continue
+            }
+        }
+
+        statusMessage = "正在建立 QuickConnect 中继连接…"
+        do {
+            let relay = try await quickConnectResolver.requestRelay(id: parsedAddress.host)
+            let relayProfile = try profile.updating(
+                host: relay.host,
+                port: relay.port,
+                clearCertificatePin: true
+            )
+            let discovered = try await authRepository.discover(profile: relayProfile)
+            return DiscoveredConnection(profile: relayProfile, capabilities: discovered)
+        } catch let error as QuickConnectResolutionError {
+            throw error
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if let certificateError {
+                throw certificateError
+            }
+            throw error
+        }
     }
 
     private func upsertProfile(_ profile: NasProfile) {

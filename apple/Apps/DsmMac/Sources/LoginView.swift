@@ -37,6 +37,7 @@ struct LoginView: View {
     @Bindable var model: AppModel
     @FocusState private var focusedField: Field?
     @State private var confirmsProfileDeletion = false
+    @State private var showsAdvancedConnectionSettings = false
 
     var body: some View {
         NavigationSplitView {
@@ -78,7 +79,7 @@ struct LoginView: View {
                         Label {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(profile.displayName)
-                                Text("\(profile.host):\(profile.port)")
+                                Text(profile.portOverride.map { "\(profile.host):\($0)" } ?? profile.host)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -135,42 +136,59 @@ struct LoginView: View {
                 }
 
                 GroupBox {
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
-                        formRow("设备名称") {
-                            TextField("例如：家里的 NAS", text: $model.displayName)
-                                .focused($focusedField, equals: .displayName)
-                        }
-                        formRow("NAS 地址") {
-                            VStack(alignment: .leading, spacing: 4) {
-                                TextField("IP、域名或 QuickConnect ID", text: $model.host)
-                                    .textContentType(.URL)
-                                    .focused($focusedField, equals: .host)
-                                Text("也可以直接粘贴浏览器地址栏中的完整地址。")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 14) {
+                        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
+                            formRow("设备名称") {
+                                TextField("例如：家里的 NAS", text: $model.displayName)
+                                    .focused($focusedField, equals: .displayName)
+                            }
+                            formRow("NAS 地址") {
+                                TextField(
+                                    "使用 QuickConnect 时会自动优先尝试直接连接；也可以粘贴完整的 HTTPS 地址。",
+                                    text: $model.host
+                                )
+                                .textContentType(.URL)
+                                .accessibilityLabel("NAS 地址")
+                                .accessibilityHint("可以输入 QuickConnect ID、IP、域名或完整的 HTTPS 地址")
+                                .focused($focusedField, equals: .host)
+                            }
+                            formRow("用户名") {
+                                TextField("NAS 登录用户名", text: $model.account)
+                                    .textContentType(.username)
+                                    .focused($focusedField, equals: .account)
+                            }
+                            formRow("密码") {
+                                SecureField("密码不会保存", text: $model.password)
+                                    .textContentType(.password)
+                                    .focused($focusedField, equals: .password)
+                            }
+                            if model.requiresOTP {
+                                formRow("验证码") {
+                                    SecureField("输入 6 位验证码", text: $model.otpCode)
+                                        .textContentType(.oneTimeCode)
+                                        .focused($focusedField, equals: .otp)
+                                }
                             }
                         }
-                        formRow("端口") {
-                            TextField("通常为 5001", text: $model.port)
-                                .frame(maxWidth: 140)
-                                .focused($focusedField, equals: .port)
-                        }
-                        formRow("用户名") {
-                            TextField("NAS 登录用户名", text: $model.account)
-                                .textContentType(.username)
-                                .focused($focusedField, equals: .account)
-                        }
-                        formRow("密码") {
-                            SecureField("密码不会保存", text: $model.password)
-                                .textContentType(.password)
-                                .focused($focusedField, equals: .password)
-                        }
-                        if model.requiresOTP {
-                            formRow("验证码") {
-                                SecureField("输入 6 位验证码", text: $model.otpCode)
-                                    .textContentType(.oneTimeCode)
-                                    .focused($focusedField, equals: .otp)
+
+                        Divider()
+
+                        DisclosureGroup(isExpanded: $showsAdvancedConnectionSettings) {
+                            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+                                formRow("自定义端口") {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        TextField("自动", text: $model.port)
+                                            .frame(maxWidth: 140)
+                                            .focused($focusedField, equals: .port)
+                                        Text("留空时由岚仓自动选择；填写后将优先使用这个端口。")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
+                            .padding(.top, 10)
+                        } label: {
+                            Label("高级连接设置", systemImage: "gearshape")
                         }
                     }
                     .textFieldStyle(.roundedBorder)

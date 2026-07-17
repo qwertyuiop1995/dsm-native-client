@@ -1218,7 +1218,6 @@ public actor DsmFileRepository: FileRepository {
                 .transport(code: error.errorCode, requestID: UUID())
             )
         }
-        print("LanStash debug: unknown transfer error: \(error), domain: \(nsError.domain), code: \(nsError.code)")
         return AppError(
             category: .unknown,
             isRetryable: false,

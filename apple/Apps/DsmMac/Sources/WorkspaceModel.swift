@@ -254,6 +254,29 @@ final class WorkspaceModel {
         isRefreshing = !items.isEmpty
         statusMessage = nil
 
+        if path == "/" {
+            if recordingHistory, !previousPath.isEmpty, previousPath != path {
+                history.append(previousPath)
+            }
+            currentPath = "/"
+            items = shares.map { share in
+                FileItem(
+                    profileID: profile.id,
+                    name: share.name,
+                    path: share.path,
+                    kind: .directory
+                )
+            }
+            hasMore = false
+            totalItemCount = shares.count
+            nextOffset = shares.count
+            selection.removeAll()
+            clearPreview()
+            isLoading = false
+            isRefreshing = false
+            return
+        }
+
         do {
             let page = try await repository.listFolder(path: path, offset: 0, limit: 500)
             guard generation == navigationGeneration else {
@@ -263,8 +286,7 @@ final class WorkspaceModel {
                 history.append(previousPath)
             }
             currentPath = path
-            let isRecycleFolder = path.split(separator: "/").contains("#recycle")
-            items = page.items.filter { isRecycleFolder || $0.name != "#recycle" }
+            items = page.items
             hasMore = page.hasMore
             totalItemCount = page.total
             nextOffset = page.offset + page.items.count

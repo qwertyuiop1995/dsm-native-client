@@ -56,6 +56,8 @@ struct WorkspaceView: View {
         .navigationSplitViewStyle(.balanced)
         .task {
             await model.load()
+            model.section = .files("/")
+            await model.navigate(to: "/", recordingHistory: false)
         }
         .onChange(of: model.section) { _, section in
             if section == .transfers || section == .settings {
@@ -233,7 +235,7 @@ struct WorkspaceView: View {
         case .settings:
             return "这台 NAS"
         default:
-            return model.currentPath.isEmpty ? model.profile.displayName : (model.currentPath.split(separator: "/").last.map(String.init) ?? model.currentPath)
+            return (model.currentPath.isEmpty || model.currentPath == "/") ? model.profile.displayName : (model.currentPath.split(separator: "/").last.map(String.init) ?? model.currentPath)
         }
     }
 
@@ -347,9 +349,14 @@ private struct SidebarView: View {
     let onAddNAS: () -> Void
     let onSelectNAS: (NasProfile) -> Void
 
+    @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
+    @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = false
+    @State private var isNasListExpanded = true
+    @State private var connectingProfileID: UUID? = nil
+
     var body: some View {
         List(selection: $model.section) {
-            Section("NAS") {
+            Section("NAS 设备", isExpanded: $isNasListExpanded) {
                 if model.isDemo {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
@@ -366,68 +373,85 @@ private struct SidebarView: View {
                 }
 
                 ForEach(profiles) { profile in
-                    Button {
-                        onSelectNAS(profile)
-                    } label: {
-                        HStack(spacing: 8) {
-                            Label {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(profile.displayName)
-                                        .font(.headline)
-                                    Text(profile.id == selectedProfileID && !model.isDemo ? "当前连接" : profile.host)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            } icon: {
-                                Image(
-                                    systemName: profile.id == selectedProfileID && !model.isDemo
-                                        ? "externaldrive.fill.badge.checkmark"
-                                        : "externaldrive"
-                                )
+                    let isCurrent = profile.id == selectedProfileID && !model.isDemo
+                    let isConnecting = connectingProfileID == profile.id
+                    
+                    HStack(spacing: 8) {
+                        Image(
+                            systemName: isCurrent
+                                ? "externaldrive.fill.badge.checkmark"
+                                : "externaldrive"
+                        )
+                        .foregroundStyle(isCurrent ? .blue : .secondary)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(profile.displayName)
+                                .font(.headline)
+                            Text(isCurrent ? "当前连接" : profile.host)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Spacer()
+                        
+                        if isConnecting {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else if isCurrent {
+                            Image(systemName: "checkmark")
                                 .foregroundStyle(.blue)
-                            }
-                            Spacer()
-                            if profile.id == selectedProfileID && !model.isDemo {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.secondary)
-                                    .accessibilityLabel("当前 NAS")
-                            }
+                                .font(.system(size: 11, weight: .bold))
+                                .accessibilityLabel("当前 NAS")
                         }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(profile.id == selectedProfileID && !model.isDemo)
+                    .contentShape(Rectangle())
+                    .padding(.vertical, 4)
+                    .onTapGesture {
+                        guard !isCurrent && connectingProfileID == nil else { return }
+                        connectingProfileID = profile.id
+                        Task {
+                            onSelectNAS(profile)
+                            try? await Task.sleep(nanoseconds: 800_000_000)
+                            connectingProfileID = nil
+                        }
+                    }
                 }
 
-                Button(action: onAddNAS) {
+                HStack {
                     Label("添加 NAS", systemImage: "plus")
+                        .foregroundStyle(.blue)
+                    Spacer()
                 }
-                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .padding(.vertical, 4)
+                .onTapGesture {
+                    onAddNAS()
+                }
             }
 
-            Section("共享文件夹") {
-                ForEach(model.shares) { share in
-                    NavigationLink(value: WorkspaceSection.files(share.path)) {
-                        Label(share.name, systemImage: "folder.fill")
-                            .symbolRenderingMode(.hierarchical)
+            if isFileModuleEnabled {
+                Section("文件管理") {
+                    NavigationLink(value: WorkspaceSection.files("/")) {
+                        Label("文件浏览器", systemImage: "folder.fill")
                             .foregroundStyle(.blue)
                     }
                 }
-                if model.shares.isEmpty, !model.isLoading {
-                    Text("没有可访问的共享")
-                        .foregroundStyle(.secondary)
-                }
             }
 
-            Section("回收站") {
-                ForEach(model.recycleRoots) { root in
-                    NavigationLink(value: WorkspaceSection.recycle(root.path)) {
-                        Label(root.name, systemImage: "trash.square.fill")
+            if isPhotosModuleEnabled {
+                Section("照片管理 (开发中)") {
+                    HStack {
+                        Label("时光轴", systemImage: "photo.on.rectangle.angled")
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Text("规划中")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.12))
+                            .cornerRadius(3)
                     }
-                }
-                if model.recycleRoots.isEmpty {
-                    Text(model.isLoading ? "正在检查…" : "没有可访问的回收站")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -462,17 +486,85 @@ private struct FileBrowserView: View {
     @State private var showsCreateFilePrompt = false
     @State private var newItemName = ""
 
+    private struct BreadcrumbItem: Identifiable {
+        let id = UUID()
+        let name: String
+        let path: String
+        let isLast: Bool
+    }
+
+    private var breadcrumbItems: [BreadcrumbItem] {
+        var items: [BreadcrumbItem] = []
+        let isRoot = model.currentPath.isEmpty || model.currentPath == "/"
+        items.append(
+            BreadcrumbItem(
+                name: "文件管理",
+                path: "/",
+                isLast: isRoot
+            )
+        )
+        if !isRoot {
+            let components = model.currentPath.split(separator: "/").map(String.init)
+            var currentAccumulatedPath = ""
+            for (index, component) in components.enumerated() {
+                currentAccumulatedPath += "/" + component
+                let isLast = index == components.count - 1
+                let displayName = component == "#recycle" ? "回收站" : component
+                items.append(
+                    BreadcrumbItem(
+                        name: displayName,
+                        path: currentAccumulatedPath,
+                        isLast: isLast
+                    )
+                )
+            }
+        }
+        return items
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Image(systemName: model.currentPath.contains("#recycle") ? "trash" : "folder")
+                HStack(spacing: 8) {
+                    Image(systemName: model.currentPath == "/" || model.currentPath.isEmpty ? "server.rack" : (model.currentPath.contains("#recycle") ? "trash" : "folder"))
                         .foregroundStyle(.secondary)
-                    Text(model.currentPath.isEmpty ? "文件" : model.currentPath)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(breadcrumbItems) { item in
+                                if item.path != "/" {
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                if item.isLast {
+                                    Text(item.name)
+                                        .font(.headline)
+                                        .fontWeight(.bold)
+                                        .foregroundStyle(.primary)
+                                } else {
+                                    Button {
+                                        Task {
+                                            await model.navigate(to: item.path)
+                                        }
+                                    } label: {
+                                        Text(item.name)
+                                            .font(.headline)
+                                            .foregroundStyle(.blue)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .onHover { inside in
+                                        if inside {
+                                            NSCursor.pointingHand.push()
+                                        } else {
+                                            NSCursor.pop()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Spacer()
                     if model.isRefreshing {
                         ProgressView()
@@ -623,6 +715,11 @@ private struct FileBrowserView: View {
 
     @ViewBuilder
     private var blankAreaContextMenu: some View {
+        Button("刷新") {
+            Task { await model.refresh() }
+        }
+        .disabled(model.isRefreshing)
+        Divider()
         Button("粘贴") {
             onPaste()
         }
@@ -641,7 +738,7 @@ private struct FileBrowserView: View {
     }
 
     private var canCreateItems: Bool {
-        !model.currentPath.isEmpty && !model.currentPath.split(separator: "/").contains("#recycle")
+        !model.currentPath.isEmpty && model.currentPath != "/" && !model.currentPath.split(separator: "/").contains("#recycle")
     }
 
     private var fileGrid: some View {
@@ -723,6 +820,7 @@ private struct FileBrowserView: View {
             BlankTableContextMenuArea(
                 canPaste: hasFileClipboard && canCreateItems,
                 canCreateItems: canCreateItems,
+                isRefreshing: model.isRefreshing,
                 onPaste: onPaste,
                 onCreateFolder: {
                     newItemName = "未命名文件夹"
@@ -731,8 +829,12 @@ private struct FileBrowserView: View {
                 onCreateFile: {
                     newItemName = "未命名.txt"
                     showsCreateFilePrompt = true
+                },
+                onRefresh: {
+                    Task { await model.refresh() }
                 }
             )
+            .id("BlankTableContext-\(hasFileClipboard)-\(canCreateItems)-\(model.isRefreshing)")
         }
         .contextMenu(forSelectionType: FileItem.ID.self) { selectedIds in
             if let firstId = selectedIds.first,
@@ -752,13 +854,14 @@ private struct FileBrowserView: View {
     }
 }
 
-/// 只接收表格空白区域的右键事件，文件行仍交给 SwiftUI Table 自己处理。
 private struct BlankTableContextMenuArea: NSViewRepresentable {
     let canPaste: Bool
     let canCreateItems: Bool
+    let isRefreshing: Bool
     let onPaste: () -> Void
     let onCreateFolder: () -> Void
     let onCreateFile: () -> Void
+    let onRefresh: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -773,24 +876,37 @@ private struct BlankTableContextMenuArea: NSViewRepresentable {
     func updateNSView(_ nsView: BlankTableContextNSView, context: Context) {
         context.coordinator.canPaste = canPaste
         context.coordinator.canCreateItems = canCreateItems
+        context.coordinator.isRefreshing = isRefreshing
         context.coordinator.onPaste = onPaste
         context.coordinator.onCreateFolder = onCreateFolder
         context.coordinator.onCreateFile = onCreateFile
+        context.coordinator.onRefresh = onRefresh
     }
 
     final class Coordinator: NSObject {
         var canPaste = false
         var canCreateItems = false
+        var isRefreshing = false
         var onPaste: () -> Void = {}
         var onCreateFolder: () -> Void = {}
         var onCreateFile: () -> Void = {}
+        var onRefresh: () -> Void = {}
 
         func showMenu(for event: NSEvent, in view: NSView) {
             let menu = NSMenu()
+            
+            let refreshItem = NSMenuItem(title: "刷新", action: #selector(refresh), keyEquivalent: "")
+            refreshItem.target = self
+            refreshItem.isEnabled = !isRefreshing
+            menu.addItem(refreshItem)
+            
+            menu.addItem(.separator())
+            
             let pasteItem = NSMenuItem(title: "粘贴", action: #selector(paste), keyEquivalent: "")
             pasteItem.target = self
             pasteItem.isEnabled = canPaste
             menu.addItem(pasteItem)
+            
             menu.addItem(.separator())
 
             let folderItem = NSMenuItem(title: "新建文件夹…", action: #selector(createFolder), keyEquivalent: "")
@@ -802,9 +918,11 @@ private struct BlankTableContextMenuArea: NSViewRepresentable {
             fileItem.target = self
             fileItem.isEnabled = canCreateItems
             menu.addItem(fileItem)
+            
             NSMenu.popUpContextMenu(menu, with: event, for: view)
         }
 
+        @objc private func refresh() { onRefresh() }
         @objc private func paste() { onPaste() }
         @objc private func createFolder() { onCreateFolder() }
         @objc private func createFile() { onCreateFile() }
@@ -859,6 +977,7 @@ struct FileIcon: View {
     }
 
     private var symbol: String {
+        if item.name == "#recycle" { return "trash.square.fill" }
         if item.isDirectory { return "folder.fill" }
         switch PreviewKind.classify(item) {
         case .image: return "photo.fill"
@@ -875,6 +994,7 @@ struct FileIcon: View {
     }
 
     private var color: Color {
+        if item.name == "#recycle" { return .orange }
         if item.isDirectory { return .blue }
         switch PreviewKind.classify(item) {
         case .image: return .purple
@@ -1462,6 +1582,9 @@ private struct SettingsView: View {
     @State private var renamedNAS = ""
     @State private var renameError: String?
     @AppStorage("LanStash_DownloadChunkSize") private var chunkSizeSetting = 8
+    @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
+    @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = false
+    @AppStorage("LanStash_UseKeychainSecureStorage") private var useKeychainSetting = true
 
     var body: some View {
         ScrollView {
@@ -1525,6 +1648,19 @@ private struct SettingsView: View {
                     } else {
                         SettingsRow(label: "验证方式", value: model.isDemo ? "示例不连接网络" : "由 macOS 系统自动验证")
                     }
+                    
+                    Divider().opacity(0.3)
+                    
+                    Toggle(isOn: $useKeychainSetting) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("系统安全钥匙串 (Keychain)")
+                                .font(.body.weight(.medium))
+                            Text("默认使用 Keychain 保护账号密码。在频繁开发测试或重新签名更新时，如果受系统输入密码弹窗的频繁打扰，建议关掉此选项，将自动转为无感知的本地沙盒 AES-GCM 安全加密存储。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
                 }
 
                 // 3. 文件恢复
@@ -1552,7 +1688,49 @@ private struct SettingsView: View {
                     }
                 }
 
-                // 4. 传输设置
+                // 4. 功能模块管理
+                SettingsSectionCard(
+                    title: "功能模块管理",
+                    icon: "square.grid.3x3.fill",
+                    iconColor: .blue
+                ) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Toggle(isOn: $isFileModuleEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("文件管理 (File Station)")
+                                    .font(.body.weight(.medium))
+                                Text("在侧边栏显示共享文件夹、回收站入口，支持文件浏览、下载和管理。")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+                        
+                        Divider().opacity(0.3)
+                        
+                        Toggle(isOn: $isPhotosModuleEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text("照片管理 (Synology Photos)")
+                                        .font(.body.weight(.medium))
+                                    Text("规划中")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Color.orange)
+                                        .cornerRadius(4)
+                                }
+                                Text("开启照片同步、智能相册浏览和时光轴管理功能。")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+                    }
+                }
+
+                // 5. 传输设置
                 SettingsSectionCard(
                     title: "传输设置",
                     icon: "arrow.up.and.down.and.sparkles",
@@ -1699,6 +1877,7 @@ struct FileLargeIcon: View {
     }
     
     private var symbol: String {
+        if item.name == "#recycle" { return "trash.square.fill" }
         if item.isDirectory { return "folder.fill" }
         switch PreviewKind.classify(item) {
         case .image: return "photo.fill"
@@ -1715,6 +1894,7 @@ struct FileLargeIcon: View {
     }
     
     private var color: Color {
+        if item.name == "#recycle" { return .orange }
         if item.isDirectory { return .blue }
         switch PreviewKind.classify(item) {
         case .image: return .teal

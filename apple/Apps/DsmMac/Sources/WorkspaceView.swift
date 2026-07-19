@@ -128,11 +128,11 @@ struct WorkspaceView: View {
                 .keyboardShortcut("[", modifiers: .command)
 
                 Button {
-                    Task { await model.goUp() }
+                    navigateUp()
                 } label: {
                     Label("上一级", systemImage: "arrow.up")
                 }
-                .disabled(!model.canGoUp)
+                .disabled(!canNavigateUp)
                 .help("前往上一级目录")
             }
 
@@ -231,6 +231,69 @@ struct WorkspaceView: View {
                         .help("选择图标视图中的文件分组方式")
                     }
 
+                } else if model.section == .photos {
+                    Button {
+                        presentPhotoUploadPanel()
+                    } label: {
+                        Label("上传", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(model.photoLibrary.currentPath.isEmpty)
+                    .help("上传照片或视频到当前文件夹")
+
+                    Button {
+                        presentBatchDownloadPanel(model.photoLibrary.selectedItems.map(\.fileItem))
+                    } label: {
+                        Label("下载", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(model.photoLibrary.selectedItems.isEmpty)
+                    .help("将所选照片或视频保存为压缩包")
+
+                    Button {
+                        shareTargets = model.photoLibrary.selectedItems.map(\.fileItem)
+                    } label: {
+                        Label("分享", systemImage: "link")
+                    }
+                    .disabled(model.photoLibrary.selectedItems.isEmpty)
+                    .help("创建可发送给他人的下载链接")
+
+                    Button {
+                        showingInfoItem = model.photoLibrary.selectedItems.first?.fileItem
+                    } label: {
+                        Label("信息", systemImage: "info.circle")
+                    }
+                    .disabled(model.photoLibrary.selectedItems.count != 1)
+                    .help("查看拍摄时间、大小和所在位置")
+
+                    Button {
+                        deleteTargets = model.photoLibrary.selectedItems.map(\.fileItem)
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                    }
+                    .disabled(model.photoLibrary.selectedItems.isEmpty)
+                    .help("打开删除确认，不会直接删除")
+
+                    Button {
+                        model.section = .transfers
+                    } label: {
+                        Label("传输", systemImage: "arrow.up.arrow.down.circle")
+                    }
+                    .badge(model.activeTransferCount)
+
+                    Menu {
+                        Button {
+                            Task { await model.photoLibrary.refreshAll() }
+                        } label: {
+                            Label("重新扫描全部照片", systemImage: "arrow.clockwise")
+                        }
+                    } label: {
+                        Label("更多照片操作", systemImage: "ellipsis.circle")
+                    }
+                    .disabled(
+                        model.photoLibrary.isLoading
+                            || model.photoLibrary.isLoadingTimeline
+                            || model.photoLibrary.isRetryingTimelineFolders
+                    )
+                    .help("更多照片操作")
                 } else if model.section == .transfers {
                     Button("清除已完成") {
                         clearCompleted()
@@ -314,6 +377,8 @@ struct WorkspaceView: View {
             return "远程位置"
         case .sharedLinks:
             return "分享管理"
+        case .photos:
+            return "照片"
         case .transfers:
             return "传输中心"
         case .settings:
@@ -357,6 +422,18 @@ struct WorkspaceView: View {
             RemoteLocationsView(model: model, onOpen: { item in openLocation(item.path) })
         case .sharedLinks:
             ShareLinksView(model: model)
+        case .photos:
+            PhotoLibraryView(
+                model: model.photoLibrary,
+                onPreview: { item in
+                    let previewItems = model.photoLibrary.displayedItems
+                        .filter { !$0.isFolder }
+                        .map(\.fileItem)
+                    model.preparePhotoPreview(items: previewItems, selected: item.fileItem)
+                },
+                onDownload: presentPhotoDownload,
+                onDelete: { deleteTargets = $0.map(\.fileItem) }
+            )
         case .transfers:
             TransferCenterView(model: model, connectedWorkspaces: connectedWorkspaces)
         case .settings:
@@ -386,14 +463,30 @@ struct WorkspaceView: View {
     }
 
     private var canNavigateBack: Bool {
-        isFileSection ? model.canGoBack : model.section != nil
+        if isFileSection { return model.canGoBack }
+        if model.section == .photos { return model.photoLibrary.canGoBack }
+        return model.section != nil
     }
 
     private func navigateBack() {
         if isFileSection {
             Task { await model.goBack() }
+        } else if model.section == .photos {
+            Task { await model.photoLibrary.goBack() }
         } else {
             restoreFileBrowser()
+        }
+    }
+
+    private var canNavigateUp: Bool {
+        model.section == .photos ? model.photoLibrary.canGoUp : model.canGoUp
+    }
+
+    private func navigateUp() {
+        if model.section == .photos {
+            Task { await model.photoLibrary.goUp() }
+        } else {
+            Task { await model.goUp() }
         }
     }
 
@@ -409,7 +502,7 @@ struct WorkspaceView: View {
     }
 
     private var shouldShowFloatingPreview: Bool {
-        guard isFileSection,
+        guard (isFileSection || model.section == .photos),
               model.isPreviewPresented,
               let item = model.selectedItem,
               !item.isDirectory else {
@@ -460,7 +553,16 @@ struct WorkspaceView: View {
         if deleteTargets.contains(where: \.isRecyclePath) {
             return "项目位于 #recycle 中，再次删除通常不可恢复。NAS：\(model.profile.displayName)。"
         }
-        return "NAS：\(model.profile.displayName)\n目录：\(model.currentPath)\n删除后能否恢复取决于共享文件夹的回收站设置，文件可能被永久删除。"
+        let locationDescription: String
+        if model.section == .photos {
+            let parentPaths = Set(deleteTargets.map { ($0.path as NSString).deletingLastPathComponent })
+            locationDescription = parentPaths.count == 1
+                ? "所在文件夹：\(parentPaths.first ?? model.photoLibrary.currentPath)"
+                : "所在位置：多个照片文件夹"
+        } else {
+            locationDescription = "目录：\(model.currentPath)"
+        }
+        return "NAS：\(model.profile.displayName)\n\(locationDescription)\n删除后能否恢复取决于共享文件夹的回收站设置，文件可能被永久删除。"
     }
 
     private func presentUploadPanel() {
@@ -472,6 +574,23 @@ struct WorkspaceView: View {
         panel.allowsMultipleSelection = true
         if panel.runModal() == .OK {
             model.enqueueUploads(panel.urls, overwrite: false)
+        }
+    }
+
+    private func presentPhotoUploadPanel() {
+        let panel = NSOpenPanel()
+        panel.title = "选择要添加的照片或视频"
+        panel.message = "所选项目会上传到当前照片文件夹。"
+        panel.prompt = "上传"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        if panel.runModal() == .OK {
+            model.enqueueUploads(
+                panel.urls,
+                to: model.photoLibrary.currentPath,
+                overwrite: false
+            )
         }
     }
 
@@ -507,6 +626,16 @@ struct WorkspaceView: View {
         panel.canCreateDirectories = true
         if panel.runModal() == .OK, let url = panel.url {
             model.enqueueBatchDownload(items, to: url)
+        }
+    }
+
+    private func presentPhotoDownload(_ items: [PhotoLibraryItem]) {
+        let files = items.map(\.fileItem)
+        guard let first = files.first else { return }
+        if files.count == 1 {
+            presentDownloadPanel(first)
+        } else {
+            presentBatchDownloadPanel(files)
         }
     }
 
@@ -648,7 +777,7 @@ private struct SidebarView: View {
     let onLogout: () async -> Void
 
     @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
-    @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = false
+    @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = true
     @State private var isNasListExpanded = true
     @State private var connectingProfileID: UUID? = nil
     @State private var confirmsLogout = false
@@ -735,18 +864,10 @@ private struct SidebarView: View {
             }
 
             if isPhotosModuleEnabled {
-                Section("照片管理 (开发中)") {
-                    HStack {
-                        Label("时光轴", systemImage: "photo.on.rectangle.angled")
+                Section("照片管理") {
+                    NavigationLink(value: WorkspaceSection.photos) {
+                        Label("照片", systemImage: "photo.on.rectangle.angled")
                             .foregroundStyle(.orange)
-                        Spacer()
-                        Text("规划中")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.secondary.opacity(0.12))
-                            .cornerRadius(3)
                     }
                 }
             }
@@ -3358,7 +3479,7 @@ private struct SettingsView: View {
     @State private var renameError: String?
     @AppStorage("LanStash_DownloadChunkSize") private var chunkSizeSetting = 8
     @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
-    @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = false
+    @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = true
     @State private var storage = AppStorageSnapshot(previewCache: 0, systemCache: 0, protectedData: 0)
     @State private var confirmsCacheCleanup = false
     @State private var storageMessage: String?
@@ -3423,15 +3544,8 @@ private struct SettingsView: View {
                                 HStack(spacing: 6) {
                                     Text("照片管理")
                                         .font(.body.weight(.medium))
-                                    Text("规划中")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 1)
-                                        .background(Color.orange)
-                                        .cornerRadius(4)
                                 }
-                                Text("开启照片同步、智能相册浏览和时光轴管理功能。")
+                                Text("在侧边栏显示个人和共享照片空间，支持按文件夹浏览照片与视频。")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

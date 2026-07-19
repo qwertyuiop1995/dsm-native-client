@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/photo-item.schema.json",
+  "title": "PhotoItem",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "path", "kind"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^/"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["folder", "image", "video"]
+    },
+    "sizeBytes": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "createdAt": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "modifiedAt": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "extension": {
+      "type": ["string", "null"]
+    },
+    "thumbnailAvailable": {
+      "type": ["boolean", "null"]
+    }
+  }
+}

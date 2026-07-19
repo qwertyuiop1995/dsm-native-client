@@ -8,6 +8,29 @@ private struct FileListPayload: Decodable, Sendable {
     let files: [FilePayload]?
     let shares: [FilePayload]?
     let folders: [FilePayload]?
+
+    private enum CodingKeys: String, CodingKey {
+        case offset, total, files, shares, folders
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        offset = Self.decodeInteger(from: container, key: .offset)
+        total = Self.decodeInteger(from: container, key: .total)
+        files = try container.decodeIfPresent([FilePayload].self, forKey: .files)
+        shares = try container.decodeIfPresent([FilePayload].self, forKey: .shares)
+        folders = try container.decodeIfPresent([FilePayload].self, forKey: .folders)
+    }
+
+    private static func decodeInteger(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys
+    ) -> Int? {
+        if let value = try? container.decode(Int.self, forKey: key) { return value }
+        if let value = try? container.decode(String.self, forKey: key) { return Int(value) }
+        return nil
+    }
+
 }
 
 private struct FileInfoPayload: Decodable, Sendable {
@@ -40,7 +63,7 @@ private struct FilePayload: Decodable, Sendable {
         } else {
             isDirectory = false
         }
-        additional = try container.decodeIfPresent(FileAdditionalPayload.self, forKey: .additional)
+        additional = try? container.decodeIfPresent(FileAdditionalPayload.self, forKey: .additional)
     }
 }
 
@@ -1493,8 +1516,33 @@ public actor DsmFileRepository: FileRepository {
                     as: SearchListPayload.self
                 )
                 if payload.finished == true {
+                    var files = payload.files ?? []
+                    let total = payload.total ?? files.count
+                    var offset = files.count
+                    while offset < total {
+                        try Task.checkCancellation()
+                        let nextPage = try await client.call(
+                            path: capability.path,
+                            api: capability.name,
+                            version: try selectedVersion(capability),
+                            method: "list",
+                            requestFormat: capability.requestFormat,
+                            parameters: [
+                                "taskid": .string(start.taskid),
+                                "offset": .integer(offset),
+                                "limit": .integer(2_000),
+                                "additional": .stringArray(Self.additionalFields)
+                            ],
+                            credential: credential,
+                            as: SearchListPayload.self
+                        )
+                        let pageFiles = nextPage.files ?? []
+                        guard !pageFiles.isEmpty else { break }
+                        files.append(contentsOf: pageFiles)
+                        offset += pageFiles.count
+                    }
                     try? await cleanSearch(capability: capability, taskID: start.taskid)
-                    return (payload.files ?? []).map(makeFileItem)
+                    return files.map(makeFileItem)
                 }
                 try await Task.sleep(nanoseconds: delay)
                 delay = min(delay * 2, 1_000_000_000)

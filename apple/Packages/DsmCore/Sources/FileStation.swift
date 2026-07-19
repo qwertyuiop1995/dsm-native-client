@@ -329,7 +329,7 @@ public struct MediaStreamSource: @unchecked Sendable {
     }
 }
 
-public protocol FileRepository: Sendable {
+public protocol FileRepository: PhotoFileServing, Sendable {
     var profileID: UUID { get }
     var allowsVerifiedRestore: Bool { get }
     var allowsRemoteMountManagement: Bool { get }

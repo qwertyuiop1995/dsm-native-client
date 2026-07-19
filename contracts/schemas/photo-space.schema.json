@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/photo-space.schema.json",
+  "title": "PhotoSpace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "rootPath"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "enum": ["personal", "shared"]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rootPath": {
+      "type": "string",
+      "enum": ["/home/Photos", "/photo"]
+    }
+  }
+}

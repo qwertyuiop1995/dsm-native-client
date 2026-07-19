@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/photo-page.schema.json",
+  "title": "PhotoPage",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["folderPath", "items", "offset", "nextOffset", "sourceTotal", "hasMore"],
+  "properties": {
+    "folderPath": {
+      "type": "string",
+      "pattern": "^/"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "photo-item.schema.json"
+      }
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nextOffset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "sourceTotal": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hasMore": {
+      "type": "boolean"
+    }
+  }
+}

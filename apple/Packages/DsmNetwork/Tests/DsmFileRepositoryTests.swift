@@ -31,6 +31,27 @@ final class DsmFileRepositoryTests: XCTestCase {
         XCTAssertEqual(share.mountPointType, "cifs")
     }
 
+    func test目录列表容忍字符串分页字段和异常附加信息() async throws {
+        let response = DsmHTTPResponse(
+            data: Data(
+                #"{"success":true,"data":{"offset":"0","total":"2","files":[{"name":"正常.jpg","path":"/photo/正常.jpg","isdir":false,"additional":[]},{"name":"视频.mp4","path":"/photo/视频.mp4","isdir":"0"}]}}"#.utf8
+            ),
+            statusCode: 200
+        )
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationList: capability(DsmAPIName.fileStationList, version: 2)
+            ]),
+            transport: MockHTTPTransport(responses: [response])
+        )
+
+        let page = try await repository.listFolder(path: "/photo", offset: 0, limit: 100)
+
+        XCTAssertEqual(page.items.map(\.name), ["正常.jpg", "视频.mp4"])
+        XCTAssertEqual(page.offset, 0)
+        XCTAssertEqual(page.total, 2)
+    }
+
     func test使用公开虚拟文件夹接口列出远程位置() async throws {
         let response = DsmHTTPResponse(
             data: Data(
@@ -589,6 +610,27 @@ final class DsmFileRepositoryTests: XCTestCase {
             return URLComponents(string: "?\(body)")?.queryItems?.first(where: { $0.name == "method" })?.value
         }
         XCTAssertEqual(methods, ["start", "list", "clean"])
+    }
+
+    func test递归搜索完成后继续读取剩余分页() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"taskid":"task-2"}}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"offset":0,"total":2,"finished":true,"files":[{"name":"一.jpg","path":"/photo/一.jpg","isdir":false}]}}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"offset":1,"total":2,"finished":true,"files":[{"name":"二.jpg","path":"/photo/二.jpg","isdir":false}]}}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true}"#.utf8), statusCode: 200)
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationSearch: capability(DsmAPIName.fileStationSearch, version: 2)
+            ]),
+            transport: transport
+        )
+
+        let results = try await repository.search(folderPath: "/photo", query: "*")
+
+        XCTAssertEqual(results.map(\.name), ["一.jpg", "二.jpg"])
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requestParameter("offset", in: requests[2]), "1")
     }
 
     func test收藏和分享链接可以创建列出并取消() async throws {

@@ -7,6 +7,7 @@ import Observation
 enum WorkspaceSection: Hashable, Identifiable {
     case files(String)
     case recycle(String)
+    case photos
     case favorites
     case recent
     case remoteLocations
@@ -18,6 +19,7 @@ enum WorkspaceSection: Hashable, Identifiable {
         switch self {
         case .files(let path): "files:\(path)"
         case .recycle(let path): "recycle:\(path)"
+        case .photos: "photos"
         case .favorites: "favorites"
         case .recent: "recent"
         case .remoteLocations: "remote-locations"
@@ -289,6 +291,7 @@ final class WorkspaceModel {
     private(set) var profile: NasProfile
     let allowsVerifiedRestore: Bool
     let allowsRemoteMountManagement: Bool
+    let photoLibrary: PhotoLibraryModel
 
     var shares: [FileItem] = []
     var recycleRoots: [FileItem] = []
@@ -350,6 +353,7 @@ final class WorkspaceModel {
     @ObservationIgnored private var restartableTransfers: [UUID: RestartableTransfer] = [:]
     @ObservationIgnored private var progressEstimators: [UUID: TransferProgressEstimator] = [:]
     @ObservationIgnored private var dragMoveUndoExpirationTask: Task<Void, Never>?
+    @ObservationIgnored private var previewContextItems: [FileItem]?
 
     init(
         profile: NasProfile,
@@ -361,6 +365,10 @@ final class WorkspaceModel {
         self.transferNotifier = transferNotifier
         self.allowsVerifiedRestore = repository.allowsVerifiedRestore
         self.allowsRemoteMountManagement = repository.allowsRemoteMountManagement
+        self.photoLibrary = PhotoLibraryModel(
+            repository: FileStationPhotoRepository(files: repository),
+            thumbnailFallback: LocalPhotoThumbnailFallback(files: repository)
+        )
         if let data = UserDefaults.standard.data(forKey: "LanStash_RecentLocations_\(profile.id.uuidString)"),
            let saved = try? JSONDecoder().decode([FavoriteLocation].self, from: data) {
             recentLocations = saved
@@ -427,14 +435,14 @@ final class WorkspaceModel {
     }
 
     var selectedItems: [FileItem] {
-        filteredItems.filter { selection.contains($0.id) }
+        (previewContextItems ?? filteredItems).filter { selection.contains($0.id) }
     }
 
     var selectedItem: FileItem? {
         guard selection.count == 1, let id = selection.first else {
             return nil
         }
-        return filteredItems.first { $0.id == id }
+        return (previewContextItems ?? filteredItems).first { $0.id == id }
     }
 
     var canEditSelectedText: Bool {
@@ -514,12 +522,15 @@ final class WorkspaceModel {
                 history.removeAll()
                 await navigate(to: path, recordingHistory: false)
             }
+        case .photos:
+            await photoLibrary.loadIfNeeded()
         case .favorites, .recent, .remoteLocations, .sharedLinks, .transfers, .settings:
             break
         }
     }
 
     func navigate(to path: String, recordingHistory: Bool = true) async {
+        previewContextItems = nil
         let previousPath = currentPath
         navigationGeneration += 1
         let generation = navigationGeneration
@@ -881,6 +892,7 @@ final class WorkspaceModel {
 
     func dismissPreview() {
         clearPreview()
+        previewContextItems = nil
     }
 
     func thumbnailData(for item: FileItem) async -> Data? {
@@ -958,9 +970,10 @@ final class WorkspaceModel {
     }
 
     private var previewImages: [FileItem] {
-        let itemsByID = Dictionary(uniqueKeysWithValues: filteredItems.map { ($0.id, $0) })
+        let baseItems = previewContextItems ?? filteredItems
+        let itemsByID = Dictionary(uniqueKeysWithValues: baseItems.map { ($0.id, $0) })
         let orderedItems = displayedItemOrder.compactMap { itemsByID[$0] }
-        let source = orderedItems.isEmpty ? filteredItems : orderedItems
+        let source = orderedItems.isEmpty ? baseItems : orderedItems
         return source.filter { PreviewKind.classify($0) == .image }
     }
 
@@ -1095,6 +1108,13 @@ final class WorkspaceModel {
                 }
             }
         }
+    }
+
+    func preparePhotoPreview(items: [FileItem], selected item: FileItem) {
+        previewContextItems = items
+        displayedItemOrder = items.map(\.id)
+        selection = [item.id]
+        preparePreview()
     }
 
     func enqueueDownload(
@@ -1325,25 +1345,29 @@ final class WorkspaceModel {
     }
 
     func enqueueUploads(_ urls: [URL], overwrite: Bool = false) {
-        guard !currentPath.isEmpty else {
+        enqueueUploads(urls, to: currentPath, overwrite: overwrite)
+    }
+
+    func enqueueUploads(_ urls: [URL], to folderPath: String, overwrite: Bool = false) {
+        guard !folderPath.isEmpty else {
             return
         }
         for url in urls {
             let taskID = addTransfer(
                 kind: .upload,
                 displayName: url.lastPathComponent,
-                remotePath: currentPath
+                remotePath: folderPath
             )
             restartableTransfers[taskID] = .upload(
                 localURL: url,
-                folderPath: currentPath,
+                folderPath: folderPath,
                 overwrite: overwrite
             )
             saveTransfers()
             startUpload(
                 taskID: taskID,
                 localURL: url,
-                folderPath: currentPath,
+                folderPath: folderPath,
                 overwrite: overwrite
             )
         }
@@ -2042,7 +2066,11 @@ final class WorkspaceModel {
                         progress: progressHandler(for: taskID)
                     )
                     finishTransfer(taskID)
-                    await refresh()
+                    if photoLibrary.currentPath == folderPath {
+                        await photoLibrary.refreshAll()
+                    } else {
+                        await refresh()
+                    }
                     statusIsError = false
                     statusMessage = "“\(url.lastPathComponent)”上传完成。"
                 } catch is CancellationError {
@@ -2070,13 +2098,21 @@ final class WorkspaceModel {
             totalUnits: Int64(targets.count)
         )
         let paths = targets.map(\.path)
+        let deletingFromPhotos = section == .photos
         let operation = Task { [weak self] in
             guard let self else { return }
             do {
                 setTransferState(taskID, .running)
                 try await repository.delete(paths: paths, progress: progressHandler(for: taskID))
-                await refresh()
-                let remaining = Set(items.map(\.path))
+                let remaining: Set<String>
+                if deletingFromPhotos {
+                    try await verifyDeletedPhotoPaths(paths)
+                    photoLibrary.removeDeletedItems(at: paths)
+                    remaining = Set(photoLibrary.displayedItems.map(\.path))
+                } else {
+                    await refresh()
+                    remaining = Set(items.map(\.path))
+                }
                 guard paths.allSatisfy({ !remaining.contains($0) }) else {
                     throw AppError(
                         category: .partialFailure,
@@ -2099,6 +2135,25 @@ final class WorkspaceModel {
             runningTasks[taskID] = nil
         }
         runningTasks[taskID] = operation
+    }
+
+    /// 逐项复查删除结果，避免批量查询遇到单个不存在项目时掩盖部分失败。
+    private func verifyDeletedPhotoPaths(_ paths: [String]) async throws {
+        for path in paths {
+            do {
+                let existingItems = try await repository.getInfo(paths: [path])
+                guard existingItems.allSatisfy({ $0.path != path }) else {
+                    throw AppError(
+                        category: .partialFailure,
+                        isRetryable: false,
+                        safeUserMessage: "删除任务结束，但部分项目仍然存在。"
+                    )
+                }
+            } catch let error as AppError where error.category == .notFound {
+                // 找不到目标正是删除成功后的预期结果。
+                continue
+            }
+        }
     }
 
     func restoreToOriginalLocation(_ item: FileItem) {

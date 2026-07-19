@@ -13,16 +13,20 @@
 		3FCADE45FE1B6CE377E360BA /* DsmMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */; };
 		4440F05E83E5ED0F48DAC304 /* DsmNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = 6A578FB6D5B34A59438162B6 /* DsmNetwork */; };
 		46CE97C3D80547D7061224F2 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE9DB7D94AFC947DE39DF8D1 /* LoginView.swift */; };
+		4991FA2CB347811AEB834677 /* PhotoLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F424D8AB691E25447A263E5 /* PhotoLibraryModel.swift */; };
 		A8947CF70F1CC5F62D83C33C /* DsmCore in Frameworks */ = {isa = PBXBuildFile; productRef = CDFB3D25D6035AB51E143261 /* DsmCore */; };
 		AC6936BB386C9A829A221F34 /* WorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6DF22565675FC82D7CC686 /* WorkspaceModel.swift */; };
 		C3AFE337248691D6883C0CE7 /* FilePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 852694B5E54505BB153EF98A /* FilePreviewView.swift */; };
+		E53088EB1BE1BCBA9B672B12 /* PhotoLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27CC848C4E842FE9081B6B85 /* PhotoLibraryView.swift */; };
 		F06931669E2EB893B31BBBE0 /* LoginViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D54FCCE59BEF04898E541CE /* LoginViewModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		1DE7697E655CBAC946BEBF3F /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		1F424D8AB691E25447A263E5 /* PhotoLibraryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryModel.swift; sourceTree = "<group>"; };
 		1F6DF22565675FC82D7CC686 /* WorkspaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceModel.swift; sourceTree = "<group>"; };
 		226606003B75B91F9FA03683 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		27CC848C4E842FE9081B6B85 /* PhotoLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryView.swift; sourceTree = "<group>"; };
 		3D43383FD609AFA6A0605CEA /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
 		46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DsmMacApp.swift; sourceTree = "<group>"; };
 		4D54FCCE59BEF04898E541CE /* LoginViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModel.swift; sourceTree = "<group>"; };
@@ -79,6 +83,8 @@
 				852694B5E54505BB153EF98A /* FilePreviewView.swift */,
 				DE9DB7D94AFC947DE39DF8D1 /* LoginView.swift */,
 				4D54FCCE59BEF04898E541CE /* LoginViewModel.swift */,
+				1F424D8AB691E25447A263E5 /* PhotoLibraryModel.swift */,
+				27CC848C4E842FE9081B6B85 /* PhotoLibraryView.swift */,
 				1F6DF22565675FC82D7CC686 /* WorkspaceModel.swift */,
 				3D43383FD609AFA6A0605CEA /* WorkspaceView.swift */,
 			);
@@ -177,6 +183,8 @@
 				C3AFE337248691D6883C0CE7 /* FilePreviewView.swift in Sources */,
 				46CE97C3D80547D7061224F2 /* LoginView.swift in Sources */,
 				F06931669E2EB893B31BBBE0 /* LoginViewModel.swift in Sources */,
+				4991FA2CB347811AEB834677 /* PhotoLibraryModel.swift in Sources */,
+				E53088EB1BE1BCBA9B672B12 /* PhotoLibraryView.swift in Sources */,
 				AC6936BB386C9A829A221F34 /* WorkspaceModel.swift in Sources */,
 				15984B33D2FC6DC271096E4A /* WorkspaceView.swift in Sources */,
 			);

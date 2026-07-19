@@ -43,4 +43,4 @@
 - 内部：`SYNO.Core.*` 等未公开接口。
 - 内部能力默认关闭，必须按 DSM build 和套件版本验证。
 
-详细规格参见 [第一阶段开发文档](../development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)。
+当前工作范围和验收顺序参见[当前开发与验收计划](../development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)；早期完整规格保存在[第一阶段开发文档归档](../archive/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_V1_ARCHIVE_ZH.md)。

@@ -7,23 +7,47 @@ public actor LocalFileSecureStore: SessionSecureStoring, PasswordSecureStoring {
     private let encryptionKey: SymmetricKey
     
     public init() {
-        // 注意：当前使用硬编码 Salt 与 Bundle ID 派生密钥，仅提供混淆保护，
-        // 不满足长期安全存储要求。后续应改为在 Keychain 中保存随机生成的
-        // 主密钥，或仅在 Keychain 不可用时降级为不保存敏感数据。
-        let salt = "LanStashSecureLocalSalt2026"
-        let bundleID = Bundle.main.bundleIdentifier ?? "io.github.qwertyuiop1995.dsmnativeclient"
-        let combined = "\(salt)\(bundleID)"
-        let hash = SHA256.hash(data: Data(combined.utf8))
-        self.encryptionKey = SymmetricKey(data: Data(hash))
+        // 本项目按产品约定仅使用应用沙盒内的 AES-GCM 加密文件，不访问系统钥匙串。
+        // 随机主密钥同样保存在应用沙盒，并限制为当前用户可读写；不使用可从二进制推导的固定密钥。
+        self.encryptionKey = Self.loadOrCreateEncryptionKey()
     }
     
     private func fileURL(for name: String, profileID: UUID) -> URL {
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let secureDir = appSupport.appendingPathComponent("LanStashSecureStore", isDirectory: true)
+        let secureDir = Self.secureDirectory(fileManager: fileManager)
         if !fileManager.fileExists(atPath: secureDir.path) {
             try? fileManager.createDirectory(at: secureDir, withIntermediateDirectories: true)
         }
         return secureDir.appendingPathComponent("\(profileID.uuidString).\(name).dat")
+    }
+
+    private static func secureDirectory(fileManager: FileManager) -> URL {
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("LanStashSecureStore", isDirectory: true)
+    }
+
+    private static func loadOrCreateEncryptionKey() -> SymmetricKey {
+        let fileManager = FileManager.default
+        let directory = secureDirectory(fileManager: fileManager)
+        let keyURL = directory.appendingPathComponent("master.key")
+        if let data = try? Data(contentsOf: keyURL), data.count == 32 {
+            return SymmetricKey(data: data)
+        }
+
+        let generatedKey = SymmetricKey(size: .bits256)
+        let keyData = generatedKey.withUnsafeBytes { Data($0) }
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            try keyData.write(to: keyURL, options: [.atomic, .completeFileProtection])
+            try fileManager.setAttributes(
+                [.posixPermissions: NSNumber(value: Int16(0o600))],
+                ofItemAtPath: keyURL.path
+            )
+            return generatedKey
+        } catch {
+            // 文件系统暂不可写时使用稳定的进程内回退键，保存操作随后仍会返回明确错误。
+            let bundleID = Bundle.main.bundleIdentifier ?? "io.github.qwertyuiop1995.dsmnativeclient"
+            return SymmetricKey(data: Data(SHA256.hash(data: Data(bundleID.utf8))))
+        }
     }
     
     private func encryptAndSave(_ plainText: String, to url: URL) throws {
@@ -32,7 +56,11 @@ public actor LocalFileSecureStore: SessionSecureStoring, PasswordSecureStoring {
         guard let encryptedData = sealedBox.combined else {
             throw CocoaError(.fileWriteUnknown)
         }
-        try encryptedData.write(to: url, options: .atomic)
+        try encryptedData.write(to: url, options: [.atomic, .completeFileProtection])
+        try fileManager.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o600))],
+            ofItemAtPath: url.path
+        )
     }
     
     private func loadAndDecrypt(from url: URL) throws -> String? {

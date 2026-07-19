@@ -8,7 +8,7 @@ final class DsmFileRepositoryTests: XCTestCase {
     func test解析共享文件夹与附加信息() async throws {
         let response = DsmHTTPResponse(
             data: Data(
-                #"{"success":true,"data":{"offset":0,"total":1,"shares":[{"name":"projects","path":"/projects","isdir":true,"additional":{"size":4096,"type":"dir","owner":{"user":"tester","group":"users"},"time":{"mtime":1700000000,"crtime":1690000000,"atime":1700000100},"perm":{"posix":493,"adv_right":{"read":true,"write":true,"delete":true}}}}]}}"#.utf8
+                #"{"success":true,"data":{"offset":0,"total":1,"shares":[{"name":"projects","path":"/projects","isdir":true,"additional":{"size":4096,"type":"dir","mount_point_type":"cifs","owner":{"user":"tester","group":"users"},"time":{"mtime":1700000000,"crtime":1690000000,"atime":1700000100},"perm":{"posix":493,"adv_right":{"read":true,"write":true,"delete":true}}}}]}}"#.utf8
             ),
             statusCode: 200
         )
@@ -28,6 +28,7 @@ final class DsmFileRepositoryTests: XCTestCase {
         XCTAssertTrue(share.isDirectory)
         XCTAssertEqual(share.owner, "tester")
         XCTAssertEqual(share.permissions?.canWrite, true)
+        XCTAssertEqual(share.mountPointType, "cifs")
     }
 
     func test二进制下载写入目标且凭据在URL中() async throws {
@@ -191,6 +192,36 @@ final class DsmFileRepositoryTests: XCTestCase {
         XCTAssertEqual(source.expectedContentLength, 2_500_000_000)
     }
 
+    func test读取文件头使用Range且凭据不进入URL() async throws {
+        let payload = Data(repeating: 0x47, count: 4_096)
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(
+                data: payload,
+                statusCode: 206,
+                headers: ["content-type": "application/octet-stream"]
+            )
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDownload: capability(DsmAPIName.fileStationDownload, version: 2)
+            ]),
+            transport: transport
+        )
+
+        let prefix = try await repository.readPrefix(
+            remotePath: "/projects/ambiguous.ts",
+            maximumLength: 4_096
+        )
+
+        XCTAssertEqual(prefix, payload)
+        let requests = await transport.recordedRequests()
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Range"), "bytes=0-4095")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "id=REDACTED_SESSION")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-SYNO-TOKEN"), "REDACTED_SESSION")
+        XCTAssertFalse(request.url?.absoluteString.contains("REDACTED_SESSION") == true)
+    }
+
     func test二进制上传包含CSRF头() async throws {
         let response1 = DsmHTTPResponse(
             data: Data(#"{"success":true}"#.utf8),
@@ -225,10 +256,14 @@ final class DsmFileRepositoryTests: XCTestCase {
         let checkPermRequest = requests[0]
         XCTAssertEqual(checkPermRequest.value(forHTTPHeaderField: "X-SYNO-TOKEN"), "REDACTED_SESSION")
         XCTAssertEqual(checkPermRequest.value(forHTTPHeaderField: "Cookie"), "id=REDACTED_SESSION")
+        let checkPermBody = try XCTUnwrap(checkPermRequest.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        XCTAssertTrue(checkPermBody.contains("create_only=true"))
+        XCTAssertTrue(checkPermBody.contains("LanStash-Write-Check-"))
 
         let uploadRequest = requests[1]
         XCTAssertEqual(uploadRequest.value(forHTTPHeaderField: "X-SYNO-TOKEN"), "REDACTED_SESSION")
         XCTAssertEqual(uploadRequest.value(forHTTPHeaderField: "Cookie"), "id=REDACTED_SESSION")
+        XCTAssertNotNil(uploadRequest.value(forHTTPHeaderField: "Content-Length"))
 
         let uploadURLComponents = URLComponents(url: try XCTUnwrap(uploadRequest.url), resolvingAgainstBaseURL: false)
         let uploadQuery = Dictionary(uniqueKeysWithValues: (uploadURLComponents?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
@@ -339,6 +374,229 @@ final class DsmFileRepositoryTests: XCTestCase {
         }
     }
 
+    func test批量下载把所有路径交给NAS生成压缩包() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: Data("PK".utf8), statusCode: 200, headers: ["content-type": "application/zip"])
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDownload: capability(DsmAPIName.fileStationDownload, version: 2)
+            ]),
+            transport: transport
+        )
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Batch-\(UUID().uuidString).zip")
+        defer { try? FileManager.default.removeItem(at: destination) }
+
+        try await repository.downloadArchive(
+            remotePaths: ["/home/a.txt", "/home/folder"],
+            to: destination
+        ) { _, _ in }
+
+        let recordedRequests = await transport.recordedRequests()
+        let request = try XCTUnwrap(recordedRequests.first)
+        let components = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+        let pathValue = try XCTUnwrap(components?.queryItems?.first(where: { $0.name == "path" })?.value)
+        XCTAssertEqual(
+            try JSONDecoder().decode([String].self, from: Data(pathValue.utf8)),
+            ["/home/a.txt", "/home/folder"]
+        )
+    }
+
+    func test重命名使用公开接口并把名称放在请求正文() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: Data(#"{"success":true}"#.utf8), statusCode: 200)
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationRename: capability(DsmAPIName.fileStationRename, version: 2)
+            ]),
+            transport: transport
+        )
+
+        try await repository.rename(path: "/home/旧名称.txt", newName: "新名称.txt")
+
+        let requests = await transport.recordedRequests()
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        let body = try XCTUnwrap(request.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        let queryItems = URLComponents(string: "?\(body)")?.queryItems
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "api" })?.value, DsmAPIName.fileStationRename)
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "method" })?.value, "rename")
+        let pathValue = try XCTUnwrap(queryItems?.first(where: { $0.name == "path" })?.value)
+        let nameValue = try XCTUnwrap(queryItems?.first(where: { $0.name == "name" })?.value)
+        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(pathValue.utf8)), ["/home/旧名称.txt"])
+        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(nameValue.utf8)), ["新名称.txt"])
+    }
+
+    func test压缩使用NAS任务并把选项放在请求正文() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"taskid":"compress-1"}}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"finished":true}}"#.utf8), statusCode: 200)
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationCompress: capability(DsmAPIName.fileStationCompress, version: 3)
+            ]),
+            transport: transport
+        )
+
+        try await repository.compress(
+            paths: ["/home/图片", "/home/说明.txt"],
+            destinationFilePath: "/home/资料.7z",
+            format: .sevenZip,
+            level: .best,
+            password: "REDACTED_ARCHIVE_PASSWORD"
+        ) { _, _ in }
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertFalse(request.url?.absoluteString.contains("REDACTED_ARCHIVE_PASSWORD") == true)
+        let body = try XCTUnwrap(request.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        let queryItems = URLComponents(string: "?\(body)")?.queryItems
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "api" })?.value, DsmAPIName.fileStationCompress)
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "method" })?.value, "start")
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "dest_file_path" })?.value, "/home/资料.7z")
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "format" })?.value, "7z")
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "level" })?.value, "best")
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "password" })?.value, "REDACTED_ARCHIVE_PASSWORD")
+        let pathValue = try XCTUnwrap(queryItems?.first(where: { $0.name == "path" })?.value)
+        XCTAssertEqual(
+            try JSONDecoder().decode([String].self, from: Data(pathValue.utf8)),
+            ["/home/图片", "/home/说明.txt"]
+        )
+    }
+
+    func test解压缩使用NAS任务并兼容小数进度() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"taskid":"extract-1"}}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"finished":true,"progress":0.75}}"#.utf8), statusCode: 200)
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationExtract: capability(DsmAPIName.fileStationExtract, version: 2)
+            ]),
+            transport: transport
+        )
+        let progressRecorder = TestProgressRecorder()
+
+        try await repository.extract(
+            filePath: "/home/资料.zip",
+            destinationFolder: "/home",
+            overwrite: false,
+            keepDirectoryStructure: true,
+            createSubfolder: true,
+            codepage: "chs",
+            password: nil
+        ) { value, _ in
+            progressRecorder.record(value)
+        }
+
+        XCTAssertEqual(progressRecorder.value, 75)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+        let request = try XCTUnwrap(requests.first)
+        let body = try XCTUnwrap(request.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        let queryItems = URLComponents(string: "?\(body)")?.queryItems
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "api" })?.value, DsmAPIName.fileStationExtract)
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "file_path" })?.value, "/home/资料.zip")
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "dest_folder_path" })?.value, "/home")
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "overwrite" })?.value, "false")
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "keep_dir" })?.value, "true")
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "create_subfolder" })?.value, "true")
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "codepage" })?.value, "chs")
+    }
+
+    func test读取压缩包内容用于密码与文件名检测() async throws {
+        let response = DsmHTTPResponse(
+            data: Data(#"{"success":true,"data":{"items":[{"itemid":7,"name":"存档","path":"/存档","size":0,"pack_size":0,"mtime":"0","is_dir":true}]}}"#.utf8),
+            statusCode: 200
+        )
+        let transport = MockHTTPTransport(responses: [response])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationExtract: capability(DsmAPIName.fileStationExtract, version: 2)
+            ]),
+            transport: transport
+        )
+
+        let items = try await repository.listArchiveItems(
+            filePath: "/home/存档.zip",
+            codepage: "chs",
+            password: "REDACTED_ARCHIVE_PASSWORD"
+        )
+
+        XCTAssertEqual(items, [ArchiveItem(id: 7, name: "存档", path: "/存档", isDirectory: true)])
+        let requests = await transport.recordedRequests()
+        let request = try XCTUnwrap(requests.first)
+        let body = try XCTUnwrap(request.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        let queryItems = URLComponents(string: "?\(body)")?.queryItems
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "method" })?.value, "list")
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "codepage" })?.value, "chs")
+        XCTAssertEqual(queryItems?.first(where: { $0.name == "password" })?.value, "REDACTED_ARCHIVE_PASSWORD")
+    }
+
+    func test递归搜索会清理NAS上的搜索任务() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"taskid":"task-1"}}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"offset":0,"total":1,"finished":true,"files":[{"name":"说明.txt","path":"/home/docs/说明.txt","isdir":false}]}}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true}"#.utf8), statusCode: 200)
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationSearch: capability(DsmAPIName.fileStationSearch, version: 2)
+            ]),
+            transport: transport
+        )
+
+        let results = try await repository.search(folderPath: "/home", query: "说明")
+
+        XCTAssertEqual(results.map(\.path), ["/home/docs/说明.txt"])
+        let methods = await transport.recordedRequests().compactMap { request in
+            if let value = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "method" })?.value {
+                return value
+            }
+            guard let body = request.httpBody.flatMap({ String(data: $0, encoding: .utf8) }) else { return nil }
+            return URLComponents(string: "?\(body)")?.queryItems?.first(where: { $0.name == "method" })?.value
+        }
+        XCTAssertEqual(methods, ["start", "list", "clean"])
+    }
+
+    func test收藏和分享链接可以创建列出并取消() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: Data(#"{"success":true}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"favorites":[{"name":"文档","path":"/home/docs"}]}}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"links":[{"id":"link-1","name":"说明.txt","path":"/home/说明.txt","url":"https://share.example.invalid/x","has_password":true,"date_expired":"2026-08-01"}]}}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true,"data":{"links":[{"id":"link-1","name":"说明.txt","path":"/home/说明.txt","url":"https://share.example.invalid/x","has_password":true,"date_expired":"2026-08-01"}]}}"#.utf8), statusCode: 200),
+            DsmHTTPResponse(data: Data(#"{"success":true}"#.utf8), statusCode: 200)
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationFavorite: capability(DsmAPIName.fileStationFavorite, version: 2),
+                DsmAPIName.fileStationSharing: capability(DsmAPIName.fileStationSharing, version: 3)
+            ]),
+            transport: transport
+        )
+
+        try await repository.addFavorite(path: "/home/docs", name: "文档")
+        let favorites = try await repository.listFavorites()
+        XCTAssertEqual(favorites.map(\.path), ["/home/docs"])
+        try await repository.removeFavorite(path: "/home/docs")
+        let created = try await repository.createShareLink(
+            paths: ["/home/说明.txt"],
+            password: "REDACTED_PASSWORD",
+            expiresAt: "2026-08-01"
+        )
+        XCTAssertEqual(created.id, "link-1")
+        let links = try await repository.listShareLinks()
+        XCTAssertEqual(links.map(\.id), ["link-1"])
+        try await repository.deleteShareLinks(ids: ["link-1"])
+    }
+
     private func makeRepository(
         capabilities: CapabilitySet,
         transport: MockHTTPTransport
@@ -370,5 +628,18 @@ final class DsmFileRepositoryTests: XCTestCase {
             requestFormat: .form,
             selectedVersion: version
         )
+    }
+}
+
+private final class TestProgressRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue: Int64 = 0
+
+    var value: Int64 {
+        lock.withLock { storedValue }
+    }
+
+    func record(_ value: Int64) {
+        lock.withLock { storedValue = value }
     }
 }

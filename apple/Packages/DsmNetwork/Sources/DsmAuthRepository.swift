@@ -6,7 +6,7 @@ public actor DsmAuthRepository: AuthRepository {
     private let transportFactory: @Sendable (NasProfile) -> any DsmHTTPTransport
 
     public init(
-        sessionStore: any SessionSecureStoring = KeychainSessionStore(),
+        sessionStore: any SessionSecureStoring = LocalFileSecureStore(),
         transportFactory: @escaping @Sendable (NasProfile) -> any DsmHTTPTransport = { profile in
             URLSessionTransport(
                 expectedHost: profile.host,

@@ -18,9 +18,16 @@
 | 能力 | 使用契约 | macOS 状态 | 实机要求 |
 | --- | --- | --- | --- |
 | 同 NAS 复制/移动 | `SYNO.FileStation.CopyMove` 官方 API | 已实现 | 验证文件夹、冲突、取消和权限不足 |
+| 文件与文件夹重命名 | `SYNO.FileStation.Rename` 官方 API | macOS 已实现；iOS/Android 待接入同一契约 | 验证同名冲突、无写入权限和特殊字符 |
+| NAS 端压缩与解压缩 | `SYNO.FileStation.Compress` v3、`SYNO.FileStation.Extract` v2 官方 API | macOS 已实现；共享契约包含压缩包预读、密码检测和文件名编码，iOS/Android UI 待接入 | 验证 ZIP/7z 创建、简体中文旧版 ZIP、加密包密码循环、常见压缩格式、空间不足、同名覆盖和取消任务 |
 | 跨 NAS 复制/移动 | Download + CreateFolder + Upload + 可选 Delete 官方 API | 已实现 12 MiB 有界内存中转 | 验证递归文件夹与背压；移动必须确认目标完成后源才删除 |
 | 下载断点续传 | Download 响应的 HTTP Range | 已实现、待验证 | 确认目标 DSM 返回 `206`，以及中断后字节一致 |
+| 含糊扩展名识别 | Download 的 4 KiB Range 文件头 + 文件签名 | macOS 已实现；三端共享识别契约 | 验证 `.ts` 的 MPEG 传输流与 TypeScript；禁止按文件大小猜测 |
 | 上传断点续传 | Upload multipart | 不支持字节续传 | 公开 API 未提供 offset/token；暂停后从头重新上传 |
+| 子目录搜索 | `SYNO.FileStation.Search` 官方 API | 已实现 | 验证任务清理、中文、正则结果上限和无权限目录 |
+| 收藏夹 | `SYNO.FileStation.Favorite` 官方 API | 已实现 | 验证新增、移除和失效路径 |
+| 分享链接管理 | `SYNO.FileStation.Sharing` 官方 API | 已实现 | 验证密码、有效期、批量路径、复制和取消分享 |
+| 远程位置浏览 | `SYNO.FileStation.List` 的挂载类型字段 | 已实现只读入口 | 仅浏览已在 DSM 配置的位置，不调用内部挂载接口 |
 
 ## 记录要求
 

@@ -11,7 +11,13 @@ public enum DsmAPIName {
     public static let fileStationUpload = "SYNO.FileStation.Upload"
     public static let fileStationDelete = "SYNO.FileStation.Delete"
     public static let fileStationCreateFolder = "SYNO.FileStation.CreateFolder"
+    public static let fileStationRename = "SYNO.FileStation.Rename"
     public static let fileStationCopyMove = "SYNO.FileStation.CopyMove"
+    public static let fileStationCompress = "SYNO.FileStation.Compress"
+    public static let fileStationExtract = "SYNO.FileStation.Extract"
+    public static let fileStationSearch = "SYNO.FileStation.Search"
+    public static let fileStationFavorite = "SYNO.FileStation.Favorite"
+    public static let fileStationSharing = "SYNO.FileStation.Sharing"
 }
 
 private struct CapabilityPayload: Decodable, Sendable {
@@ -49,7 +55,13 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationUpload,
         DsmAPIName.fileStationDelete,
         DsmAPIName.fileStationCreateFolder,
-        DsmAPIName.fileStationCopyMove
+        DsmAPIName.fileStationRename,
+        DsmAPIName.fileStationCopyMove,
+        DsmAPIName.fileStationCompress,
+        DsmAPIName.fileStationExtract,
+        DsmAPIName.fileStationSearch,
+        DsmAPIName.fileStationFavorite,
+        DsmAPIName.fileStationSharing
     ]
 
     private let client: DsmAPIClient
@@ -143,6 +155,12 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationUpload: 1...2,
         DsmAPIName.fileStationDelete: 1...2,
         DsmAPIName.fileStationCreateFolder: 1...2,
-        DsmAPIName.fileStationCopyMove: 1...3
+        DsmAPIName.fileStationRename: 1...2,
+        DsmAPIName.fileStationCopyMove: 1...3,
+        DsmAPIName.fileStationCompress: 3...3,
+        DsmAPIName.fileStationExtract: 2...2,
+        DsmAPIName.fileStationSearch: 1...2,
+        DsmAPIName.fileStationFavorite: 1...2,
+        DsmAPIName.fileStationSharing: 1...3
     ]
 }

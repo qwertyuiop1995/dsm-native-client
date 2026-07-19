@@ -7,6 +7,8 @@ public enum ActivityKind: String, Codable, Sendable {
     case move
     case delete
     case restore
+    case compress
+    case extract
 }
 
 public enum ActivityState: String, Codable, Sendable {

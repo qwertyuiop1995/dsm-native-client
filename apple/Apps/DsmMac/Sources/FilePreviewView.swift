@@ -2,6 +2,7 @@ import AppKit
 import AVKit
 import CryptoKit
 import DsmCore
+import Observation
 import PDFKit
 import Security
 import SwiftUI
@@ -24,19 +25,31 @@ private final class MediaLoadingContext: @unchecked Sendable {
     }
 }
 
+@MainActor
+@Observable
+final class PreviewWindowPresentationState {
+    var isFullScreen = false
+}
+
 final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDelegate, URLSessionDelegate, URLSessionTaskDelegate, URLSessionDataDelegate, @unchecked Sendable {
     private let source: MediaStreamSource
     private let onFailure: @Sendable (String) -> Void
+    private let onLoadingMetrics: @Sendable (Double?, Bool) -> Void
     private var session: URLSession!
     private var activeRequests = [URLSessionDataTask: MediaLoadingContext]()
     private let lock = NSLock()
+    private var speedWindowStartedAt = Date()
+    private var speedWindowBytes: Int64 = 0
+    private var smoothedBytesPerSecond: Double?
 
     init(
         source: MediaStreamSource,
-        onFailure: @escaping @Sendable (String) -> Void
+        onFailure: @escaping @Sendable (String) -> Void,
+        onLoadingMetrics: @escaping @Sendable (Double?, Bool) -> Void
     ) {
         self.source = source
         self.onFailure = onFailure
+        self.onLoadingMetrics = onLoadingMetrics
         super.init()
         let config = URLSessionConfiguration.ephemeral
         config.urlCache = nil
@@ -55,6 +68,7 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
             return values
         }
         session.invalidateAndCancel()
+        onLoadingMetrics(nil, false)
         for context in requests {
             context.loadingRequest.finishLoading(with: CancellationError())
         }
@@ -79,12 +93,18 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
 
         let task = session.dataTask(with: request)
         lock.withLock {
+            if activeRequests.isEmpty {
+                speedWindowStartedAt = Date()
+                speedWindowBytes = 0
+                smoothedBytesPerSecond = nil
+            }
             activeRequests[task] = MediaLoadingContext(
                 loadingRequest: loadingRequest,
                 requestedOffset: offset,
                 maximumLength: maximumLength
             )
         }
+        onLoadingMetrics(nil, true)
         task.resume()
         return true
     }
@@ -99,6 +119,7 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
                 activeRequests.removeValue(forKey: task)
             }
         }
+        publishIdleIfNeeded()
     }
 
     // MARK: - URLSessionDataDelegate
@@ -182,6 +203,7 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
         if !accepted.isEmpty {
             context.loadingRequest.dataRequest?.respond(with: Data(accepted))
             context.receivedLength += accepted.count
+            recordReceivedBytes(accepted.count)
         }
         if context.receivedLength >= context.maximumLength {
             finish(dataTask)
@@ -202,6 +224,7 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
         } else {
             context.loadingRequest.finishLoading()
         }
+        publishIdleIfNeeded()
     }
 
     func urlSession(
@@ -294,6 +317,34 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
             context.loadingRequest.finishLoading()
         }
         task.cancel()
+        publishIdleIfNeeded()
+    }
+
+    private func recordReceivedBytes(_ count: Int) {
+        let result: (Double, Bool)? = lock.withLock {
+            speedWindowBytes += Int64(count)
+            let elapsed = Date().timeIntervalSince(speedWindowStartedAt)
+            guard elapsed >= 0.25 else { return nil }
+            let instantSpeed = Double(speedWindowBytes) / elapsed
+            if let previous = smoothedBytesPerSecond {
+                smoothedBytesPerSecond = previous * 0.65 + instantSpeed * 0.35
+            } else {
+                smoothedBytesPerSecond = instantSpeed
+            }
+            speedWindowStartedAt = Date()
+            speedWindowBytes = 0
+            return (smoothedBytesPerSecond ?? instantSpeed, !activeRequests.isEmpty)
+        }
+        if let result {
+            onLoadingMetrics(result.0, result.1)
+        }
+    }
+
+    private func publishIdleIfNeeded() {
+        let isLoading = lock.withLock { !activeRequests.isEmpty }
+        if !isLoading {
+            onLoadingMetrics(nil, false)
+        }
     }
 
     private static func parseContentRange(
@@ -328,19 +379,67 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
 
 struct FileDetailView: View {
     @Bindable var model: WorkspaceModel
-    let onDownload: (FileItem) -> Void
+    @Bindable var windowState: PreviewWindowPresentationState
+    let onDownload: (FileItem, WorkspaceModel.FolderDownloadMode) -> Void
     let onDelete: ([FileItem]) -> Void
     let onRestore: (FileItem) -> Void
+    @State private var confirmsDiscardAndClose = false
+    @State private var confirmsCancelEditing = false
 
     var body: some View {
+        Group {
+            if windowState.isFullScreen, let item = model.selectedItem, supportsFullScreen {
+                fullScreenPreview(item)
+            } else {
+                standardPreview
+            }
+        }
+        .background {
+            PreviewSpaceShortcutHandler {
+                requestClose()
+            }
+        }
+        .alert("放弃未保存的修改？", isPresented: $confirmsDiscardAndClose) {
+            Button("继续编辑", role: .cancel) {}
+            Button("放弃修改", role: .destructive) {
+                model.cancelTextEditing()
+                model.dismissPreview()
+            }
+        } message: {
+            Text("关闭后，尚未保存到 NAS 的修改会丢失。")
+        }
+        .alert("取消这次编辑？", isPresented: $confirmsCancelEditing) {
+            Button("继续编辑", role: .cancel) {}
+            Button("放弃修改", role: .destructive) {
+                model.cancelTextEditing()
+            }
+        } message: {
+            Text("尚未保存到 NAS 的修改会丢失。")
+        }
+    }
+
+    private var standardPreview: some View {
         VStack(spacing: 0) {
             HStack {
                 Text("项目详情")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
+                if supportsFullScreen {
+                    Button {
+                        NSApp.keyWindow?.toggleFullScreen(nil)
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut("f", modifiers: [.command, .control])
+                    .help("进入或退出全屏（⌃⌘F）")
+                    .accessibilityLabel("进入或退出全屏")
+                }
                 Button {
-                    model.isPreviewPresented = false
+                    requestClose()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16))
@@ -348,7 +447,9 @@ struct FileDetailView: View {
                         .padding(4)
                 }
                 .buttonStyle(.plain)
+                .disabled(model.isSavingText)
                 .help("关闭预览窗口")
+                .accessibilityLabel("关闭预览窗口")
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -374,6 +475,34 @@ struct FileDetailView: View {
                 }
             }
             .frame(maxHeight: .infinity)
+        }
+    }
+
+    private var supportsFullScreen: Bool {
+        guard let item = model.selectedItem else { return false }
+        let kind = model.resolvedPreviewKind ?? PreviewKind.classify(item)
+        return kind == .image || kind == .video
+    }
+
+    private func fullScreenPreview(_ item: FileItem) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            preview(item)
+                .ignoresSafeArea()
+            Button {
+                NSApp.keyWindow?.toggleFullScreen(nil)
+            } label: {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(.black.opacity(0.48), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("f", modifiers: [.command, .control])
+            .help("退出全屏（⌃⌘F）")
+            .accessibilityLabel("退出全屏")
+            .padding(20)
         }
     }
 
@@ -405,8 +534,6 @@ struct FileDetailView: View {
                 preview(item)
             }
 
-            Divider()
-            actionBar(item)
         }
     }
 
@@ -420,20 +547,43 @@ struct FileDetailView: View {
                 ProgressView()
                 Text("正在准备预览…")
                     .foregroundStyle(.secondary)
+                if let speed = model.previewLoadingSpeedBytesPerSecond, speed > 0 {
+                    Text("读取速度 \(networkSpeedText(speed))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .image(let data):
             if let image = NSImage(data: data) {
-                ScrollView([.horizontal, .vertical]) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: 900, maxHeight: 900)
-                        .padding(20)
+                ZStack {
+                    FittedImagePreview(image: image)
+                        .id(item.id)
+                    if model.canPreviewPreviousImage || model.canPreviewNextImage {
+                        HStack {
+                            imageNavigationButton(
+                                title: "上一张",
+                                systemImage: "chevron.left",
+                                isEnabled: model.canPreviewPreviousImage,
+                                shortcut: .leftArrow,
+                                action: model.previewPreviousImage
+                            )
+                            Spacer()
+                            imageNavigationButton(
+                                title: "下一张",
+                                systemImage: "chevron.right",
+                                isEnabled: model.canPreviewNextImage,
+                                shortcut: .rightArrow,
+                                action: model.previewNextImage
+                            )
+                        }
+                        .padding(.horizontal, 18)
+                    }
                 }
-                .background(Color(nsColor: .windowBackgroundColor))
             } else {
-                previewMessage("无法读取图片缩略图。", systemImage: "photo.badge.exclamationmark")
+                previewMessage("无法读取这张图片。", systemImage: "photo.badge.exclamationmark") {
+                    onDownload(item, .archive)
+                }
             }
         case .text(let text, let truncated):
             VStack(spacing: 0) {
@@ -443,25 +593,130 @@ struct FileDetailView: View {
                         .foregroundStyle(.orange)
                         .padding(8)
                 }
-                ScrollView([.horizontal, .vertical]) {
-                    Text(text)
+                HStack(spacing: 10) {
+                    if model.isEditingText {
+                        Button("取消") {
+                            if model.hasUnsavedTextEdits {
+                                confirmsCancelEditing = true
+                            } else {
+                                model.cancelTextEditing()
+                            }
+                        }
+                        .disabled(model.isSavingText)
+                        if model.canFormatSelectedText {
+                            Button("整理格式") {
+                                model.formatEditableText()
+                            }
+                            .disabled(model.isSavingText)
+                            .help("整理支持格式的缩进与换行")
+                        }
+                        Spacer()
+                        Button {
+                            Task { await model.saveTextEdits() }
+                        } label: {
+                            if model.isSavingText {
+                                HStack(spacing: 6) {
+                                    ProgressView().controlSize(.small)
+                                    Text("正在保存…")
+                                }
+                            } else {
+                                Text("保存")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut("s", modifiers: .command)
+                        .disabled(model.isSavingText || !model.hasUnsavedTextEdits)
+                    } else {
+                        Spacer()
+                        if model.canEditSelectedText {
+                            Button("编辑") {
+                                model.beginTextEditing()
+                            }
+                            .keyboardShortcut("e", modifiers: .command)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+
+                if let message = model.textEditingMessage {
+                    Label(
+                        message,
+                        systemImage: model.textEditingMessageIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(model.textEditingMessageIsError ? .red : .secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if model.isEditingText {
+                    TextEditor(text: $model.editableText)
                         .font(.system(.callout, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
+                        .scrollContentBackground(.hidden)
+                        .padding(10)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .accessibilityLabel("编辑 \(item.name)")
+                } else {
+                    ScrollView([.horizontal, .vertical]) {
+                        Text(text)
+                            .font(.system(.callout, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                    }
                 }
             }
         case .pdf(let url):
             PDFDocumentView(url: url)
         case .video(let source):
-            VideoPlayerView(source: source)
+            VideoPlayerView(source: source) {
+                onDownload(item, .archive)
+            }
         case .audio(let source):
             AudioPlayerView(source: source)
         case .unsupported(let message):
-            previewMessage(message, systemImage: "doc.questionmark")
+            previewMessage(message, systemImage: "doc.questionmark") {
+                onDownload(item, .archive)
+            }
         case .failed(let message):
-            previewMessage(message, systemImage: "exclamationmark.triangle", color: .red)
+            previewMessage(message, systemImage: "exclamationmark.triangle", color: .red) {
+                onDownload(item, .archive)
+            }
         }
+    }
+
+    private func requestClose() {
+        guard !model.isSavingText else { return }
+        if model.hasUnsavedTextEdits {
+            confirmsDiscardAndClose = true
+        } else {
+            model.dismissPreview()
+        }
+    }
+
+    private func imageNavigationButton(
+        title: String,
+        systemImage: String,
+        isEnabled: Bool,
+        shortcut: KeyEquivalent,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 44, height: 44)
+                .background(.regularMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.32)
+        .keyboardShortcut(shortcut, modifiers: [])
+        .help("\(title)（方向键）")
+        .accessibilityLabel(title)
     }
 
     private func folderDetails(_ item: FileItem) -> some View {
@@ -479,47 +734,258 @@ struct FileDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func actionBar(_ item: FileItem) -> some View {
-        HStack(spacing: 10) {
-            if item.isDirectory {
-                Button("打开") {
-                    Task { await model.open(item) }
-                }
-            } else {
-                Button("下载…") {
-                    onDownload(item)
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            if item.isRecyclePath {
-                if model.allowsVerifiedRestore {
-                    Button("恢复…") {
-                        onRestore(item)
-                    }
-                } else {
-                    Label("暂不支持直接恢复", systemImage: "lock.trianglebadge.exclamationmark")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            }
-            Spacer()
-            Button(item.isRecyclePath ? "永久删除…" : "删除…", role: .destructive) {
-                onDelete([item])
-            }
-        }
-        .padding(12)
-    }
-
     private func previewMessage(
         _ message: String,
         systemImage: String,
-        color: Color = .secondary
+        color: Color = .secondary,
+        action: (() -> Void)? = nil
     ) -> some View {
-        ContentUnavailableView {
-            Label("无法预览", systemImage: systemImage)
-        } description: {
-            Text(message)
+        VStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 30, weight: .regular))
                 .foregroundStyle(color)
+            Text("无法预览")
+                .font(.headline)
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if let action {
+                Button("下载文件…", action: action)
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: 360)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct PreviewSpaceShortcutHandler: NSViewRepresentable {
+    let onSpace: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onSpace: onSpace) }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.attach(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onSpace = onSpace
+        context.coordinator.attach(to: nsView)
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var onSpace: () -> Void
+        private weak var hostView: NSView?
+        private var monitor: Any?
+
+        init(onSpace: @escaping () -> Void) {
+            self.onSpace = onSpace
+        }
+
+        func attach(to view: NSView) {
+            hostView = view
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { @MainActor [weak self] event in
+                guard let self,
+                      event.window === self.hostView?.window,
+                      !self.isEditingText(in: event.window),
+                      event.keyCode == 49,
+                      event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty else {
+                    return event
+                }
+                self.onSpace()
+                return nil
+            }
+        }
+
+        func detach() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        private func isEditingText(in window: NSWindow?) -> Bool {
+            window?.firstResponder is NSTextView
+        }
+    }
+}
+
+private struct FittedImagePreview: View {
+    let image: NSImage
+    @State private var zoom: CGFloat = 1
+    @State private var rotation = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geometry in
+            let availableWidth = max(1, geometry.size.width - 32)
+            let availableHeight = max(1, geometry.size.height - 88)
+            let originalWidth = max(1, image.size.width)
+            let originalHeight = max(1, image.size.height)
+            let isQuarterTurn = abs(rotation) % 180 == 90
+            let rotatedWidth = isQuarterTurn ? originalHeight : originalWidth
+            let rotatedHeight = isQuarterTurn ? originalWidth : originalHeight
+            let fittedScale = min(1, availableWidth / rotatedWidth, availableHeight / rotatedHeight)
+            let imageWidth = originalWidth * fittedScale * zoom
+            let imageHeight = originalHeight * fittedScale * zoom
+            let visualWidth = isQuarterTurn ? imageHeight : imageWidth
+            let visualHeight = isQuarterTurn ? imageWidth : imageHeight
+
+            ZStack(alignment: .bottom) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: imageWidth, height: imageHeight)
+                    .rotationEffect(.degrees(Double(rotation)))
+                    .frame(width: visualWidth, height: visualHeight)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .clipped()
+
+                HStack(spacing: 4) {
+                    previewControl("向左旋转", systemImage: "rotate.left") {
+                        updateRotation(by: -90)
+                    }
+                    .keyboardShortcut("l", modifiers: .command)
+                    previewControl("向右旋转", systemImage: "rotate.right") {
+                        updateRotation(by: 90)
+                    }
+                    .keyboardShortcut("r", modifiers: .command)
+                    Divider().frame(height: 22).padding(.horizontal, 4)
+                    previewControl("缩小", systemImage: "minus.magnifyingglass") {
+                        updateZoom(zoom - 0.2)
+                    }
+                    .keyboardShortcut("-", modifiers: .command)
+                    Text("\(Int((zoom * 100).rounded()))%")
+                        .font(.caption.monospacedDigit())
+                        .frame(minWidth: 44)
+                        .accessibilityLabel("缩放比例百分之 \(Int((zoom * 100).rounded()))")
+                    previewControl("放大", systemImage: "plus.magnifyingglass") {
+                        updateZoom(zoom + 0.2)
+                    }
+                    .keyboardShortcut("=", modifiers: .command)
+                    Button("适合窗口") {
+                        updateZoom(1)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(zoom == 1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(.regularMaterial, in: Capsule())
+                .padding(.bottom, 10)
+            }
+            .background {
+                ImageScrollWheelReader { delta, isPrecise in
+                    let step = isPrecise ? delta * 0.012 : delta * 0.08
+                    updateZoom(zoom + step)
+                }
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .accessibilityLabel("图片预览，可使用滚轮缩放")
+    }
+
+    private func previewControl(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+
+    private func updateZoom(_ value: CGFloat) {
+        let newValue = min(5, max(0.25, value))
+        if reduceMotion {
+            zoom = newValue
+        } else {
+            withAnimation(.easeOut(duration: 0.12)) {
+                zoom = newValue
+            }
+        }
+    }
+
+    private func updateRotation(by degrees: Int) {
+        let newValue = (rotation + degrees) % 360
+        if reduceMotion {
+            rotation = newValue
+        } else {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                rotation = newValue
+            }
+        }
+    }
+}
+
+private struct ImageScrollWheelReader: NSViewRepresentable {
+    let onScroll: (CGFloat, Bool) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onScroll: onScroll)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.attach(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onScroll = onScroll
+        context.coordinator.attach(to: nsView)
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var onScroll: (CGFloat, Bool) -> Void
+        private weak var hostView: NSView?
+        private var monitor: Any?
+
+        init(onScroll: @escaping (CGFloat, Bool) -> Void) {
+            self.onScroll = onScroll
+        }
+
+        func attach(to view: NSView) {
+            hostView = view
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { @MainActor [weak self] event in
+                guard let self,
+                      event.window === self.hostView?.window,
+                      let hostView = self.hostView else { return event }
+                let point = hostView.convert(event.locationInWindow, from: nil)
+                guard hostView.bounds.contains(point) else { return event }
+                self.onScroll(event.scrollingDeltaY, event.hasPreciseScrollingDeltas)
+                return nil
+            }
+        }
+
+        func detach() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
         }
     }
 }
@@ -546,11 +1012,14 @@ private struct PDFDocumentView: NSViewRepresentable {
 
 struct VideoPlayerView: View {
     let source: MediaStreamSource
+    let onDownload: () -> Void
     @State private var player: AVPlayer?
     @State private var resourceLoaderDelegate: DsmAVAssetResourceLoaderDelegate?
     @State private var playbackGeneration = UUID()
     @State private var isPreparing = true
     @State private var failureMessage: String?
+    @State private var networkSpeed: Double?
+    @State private var isNetworkLoading = false
 
     var body: some View {
         ZStack {
@@ -561,23 +1030,57 @@ struct VideoPlayerView: View {
                     ProgressView()
                     Text("正在缓冲视频…")
                         .foregroundStyle(.secondary)
+                    if let networkSpeed, networkSpeed > 0 {
+                        Text("读取速度 \(networkSpeedText(networkSpeed))")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .padding(20)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 .accessibilityElement(children: .combine)
             }
 
+            if !isPreparing, failureMessage == nil, isNetworkLoading,
+               let networkSpeed, networkSpeed > 0 {
+                VStack {
+                    HStack {
+                        Spacer()
+                        Label(networkSpeedText(networkSpeed), systemImage: "arrow.down.circle")
+                            .font(.caption.monospacedDigit())
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.regularMaterial, in: Capsule())
+                            .accessibilityLabel("视频读取速度 \(networkSpeedText(networkSpeed))")
+                    }
+                    Spacer()
+                }
+                .padding(14)
+                .allowsHitTesting(false)
+            }
+
             if let failureMessage {
-                ContentUnavailableView {
-                    Label("视频无法播放", systemImage: "video.slash")
-                } description: {
+                VStack(spacing: 12) {
+                    Image(systemName: "video.slash")
+                        .font(.system(size: 34))
+                        .foregroundStyle(.secondary)
+                    Text("视频无法播放")
+                        .font(.headline)
                     Text(failureMessage)
-                } actions: {
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    HStack {
                     Button("重试") {
                         setupPlayer()
                     }
+                        Button("下载文件…", action: onDownload)
+                            .buttonStyle(.borderedProminent)
+                    }
                 }
-                .background(.regularMaterial)
+                .padding(24)
+                .frame(maxWidth: 420)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
                 .accessibilityElement(children: .contain)
             }
         }
@@ -596,6 +1099,8 @@ struct VideoPlayerView: View {
         cleanPlayer()
         isPreparing = true
         failureMessage = nil
+        networkSpeed = nil
+        isNetworkLoading = false
         let generation = UUID()
         playbackGeneration = generation
 
@@ -605,6 +1110,12 @@ struct VideoPlayerView: View {
                 isPreparing = false
                 failureMessage = message.replacingOccurrences(of: "媒体", with: "视频")
                 player?.pause()
+            }
+        } onLoadingMetrics: { speed, isLoading in
+            Task { @MainActor in
+                guard playbackGeneration == generation else { return }
+                networkSpeed = speed
+                isNetworkLoading = isLoading
             }
         }
         resourceLoaderDelegate = delegate
@@ -632,7 +1143,7 @@ struct VideoPlayerView: View {
                     guard playbackGeneration == generation else { return }
                     guard playable else {
                         isPreparing = false
-                        failureMessage = "视频编码不受这台 Mac 支持，可以下载后使用其他播放器打开。"
+                        failureMessage = "视频编码不受这台 Mac 支持。请下载后使用其他播放器打开。"
                         return
                     }
                     isPreparing = false
@@ -654,6 +1165,8 @@ struct VideoPlayerView: View {
         player = nil
         resourceLoaderDelegate?.cancelAll()
         resourceLoaderDelegate = nil
+        networkSpeed = nil
+        isNetworkLoading = false
     }
 }
 
@@ -687,6 +1200,8 @@ struct AudioPlayerView: View {
     @State private var duration: Double = 0
     @State private var timer: Timer?
     @State private var failureMessage: String?
+    @State private var networkSpeed: Double?
+    @State private var isNetworkLoading = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -705,8 +1220,24 @@ struct AudioPlayerView: View {
                         .controlSize(.small)
                     Text("正在缓冲音乐…")
                         .foregroundStyle(.secondary)
+                    if let networkSpeed, networkSpeed > 0 {
+                        Text("读取速度 \(networkSpeedText(networkSpeed))")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .accessibilityElement(children: .combine)
+            }
+
+            if !isPreparing, failureMessage == nil, isNetworkLoading,
+               let networkSpeed, networkSpeed > 0 {
+                Label("正在读取 · \(networkSpeedText(networkSpeed))", systemImage: "arrow.down.circle")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.quaternary, in: Capsule())
+                    .accessibilityLabel("音乐读取速度 \(networkSpeedText(networkSpeed))")
             }
 
             if let failureMessage {
@@ -807,6 +1338,8 @@ struct AudioPlayerView: View {
         cleanPlayer()
         isPreparing = true
         failureMessage = nil
+        networkSpeed = nil
+        isNetworkLoading = false
         let generation = UUID()
         playbackGeneration = generation
 
@@ -817,6 +1350,12 @@ struct AudioPlayerView: View {
                 failureMessage = message.replacingOccurrences(of: "媒体", with: "音乐")
                 player?.pause()
                 isPlaying = false
+            }
+        } onLoadingMetrics: { speed, isLoading in
+            Task { @MainActor in
+                guard playbackGeneration == generation else { return }
+                networkSpeed = speed
+                isNetworkLoading = isLoading
             }
         }
         resourceLoaderDelegate = delegate
@@ -881,6 +1420,8 @@ struct AudioPlayerView: View {
         player = nil
         resourceLoaderDelegate?.cancelAll()
         resourceLoaderDelegate = nil
+        networkSpeed = nil
+        isNetworkLoading = false
         isPlaying = false
         isSeeking = false
         currentTime = 0
@@ -893,4 +1434,12 @@ struct AudioPlayerView: View {
         let seconds = Int(time) % 60
         return String(format: "%02d:%02d", minutes, seconds)
     }
+}
+
+private func networkSpeedText(_ bytesPerSecond: Double) -> String {
+    let formatted = ByteCountFormatter.string(
+        fromByteCount: Int64(max(0, bytesPerSecond)),
+        countStyle: .file
+    )
+    return "\(formatted)/秒"
 }

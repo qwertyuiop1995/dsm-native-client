@@ -49,5 +49,48 @@ final class FileStationTests: XCTestCase {
             ),
             .audio
         )
+        XCTAssertEqual(
+            PreviewKind.classify(
+                FileItem(
+                    profileID: profileID,
+                    name: "episode.TS",
+                    path: "/video/episode.TS",
+                    kind: .file,
+                    sizeBytes: 300 * 1_024 * 1_024,
+                    mimeType: "video/mp2t"
+                )
+            ),
+            .video
+        )
+        XCTAssertEqual(
+            PreviewKind.classify(
+                FileItem(
+                    profileID: profileID,
+                    name: "large.ts",
+                    path: "/code/large.ts",
+                    kind: .file,
+                    sizeBytes: 300 * 1_024 * 1_024
+                )
+            ),
+            .text
+        )
+    }
+
+    func testTS文件根据内容而不是大小区分视频和代码() {
+        var transportStream = Data(repeating: 0, count: 188 * 4)
+        for packetIndex in 0..<4 {
+            transportStream[packetIndex * 188] = 0x47
+        }
+
+        XCTAssertEqual(
+            FileContentSniffer.classifyTypeScriptOrTransportStream(transportStream),
+            .video
+        )
+        XCTAssertEqual(
+            FileContentSniffer.classifyTypeScriptOrTransportStream(
+                Data("export const greeting = 'hello';".utf8)
+            ),
+            .text
+        )
     }
 }

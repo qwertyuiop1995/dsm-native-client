@@ -1,6 +1,7 @@
 import AppKit
 import DsmCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 private enum FileViewMode: String, CaseIterable, Identifiable {
     case list
@@ -8,11 +9,30 @@ private enum FileViewMode: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+private enum FileGrouping: String, CaseIterable, Identifiable {
+    case none
+    case type
+    case date
+    case size
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .none: "不分组"
+        case .type: "按类型"
+        case .date: "按时间"
+        case .size: "按大小"
+        }
+    }
+}
+
 struct WorkspaceView: View {
     @Bindable var model: WorkspaceModel
     let profiles: [NasProfile]
     let selectedProfileID: UUID?
     let connectedWorkspaces: [WorkspaceModel]
+    let connectionRoute: AppModel.ConnectionRoute?
     let onAddNAS: () -> Void
     let onSelectNAS: (UUID) -> Void
     let hasFileClipboard: Bool
@@ -25,10 +45,13 @@ struct WorkspaceView: View {
 
     @State private var deleteTargets: [FileItem] = []
     @State private var restoreTarget: FileItem?
-    @State private var viewMode: FileViewMode = .list
+    @State private var viewMode: FileViewMode = .grid
+    @AppStorage("LanStash_FileGrouping") private var fileGrouping: FileGrouping = .none
     @State private var sortOrder = [KeyPathComparator<FileItem>]()
     @State private var showingInfoItem: FileItem? = nil
-    @State private var showsPreviewInspector = false
+    @State private var previewWindowController: FloatingPreviewWindowController?
+    @State private var shareTargets: [FileItem] = []
+    @State private var isRestoringSectionAfterUnsavedEdit = false
 
     var body: some View {
         NavigationSplitView {
@@ -36,22 +59,15 @@ struct WorkspaceView: View {
                 model: model,
                 profiles: profiles,
                 selectedProfileID: selectedProfileID,
+                connectionRoute: connectionRoute,
                 onAddNAS: onAddNAS,
-                onSelectNAS: { profile in onSelectNAS(profile.id) }
+                onSelectNAS: { profile in onSelectNAS(profile.id) },
+                onLogout: onLogout
             )
                 .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
         } detail: {
             contentColumn
                 .navigationSplitViewColumnWidth(min: 480, ideal: 680)
-        }
-        .inspector(isPresented: $showsPreviewInspector) {
-            FileDetailView(
-                model: model,
-                onDownload: presentDownloadPanel,
-                onDelete: { deleteTargets = $0 },
-                onRestore: { restoreTarget = $0 }
-            )
-            .inspectorColumnWidth(min: 280, ideal: 380, max: 700)
         }
         .navigationSplitViewStyle(.balanced)
         .task {
@@ -59,28 +75,56 @@ struct WorkspaceView: View {
             model.section = .files("/")
             await model.navigate(to: "/", recordingHistory: false)
         }
-        .onChange(of: model.section) { _, section in
-            if section == .transfers || section == .settings {
-                showsPreviewInspector = false
+        .onChange(of: model.section) { previousSection, section in
+            if isRestoringSectionAfterUnsavedEdit {
+                isRestoringSectionAfterUnsavedEdit = false
+                return
+            }
+            if model.hasUnsavedTextEdits, section != previousSection {
+                let alert = NSAlert()
+                alert.messageText = "请先处理未保存的修改"
+                alert.informativeText = "保存或取消当前文件的修改后，才能离开文件管理。"
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "继续编辑")
+                alert.runModal()
+                isRestoringSectionAfterUnsavedEdit = true
+                model.section = previousSection
+                return
+            }
+            switch section {
+            case .files?, .recycle?:
+                break
+            default:
+                previewWindowController?.closeFromModel()
+                model.dismissPreview()
             }
             Task { await model.activate(section) }
         }
         .onChange(of: model.selection) { _, _ in
-            model.selectionChanged()
-            showsPreviewInspector = false
+            if model.selectionChanged() {
+                previewWindowController?.closeFromModel()
+            }
         }
         .onChange(of: model.isPreviewPresented) { _, isPresented in
-            showsPreviewInspector = isPresented && shouldShowPreviewInspector
+            if isPresented && shouldShowFloatingPreview {
+                presentFloatingPreview()
+            } else {
+                previewWindowController?.closeFromModel()
+            }
+        }
+        .onDisappear {
+            previewWindowController?.closeFromModel()
+            model.dismissPreview()
         }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Button {
-                    Task { await model.goBack() }
+                    navigateBack()
                 } label: {
                     Label("返回", systemImage: "chevron.backward")
                 }
-                .disabled(!model.canGoBack)
-                .help("返回上一个目录（⌘[）")
+                .disabled(!canNavigateBack)
+                .help(isFileSection ? "返回上一个目录（⌘[）" : "返回刚才浏览的文件夹（⌘[）")
                 .keyboardShortcut("[", modifiers: .command)
 
                 Button {
@@ -102,27 +146,46 @@ struct WorkspaceView: View {
                     .disabled(model.currentPath.isEmpty || model.isRefreshing)
                     .keyboardShortcut("r", modifiers: .command)
 
-                    Menu {
-                        Button("选择文件上传…") {
-                            presentUploadPanel(overwrite: false)
-                        }
-                        Button("上传并覆盖同名文件…") {
-                            presentUploadPanel(overwrite: true)
-                        }
+                    Button {
+                        presentUploadPanel()
                     } label: {
                         Label("上传", systemImage: "square.and.arrow.up")
                     }
                     .disabled(!isFileSection)
                     .help("上传文件到当前目录")
 
-                    Button {
-                        if let item = model.selectedItem, !item.isDirectory {
-                            presentDownloadPanel(item)
+                    Menu {
+                        if model.selectedItems.count > 1 {
+                            Button("下载所选项目为压缩包…") {
+                                presentBatchDownloadPanel(model.selectedItems)
+                            }
+                        } else if let item = model.selectedItem {
+                            if item.isDirectory {
+                                Button("下载为压缩包…") {
+                                    presentDownloadPanel(item, folderMode: .archive)
+                                }
+                                Button("下载为文件夹…") {
+                                    presentDownloadPanel(item, folderMode: .directory)
+                                }
+                            } else {
+                                Button("下载…") {
+                                    presentDownloadPanel(item, folderMode: .archive)
+                                }
+                            }
                         }
                     } label: {
                         Label("下载", systemImage: "square.and.arrow.down")
                     }
-                    .disabled(model.selectedItem?.isDirectory != false)
+                    .disabled(model.selectedItem == nil)
+                    .help("下载文件夹时默认保存为压缩包，也可以保留原来的文件夹结构")
+
+                    Button {
+                        shareTargets = model.selectedItems
+                    } label: {
+                        Label("分享", systemImage: "link")
+                    }
+                    .disabled(model.selectedItems.isEmpty)
+                    .help("创建可发送给他人的下载链接")
 
                     Button {
                         deleteTargets = model.selectedItems
@@ -132,7 +195,9 @@ struct WorkspaceView: View {
                     .disabled(model.selectedItems.isEmpty)
                     .help("打开删除确认，不会直接删除")
 
-                    Button(action: onPaste) {
+                    Button {
+                        onPaste()
+                    } label: {
                         Label("粘贴", systemImage: "doc.on.clipboard")
                     }
                     .disabled(!hasFileClipboard || !isFileSection)
@@ -148,21 +213,24 @@ struct WorkspaceView: View {
 
                     Picker("视图模式", selection: $viewMode) {
                         Label("列表", systemImage: "list.bullet").tag(FileViewMode.list)
-                        Label("grid", systemImage: "grid").tag(FileViewMode.grid)
+                        Label("图标", systemImage: "square.grid.3x3").tag(FileViewMode.grid)
                     }
                     .pickerStyle(.segmented)
                     .disabled(!isFileSection)
 
-                    Menu {
-                        Button("退出登录") {
-                            Task { await onLogout() }
+                    if viewMode == .grid {
+                        Menu {
+                            Picker("分组方式", selection: $fileGrouping) {
+                                ForEach(FileGrouping.allCases) { grouping in
+                                    Text(grouping.title).tag(grouping)
+                                }
+                            }
+                        } label: {
+                            Label(fileGrouping.title, systemImage: "rectangle.3.group")
                         }
-                        Button("设置") {
-                            model.section = .settings
-                        }
-                    } label: {
-                        Label("更多", systemImage: "ellipsis.circle")
+                        .help("选择图标视图中的文件分组方式")
                     }
+
                 } else if model.section == .transfers {
                     Button("清除已完成") {
                         clearCompleted()
@@ -170,13 +238,13 @@ struct WorkspaceView: View {
                     .disabled(!canClearCompleted)
                     
                     Button {
-                        model.section = nil
+                        restoreFileBrowser()
                     } label: {
                         Label("返回文件", systemImage: "folder")
                     }
                 } else if model.section == .settings {
                     Button {
-                        model.section = nil
+                        restoreFileBrowser()
                     } label: {
                         Label("返回文件", systemImage: "folder")
                     }
@@ -209,7 +277,15 @@ struct WorkspaceView: View {
             Text("恢复前会检查目标目录和同名冲突；不会覆盖已有文件。")
         }
         .sheet(item: $showingInfoItem) { item in
-            FilePropertiesView(item: item)
+            FilePropertiesView(item: item, model: model)
+        }
+        .sheet(isPresented: Binding(
+            get: { !shareTargets.isEmpty },
+            set: { if !$0 { shareTargets = [] } }
+        )) {
+            ShareCreationView(model: model, targets: shareTargets) {
+                shareTargets = []
+            }
         }
         .alert("需要重新确认登录", isPresented: $model.requiresReauthentication) {
             Button("重试") {
@@ -230,6 +306,14 @@ struct WorkspaceView: View {
 
     private var navigationTitle: String {
         switch model.section {
+        case .favorites:
+            return "收藏"
+        case .recent:
+            return "最近访问"
+        case .remoteLocations:
+            return "远程位置"
+        case .sharedLinks:
+            return "分享管理"
         case .transfers:
             return "传输中心"
         case .settings:
@@ -254,16 +338,38 @@ struct WorkspaceView: View {
     @ViewBuilder
     private var contentColumn: some View {
         switch model.section {
+        case .favorites:
+            LocationCollectionView(
+                title: "收藏",
+                locations: model.favorites,
+                emptyMessage: "还没有收藏的文件夹。",
+                onOpen: openLocation,
+                onRemove: { location in model.toggleFavorite(path: location.path, name: location.name) }
+            )
+        case .recent:
+            RecentLocationsView(
+                locations: model.recentLocations,
+                onOpen: { location in Task { await model.openRecentLocation(location) } },
+                onRemove: model.removeRecentLocation,
+                onClearAll: model.clearRecentLocations
+            )
+        case .remoteLocations:
+            RemoteLocationsView(locations: model.remoteLocations, onOpen: { item in openLocation(item.path) })
+        case .sharedLinks:
+            ShareLinksView(model: model)
         case .transfers:
             TransferCenterView(model: model, connectedWorkspaces: connectedWorkspaces)
         case .settings:
-            SettingsView(model: model, onRenameNAS: onRenameNAS, onLogout: onLogout)
+            SettingsView(model: model, onRenameNAS: onRenameNAS)
         default:
             FileBrowserView(
                 model: model,
                 viewMode: $viewMode,
+                fileGrouping: fileGrouping,
                 showingInfoItem: $showingInfoItem,
                 onDownload: presentDownloadPanel,
+                onDownloadBatch: presentBatchDownloadPanel,
+                onShare: { shareTargets = $0 },
                 onDelete: { deleteTargets = $0 },
                 onRestore: { restoreTarget = $0 },
                 onCopy: onCopy,
@@ -274,6 +380,27 @@ struct WorkspaceView: View {
         }
     }
 
+    private func openLocation(_ path: String) {
+        model.section = .files(path)
+        Task { await model.navigate(to: path, recordingHistory: false) }
+    }
+
+    private var canNavigateBack: Bool {
+        isFileSection ? model.canGoBack : model.section != nil
+    }
+
+    private func navigateBack() {
+        if isFileSection {
+            Task { await model.goBack() }
+        } else {
+            restoreFileBrowser()
+        }
+    }
+
+    private func restoreFileBrowser() {
+        model.section = model.currentFileSection
+    }
+
     private var isFileSection: Bool {
         switch model.section {
         case .files, .recycle: true
@@ -281,7 +408,7 @@ struct WorkspaceView: View {
         }
     }
 
-    private var shouldShowPreviewInspector: Bool {
+    private var shouldShowFloatingPreview: Bool {
         guard isFileSection,
               model.isPreviewPresented,
               let item = model.selectedItem,
@@ -289,6 +416,23 @@ struct WorkspaceView: View {
             return false
         }
         return PreviewKind.classify(item) != .unsupported
+    }
+
+    private func presentFloatingPreview() {
+        let controller: FloatingPreviewWindowController
+        if let existing = previewWindowController, existing.profileID == model.profile.id {
+            controller = existing
+        } else {
+            previewWindowController?.closeFromModel()
+            controller = FloatingPreviewWindowController(
+                model: model,
+                onDownload: presentDownloadPanel,
+                onDelete: { deleteTargets = $0 },
+                onRestore: { restoreTarget = $0 }
+            )
+            previewWindowController = controller
+        }
+        controller.show()
     }
 
     private var deleteAlertPresented: Binding<Bool> {
@@ -319,26 +463,178 @@ struct WorkspaceView: View {
         return "NAS：\(model.profile.displayName)\n目录：\(model.currentPath)\n删除后能否恢复取决于共享文件夹的回收站设置，文件可能被永久删除。"
     }
 
-    private func presentUploadPanel(overwrite: Bool) {
+    private func presentUploadPanel() {
         let panel = NSOpenPanel()
-        panel.title = overwrite ? "选择要覆盖上传的文件" : "选择要上传的文件"
-        panel.prompt = overwrite ? "上传并覆盖" : "上传"
+        panel.title = "选择要上传的文件"
+        panel.prompt = "上传"
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
         if panel.runModal() == .OK {
-            model.enqueueUploads(panel.urls, overwrite: overwrite)
+            model.enqueueUploads(panel.urls, overwrite: false)
         }
     }
 
-    private func presentDownloadPanel(_ item: FileItem) {
+    private func presentDownloadPanel(
+        _ item: FileItem,
+        folderMode: WorkspaceModel.FolderDownloadMode = .archive
+    ) {
+        let downloadsDirectoryAsArchive = item.isDirectory && folderMode == .archive
         let panel = NSSavePanel()
-        panel.title = "下载 \(item.name)"
-        panel.nameFieldStringValue = item.name
+        panel.title = downloadsDirectoryAsArchive
+            ? "下载“\(item.name)”文件夹"
+            : (item.isDirectory ? "下载文件夹 \(item.name)" : "下载 \(item.name)")
+        panel.message = downloadsDirectoryAsArchive
+            ? "下载后会得到一个压缩包，打开即可查看其中的全部内容。"
+            : (item.isDirectory ? "保留原目录结构并逐个下载其中的文件。" : "选择文件的保存位置。")
+        panel.nameFieldStringValue = downloadsDirectoryAsArchive ? "\(item.name).zip" : item.name
+        if downloadsDirectoryAsArchive {
+            panel.allowedContentTypes = [.zip]
+        }
         panel.canCreateDirectories = true
         if panel.runModal() == .OK, let url = panel.url {
-            model.enqueueDownload(item, to: url)
+            model.enqueueDownload(item, to: url, folderMode: folderMode)
         }
+    }
+
+    private func presentBatchDownloadPanel(_ items: [FileItem]) {
+        guard !items.isEmpty else { return }
+        let panel = NSSavePanel()
+        panel.title = "下载所选项目"
+        panel.message = "所选项目会保存为一个压缩包。"
+        panel.nameFieldStringValue = "下载项目.zip"
+        panel.allowedContentTypes = [.zip]
+        panel.canCreateDirectories = true
+        if panel.runModal() == .OK, let url = panel.url {
+            model.enqueueBatchDownload(items, to: url)
+        }
+    }
+
+}
+
+@MainActor
+private final class FloatingPreviewWindowController: NSObject, NSWindowDelegate {
+    let profileID: UUID
+
+    private let model: WorkspaceModel
+    private let onDownload: (FileItem, WorkspaceModel.FolderDownloadMode) -> Void
+    private let onDelete: ([FileItem]) -> Void
+    private let onRestore: (FileItem) -> Void
+    private let presentationState = PreviewWindowPresentationState()
+    private var window: NSWindow?
+    private var isClosingFromModel = false
+
+    init(
+        model: WorkspaceModel,
+        onDownload: @escaping (FileItem, WorkspaceModel.FolderDownloadMode) -> Void,
+        onDelete: @escaping ([FileItem]) -> Void,
+        onRestore: @escaping (FileItem) -> Void
+    ) {
+        profileID = model.profile.id
+        self.model = model
+        self.onDownload = onDownload
+        self.onDelete = onDelete
+        self.onRestore = onRestore
+    }
+
+    func show() {
+        let previewWindow = window ?? makeWindow()
+        if !previewWindow.isVisible {
+            placeAtScreenCenter(previewWindow)
+        }
+        previewWindow.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func closeFromModel() {
+        guard let window, window.isVisible else { return }
+        isClosingFromModel = true
+        window.close()
+        isClosingFromModel = false
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        presentationState.isFullScreen = false
+        window = nil
+        if !isClosingFromModel, model.isPreviewPresented {
+            model.dismissPreview()
+        }
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if model.isSavingText {
+            NSSound.beep()
+            return false
+        }
+        guard model.hasUnsavedTextEdits else { return true }
+        let alert = NSAlert()
+        alert.messageText = "放弃未保存的修改？"
+        alert.informativeText = "关闭后，尚未保存到 NAS 的修改会丢失。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "继续编辑")
+        alert.addButton(withTitle: "放弃修改")
+        guard alert.runModal() == .alertSecondButtonReturn else { return false }
+        model.cancelTextEditing()
+        return true
+    }
+
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        presentationState.isFullScreen = true
+        window?.level = .normal
+    }
+
+    func windowWillExitFullScreen(_ notification: Notification) {
+        presentationState.isFullScreen = false
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        presentationState.isFullScreen = false
+        window?.level = .floating
+    }
+
+    private func makeWindow() -> NSWindow {
+        let previewWindow = NSWindow(
+            contentRect: .zero,
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        previewWindow.title = "项目预览"
+        previewWindow.titleVisibility = .hidden
+        previewWindow.titlebarAppearsTransparent = true
+        previewWindow.isMovableByWindowBackground = false
+        previewWindow.isReleasedWhenClosed = false
+        previewWindow.level = .floating
+        previewWindow.collectionBehavior = [.fullScreenPrimary]
+        previewWindow.minSize = NSSize(width: 480, height: 420)
+        previewWindow.delegate = self
+        previewWindow.contentViewController = NSHostingController(
+            rootView: FileDetailView(
+                model: model,
+                windowState: presentationState,
+                onDownload: onDownload,
+                onDelete: onDelete,
+                onRestore: onRestore
+            )
+        )
+        window = previewWindow
+        return previewWindow
+    }
+
+    private func placeAtScreenCenter(_ window: NSWindow) {
+        let screen = NSApp.keyWindow?.screen ?? NSScreen.main
+        let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1_280, height: 800)
+        let contentSize = NSSize(
+            width: min(1_080, max(640, visibleFrame.width * 0.68)),
+            height: min(860, max(520, visibleFrame.height * 0.78))
+        )
+        let frame = NSRect(
+            x: visibleFrame.midX - contentSize.width / 2,
+            y: visibleFrame.midY - contentSize.height / 2,
+            width: contentSize.width,
+            height: contentSize.height
+        )
+        window.setFrame(frame, display: true)
     }
 }
 
@@ -346,34 +642,22 @@ private struct SidebarView: View {
     @Bindable var model: WorkspaceModel
     let profiles: [NasProfile]
     let selectedProfileID: UUID?
+    let connectionRoute: AppModel.ConnectionRoute?
     let onAddNAS: () -> Void
     let onSelectNAS: (NasProfile) -> Void
+    let onLogout: () async -> Void
 
     @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
     @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = false
     @State private var isNasListExpanded = true
     @State private var connectingProfileID: UUID? = nil
+    @State private var confirmsLogout = false
 
     var body: some View {
         List(selection: $model.section) {
             Section("NAS 设备", isExpanded: $isNasListExpanded) {
-                if model.isDemo {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(model.profile.displayName)
-                                .font(.headline)
-                            Text("演示模式")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "sparkles.rectangle.stack")
-                            .foregroundStyle(.blue)
-                    }
-                }
-
                 ForEach(profiles) { profile in
-                    let isCurrent = profile.id == selectedProfileID && !model.isDemo
+                    let isCurrent = profile.id == selectedProfileID
                     let isConnecting = connectingProfileID == profile.id
                     
                     HStack(spacing: 8) {
@@ -431,9 +715,21 @@ private struct SidebarView: View {
 
             if isFileModuleEnabled {
                 Section("文件管理") {
-                    NavigationLink(value: WorkspaceSection.files("/")) {
+                    NavigationLink(value: model.currentFileSection) {
                         Label("文件浏览器", systemImage: "folder.fill")
                             .foregroundStyle(.blue)
+                    }
+                    NavigationLink(value: WorkspaceSection.favorites) {
+                        Label("收藏", systemImage: "star.fill")
+                    }
+                    NavigationLink(value: WorkspaceSection.recent) {
+                        Label("最近访问", systemImage: "clock")
+                    }
+                    NavigationLink(value: WorkspaceSection.remoteLocations) {
+                        Label("远程位置", systemImage: "network")
+                    }
+                    NavigationLink(value: WorkspaceSection.sharedLinks) {
+                        Label("分享管理", systemImage: "link")
                     }
                 }
             }
@@ -466,14 +762,311 @@ private struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Divider()
+                HStack(spacing: 10) {
+                    Image(systemName: connectionRoute?.systemImage ?? "network")
+                        .foregroundStyle(.green)
+                        .frame(width: 20)
+                        .accessibilityHidden(true)
+                    Text(connectionRoute?.title ?? "已连接")
+                        .font(.caption.weight(.medium))
+                        .lineLimit(1)
+                    Spacer(minLength: 6)
+                    Button("退出") {
+                        if model.activeTransferCount > 0 {
+                            confirmsLogout = true
+                        } else {
+                            Task { await onLogout() }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.red)
+                    .help("退出这台 NAS")
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+            }
+            .background(.bar)
+        }
+        .alert("退出这台 NAS？", isPresented: $confirmsLogout) {
+            Button("继续使用", role: .cancel) {}
+            Button("退出并取消任务", role: .destructive) {
+                Task { await onLogout() }
+            }
+        } message: {
+            Text("还有 \(model.activeTransferCount) 个任务正在进行。退出后，这些任务会被取消。")
+        }
+    }
+}
+
+private struct LocationCollectionView: View {
+    let title: String
+    let locations: [FavoriteLocation]
+    let emptyMessage: String
+    let onOpen: (String) -> Void
+    var onRemove: ((FavoriteLocation) -> Void)? = nil
+
+    var body: some View {
+        Group {
+            if locations.isEmpty {
+                ContentUnavailableView(title, systemImage: "folder", description: Text(emptyMessage))
+            } else {
+                List(locations) { location in
+                    HStack {
+                        Button {
+                            onOpen(location.path)
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(location.name)
+                                    Text(location.path).font(.caption).foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "folder.fill").foregroundStyle(.blue)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                        if let onRemove {
+                            Button("移除") { onRemove(location) }
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+            }
+        }
+        .navigationTitle(title)
+    }
+}
+
+private struct RecentLocationsView: View {
+    let locations: [FavoriteLocation]
+    let onOpen: (FavoriteLocation) -> Void
+    let onRemove: (FavoriteLocation) -> Void
+    let onClearAll: () -> Void
+    @State private var selection: FavoriteLocation.ID?
+    @State private var confirmsClearAll = false
+
+    var body: some View {
+        Group {
+            if locations.isEmpty {
+                ContentUnavailableView(
+                    "暂无最近访问",
+                    systemImage: "clock",
+                    description: Text("打开过的文件夹会显示在这里。")
+                )
+            } else {
+                List(selection: $selection) {
+                    ForEach(locations) { location in
+                        HStack {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(location.name)
+                                    Text(location.path).font(.caption).foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "folder.fill").foregroundStyle(.blue)
+                            }
+                            Spacer()
+                            Button("移除", systemImage: "xmark.circle") { onRemove(location) }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                                .help("从最近访问中移除")
+                        }
+                        .contentShape(Rectangle())
+                        .tag(location.id)
+                        .onTapGesture(count: 2) { onOpen(location) }
+                        .contextMenu {
+                            Button("从最近访问中移除", role: .destructive) { onRemove(location) }
+                        }
+                    }
+                }
+                .toolbar {
+                    Button("清除全部", systemImage: "trash") { confirmsClearAll = true }
+                        .help("清除全部最近访问记录")
+                }
+            }
+        }
+        .navigationTitle("最近访问")
+        .alert("清除全部最近访问记录？", isPresented: $confirmsClearAll) {
+            Button("取消", role: .cancel) {}
+            Button("清除全部", role: .destructive, action: onClearAll)
+        } message: {
+            Text("这只会清除本机保存的访问记录，不会删除 NAS 中的文件。")
+        }
+    }
+}
+
+private struct RemoteLocationsView: View {
+    let locations: [FileItem]
+    let onOpen: (FileItem) -> Void
+
+    var body: some View {
+        Group {
+            if locations.isEmpty {
+                ContentUnavailableView(
+                    "没有远程位置",
+                    systemImage: "network",
+                    description: Text("这里会显示已经连接到这台 NAS 的其他存储位置。")
+                )
+            } else {
+                List(locations) { location in
+                    Button { onOpen(location) } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(location.name)
+                                Text("点按以浏览").font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "network").foregroundStyle(.blue)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .navigationTitle("远程位置")
+    }
+}
+
+private struct ShareCreationView: View {
+    @Bindable var model: WorkspaceModel
+    let targets: [FileItem]
+    let onClose: () -> Void
+    @State private var password = ""
+    @State private var expirationDays = 0
+    @State private var isCreating = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("创建分享链接").font(.title2.weight(.semibold))
+            Text(targets.count == 1 ? "分享“\(targets[0].name)”" : "分享所选的 \(targets.count) 个项目")
+                .foregroundStyle(.secondary)
+            Form {
+                VStack(alignment: .leading, spacing: 4) {
+                    SecureField("访问密码（可选）", text: $password)
+                        .onChange(of: password) { _, value in
+                            if value.count > 16 { password = String(value.prefix(16)) }
+                        }
+                    Text("最多 16 个字符").font(.caption).foregroundStyle(.secondary)
+                }
+                Picker("有效期", selection: $expirationDays) {
+                    Text("长期有效").tag(0)
+                    Text("7 天").tag(7)
+                    Text("30 天").tag(30)
+                    Text("90 天").tag(90)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel, action: onClose)
+                Button {
+                    createLink()
+                } label: {
+                    if isCreating { ProgressView().controlSize(.small) } else { Text("创建并复制链接") }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isCreating)
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
+    }
+
+    private func createLink() {
+        isCreating = true
+        Task {
+            let expiresAt: String?
+            if expirationDays == 0 {
+                expiresAt = nil
+            } else {
+                let date = Calendar.current.date(byAdding: .day, value: expirationDays, to: Date()) ?? Date()
+                expiresAt = date.formatted(.iso8601.year().month().day())
+            }
+            if let link = await model.createShareLink(
+                paths: targets.map(\.path),
+                password: password.isEmpty ? nil : password,
+                expiresAt: expiresAt
+            ) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(link.url, forType: .string)
+                onClose()
+            }
+            isCreating = false
+        }
+    }
+}
+
+private struct ShareLinksView: View {
+    @Bindable var model: WorkspaceModel
+    @State private var linkToDelete: FileShareLink?
+
+    var body: some View {
+        Group {
+            if model.isLoadingShareLinks {
+                ProgressView("正在读取分享…")
+            } else if model.shareLinks.isEmpty {
+                ContentUnavailableView(
+                    "还没有分享链接",
+                    systemImage: "link",
+                    description: Text("在文件列表中选择项目，然后点按“分享”。")
+                )
+            } else {
+                List(model.shareLinks) { link in
+                    HStack(spacing: 12) {
+                        Image(systemName: "link.circle.fill").foregroundStyle(.blue)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(link.name.isEmpty ? "已分享项目" : link.name)
+                            HStack(spacing: 8) {
+                                if link.hasPassword { Label("已设密码", systemImage: "lock.fill") }
+                                if let expiration = link.expiresAt { Text("有效期至 \(expiration)") }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("复制链接") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(link.url, forType: .string)
+                            model.statusIsError = false
+                            model.statusMessage = "链接已复制。"
+                        }
+                        Button("取消分享", role: .destructive) { linkToDelete = link }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .navigationTitle("分享管理")
+        .task { await model.loadShareLinks() }
+        .alert("取消这个分享？", isPresented: Binding(
+            get: { linkToDelete != nil },
+            set: { if !$0 { linkToDelete = nil } }
+        )) {
+            Button("保留", role: .cancel) { linkToDelete = nil }
+            Button("取消分享", role: .destructive) {
+                guard let link = linkToDelete else { return }
+                linkToDelete = nil
+                Task { await model.deleteShareLinks(ids: [link.id]) }
+            }
+        } message: {
+            Text("取消后，收到这个链接的人将无法继续访问。")
+        }
     }
 }
 
 private struct FileBrowserView: View {
     @Bindable var model: WorkspaceModel
     @Binding var viewMode: FileViewMode
+    let fileGrouping: FileGrouping
     @Binding var showingInfoItem: FileItem?
-    let onDownload: (FileItem) -> Void
+    let onDownload: (FileItem, WorkspaceModel.FolderDownloadMode) -> Void
+    let onDownloadBatch: ([FileItem]) -> Void
+    let onShare: ([FileItem]) -> Void
     let onDelete: ([FileItem]) -> Void
     let onRestore: (FileItem) -> Void
     let onCopy: ([FileItem]) -> Void
@@ -484,13 +1077,30 @@ private struct FileBrowserView: View {
     @State private var sortOrder = [KeyPathComparator<FileItem>]()
     @State private var showsCreateFolderPrompt = false
     @State private var showsCreateFilePrompt = false
+    @State private var renameTarget: FileItem?
+    @State private var renameName = ""
+    @State private var compressionTargets: [FileItem] = []
+    @State private var extractionTarget: FileItem?
     @State private var newItemName = ""
+    @State private var hoveredItemID: FileItem.ID?
+    @State private var dropTargetItemID: FileItem.ID?
+    @State private var gridItemFrames: [FileItem.ID: CGRect] = [:]
+    @State private var marqueeStart: CGPoint?
+    @State private var marqueeCurrent: CGPoint?
+    @State private var marqueeBaseSelection: Set<FileItem.ID> = []
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private struct BreadcrumbItem: Identifiable {
         let id = UUID()
         let name: String
         let path: String
         let isLast: Bool
+    }
+
+    private struct FileGridGroup: Identifiable {
+        let id: String
+        let title: String?
+        let items: [FileItem]
     }
 
     private var breadcrumbItems: [BreadcrumbItem] {
@@ -520,6 +1130,24 @@ private struct FileBrowserView: View {
             }
         }
         return items
+    }
+
+    private var showsCompressionSheet: Binding<Bool> {
+        Binding(
+            get: { !compressionTargets.isEmpty },
+            set: { presented in if !presented { compressionTargets.removeAll() } }
+        )
+    }
+
+    private var archivePasswordBinding: Binding<WorkspaceModel.ArchivePasswordRequest?> {
+        Binding(
+            get: { model.archivePasswordRequest },
+            set: { request in
+                if request == nil, model.archivePasswordRequest != nil {
+                    model.cancelArchivePasswordRequest()
+                }
+            }
+        )
     }
 
     var body: some View {
@@ -588,10 +1216,15 @@ private struct FileBrowserView: View {
                         .disabled(model.isLoadingMore)
                     }
                 }
-                if let message = model.statusMessage {
-                    Label(message, systemImage: model.statusIsError ? "exclamationmark.triangle.fill" : "info.circle")
+                if let message = model.searchErrorMessage ?? model.statusMessage {
+                    Label(
+                        message,
+                        systemImage: model.searchErrorMessage != nil || model.statusIsError
+                            ? "exclamationmark.triangle.fill"
+                            : "info.circle"
+                    )
                         .font(.caption)
-                        .foregroundStyle(model.statusIsError ? .red : .secondary)
+                        .foregroundStyle(model.searchErrorMessage != nil || model.statusIsError ? .red : .secondary)
                 }
             }
             .padding(.horizontal, 16)
@@ -599,19 +1232,13 @@ private struct FileBrowserView: View {
 
             Divider()
 
-            if model.isLoading {
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("正在读取目录…")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if model.filteredItems.isEmpty {
+            if model.filteredItems.isEmpty {
                 ContentUnavailableView(
                     model.searchText.isEmpty ? "目录为空" : "没有匹配项目",
                     systemImage: model.searchText.isEmpty ? "folder" : "magnifyingglass",
                     description: Text(model.searchText.isEmpty ? "可以上传文件到这个目录。" : "尝试其他搜索词。")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 if viewMode == .list {
                     fileTable
@@ -620,10 +1247,68 @@ private struct FileBrowserView: View {
                 }
             }
         }
-        .searchable(text: $model.searchText, placement: .toolbar, prompt: "筛选当前目录")
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .overlay {
+            if model.isLoading || model.isRefreshing || model.isSearching {
+                ZStack {
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .background(Color.primary.opacity(0.035))
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.regular)
+                        Text(model.isSearching ? "正在搜索…" : (model.isLoading ? "正在读取目录…" : "正在打开文件夹…"))
+                            .font(.callout.weight(.medium))
+                        Text("请稍候，完成后即可继续操作。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 18)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
+                }
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(model.isSearching ? "正在搜索，请稍候" : "正在加载文件夹，请稍候")
+            } else if let undoMessage = model.recentDragMoveUndoMessage {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 12) {
+                        Label(undoMessage, systemImage: "arrowshape.turn.up.backward.circle.fill")
+                            .lineLimit(1)
+                        Button("撤销") {
+                            model.undoRecentDragMove()
+                        }
+                        .keyboardShortcut("z", modifiers: .command)
+                        .disabled(model.isMovingItemsByDrag)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .shadow(radius: 8, y: 3)
+                    .padding(.bottom, 18)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(undoMessage)，可在十秒内撤销")
+                }
+            }
+        }
+        .searchable(text: $model.searchText, placement: .toolbar, prompt: "搜索文件")
+        .searchScopes($model.searchScope) {
+            ForEach(WorkspaceModel.SearchScope.allCases) { scope in
+                Text(scope.title).tag(scope)
+            }
+        }
+        .onChange(of: model.searchText) { _, _ in model.updateSearch() }
+        .onChange(of: model.searchScope) { _, _ in model.updateSearch() }
         .dropDestination(for: URL.self) { urls, _ in
             model.enqueueUploads(urls)
             return true
+        }
+        .background {
+            FileKeyboardShortcutHandler(
+                onAction: handleFileShortcut
+            )
         }
         .contextMenu {
             blankAreaContextMenu
@@ -652,11 +1337,79 @@ private struct FileBrowserView: View {
         } message: {
             Text("将创建一个 0 字节文件；文件类型由扩展名决定。")
         }
+        .alert("重命名", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        )) {
+            TextField("新名称", text: $renameName)
+            Button("取消", role: .cancel) {
+                renameTarget = nil
+            }
+            Button("重命名") {
+                guard let target = renameTarget else { return }
+                let newName = renameName
+                renameTarget = nil
+                Task { await model.rename(target, to: newName) }
+            }
+            .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("输入文件或文件夹的新名称。")
+        }
+        .sheet(isPresented: showsCompressionSheet) {
+            ArchiveCreationView(targets: compressionTargets) { name, format, level, password in
+                let targets = compressionTargets
+                compressionTargets = []
+                model.enqueueCompression(
+                    targets,
+                    archiveName: name,
+                    format: format,
+                    level: level,
+                    password: password
+                )
+            } onCancel: {
+                compressionTargets = []
+            }
+        }
+        .sheet(item: $extractionTarget) { item in
+            ArchiveExtractionView(item: item) { createSubfolder, keepDirectoryStructure, overwrite in
+                extractionTarget = nil
+                Task {
+                    await model.prepareExtraction(
+                        item,
+                        createSubfolder: createSubfolder,
+                        keepDirectoryStructure: keepDirectoryStructure,
+                        overwrite: overwrite
+                    )
+                }
+            } onCancel: {
+                extractionTarget = nil
+            }
+        }
+        .sheet(item: archivePasswordBinding) { request in
+            ArchivePasswordView(
+                archiveName: request.item.name,
+                errorMessage: request.errorMessage,
+                isChecking: model.isCheckingArchivePassword,
+                onSubmit: { password in Task { await model.submitArchivePassword(password) } },
+                onCancel: model.cancelArchivePasswordRequest
+            )
+        }
+        .task(id: displayedItemIDs) {
+            model.updateDisplayedItemOrder(displayedItems)
+        }
         .navigationTitle(model.currentPath.isEmpty ? "文件" : (model.currentPath as NSString).lastPathComponent)
     }
 
     private var sortedItems: [FileItem] {
         model.filteredItems.sorted(using: sortOrder)
+    }
+
+    private var displayedItems: [FileItem] {
+        viewMode == .grid ? fileGridGroups.flatMap(\.items) : sortedItems
+    }
+
+    private var displayedItemIDs: [FileItem.ID] {
+        displayedItems.map(\.id)
     }
 
     private func selectIfUnselected(_ item: FileItem) {
@@ -667,8 +1420,77 @@ private struct FileBrowserView: View {
         }
     }
 
+    private func beginRename(_ item: FileItem) {
+        guard canRename(item) else { return }
+        model.selection = [item.id]
+        renameName = item.name
+        renameTarget = item
+    }
+
+    private func renameSelectedItem() {
+        guard let item = model.selectedItem else { return }
+        beginRename(item)
+    }
+
+    private func toggleQuickPreview() {
+        guard let item = model.selectedItem,
+              !item.isDirectory,
+              PreviewKind.classify(item) != .unsupported else { return }
+        if model.isPreviewPresented {
+            model.dismissPreview()
+        } else {
+            model.preparePreview()
+        }
+    }
+
+    private func handleFileShortcut(_ action: MacFileShortcut) {
+        switch action {
+        case .preview:
+            toggleQuickPreview()
+        case .rename:
+            renameSelectedItem()
+        case .open:
+            guard let item = model.selectedItem else { return }
+            Task { await model.open(item) }
+        case .up:
+            Task { await model.goUp() }
+        case .selectAll:
+            model.selection = Set(model.filteredItems.map(\.id))
+        case .copy:
+            guard !model.selectedItems.isEmpty else { return }
+            onCopy(model.selectedItems)
+        case .cut:
+            guard !model.selectedItems.isEmpty else { return }
+            onCut(model.selectedItems)
+        case .paste:
+            guard hasFileClipboard && canCreateItems else { return }
+            onPaste()
+        case .info:
+            showingInfoItem = model.selectedItem
+        case .delete:
+            guard !model.selectedItems.isEmpty else { return }
+            onDelete(model.selectedItems)
+        case .undo:
+            guard model.recentDragMoveUndoMessage != nil else { return }
+            model.undoRecentDragMove()
+        }
+    }
+
+    private func canRename(_ item: FileItem) -> Bool {
+        // 重命名取决于父目录权限，文件本身的 write 标记在部分 DSM 版本中会误报。
+        // 保留共享根目录和回收站保护，其余情况交给 NAS 接口执行最终权限校验。
+        canCreateItems && !item.isRecyclePath
+    }
+
+    private func isSupportedArchive(_ item: FileItem) -> Bool {
+        guard !item.isDirectory else { return false }
+        return ["zip", "gz", "tar", "tgz", "tbz", "bz2", "rar", "7z", "iso"]
+            .contains(item.fileExtension?.lowercased() ?? "")
+    }
+
     @ViewBuilder
     private func contextMenuForFile(_ item: FileItem) -> some View {
+        let targets = contextTargets(for: item)
         if item.isDirectory {
             Button("打开") {
                 Task { await model.open(item) }
@@ -678,9 +1500,34 @@ private struct FileBrowserView: View {
                 Task { await model.open(item) }
             }
         }
-        if !item.isDirectory {
-            Button("下载…") { onDownload(item) }
+        Button("重命名…") {
+            beginRename(item)
         }
+        .disabled(!canRename(item))
+        .keyboardShortcut(.return, modifiers: [])
+        Button(model.favorites.contains(where: { $0.path == item.path }) ? "取消收藏" : "添加到收藏") {
+            model.toggleFavorite(item)
+        }
+        if canCreateItems && !item.isRecyclePath {
+            Divider()
+            Button(targets.count > 1 ? "压缩所选项目…" : "压缩…") {
+                compressionTargets = targets
+            }
+            if targets.count == 1, isSupportedArchive(item) {
+                Button("解压缩…") {
+                    extractionTarget = item
+                }
+            }
+        }
+        if targets.count > 1 {
+            Button("下载所选项目为压缩包…") { onDownloadBatch(targets) }
+        } else if item.isDirectory {
+            Button("下载为压缩包…") { onDownload(item, .archive) }
+            Button("下载为文件夹…") { onDownload(item, .directory) }
+        } else {
+            Button("下载…") { onDownload(item, .archive) }
+        }
+        Button(targets.count > 1 ? "分享所选项目…" : "分享…") { onShare(targets) }
         Divider()
         Button("复制") {
             onCopy(contextTargets(for: item))
@@ -701,10 +1548,12 @@ private struct FileBrowserView: View {
         Button("显示简介") {
             showingInfoItem = item
         }
+        .keyboardShortcut("i", modifiers: .command)
         Divider()
         Button(item.isRecyclePath ? "永久删除…" : "删除…", role: .destructive) {
             onDelete([item])
         }
+        .keyboardShortcut(.delete, modifiers: .command)
     }
 
     private func contextTargets(for item: FileItem) -> [FileItem] {
@@ -720,9 +1569,7 @@ private struct FileBrowserView: View {
         }
         .disabled(model.isRefreshing)
         Divider()
-        Button("粘贴") {
-            onPaste()
-        }
+        Button("粘贴") { onPaste() }
         .disabled(!hasFileClipboard || !canCreateItems)
         Divider()
         Button("新建文件夹…") {
@@ -742,80 +1589,299 @@ private struct FileBrowserView: View {
     }
 
     private var fileGrid: some View {
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90, maximum: 120), spacing: 16)], spacing: 16) {
-                ForEach(sortedItems) { item in
-                    FileGridCell(
-                        item: item,
-                        isSelected: model.selection.contains(item.id),
-                        onSelect: {
-                            if NSEvent.modifierFlags.contains(.command) {
-                                if model.selection.contains(item.id) {
-                                    model.selection.remove(item.id)
-                                } else {
-                                    model.selection.insert(item.id)
+        GeometryReader { availableSpace in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 22) {
+                    ForEach(fileGridGroups) { group in
+                        VStack(alignment: .leading, spacing: 12) {
+                            if let title = group.title {
+                                HStack(spacing: 8) {
+                                    Text(title)
+                                        .font(.headline)
+                                    Text("\(group.items.count) 项")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
                                 }
-                            } else {
-                                model.selection = [item.id]
+                                .accessibilityElement(children: .combine)
                             }
-                        },
-                        onOpen: {
-                            Task { await model.open(item) }
-                        },
-                        contextMenuContent: AnyView(
-                            contextMenuForFile(item)
-                        )
-                    )
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 104), spacing: 16)], spacing: 16) {
+                                ForEach(group.items) { item in
+                                    FileGridCell(
+                                        model: model,
+                                        item: item,
+                                        isSelected: model.selection.contains(item.id),
+                                        isDropTarget: dropTargetItemID == item.id,
+                                        onSelect: {
+                                            if NSEvent.modifierFlags.contains(.command) {
+                                                if model.selection.contains(item.id) {
+                                                    model.selection.remove(item.id)
+                                                } else {
+                                                    model.selection.insert(item.id)
+                                                }
+                                            } else {
+                                                model.selection = [item.id]
+                                            }
+                                        },
+                                        onOpen: {
+                                            Task { await model.open(item) }
+                                        },
+                                        contextMenuContent: AnyView(
+                                            contextMenuForFile(item)
+                                        )
+                                    )
+                                    .background {
+                                        GeometryReader { proxy in
+                                            Color.clear.preference(
+                                                key: FileGridFramePreferenceKey.self,
+                                                value: [item.id: proxy.frame(in: .named("FileGridSelectionSpace"))]
+                                            )
+                                        }
+                                    }
+                                    .draggable(item.id)
+                                    .dropDestination(for: String.self) { ids, _ in
+                                        handleInternalDrop(ids, onto: item)
+                                    } isTargeted: { isTargeted in
+                                        updateDropTarget(item, isTargeted: isTargeted)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
+                .frame(minHeight: availableSpace.size.height, alignment: .top)
+                .contentShape(Rectangle())
+                .coordinateSpace(name: "FileGridSelectionSpace")
+                .overlay(alignment: .topLeading) {
+                    if let rectangle = marqueeRectangle {
+                        Rectangle()
+                            .fill(Color.accentColor.opacity(0.10))
+                            .overlay {
+                                Rectangle()
+                                    .stroke(Color.accentColor.opacity(0.75), lineWidth: 1)
+                            }
+                            .frame(width: rectangle.width, height: rectangle.height)
+                            .offset(x: rectangle.minX, y: rectangle.minY)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .simultaneousGesture(marqueeSelectionGesture)
+                .simultaneousGesture(
+                    SpatialTapGesture().onEnded { value in
+                        if !gridItemFrames.values.contains(where: { $0.contains(value.location) }) {
+                            model.selection.removeAll()
+                        }
+                    }
+                )
+                .onPreferenceChange(FileGridFramePreferenceKey.self) { gridItemFrames = $0 }
+                .padding(16)
             }
-            .padding(16)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.2))
         }
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.2))
+    }
+
+    private var marqueeRectangle: CGRect? {
+        guard let start = marqueeStart, let current = marqueeCurrent else { return nil }
+        return CGRect(
+            x: min(start.x, current.x),
+            y: min(start.y, current.y),
+            width: abs(current.x - start.x),
+            height: abs(current.y - start.y)
+        )
+    }
+
+    private var marqueeSelectionGesture: some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .named("FileGridSelectionSpace"))
+            .onChanged { value in
+                if marqueeStart == nil {
+                    guard !gridItemFrames.values.contains(where: { $0.contains(value.startLocation) }) else { return }
+                    marqueeStart = value.startLocation
+                    marqueeBaseSelection = NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty
+                        ? []
+                        : model.selection
+                }
+                guard marqueeStart != nil else { return }
+                marqueeCurrent = value.location
+                guard let rectangle = marqueeRectangle else { return }
+                let enclosed = Set(gridItemFrames.compactMap { id, frame in
+                    frame.intersects(rectangle) ? id : nil
+                })
+                model.selection = marqueeBaseSelection.union(enclosed)
+            }
+            .onEnded { _ in
+                marqueeStart = nil
+                marqueeCurrent = nil
+                marqueeBaseSelection.removeAll()
+            }
+    }
+
+    private func updateDropTarget(_ item: FileItem, isTargeted: Bool) {
+        guard item.isDirectory,
+              !model.selectedItems.contains(where: { $0.id == item.id }) else {
+            if dropTargetItemID == item.id { dropTargetItemID = nil }
+            return
+        }
+        if isTargeted {
+            dropTargetItemID = item.id
+        } else if dropTargetItemID == item.id {
+            dropTargetItemID = nil
+        }
+    }
+
+    private var fileGridGroups: [FileGridGroup] {
+        guard fileGrouping != .none else {
+            return [FileGridGroup(id: "all", title: nil, items: sortedItems)]
+        }
+
+        var buckets: [String: [FileItem]] = [:]
+        var titles: [String: String] = [:]
+        for item in sortedItems {
+            let group = gridGroup(for: item)
+            buckets[group.id, default: []].append(item)
+            titles[group.id] = group.title
+        }
+
+        return gridGroupOrder.compactMap { id in
+            guard let items = buckets[id], !items.isEmpty else { return nil }
+            return FileGridGroup(id: id, title: titles[id], items: items)
+        }
+    }
+
+    private var gridGroupOrder: [String] {
+        switch fileGrouping {
+        case .none:
+            ["all"]
+        case .type:
+            ["folder", "image", "video", "audio", "document", "other"]
+        case .date:
+            ["today", "yesterday", "week", "month", "earlier", "unknown-date"]
+        case .size:
+            ["folder", "tiny", "small", "medium", "large", "unknown-size"]
+        }
+    }
+
+    private func gridGroup(for item: FileItem) -> (id: String, title: String) {
+        switch fileGrouping {
+        case .none:
+            return ("all", "全部")
+        case .type:
+            if item.isDirectory { return ("folder", "文件夹") }
+            switch PreviewKind.classify(item) {
+            case .image: return ("image", "图片")
+            case .video: return ("video", "视频")
+            case .audio: return ("audio", "音频")
+            case .pdf, .text: return ("document", "文档")
+            case .unsupported: return ("other", "其他文件")
+            }
+        case .date:
+            guard let date = item.times?.modifiedAt else { return ("unknown-date", "时间未知") }
+            let calendar = Calendar.current
+            if calendar.isDateInToday(date) { return ("today", "今天") }
+            if calendar.isDateInYesterday(date) { return ("yesterday", "昨天") }
+            if let week = calendar.dateInterval(of: .weekOfYear, for: Date()), week.contains(date) {
+                return ("week", "本周")
+            }
+            if let month = calendar.dateInterval(of: .month, for: Date()), month.contains(date) {
+                return ("month", "本月")
+            }
+            return ("earlier", "更早")
+        case .size:
+            if item.isDirectory { return ("folder", "文件夹") }
+            guard let size = item.sizeBytes else { return ("unknown-size", "大小未知") }
+            if size < 10 * 1_024 * 1_024 { return ("tiny", "小于 10 MB") }
+            if size < 100 * 1_024 * 1_024 { return ("small", "10 MB – 100 MB") }
+            if size < 1_024 * 1_024 * 1_024 { return ("medium", "100 MB – 1 GB") }
+            return ("large", "1 GB 以上")
+        }
+    }
+
+    private func handleInternalDrop(_ ids: [String], onto destination: FileItem) -> Bool {
+        defer { dropTargetItemID = nil }
+        guard canCreateItems,
+              destination.isDirectory,
+              let draggedID = ids.first,
+              let draggedItem = model.filteredItems.first(where: { $0.id == draggedID }) else {
+            return false
+        }
+        let targets = model.selection.contains(draggedID) && !model.selectedItems.isEmpty
+            ? model.selectedItems
+            : [draggedItem]
+        model.moveByDragging(targets, to: destination)
+        return true
     }
 
     private var fileTable: some View {
         Table(sortedItems, selection: $model.selection, sortOrder: $sortOrder) {
             TableColumn("名称", value: \.name) { item in
-                HStack(spacing: 8) {
-                    FileIcon(item: item)
-                    Text(item.name)
-                        .lineLimit(1)
+                hoverableTableCell(item) {
+                    HStack(spacing: 8) {
+                        FileIcon(item: item)
+                        Text(item.name)
+                            .lineLimit(1)
+                    }
+                    .contentShape(Rectangle())
+                    .onDrag {
+                        selectIfUnselected(item)
+                        return NSItemProvider(object: item.id as NSString)
+                    } preview: {
+                        Label(item.name, systemImage: item.isDirectory ? "folder.fill" : "doc.fill")
+                            .padding(8)
+                    }
                 }
-                .contentShape(Rectangle())
             }
             .width(min: 220, ideal: 320)
 
             TableColumn("大小", value: \.sizeForSort) { item in
-                Text(item.isDirectory ? "—" : ByteCountFormatter.string(fromByteCount: item.sizeBytes ?? 0, countStyle: .file))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                hoverableTableCell(item) {
+                    Text(item.isDirectory ? "—" : item.sizeBytes.map {
+                        ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)
+                    } ?? "—")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
             }
             .width(min: 80, ideal: 100)
 
             TableColumn("类型", value: \.fileTypeDisplay) { item in
-                Text(item.fileTypeDisplay)
-                    .foregroundStyle(.secondary)
+                hoverableTableCell(item) {
+                    Text(item.fileTypeDisplay)
+                        .foregroundStyle(.secondary)
+                }
             }
             .width(min: 80, ideal: 100)
 
             TableColumn("修改日期", value: \.modifiedTimeForSort) { item in
-                if let date = item.times?.modifiedAt {
-                    Text(date, format: .dateTime.year().month().day().hour().minute())
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("—").foregroundStyle(.tertiary)
+                hoverableTableCell(item) {
+                    Group {
+                        if let date = item.times?.modifiedAt {
+                            Text(date, format: .dateTime.year().month().day().hour().minute())
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("—").foregroundStyle(.tertiary)
+                        }
+                    }
                 }
             }
             .width(min: 130, ideal: 160)
 
             TableColumn("所有者", value: \.ownerForSort) { item in
-                Text(item.owner ?? "—")
-                    .foregroundStyle(.secondary)
+                hoverableTableCell(item) {
+                    Text(item.owner ?? "—")
+                        .foregroundStyle(.secondary)
+                }
             }
             .width(min: 80, ideal: 100)
         }
-        .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .tableStyle(.inset(alternatesRowBackgrounds: false))
         .accessibilityLabel("\(model.currentPath) 文件列表")
+        .background {
+            TableDoubleClickHandler(items: sortedItems) { itemID in
+                guard let item = sortedItems.first(where: { $0.id == itemID }) else { return }
+                Task { await model.open(item) }
+            }
+        }
         .overlay {
             BlankTableContextMenuArea(
                 canPaste: hasFileClipboard && canCreateItems,
@@ -844,13 +1910,217 @@ private struct FileBrowserView: View {
                 blankAreaContextMenu
             }
         }
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded {
-                if let item = model.selectedItem {
-                    Task { await model.open(item) }
+    }
+
+    private func hoverableTableCell<Content: View>(
+        _ item: FileItem,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background {
+                if dropTargetItemID == item.id {
+                    Color.accentColor.opacity(0.20)
+                } else if hoveredItemID == item.id, !model.selection.contains(item.id) {
+                    Color.accentColor.opacity(0.10)
                 }
             }
-        )
+            .overlay {
+                if dropTargetItemID == item.id {
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.accentColor.opacity(0.85), lineWidth: 2)
+                        .padding(.vertical, 1)
+                }
+            }
+            .dropDestination(for: String.self) { ids, _ in
+                handleInternalDrop(ids, onto: item)
+            } isTargeted: { isTargeted in
+                updateDropTarget(item, isTargeted: isTargeted)
+            }
+            .onHover { isHovered in
+                if isHovered {
+                    hoveredItemID = item.id
+                } else if hoveredItemID == item.id {
+                    hoveredItemID = nil
+                }
+            }
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.15),
+                value: hoveredItemID == item.id
+            )
+    }
+}
+
+private struct FileGridFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [FileItem.ID: CGRect] = [:]
+
+    static func reduce(value: inout [FileItem.ID: CGRect], nextValue: () -> [FileItem.ID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+private enum MacFileShortcut {
+    case preview, rename, open, up, selectAll, copy, cut, paste, info, delete, undo
+}
+
+private struct FileKeyboardShortcutHandler: NSViewRepresentable {
+    let onAction: (MacFileShortcut) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onAction: onAction)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.attach(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onAction = onAction
+        context.coordinator.attach(to: nsView)
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var onAction: (MacFileShortcut) -> Void
+        private weak var hostView: NSView?
+        private var monitor: Any?
+
+        init(onAction: @escaping (MacFileShortcut) -> Void) {
+            self.onAction = onAction
+        }
+
+        func attach(to view: NSView) {
+            hostView = view
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { @MainActor [weak self] event in
+                guard let self,
+                      !event.isARepeat,
+                      event.window === self.hostView?.window,
+                      !self.isEditingText(in: event.window) else {
+                    return event
+                }
+                let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+                let action: MacFileShortcut?
+                if modifiers.isEmpty {
+                    switch event.keyCode {
+                    case 49: action = .preview // 空格
+                    case 36, 76: action = .rename // Return 与数字键盘 Enter
+                    default: action = nil
+                    }
+                } else if modifiers == .command {
+                    switch event.keyCode {
+                    case 0: action = .selectAll // ⌘A
+                    case 6: action = .undo // ⌘Z
+                    case 7: action = .cut // ⌘X
+                    case 8: action = .copy // ⌘C
+                    case 9: action = .paste // ⌘V
+                    case 34: action = .info // ⌘I
+                    case 51: action = .delete // ⌘Delete
+                    case 125: action = .open // ⌘↓
+                    case 126: action = .up // ⌘↑
+                    default: action = nil
+                    }
+                } else {
+                    action = nil
+                }
+                guard let action else { return event }
+                self.onAction(action)
+                return nil
+            }
+        }
+
+        func detach() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        private func isEditingText(in window: NSWindow?) -> Bool {
+            window?.firstResponder is NSTextView
+        }
+    }
+}
+
+private struct TableDoubleClickHandler: NSViewRepresentable {
+    let items: [FileItem]
+    let onOpen: (FileItem.ID) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.attach(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.items = items.map(\.id)
+        context.coordinator.onOpen = onOpen
+        context.coordinator.attach(to: nsView)
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var items: [FileItem.ID] = []
+        var onOpen: (FileItem.ID) -> Void = { _ in }
+        private weak var hostView: NSView?
+        private var monitor: Any?
+
+        func attach(to view: NSView) {
+            hostView = view
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { @MainActor [weak self] event in
+                    guard let self,
+                          event.clickCount == 2,
+                          event.window === self.hostView?.window,
+                          let table = self.tableView(at: event.locationInWindow, in: event.window) else {
+                        return event
+                    }
+                    let row = table.row(at: table.convert(event.locationInWindow, from: nil))
+                    guard self.items.indices.contains(row) else { return event }
+                    self.onOpen(self.items[row])
+                    return event
+            }
+        }
+
+        func detach() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+            monitor = nil
+        }
+
+        private func tableView(at point: NSPoint, in window: NSWindow?) -> NSTableView? {
+            guard let contentView = window?.contentView else { return nil }
+            return findTable(in: contentView, point: point)
+        }
+
+        private func findTable(in view: NSView, point: NSPoint) -> NSTableView? {
+            if let table = view as? NSTableView {
+                let localPoint = table.convert(point, from: nil)
+                if table.visibleRect.contains(localPoint), table.row(at: localPoint) >= 0 {
+                    return table
+                }
+            }
+            for subview in view.subviews.reversed() {
+                if let table = findTable(in: subview, point: point) {
+                    return table
+                }
+            }
+            return nil
+        }
     }
 }
 
@@ -962,6 +2232,183 @@ private final class BlankTableContextNSView: NSView {
             }
         }
         return nil
+    }
+}
+
+private struct ArchiveCreationView: View {
+    let targets: [FileItem]
+    let onCreate: (String, ArchiveFormat, ArchiveCompressionLevel, String?) -> Void
+    let onCancel: () -> Void
+
+    @State private var archiveName: String
+    @State private var format: ArchiveFormat = .zip
+    @State private var level: ArchiveCompressionLevel = .moderate
+    @State private var password = ""
+    @State private var showsPassword = false
+
+    init(
+        targets: [FileItem],
+        onCreate: @escaping (String, ArchiveFormat, ArchiveCompressionLevel, String?) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.targets = targets
+        self.onCreate = onCreate
+        self.onCancel = onCancel
+        let baseName = targets.count == 1 ? targets[0].name : "压缩项目"
+        _archiveName = State(initialValue: "\(baseName).zip")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("创建压缩包", systemImage: "archivebox.fill")
+                .font(.title2.weight(.semibold))
+            Text(targets.count == 1 ? "压缩“\(targets[0].name)”" : "压缩所选的 \(targets.count) 个项目")
+                .foregroundStyle(.secondary)
+            Form {
+                TextField("压缩包名称", text: $archiveName)
+                Picker("格式", selection: $format) {
+                    Text("ZIP（兼容性更好）").tag(ArchiveFormat.zip)
+                    Text("7z（通常更节省空间）").tag(ArchiveFormat.sevenZip)
+                }
+                .onChange(of: format) { _, newFormat in
+                    let desired = newFormat == .zip ? "zip" : "7z"
+                    let current = (archiveName as NSString).pathExtension
+                    if !current.isEmpty {
+                        archiveName = (archiveName as NSString).deletingPathExtension + "." + desired
+                    }
+                }
+                Picker("压缩程度", selection: $level) {
+                    Text("均衡（推荐）").tag(ArchiveCompressionLevel.moderate)
+                    Text("仅打包，不压缩").tag(ArchiveCompressionLevel.store)
+                    Text("更快完成").tag(ArchiveCompressionLevel.fastest)
+                    Text("尽量节省空间").tag(ArchiveCompressionLevel.best)
+                }
+                HStack {
+                    Group {
+                        if showsPassword {
+                            TextField("密码（可选）", text: $password)
+                        } else {
+                            SecureField("密码（可选）", text: $password)
+                        }
+                    }
+                    Button(showsPassword ? "隐藏" : "显示") { showsPassword.toggle() }
+                        .buttonStyle(.borderless)
+                }
+            }
+            Text("压缩过程由 NAS 完成，关闭此窗口后可在传输中心查看进度。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel, action: onCancel)
+                Button("开始压缩") {
+                    onCreate(archiveName, format, level, password.isEmpty ? nil : password)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(archiveName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 500)
+    }
+}
+
+private struct ArchiveExtractionView: View {
+    let item: FileItem
+    let onExtract: (Bool, Bool, Bool) -> Void
+    let onCancel: () -> Void
+
+    @State private var createSubfolder = true
+    @State private var keepDirectoryStructure = true
+    @State private var overwrite = false
+    @State private var confirmsOverwrite = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("解压缩", systemImage: "archivebox.fill")
+                .font(.title2.weight(.semibold))
+            Text("将“\(item.name)”解压到当前文件夹")
+                .foregroundStyle(.secondary)
+            Form {
+                Toggle("创建同名文件夹", isOn: $createSubfolder)
+                Toggle("保留压缩包内的文件夹结构", isOn: $keepDirectoryStructure)
+                Toggle("替换同名文件", isOn: $overwrite)
+                if overwrite {
+                    Label("已有的同名文件可能会被替换。开始前会再次确认。", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            Text("支持 ZIP、7z、RAR、TAR、GZ、BZ2 和 ISO 等常见格式。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel, action: onCancel)
+                Button("开始解压") {
+                    if overwrite {
+                        confirmsOverwrite = true
+                    } else {
+                        startExtraction()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(width: 500)
+        .alert("替换同名文件？", isPresented: $confirmsOverwrite) {
+            Button("取消", role: .cancel) {}
+            Button("替换并继续", role: .destructive, action: startExtraction)
+        } message: {
+            Text("当前文件夹中已有的同名文件可能会被替换，原内容可能无法恢复。")
+        }
+    }
+
+    private func startExtraction() {
+        onExtract(createSubfolder, keepDirectoryStructure, overwrite)
+    }
+}
+
+private struct ArchivePasswordView: View {
+    let archiveName: String
+    let errorMessage: String?
+    let isChecking: Bool
+    let onSubmit: (String) -> Void
+    let onCancel: () -> Void
+    @State private var password = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("需要压缩包密码", systemImage: "lock.fill")
+                .font(.title2.weight(.semibold))
+            Text("“\(archiveName)”已加密，请输入密码后继续解压。")
+                .foregroundStyle(.secondary)
+            SecureField("压缩包密码", text: $password)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { submit() }
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.circle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+            HStack {
+                if isChecking { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("取消", role: .cancel, action: onCancel)
+                Button("继续解压", action: submit)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(password.isEmpty || isChecking)
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
+    }
+
+    private func submit() {
+        guard !password.isEmpty, !isChecking else { return }
+        onSubmit(password)
+        password = ""
     }
 }
 
@@ -1081,7 +2528,7 @@ private struct TransferCenterView: View {
         if baseTasks.contains(where: { $0.kind == .download && !isTaskFinished($0) }) {
             filters.append(.download)
         }
-        if baseTasks.contains(where: { ($0.kind == .copy || $0.kind == .move || $0.kind == .delete || $0.kind == .restore) && !isTaskFinished($0) }) {
+        if baseTasks.contains(where: { ($0.kind == .copy || $0.kind == .move || $0.kind == .delete || $0.kind == .restore || $0.kind == .compress || $0.kind == .extract) && !isTaskFinished($0) }) {
             filters.append(.fileOperation)
         }
         if baseTasks.contains(where: { $0.state == .succeeded }) {
@@ -1112,7 +2559,7 @@ private struct TransferCenterView: View {
         case .download:
             return tasks.filter { $0.kind == .download && !isTaskFinished($0) }
         case .fileOperation:
-            return tasks.filter { ($0.kind == .copy || $0.kind == .move || $0.kind == .delete || $0.kind == .restore) && !isTaskFinished($0) }
+            return tasks.filter { ($0.kind == .copy || $0.kind == .move || $0.kind == .delete || $0.kind == .restore || $0.kind == .compress || $0.kind == .extract) && !isTaskFinished($0) }
         case .completed:
             return tasks.filter { $0.state == .succeeded }
         case .failed:
@@ -1127,7 +2574,7 @@ private struct TransferCenterView: View {
         case .download:
             return baseTasks.filter { $0.kind == .download && !isTaskFinished($0) }.count
         case .fileOperation:
-            return baseTasks.filter { ($0.kind == .copy || $0.kind == .move || $0.kind == .delete || $0.kind == .restore) && !isTaskFinished($0) }.count
+            return baseTasks.filter { ($0.kind == .copy || $0.kind == .move || $0.kind == .delete || $0.kind == .restore || $0.kind == .compress || $0.kind == .extract) && !isTaskFinished($0) }.count
         case .completed:
             return baseTasks.filter { $0.state == .succeeded }.count
         case .failed:
@@ -1400,6 +2847,8 @@ private struct TransferRow: View {
         case .move: "folder.fill.badge.arrow.forward"
         case .delete: "trash.circle.fill"
         case .restore: "arrow.uturn.backward.circle.fill"
+        case .compress: "archivebox.circle.fill"
+        case .extract: "archivebox.fill"
         }
     }
 
@@ -1574,17 +3023,81 @@ private struct SettingsRow: View {
     }
 }
 
+private struct AppStorageSnapshot {
+    let previewCache: Int64
+    let systemCache: Int64
+    let protectedData: Int64
+    var reclaimable: Int64 { previewCache + systemCache }
+    var total: Int64 { reclaimable + protectedData }
+}
+
+private enum AppStorageInspector {
+    static func snapshot() -> AppStorageSnapshot {
+        AppStorageSnapshot(
+            previewCache: size(of: previewDirectory),
+            systemCache: size(of: cacheDirectory),
+            protectedData: size(of: secureDataDirectory)
+        )
+    }
+
+    static func clearReclaimableData() throws {
+        try removeContents(of: previewDirectory, expectedLastComponent: "LanStashPreview")
+        if let bundleID = Bundle.main.bundleIdentifier {
+            try removeContents(of: cacheDirectory, expectedLastComponent: bundleID)
+        }
+        URLCache.shared.removeAllCachedResponses()
+    }
+
+    private static var previewDirectory: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("LanStashPreview", isDirectory: true)
+    }
+
+    private static var cacheDirectory: URL {
+        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        return root.appendingPathComponent(Bundle.main.bundleIdentifier ?? "io.github.qwertyuiop1995.dsmnativeclient", isDirectory: true)
+    }
+
+    private static var secureDataDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("LanStashSecureStore", isDirectory: true)
+    }
+
+    private static func size(of root: URL) -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: []
+        ) else { return 0 }
+        var total: Int64 = 0
+        for case let url as URL in enumerator {
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            if values?.isRegularFile == true { total += Int64(values?.fileSize ?? 0) }
+        }
+        return total
+    }
+
+    private static func removeContents(of directory: URL, expectedLastComponent: String) throws {
+        guard directory.lastPathComponent == expectedLastComponent else { return }
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: directory.path) else { return }
+        for child in try manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+            try manager.removeItem(at: child)
+        }
+    }
+}
+
 private struct SettingsView: View {
     @Bindable var model: WorkspaceModel
     let onRenameNAS: (String) -> String?
-    let onLogout: () async -> Void
     @State private var showsRenamePrompt = false
     @State private var renamedNAS = ""
     @State private var renameError: String?
     @AppStorage("LanStash_DownloadChunkSize") private var chunkSizeSetting = 8
     @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
     @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = false
-    @AppStorage("LanStash_UseKeychainSecureStorage") private var useKeychainSetting = true
+    @State private var storage = AppStorageSnapshot(previewCache: 0, systemCache: 0, protectedData: 0)
+    @State private var confirmsCacheCleanup = false
+    @State private var storageMessage: String?
 
     var body: some View {
         ScrollView {
@@ -1607,7 +3120,6 @@ private struct SettingsView: View {
                             renameError = nil
                             showsRenamePrompt = true
                         }
-                        .disabled(model.isDemo)
                     }
                     if let renameError {
                         Label(renameError, systemImage: "exclamationmark.triangle.fill")
@@ -1619,85 +3131,19 @@ private struct SettingsView: View {
                     Divider().opacity(0.3)
                     SettingsRow(label: "用户名", value: model.profile.usernameHint ?? "未保存")
                     Divider().opacity(0.3)
-                    SettingsRow(label: "连接状态", value: model.isDemo ? "演示模式" : "已安全连接")
-                }
-
-                // 2. 连接安全
-                SettingsSectionCard(
-                    title: "连接安全",
-                    icon: "lock.shield",
-                    iconColor: .green
-                ) {
-                    if let fingerprint = model.profile.pinnedCertificateSHA256 {
-                        SettingsRow(label: "验证方式", value: "已核对并记住此证书")
-                        Divider().opacity(0.3)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("安全指纹 (SHA-256)")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            
-                            Text(fingerprint)
-                                .font(.system(.subheadline, design: .monospaced))
-                                .foregroundStyle(.primary)
-                                .textSelection(.enabled)
-                                .padding(8)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color.secondary.opacity(0.08))
-                                .cornerRadius(6)
-                        }
-                    } else {
-                        SettingsRow(label: "验证方式", value: model.isDemo ? "示例不连接网络" : "由 macOS 系统自动验证")
-                    }
-                    
-                    Divider().opacity(0.3)
-                    
-                    Toggle(isOn: $useKeychainSetting) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("系统安全钥匙串 (Keychain)")
-                                .font(.body.weight(.medium))
-                            Text("默认使用 Keychain 保护账号密码。在频繁开发测试或重新签名更新时，如果受系统输入密码弹窗的频繁打扰，建议关掉此选项，将自动转为无感知的本地沙盒 AES-GCM 安全加密存储。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .toggleStyle(.switch)
-                }
-
-                // 3. 文件恢复
-                SettingsSectionCard(
-                    title: "回收站恢复",
-                    icon: "arrow.triangle.2.circlepath.camera",
-                    iconColor: .purple
-                ) {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: model.allowsVerifiedRestore ? "checkmark.circle.fill" : "info.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(model.allowsVerifiedRestore ? .green : .orange)
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(model.allowsVerifiedRestore ? "已开启完全恢复" : "只读浏览模式")
-                                .font(.body.weight(.medium))
-                            Text(model.allowsVerifiedRestore
-                                    ? "可以将回收站的文件直接还原到它们被删除前的位置；如果有同名冲突，岚仓将不会覆盖已有文件。"
-                                    : "当前只能查看和下载回收站内的文件，暂不支持直接将文件原路还原。")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
+                    SettingsRow(label: "连接状态", value: "已安全连接")
                 }
 
                 // 4. 功能模块管理
                 SettingsSectionCard(
-                    title: "功能模块管理",
+                    title: "功能",
                     icon: "square.grid.3x3.fill",
                     iconColor: .blue
                 ) {
                     VStack(alignment: .leading, spacing: 14) {
                         Toggle(isOn: $isFileModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("文件管理 (File Station)")
+                                Text("文件管理")
                                     .font(.body.weight(.medium))
                                 Text("在侧边栏显示共享文件夹、回收站入口，支持文件浏览、下载和管理。")
                                     .font(.caption)
@@ -1711,7 +3157,7 @@ private struct SettingsView: View {
                         Toggle(isOn: $isPhotosModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 6) {
-                                    Text("照片管理 (Synology Photos)")
+                                    Text("照片管理")
                                         .font(.body.weight(.medium))
                                     Text("规划中")
                                         .font(.system(size: 10, weight: .bold))
@@ -1738,21 +3184,21 @@ private struct SettingsView: View {
                 ) {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("分片缓存大小")
+                            Text("下载性能")
                                 .font(.body)
                             Spacer()
                             Picker("", selection: $chunkSizeSetting) {
-                                Text("4 MB (弱网保底)").tag(4)
-                                Text("8 MB (默认值)").tag(8)
-                                Text("16 MB (推荐)").tag(16)
-                                Text("32 MB (千兆高速)").tag(32)
-                                Text("64 MB (极速万兆)").tag(64)
+                                Text("网络不稳定（4 MB）").tag(4)
+                                Text("标准（8 MB）").tag(8)
+                                Text("较快网络（16 MB）").tag(16)
+                                Text("高速网络（32 MB）").tag(32)
+                                Text("超高速网络（64 MB）").tag(64)
                             }
                             .pickerStyle(.menu)
                             .frame(width: 155)
                         }
                         
-                        Text("调节断点续传的分片缓存大小。在高速局域网下，调大缓存能显著减少 HTTP 请求往返开销并提升吞吐量；在弱网或 QuickConnect 外网中继时，调小缓存能减少因超时或重连而导致的重传流量开销。")
+                        Text("通常保持“标准”即可。如果下载经常中断，可以选择“网络不稳定”；网络稳定且速度较快时，可以选择更高的档位。")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(nil)
@@ -1760,30 +3206,49 @@ private struct SettingsView: View {
                     }
                 }
 
-                // 5. 操作区域
-                HStack {
-                    Spacer()
-                    Button {
-                        Task { await onLogout() }
-                    } label: {
-                        HStack {
-                            Image(systemName: "power")
-                            Text("退出登录")
+                SettingsSectionCard(
+                    title: "存储管理",
+                    icon: "internaldrive.fill",
+                    iconColor: .teal
+                ) {
+                    SettingsRow(label: "本地数据与缓存", value: ByteCountFormatter.string(fromByteCount: storage.total, countStyle: .file))
+                    Divider().opacity(0.3)
+                    SettingsRow(label: "可清理缓存", value: ByteCountFormatter.string(fromByteCount: storage.reclaimable, countStyle: .file))
+                    Divider().opacity(0.3)
+                    SettingsRow(label: "登录与设置数据", value: ByteCountFormatter.string(fromByteCount: storage.protectedData, countStyle: .file))
+                    Text("清理缓存不会删除登录信息、设置、任务记录或 NAS 中的文件。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        if let storageMessage {
+                            Text(storageMessage).font(.caption).foregroundStyle(.secondary)
                         }
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(Color.red.gradient)
-                        .cornerRadius(8)
+                        Spacer()
+                        Button("重新计算") { storage = AppStorageInspector.snapshot() }
+                        Button("清理缓存…") { confirmsCacheCleanup = true }
+                            .disabled(storage.reclaimable == 0)
                     }
-                    .buttonStyle(.plain)
                 }
-                .padding(.top, 8)
             }
             .padding(32)
             .frame(maxWidth: 680, alignment: .leading)
             .frame(maxWidth: .infinity)
+        }
+        .task { storage = AppStorageInspector.snapshot() }
+        .alert("清理应用缓存？", isPresented: $confirmsCacheCleanup) {
+            Button("取消", role: .cancel) {}
+            Button("清理", role: .destructive) {
+                model.dismissPreview()
+                do {
+                    try AppStorageInspector.clearReclaimableData()
+                    storage = AppStorageInspector.snapshot()
+                    storageMessage = "缓存已清理。"
+                } catch {
+                    storageMessage = "部分缓存未能清理，请稍后重试。"
+                }
+            }
+        } message: {
+            Text("将删除可重新生成的预览临时文件和系统缓存，不影响应用正常使用。")
         }
         .alert("修改 NAS 名称", isPresented: $showsRenamePrompt) {
             TextField("设备名称", text: $renamedNAS)
@@ -1818,24 +3283,29 @@ extension FileItem {
 }
 
 struct FileGridCell: View {
+    @Bindable var model: WorkspaceModel
     let item: FileItem
     let isSelected: Bool
+    let isDropTarget: Bool
     let onSelect: () -> Void
     let onOpen: () -> Void
     let contextMenuContent: AnyView
+    @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 8) {
-            FileLargeIcon(item: item)
-                .frame(width: 48, height: 48)
+        VStack(spacing: 6) {
+            FileGridThumbnail(model: model, item: item)
+                .frame(width: 64, height: 48)
             
             Text(item.name)
                 .font(.subheadline)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
-                .frame(height: 36, alignment: .top)
+                .frame(height: 30, alignment: .top)
         }
         .padding(8)
+        .frame(width: 104, height: 104)
         .contentShape(Rectangle())
         .background(
             RightClickDetector {
@@ -1844,12 +3314,27 @@ struct FileGridCell: View {
         )
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.blue.opacity(0.15) : Color.clear)
+                .fill(
+                    isDropTarget
+                        ? Color.accentColor.opacity(0.22)
+                        : isSelected
+                        ? Color.accentColor.opacity(0.15)
+                        : (isHovered ? Color.accentColor.opacity(0.10) : Color.clear)
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
+                .stroke(
+                    isDropTarget
+                        ? Color.accentColor.opacity(0.90)
+                        : isSelected
+                        ? Color.accentColor.opacity(0.35)
+                        : (isHovered ? Color.accentColor.opacity(0.18) : Color.clear),
+                    lineWidth: isDropTarget ? 2 : 1
+                )
         )
+        .onHover { isHovered = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isHovered)
         .onTapGesture {
             onSelect()
         }
@@ -1861,6 +3346,47 @@ struct FileGridCell: View {
         .contextMenu {
             contextMenuContent
         }
+    }
+}
+
+private struct FileGridThumbnail: View {
+    @Bindable var model: WorkspaceModel
+    let item: FileItem
+    @State private var thumbnailData: Data?
+
+    var body: some View {
+        Group {
+            if let thumbnailData, let image = NSImage(data: thumbnailData) {
+                ZStack {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.medium)
+                        .scaledToFill()
+                        .frame(width: 64, height: 48)
+                        .clipped()
+
+                    if PreviewKind.classify(item) == .video {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 20))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .black.opacity(0.48))
+                            .shadow(radius: 2)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 1)
+                }
+            } else {
+                FileLargeIcon(item: item)
+                    .frame(width: 44, height: 44)
+            }
+        }
+        .task(id: item.id) {
+            thumbnailData = await model.thumbnailData(for: item)
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -1909,7 +3435,11 @@ struct FileLargeIcon: View {
 
 struct FilePropertiesView: View {
     let item: FileItem
+    let model: WorkspaceModel
     @Environment(\.dismiss) private var dismiss
+    @State private var folderStatistics: FolderStatistics?
+    @State private var isCalculatingFolderSize = false
+    @State private var folderSizeError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1956,7 +3486,32 @@ struct FilePropertiesView: View {
                     ) {
                         SettingsRow(label: "种类", value: item.fileTypeDisplay)
                         Divider().opacity(0.3)
-                        SettingsRow(label: "大小", value: formatBytesDetailed(item.sizeBytes))
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("大小")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            if isCalculatingFolderSize {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("正在计算…")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text(sizeDisplayValue)
+                                    .monospacedDigit()
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+                        if let folderStatistics {
+                            Divider().opacity(0.3)
+                            SettingsRow(
+                                label: "内容",
+                                value: "\(folderStatistics.fileCount) 个文件，\(folderStatistics.folderCount) 个文件夹"
+                            )
+                        } else if let folderSizeError {
+                            Text(folderSizeError)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
                         Divider().opacity(0.3)
                         SettingsRow(label: "位置", value: item.path, isMonospaced: true)
                     }
@@ -1995,15 +3550,39 @@ struct FilePropertiesView: View {
             }
         }
         .frame(width: 420, height: 500)
+        .task(id: item.id) {
+            guard item.isDirectory else { return }
+            isCalculatingFolderSize = true
+            folderSizeError = nil
+            do {
+                folderStatistics = try await model.folderStatistics(for: item)
+            } catch is CancellationError {
+                return
+            } catch {
+                folderSizeError = "暂时无法计算大小，请检查连接后重新打开详情。"
+            }
+            isCalculatingFolderSize = false
+        }
     }
 
-    private func formatBytesDetailed(_ bytes: Int64?) -> String {
-        guard let bytes = bytes, item.isDirectory == false else { return "—" }
+    private var sizeDisplayValue: String {
+        if item.isDirectory {
+            guard let statistics = folderStatistics else { return "—" }
+            return formatBytesDetailed(statistics.sizeBytes, isComplete: statistics.isComplete)
+        }
+        if let size = item.sizeBytes {
+            return formatBytesDetailed(size, isComplete: true)
+        }
+        return "—"
+    }
+
+    private func formatBytesDetailed(_ bytes: Int64, isComplete: Bool) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         let bytesString = formatter.string(from: NSNumber(value: bytes)) ?? "\(bytes)"
         let readableString = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
-        return "\(bytesString) 字节 (\(readableString))"
+        let prefix = isComplete ? "" : "至少 "
+        return "\(prefix)\(bytesString) 字节 (\(readableString))"
     }
 
     private func formatDateString(_ date: Date?) -> String {

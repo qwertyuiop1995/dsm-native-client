@@ -4,6 +4,34 @@ import Foundation
 import XCTest
 @testable import DsmMacExecutable
 
+final class TextDocumentFormatterTests: XCTestCase {
+    func testJSON整理会添加缩进并保留中文() throws {
+        let formatted = try TextDocumentFormatter.format(
+            #"{"name":"岚仓","items":[1,2]}"#,
+            fileExtension: "json"
+        )
+
+        XCTAssertTrue(formatted.contains("\n  \"items\""))
+        XCTAssertTrue(formatted.contains("\"岚仓\""))
+        XCTAssertTrue(formatted.hasSuffix("\n"))
+    }
+
+    func test错误JSON不会生成可能损坏原文件的内容() {
+        XCTAssertThrowsError(
+            try TextDocumentFormatter.format("{\"name\":}", fileExtension: "json")
+        )
+    }
+
+    func testJavaScript整理只调整安全空白() throws {
+        let source = "function greet() {\nconsole.log('岚仓 { test }');\nif (true) {\nreturn 1;\n}\n}"
+        let formatted = try TextDocumentFormatter.format(source, fileExtension: "js")
+
+        XCTAssertTrue(formatted.contains("    console.log('岚仓 { test }');"))
+        XCTAssertTrue(formatted.contains("        return 1;"))
+        XCTAssertTrue(formatted.hasSuffix("\n"))
+    }
+}
+
 private struct CertificateReviewAuthRepository: AuthRepository {
     private enum StubError: Error {
         case unexpectedCall
@@ -92,6 +120,7 @@ private actor RecordingAuthRepository: AuthRepository {
     private(set) var loginPort: Int?
     private(set) var clearSessionCallCount = 0
     private(set) var logoutCallCount = 0
+    private(set) var loginCallCount = 0
     private let failingHosts: Set<String>
 
     init(failingHosts: Set<String> = []) {
@@ -118,6 +147,7 @@ private actor RecordingAuthRepository: AuthRepository {
         password: String,
         otpCode: String?
     ) async throws -> AuthSession {
+        loginCallCount += 1
         loginHost = profile.host
         loginPort = profile.port
         return AuthSession(sid: "test-session", synoToken: nil, did: nil, isPortalPort: false)
@@ -203,6 +233,67 @@ final class ConnectionFlowTests: XCTestCase {
         let stored = try await passwordStore.load(for: profileID)
         XCTAssertEqual(stored, "local-test-password")
         XCTAssertEqual(model.password, "local-test-password")
+    }
+
+    @MainActor
+    func test自动登录选项持久化并在下次启动使用保存密码连接() async throws {
+        let suiteName = "ConnectionFlowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let profileStore = NasProfileStore(defaults: defaults)
+        let profile = try NasProfile(
+            displayName: "家庭 NAS",
+            host: "home-nas.local",
+            port: 5_001,
+            usernameHint: "user"
+        )
+        try profileStore.save([profile])
+        profileStore.setAutoLoginEnabled(true, for: profile.id)
+        let passwordStore = MemoryPasswordStore()
+        try await passwordStore.save("local-test-password", for: profile.id)
+        let authRepository = RecordingAuthRepository()
+        let model = AppModel(
+            profileStore: profileStore,
+            authRepository: authRepository,
+            passwordStore: passwordStore
+        )
+
+        model.load()
+        for _ in 0..<100 {
+            if model.workspace != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        XCTAssertNotNil(model.workspace)
+        XCTAssertTrue(model.autoLoginEnabled)
+        XCTAssertTrue(model.rememberPassword)
+        let loginCallCount = await authRepository.loginCallCount
+        XCTAssertEqual(loginCallCount, 1)
+    }
+
+    @MainActor
+    func test关闭记住密码会同时关闭自动登录() async throws {
+        let suiteName = "ConnectionFlowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let profileStore = NasProfileStore(defaults: defaults)
+        let model = AppModel(
+            profileStore: profileStore,
+            authRepository: RecordingAuthRepository(),
+            passwordStore: MemoryPasswordStore()
+        )
+        model.host = "home-nas.local"
+        model.account = "user"
+        model.password = "local-test-password"
+        model.setAutoLoginEnabled(true)
+        await model.connect()
+        let profileID = try XCTUnwrap(model.selectedProfileID)
+
+        model.setRememberPassword(false)
+
+        XCTAssertFalse(model.rememberPassword)
+        XCTAssertFalse(model.autoLoginEnabled)
+        XCTAssertFalse(profileStore.isAutoLoginEnabled(for: profileID))
     }
 
     @MainActor
@@ -317,6 +408,7 @@ final class ConnectionFlowTests: XCTestCase {
         XCTAssertEqual(loginHost, "192-168-1-20.family-nas.direct.quickconnect.to")
         XCTAssertEqual(model.host, "family-nas")
         XCTAssertEqual(model.workspace?.profile.host, "family-nas")
+        XCTAssertEqual(model.currentConnectionRoute, .local)
     }
 
     @MainActor
@@ -349,6 +441,7 @@ final class ConnectionFlowTests: XCTestCase {
         XCTAssertEqual(discoveredHosts, [localHost, externalHost])
         XCTAssertEqual(loginHost, externalHost)
         XCTAssertNotNil(model.workspace)
+        XCTAssertEqual(model.currentConnectionRoute, .external)
     }
 
     @MainActor
@@ -411,6 +504,7 @@ final class ConnectionFlowTests: XCTestCase {
         XCTAssertEqual(loginHost, relayHost)
         XCTAssertEqual(loginPort, 443)
         XCTAssertNotNil(model.workspace)
+        XCTAssertEqual(model.currentConnectionRoute, .quickConnect)
     }
 
     @MainActor
@@ -443,6 +537,7 @@ final class ConnectionFlowTests: XCTestCase {
         XCTAssertEqual(discoveredHosts, [relayHost])
         XCTAssertEqual(loginHost, relayHost)
         XCTAssertNotNil(model.workspace)
+        XCTAssertEqual(model.currentConnectionRoute, .quickConnect)
     }
 
     @MainActor

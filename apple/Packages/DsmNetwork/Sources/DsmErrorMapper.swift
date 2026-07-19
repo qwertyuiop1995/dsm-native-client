@@ -123,6 +123,20 @@ enum DsmErrorMapper {
             return apiError(.serverBusy, true, "NAS 暂时繁忙，请稍后重试。", code, requestID)
         case 150:
             return apiError(.networkUnavailable, false, "网络环境发生变化，请重新连接。", code, requestID)
+        case 408:
+            return apiError(.notFound, false, "这个文件或文件夹已不存在。", code, requestID)
+        case 1300:
+            return apiError(.unknown, true, "无法创建压缩包，请检查可用空间和文件夹权限后重试。", code, requestID)
+        case 1301:
+            return apiError(.invalidResponse, false, "压缩包名称过长，请缩短名称后重试。", code, requestID)
+        case 1400:
+            return apiError(.unknown, true, "无法解压这个压缩包，请检查可用空间和文件夹权限后重试。", code, requestID)
+        case 1401, 1402:
+            return apiError(.invalidResponse, false, "无法打开这个压缩包，它可能已损坏或格式不受支持。", code, requestID)
+        case 1403:
+            return apiError(.invalidResponse, false, "压缩包密码不正确，请重新输入。", code, requestID)
+        case 1404, 1405:
+            return apiError(.invalidResponse, false, "无法读取压缩包中的内容，请检查文件是否完整。", code, requestID)
         default:
             return apiError(.unknown, false, "NAS 无法完成这次操作，请稍后重试。", code, requestID)
         }

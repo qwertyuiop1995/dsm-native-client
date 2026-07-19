@@ -4,9 +4,17 @@ import Foundation
 import Observation
 
 struct NASFileClipboard {
+    let id = UUID()
     let sourceProfileID: UUID
     let items: [FileItem]
     let movesSource: Bool
+}
+
+struct PasteConflictPrompt {
+    let clipboardID: UUID
+    let destinationProfileID: UUID
+    let destinationPath: String
+    let conflictingNames: [String]
 }
 
 struct CertificatePrompt: Identifiable {
@@ -44,6 +52,7 @@ struct CertificatePrompt: Identifiable {
 final class NasProfileStore {
     private let defaults: UserDefaults
     private let key = "lanstash.nas-profiles.v1"
+    private let autoLoginKeyPrefix = "lanstash.auto-login.v1."
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -60,25 +69,67 @@ final class NasProfileStore {
     func save(_ profiles: [NasProfile]) throws {
         defaults.set(try JSONEncoder().encode(profiles), forKey: key)
     }
+
+    func isAutoLoginEnabled(for profileID: UUID) -> Bool {
+        defaults.bool(forKey: autoLoginKeyPrefix + profileID.uuidString)
+    }
+
+    func setAutoLoginEnabled(_ enabled: Bool, for profileID: UUID) {
+        defaults.set(enabled, forKey: autoLoginKeyPrefix + profileID.uuidString)
+    }
+
+    func removeAutoLoginPreference(for profileID: UUID) {
+        defaults.removeObject(forKey: autoLoginKeyPrefix + profileID.uuidString)
+    }
 }
 
 @MainActor
 @Observable
 final class AppModel {
+    enum ConnectionRoute: Equatable {
+        case local
+        case external
+        case quickConnect
+
+        var title: String {
+            switch self {
+            case .local: "局域网连接"
+            case .external: "外网连接"
+            case .quickConnect: "QuickConnect 连接"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .local: "house.and.flag.fill"
+            case .external: "globe"
+            case .quickConnect: "bolt.horizontal.circle.fill"
+            }
+        }
+    }
+
     private enum CertificateRetryMode {
         case connect
         case restore
     }
 
+    private enum SessionRestoreOutcome: Equatable {
+        case connected
+        case credentialsNeeded
+        case stopped
+    }
+
     private struct DiscoveredConnection {
         let profile: NasProfile
         let capabilities: CapabilitySet
+        let route: ConnectionRoute
     }
 
     private struct ConnectionContext {
         let connectionProfile: NasProfile
         let capabilities: CapabilitySet
         let session: AuthSession
+        let route: ConnectionRoute
     }
 
     var profiles: [NasProfile] = []
@@ -91,13 +142,16 @@ final class AppModel {
     var account = ""
     var password = ""
     var rememberPassword = false
+    var autoLoginEnabled = false
     var otpCode = ""
     var requiresOTP = false
     var isBusy = false
-    var statusMessage = "添加一台 NAS，或先看看示例。"
+    var statusMessage = "添加一台 NAS，然后输入账号和密码连接。"
     var statusIsError = false
     var pendingCertificate: CertificatePrompt?
     var fileClipboard: NASFileClipboard?
+    var pendingPasteConflict: PasteConflictPrompt?
+    var isPreparingPaste = false
 
     private let profileStore: NasProfileStore
     private let authRepository: any AuthRepository
@@ -116,11 +170,16 @@ final class AppModel {
         profiles.compactMap { workspacesByProfileID[$0.id] }
     }
 
+    var currentConnectionRoute: ConnectionRoute? {
+        guard let selectedProfileID else { return nil }
+        return connectionContextsByProfileID[selectedProfileID]?.route
+    }
+
     init(
         profileStore: NasProfileStore = NasProfileStore(),
         authRepository: any AuthRepository = DsmAuthRepository(),
         quickConnectResolver: any QuickConnectResolving = DsmQuickConnectResolver(),
-        passwordStore: any PasswordSecureStoring = KeychainPasswordStore()
+        passwordStore: any PasswordSecureStoring = LocalFileSecureStore()
     ) {
         self.profileStore = profileStore
         self.authRepository = authRepository
@@ -135,7 +194,10 @@ final class AppModel {
         didLoad = true
         profiles = profileStore.load()
         if let first = profiles.first {
-            chooseProfile(first, attemptSessionRestore: true)
+            chooseProfile(
+                first,
+                attemptSessionRestore: profileStore.isAutoLoginEnabled(for: first.id)
+            )
         }
     }
 
@@ -149,6 +211,7 @@ final class AppModel {
         account = ""
         password = ""
         rememberPassword = false
+        autoLoginEnabled = false
         otpCode = ""
         requiresOTP = false
         statusIsError = false
@@ -164,11 +227,32 @@ final class AppModel {
             return
         }
         closeCurrentWorkspace()
-        chooseProfile(profile, attemptSessionRestore: true)
+        chooseProfile(
+            profile,
+            attemptSessionRestore: profileStore.isAutoLoginEnabled(for: profile.id)
+        )
+    }
+
+    func setRememberPassword(_ enabled: Bool) {
+        rememberPassword = enabled
+        if !enabled {
+            setAutoLoginEnabled(false)
+        }
+    }
+
+    func setAutoLoginEnabled(_ enabled: Bool) {
+        autoLoginEnabled = enabled
+        if enabled {
+            rememberPassword = true
+        }
+        if let profileID = selectedProfile?.id {
+            profileStore.setAutoLoginEnabled(enabled, for: profileID)
+        }
     }
 
     func placeOnClipboard(_ items: [FileItem], moveSource: Bool) {
         guard let sourceProfileID = workspace?.profile.id, !items.isEmpty else { return }
+        pendingPasteConflict = nil
         fileClipboard = NASFileClipboard(
             sourceProfileID: sourceProfileID,
             items: items,
@@ -184,21 +268,82 @@ final class AppModel {
         guard let clipboard = fileClipboard,
               let destination = workspace,
               !destination.currentPath.isEmpty,
-              let source = workspacesByProfileID[clipboard.sourceProfileID] else {
+              workspacesByProfileID[clipboard.sourceProfileID] != nil,
+              pendingPasteConflict == nil,
+              !isPreparingPaste else {
             return
         }
+        isPreparingPaste = true
+        destination.statusIsError = false
+        destination.statusMessage = "正在检查目标文件夹…"
+        let destinationPath = destination.currentPath
+        Task { [weak self] in
+            guard let self else { return }
+            defer { isPreparingPaste = false }
+            guard let conflictingNames = await destination.pasteConflictNames(
+                for: clipboard.items,
+                in: destinationPath
+            ) else {
+                return
+            }
+            guard fileClipboard?.id == clipboard.id,
+                  workspace?.profile.id == destination.profile.id,
+                  workspace?.currentPath == destinationPath else {
+                return
+            }
+            if conflictingNames.isEmpty {
+                executePaste(clipboard, into: destination, overwrite: false)
+            } else {
+                destination.statusMessage = "发现同名项目，请选择处理方式。"
+                pendingPasteConflict = PasteConflictPrompt(
+                    clipboardID: clipboard.id,
+                    destinationProfileID: destination.profile.id,
+                    destinationPath: destinationPath,
+                    conflictingNames: conflictingNames
+                )
+            }
+        }
+    }
+
+    func cancelPendingPaste() {
+        pendingPasteConflict = nil
+    }
+
+    func resolvePendingPaste(replaceExisting: Bool) {
+        guard let prompt = pendingPasteConflict else { return }
+        pendingPasteConflict = nil
+        guard let clipboard = fileClipboard,
+              clipboard.id == prompt.clipboardID,
+              let destination = workspace,
+              destination.profile.id == prompt.destinationProfileID,
+              destination.currentPath == prompt.destinationPath else {
+            workspace?.statusIsError = true
+            workspace?.statusMessage = "粘贴位置已经改变，请在目标文件夹中重新选择“粘贴”。"
+            return
+        }
+        executePaste(clipboard, into: destination, overwrite: replaceExisting)
+    }
+
+    private func executePaste(
+        _ clipboard: NASFileClipboard,
+        into destination: WorkspaceModel,
+        overwrite: Bool
+    ) {
+        guard let source = workspacesByProfileID[clipboard.sourceProfileID] else { return }
         if source.profile.id == destination.profile.id {
             destination.enqueueFileOperation(
                 clipboard.items,
                 to: destination.currentPath,
-                moveSource: clipboard.movesSource
+                moveSource: clipboard.movesSource,
+                overwrite: overwrite
             )
         } else {
             destination.enqueueCrossNASOperation(
                 from: source,
                 targets: clipboard.items,
                 to: destination.currentPath,
-                moveSource: clipboard.movesSource
+                moveSource: clipboard.movesSource,
+                overwrite: overwrite
             )
         }
         if clipboard.movesSource {
@@ -224,7 +369,8 @@ final class AppModel {
                 let updatedContext = ConnectionContext(
                     connectionProfile: connectionProfile,
                     capabilities: context.capabilities,
-                    session: context.session
+                    session: context.session,
+                    route: context.route
                 )
                 connectionContextsByProfileID[updated.id] = updatedContext
                 if activeConnectionProfile?.id == updated.id {
@@ -252,6 +398,9 @@ final class AppModel {
         defer { isBusy = false }
 
         do {
+            if autoLoginEnabled {
+                rememberPassword = true
+            }
             let profile = try makeProfile()
             let submittedPassword = password
             selectedProfile = profile
@@ -288,12 +437,18 @@ final class AppModel {
                 passwordStorageFailed = true
                 password = ""
                 rememberPassword = false
+                autoLoginEnabled = false
             }
+            profileStore.setAutoLoginEnabled(
+                autoLoginEnabled && rememberPassword && !passwordStorageFailed,
+                for: updated.id
+            )
             try openWorkspace(
                 profile: updated,
                 connectionProfile: connection.profile,
                 capabilities: connection.capabilities,
-                session: authenticated
+                session: authenticated,
+                route: connection.route
             )
             if passwordStorageFailed {
                 statusMessage = "已连接，但无法在这台 Mac 上保存密码。下次需要重新输入。"
@@ -370,6 +525,7 @@ final class AppModel {
         }
         try? await authRepository.clearSession(for: profile.id)
         try? await passwordStore.remove(for: profile.id)
+        profileStore.removeAutoLoginPreference(for: profile.id)
         workspacesByProfileID[profile.id]?.cancelAllWork()
         workspacesByProfileID[profile.id] = nil
         connectionContextsByProfileID[profile.id] = nil
@@ -378,29 +534,7 @@ final class AppModel {
         newProfile()
     }
 
-    func enterDemo() {
-        do {
-            let profile = try NasProfile(
-                displayName: "岚仓演示 NAS",
-                host: "demo.lanstash.invalid",
-                port: 5001,
-                usernameHint: "demo"
-            )
-            let repository = DemoFileRepository(profileID: profile.id)
-            capabilities = nil
-            session = nil
-            activeConnectionProfile = nil
-            workspace = WorkspaceModel(profile: profile, repository: repository)
-            statusIsError = false
-            statusMessage = "示例已打开。"
-        } catch {
-            statusIsError = true
-            statusMessage = "无法打开示例，请重试。"
-        }
-    }
-
     func logout() async {
-        let wasDemo = workspace?.isDemo == true
         let profile = selectedProfile
         let connectionProfile = activeConnectionProfile
         let discovered = capabilities
@@ -415,14 +549,12 @@ final class AppModel {
         activeConnectionProfile = nil
         password = ""
         rememberPassword = false
+        if let profile {
+            profileStore.setAutoLoginEnabled(false, for: profile.id)
+        }
+        autoLoginEnabled = false
         otpCode = ""
         requiresOTP = false
-
-        if wasDemo {
-            statusIsError = false
-            statusMessage = "已关闭示例。"
-            return
-        }
 
         guard let profile, let discovered, let authenticated else {
             statusMessage = "已退出。"
@@ -455,6 +587,10 @@ final class AppModel {
         capabilities = nil
         password = ""
         rememberPassword = false
+        if let profile {
+            profileStore.setAutoLoginEnabled(false, for: profile.id)
+        }
+        autoLoginEnabled = false
         otpCode = ""
         requiresOTP = false
 
@@ -476,6 +612,7 @@ final class AppModel {
         account = profile.usernameHint ?? ""
         password = ""
         rememberPassword = false
+        autoLoginEnabled = profileStore.isAutoLoginEnabled(for: profile.id)
         otpCode = ""
         requiresOTP = false
         statusIsError = false
@@ -498,7 +635,16 @@ final class AppModel {
         }
         Task {
             await loadSavedPassword(for: profile)
-            await restoreSession(for: profile)
+            guard selectedProfile?.id == profile.id, autoLoginEnabled, !password.isEmpty else {
+                return
+            }
+            let outcome = await restoreSession(for: profile)
+            if outcome == .credentialsNeeded,
+               selectedProfile?.id == profile.id,
+               autoLoginEnabled,
+               !password.isEmpty {
+                await connect()
+            }
         }
     }
 
@@ -518,18 +664,25 @@ final class AppModel {
             }
             password = storedPassword ?? ""
             rememberPassword = storedPassword != nil
+            if storedPassword == nil, autoLoginEnabled {
+                setAutoLoginEnabled(false)
+            }
         } catch {
             guard selectedProfile?.id == profile.id else {
                 return
             }
             password = ""
             rememberPassword = false
+            if autoLoginEnabled {
+                setAutoLoginEnabled(false)
+            }
         }
     }
 
-    private func restoreSession(for profile: NasProfile) async {
+    @discardableResult
+    private func restoreSession(for profile: NasProfile) async -> SessionRestoreOutcome {
         guard !isBusy else {
-            return
+            return .stopped
         }
         isBusy = true
         statusMessage = "正在恢复上次连接…"
@@ -537,7 +690,7 @@ final class AppModel {
         do {
             guard let restored = try await authRepository.restoreSession(for: profile.id) else {
                 statusMessage = "请输入密码以连接。"
-                return
+                return .credentialsNeeded
             }
             let connection = try await discoverConnection(for: profile)
             session = restored
@@ -551,15 +704,17 @@ final class AppModel {
                 try? await authRepository.clearSession(for: profile.id)
                 statusIsError = true
                 statusMessage = "上次登录已失效，请重新输入密码。"
-                return
+                return .credentialsNeeded
             }
 
             try openWorkspace(
                 profile: profile,
                 connectionProfile: connection.profile,
                 capabilities: connection.capabilities,
-                session: restored
+                session: restored,
+                route: connection.route
             )
+            return .connected
         } catch let error as DsmCertificateTrustError {
             certificateRetryMode = .restore
             pendingCertificate = CertificatePrompt(
@@ -568,16 +723,20 @@ final class AppModel {
             )
             statusIsError = true
             statusMessage = error.localizedDescription
+            return .stopped
         } catch let error as QuickConnectResolutionError {
             statusIsError = true
             statusMessage = error.localizedDescription
+            return .stopped
         } catch let error as AppError where error.isRetryable || error.category == .tlsUntrusted {
             statusIsError = true
             statusMessage = error.safeUserMessage
+            return .stopped
         } catch {
             statusIsError = true
             statusMessage = "上次登录已失效，请重新输入密码。"
             try? await authRepository.clearSession(for: profile.id)
+            return .credentialsNeeded
         }
     }
 
@@ -603,7 +762,8 @@ final class AppModel {
         profile: NasProfile,
         connectionProfile: NasProfile,
         capabilities: CapabilitySet,
-        session: AuthSession
+        session: AuthSession,
+        route: ConnectionRoute
     ) throws {
         let repository = try DsmFileRepository(
             profile: connectionProfile,
@@ -616,7 +776,8 @@ final class AppModel {
         connectionContextsByProfileID[profile.id] = ConnectionContext(
             connectionProfile: connectionProfile,
             capabilities: capabilities,
-            session: session
+            session: session,
+            route: route
         )
         workspace = openedWorkspace
         statusIsError = false
@@ -658,7 +819,11 @@ final class AppModel {
         let parsedAddress = try NasAddressParser.parse(profile.host, defaultPort: profile.port)
         guard parsedAddress.kind == .quickConnect else {
             let discovered = try await authRepository.discover(profile: profile)
-            return DiscoveredConnection(profile: profile, capabilities: discovered)
+            return DiscoveredConnection(
+                profile: profile,
+                capabilities: discovered,
+                route: Self.isLocalHost(profile.host) ? .local : .external
+            )
         }
 
         statusMessage = "正在通过 QuickConnect 查找 NAS…"
@@ -679,7 +844,11 @@ final class AppModel {
             let connectionProfile = try profile.updating(host: endpoint.host, port: endpointPort)
             do {
                 let discovered = try await authRepository.discover(profile: connectionProfile)
-                return DiscoveredConnection(profile: connectionProfile, capabilities: discovered)
+                return DiscoveredConnection(
+                    profile: connectionProfile,
+                    capabilities: discovered,
+                    route: endpoint.kind == .local ? .local : .external
+                )
             } catch is CancellationError {
                 throw CancellationError()
             } catch let error as DsmCertificateTrustError {
@@ -699,7 +868,11 @@ final class AppModel {
                 clearCertificatePin: true
             )
             let discovered = try await authRepository.discover(profile: relayProfile)
-            return DiscoveredConnection(profile: relayProfile, capabilities: discovered)
+            return DiscoveredConnection(
+                profile: relayProfile,
+                capabilities: discovered,
+                route: .quickConnect
+            )
         } catch let error as QuickConnectResolutionError {
             throw error
         } catch is CancellationError {
@@ -710,6 +883,25 @@ final class AppModel {
             }
             throw error
         }
+    }
+
+    private static func isLocalHost(_ host: String) -> Bool {
+        let value = host.lowercased()
+        if value == "localhost" || value == "::1" || value.hasSuffix(".local") || !value.contains(".") {
+            return true
+        }
+        if value.hasPrefix("fc") || value.hasPrefix("fd") || value.hasPrefix("fe80:") {
+            return true
+        }
+        let parts = value.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else {
+            return false
+        }
+        return parts[0] == 10
+            || parts[0] == 127
+            || (parts[0] == 172 && (16...31).contains(parts[1]))
+            || (parts[0] == 192 && parts[1] == 168)
+            || (parts[0] == 169 && parts[1] == 254)
     }
 
     private func upsertProfile(_ profile: NasProfile) {

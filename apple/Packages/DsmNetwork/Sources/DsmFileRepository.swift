@@ -49,6 +49,7 @@ private struct FileAdditionalPayload: Decodable, Sendable {
     let time: FileTimePayload?
     let owner: FileOwnerPayload?
     let perm: FilePermissionPayload?
+    let mountPointType: String?
 
     private enum CodingKeys: String, CodingKey {
         case size
@@ -56,6 +57,7 @@ private struct FileAdditionalPayload: Decodable, Sendable {
         case time
         case owner
         case perm
+        case mountPointType = "mount_point_type"
     }
 
     init(from decoder: Decoder) throws {
@@ -71,6 +73,90 @@ private struct FileAdditionalPayload: Decodable, Sendable {
         time = try? container.decodeIfPresent(FileTimePayload.self, forKey: .time)
         owner = try? container.decodeIfPresent(FileOwnerPayload.self, forKey: .owner)
         perm = try? container.decodeIfPresent(FilePermissionPayload.self, forKey: .perm)
+        mountPointType = try? container.decodeIfPresent(String.self, forKey: .mountPointType)
+    }
+}
+
+private struct SearchListPayload: Decodable, Sendable {
+    let offset: Int?
+    let total: Int?
+    let finished: Bool?
+    let files: [FilePayload]?
+}
+
+private struct FavoritePayload: Decodable, Sendable {
+    let name: String?
+    let path: String
+}
+
+private struct FavoriteListPayload: Decodable, Sendable {
+    let favorites: [FavoritePayload]?
+}
+
+private struct SharePayload: Decodable, Sendable {
+    let id: String
+    let name: String?
+    let path: String?
+    let url: String?
+    let linkURL: String?
+    let hasPassword: Bool?
+    let expiresAt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, path, url
+        case linkURL = "link_url"
+        case hasPassword = "has_password"
+        case expiresAt = "date_expired"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let value = try? container.decode(String.self, forKey: .id) {
+            id = value
+        } else if let value = try? container.decode(Int.self, forKey: .id) {
+            id = String(value)
+        } else {
+            id = UUID().uuidString
+        }
+        name = try? container.decodeIfPresent(String.self, forKey: .name)
+        path = try? container.decodeIfPresent(String.self, forKey: .path)
+        url = try? container.decodeIfPresent(String.self, forKey: .url)
+        linkURL = try? container.decodeIfPresent(String.self, forKey: .linkURL)
+        if let value = try? container.decode(Bool.self, forKey: .hasPassword) {
+            hasPassword = value
+        } else if let value = try? container.decode(Int.self, forKey: .hasPassword) {
+            hasPassword = value != 0
+        } else {
+            hasPassword = nil
+        }
+        if let value = try? container.decode(String.self, forKey: .expiresAt) {
+            expiresAt = value == "0" ? nil : value
+        } else if let value = try? container.decode(Int.self, forKey: .expiresAt) {
+            expiresAt = value > 0 ? String(value) : nil
+        } else {
+            expiresAt = nil
+        }
+    }
+}
+
+private struct ShareListPayload: Decodable, Sendable {
+    let links: [SharePayload]?
+    let id: String?
+    let url: String?
+
+    private enum CodingKeys: String, CodingKey { case links, id, url }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        links = try? container.decodeIfPresent([SharePayload].self, forKey: .links)
+        if let value = try? container.decode(String.self, forKey: .id) {
+            id = value
+        } else if let value = try? container.decode(Int.self, forKey: .id) {
+            id = String(value)
+        } else {
+            id = nil
+        }
+        url = try? container.decodeIfPresent(String.self, forKey: .url)
     }
 }
 
@@ -99,6 +185,22 @@ private struct TaskStartPayload: Decodable, Sendable {
     let taskid: String
 }
 
+private struct ArchiveListPayload: Decodable, Sendable {
+    let items: [ArchiveItemPayload]?
+}
+
+private struct ArchiveItemPayload: Decodable, Sendable {
+    let itemid: Int
+    let name: String
+    let path: String
+    let isDirectory: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case itemid, name, path
+        case isDirectory = "is_dir"
+    }
+}
+
 private struct TaskStatusPayload: Decodable, Sendable {
     let finished: Bool
     let progress: Int64?
@@ -110,6 +212,20 @@ private struct TaskStatusPayload: Decodable, Sendable {
         case progress
         case total
         case processedSize = "processed_size"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        finished = try container.decode(Bool.self, forKey: .finished)
+        total = try container.decodeIfPresent(Int64.self, forKey: .total)
+        processedSize = try container.decodeIfPresent(Int64.self, forKey: .processedSize)
+        if let integerProgress = try? container.decodeIfPresent(Int64.self, forKey: .progress) {
+            progress = integerProgress
+        } else if let fractionalProgress = try? container.decodeIfPresent(Double.self, forKey: .progress) {
+            progress = Int64((fractionalProgress <= 1 ? fractionalProgress * 100 : fractionalProgress).rounded())
+        } else {
+            progress = nil
+        }
     }
 }
 
@@ -130,7 +246,6 @@ private struct StreamingUploadPlan: @unchecked Sendable {
 
 public actor DsmFileRepository: FileRepository {
     public nonisolated let profileID: UUID
-    public nonisolated let isDemo = false
     public nonisolated let allowsVerifiedRestore: Bool
 
     private let baseURL: URL
@@ -277,6 +392,46 @@ public actor DsmFileRepository: FileRepository {
         }
     }
 
+    public func readPrefix(remotePath: String, maximumLength: Int) async throws -> Data {
+        guard maximumLength > 0 else { return Data() }
+        let capability = try requireCapability(DsmAPIName.fileStationDownload)
+        var request = try DsmRequestBuilder.build(
+            baseURL: baseURL,
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: "download",
+            requestFormat: capability.requestFormat,
+            parameters: [
+                "path": .stringArray([remotePath]),
+                "mode": .string("download")
+            ],
+            credential: nil,
+            httpMethod: "GET"
+        )
+        request.setValue("bytes=0-\(maximumLength - 1)", forHTTPHeaderField: "Range")
+        if let cookie = credential.cookieHeaderValue {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        if let synoToken = credential.synoToken, !synoToken.isEmpty {
+            request.setValue(synoToken, forHTTPHeaderField: "X-SYNO-TOKEN")
+        }
+
+        let temporaryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LanStashFileProbe-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+        do {
+            let response = try await transport.download(request, to: temporaryURL) { _, _ in }
+            let handle = try FileHandle(forReadingFrom: temporaryURL)
+            defer { try? handle.close() }
+            let prefix = try handle.read(upToCount: maximumLength) ?? Data()
+            try validateBinaryResponse(response, data: prefix)
+            return prefix
+        } catch {
+            throw translate(error)
+        }
+    }
+
     public func checkWritePermission(
         folderPath: String,
         filename: String,
@@ -343,6 +498,37 @@ public actor DsmFileRepository: FileRepository {
         expectedSize: Int64?,
         progress: @escaping FileTransferProgress
     ) async throws {
+        try await performDownload(
+            remotePaths: [remotePath],
+            identity: remotePath,
+            to: localURL,
+            expectedSize: expectedSize,
+            progress: progress
+        )
+    }
+
+    public func downloadArchive(
+        remotePaths: [String],
+        to localURL: URL,
+        progress: @escaping FileTransferProgress
+    ) async throws {
+        guard !remotePaths.isEmpty else { return }
+        try await performDownload(
+            remotePaths: remotePaths,
+            identity: remotePaths.joined(separator: "\u{1F}"),
+            to: localURL,
+            expectedSize: nil,
+            progress: progress
+        )
+    }
+
+    private func performDownload(
+        remotePaths: [String],
+        identity: String,
+        to localURL: URL,
+        expectedSize: Int64?,
+        progress: @escaping FileTransferProgress
+    ) async throws {
         let capability = try requireCapability(DsmAPIName.fileStationDownload)
         let baseRequest = try DsmRequestBuilder.build(
             baseURL: baseURL,
@@ -352,7 +538,7 @@ public actor DsmFileRepository: FileRepository {
             method: "download",
             requestFormat: capability.requestFormat,
             parameters: [
-                "path": .stringArray([remotePath]),
+                "path": .stringArray(remotePaths),
                 "mode": .string("download")
             ],
             credential: credential,
@@ -360,7 +546,7 @@ public actor DsmFileRepository: FileRepository {
         )
         
         let partURL = partialDownloadURL(
-            remotePath: remotePath,
+            remotePath: identity,
             localURL: localURL,
             expectedSize: expectedSize
         )
@@ -572,10 +758,17 @@ public actor DsmFileRepository: FileRepository {
     ) async throws {
         do {
             let capability = try requireCapability(DsmAPIName.fileStationUpload)
+            // CheckPermission 的公开契约只保证检查“在目录中新建项目”的权限。
+            // 覆盖上传时若直接拿已存在的文件名并传 create_only=false，部分 DSM
+            // 会返回未公开错误码，导致真正的上传尚未开始便失败。使用一次性名称
+            // 检查目标目录的写入权限，最终能否覆盖仍由 Upload API 决定。
+            let permissionFilename = overwrite
+                ? "LanStash-Write-Check-\(UUID().uuidString).tmp"
+                : localURL.lastPathComponent
             try await checkWritePermission(
                 folderPath: folderPath,
-                filename: localURL.lastPathComponent,
-                createOnly: !overwrite
+                filename: permissionFilename,
+                createOnly: true
             )
 
             let boundary = "LanStash-\(UUID().uuidString)"
@@ -617,6 +810,10 @@ public actor DsmFileRepository: FileRepository {
             request.httpMethod = "POST"
             request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
+            let bodySize = try bodyURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
+            if let bodySize {
+                request.setValue(String(bodySize), forHTTPHeaderField: "Content-Length")
+            }
             if let cookie = credential.cookieHeaderValue {
                 request.setValue(cookie, forHTTPHeaderField: "Cookie")
             }
@@ -637,6 +834,7 @@ public actor DsmFileRepository: FileRepository {
         expectedSize: Int64,
         target: DsmFileRepository,
         destinationFolder: String,
+        overwrite: Bool,
         progress: @escaping FileTransferProgress
     ) async throws {
         guard expectedSize >= 0 else {
@@ -664,7 +862,8 @@ public actor DsmFileRepository: FileRepository {
         let uploadPlan = try await target.makeStreamingUploadPlan(
             filename: filename,
             fileSize: expectedSize,
-            destinationFolder: destinationFolder
+            destinationFolder: destinationFolder,
+            overwrite: overwrite
         )
         let progressState = CrossNASProgressState(fileSize: expectedSize, progress: progress)
         let pipe = BoundedMemoryPipe(
@@ -725,13 +924,14 @@ public actor DsmFileRepository: FileRepository {
     private func makeStreamingUploadPlan(
         filename: String,
         fileSize: Int64,
-        destinationFolder: String
+        destinationFolder: String,
+        overwrite: Bool
     ) async throws -> StreamingUploadPlan {
         let capability = try requireCapability(DsmAPIName.fileStationUpload)
         try await checkWritePermission(
             folderPath: destinationFolder,
             filename: filename,
-            createOnly: true
+            createOnly: !overwrite
         )
         let boundary = "LanStash-\(UUID().uuidString)"
         let fields = [
@@ -741,7 +941,7 @@ public actor DsmFileRepository: FileRepository {
             "_sid": credential.sid,
             "path": destinationFolder,
             "create_parents": "false",
-            "overwrite": "false",
+            "overwrite": overwrite ? "true" : "false",
             "SynoToken": credential.synoToken ?? "",
             "synotoken": credential.synoToken ?? ""
         ]
@@ -848,6 +1048,26 @@ public actor DsmFileRepository: FileRepository {
         }
     }
 
+    public func rename(path: String, newName: String) async throws {
+        let capability = try requireCapability(DsmAPIName.fileStationRename)
+        do {
+            try await client.callVoid(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: "rename",
+                requestFormat: capability.requestFormat,
+                parameters: [
+                    "path": .stringArray([path]),
+                    "name": .stringArray([newName])
+                ],
+                credential: credential
+            )
+        } catch let error as DsmNetworkError {
+            throw DsmErrorMapper.map(error)
+        }
+    }
+
     public func move(
         paths: [String],
         to destinationFolder: String,
@@ -907,6 +1127,144 @@ public actor DsmFileRepository: FileRepository {
                 as: TaskStartPayload.self
             )
             try await pollTask(capability: capability, taskID: start.taskid, progress: progress)
+        } catch let error as DsmNetworkError {
+            throw DsmErrorMapper.map(error)
+        }
+    }
+
+    public func compress(
+        paths: [String],
+        destinationFilePath: String,
+        format: ArchiveFormat,
+        level: ArchiveCompressionLevel,
+        password: String?,
+        progress: @escaping FileTransferProgress
+    ) async throws {
+        guard !paths.isEmpty else { return }
+        let capability = try requireCapability(DsmAPIName.fileStationCompress)
+        guard try selectedVersion(capability) >= 3 else {
+            throw AppError(
+                category: .versionUnsupported,
+                isRetryable: false,
+                safeUserMessage: "这台 NAS 的系统版本暂不支持创建压缩包。"
+            )
+        }
+        do {
+            var parameters: [String: DsmParameterValue] = [
+                "path": .stringArray(paths),
+                "dest_file_path": .string(destinationFilePath),
+                "level": .string(level.rawValue),
+                "mode": .string("add"),
+                "format": .string(format.rawValue)
+            ]
+            if let password, !password.isEmpty {
+                parameters["password"] = .string(password)
+            }
+            let start = try await client.call(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: "start",
+                requestFormat: capability.requestFormat,
+                parameters: parameters,
+                credential: credential,
+                as: TaskStartPayload.self
+            )
+            try await pollTask(capability: capability, taskID: start.taskid, progress: progress)
+        } catch let error as DsmNetworkError {
+            throw DsmErrorMapper.map(error)
+        }
+    }
+
+    public func extract(
+        filePath: String,
+        destinationFolder: String,
+        overwrite: Bool,
+        keepDirectoryStructure: Bool,
+        createSubfolder: Bool,
+        codepage: String?,
+        password: String?,
+        progress: @escaping FileTransferProgress
+    ) async throws {
+        let capability = try requireCapability(DsmAPIName.fileStationExtract)
+        guard try selectedVersion(capability) >= 2 else {
+            throw AppError(
+                category: .versionUnsupported,
+                isRetryable: false,
+                safeUserMessage: "这台 NAS 的系统版本暂不支持解压缩。"
+            )
+        }
+        do {
+            var parameters: [String: DsmParameterValue] = [
+                "file_path": .string(filePath),
+                "dest_folder_path": .string(destinationFolder),
+                "overwrite": .boolean(overwrite),
+                "keep_dir": .boolean(keepDirectoryStructure),
+                "create_subfolder": .boolean(createSubfolder)
+            ]
+            if let codepage, !codepage.isEmpty {
+                parameters["codepage"] = .string(codepage)
+            }
+            if let password, !password.isEmpty {
+                parameters["password"] = .string(password)
+            }
+            let start = try await client.call(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: "start",
+                requestFormat: capability.requestFormat,
+                parameters: parameters,
+                credential: credential,
+                as: TaskStartPayload.self
+            )
+            try await pollTask(capability: capability, taskID: start.taskid, progress: progress)
+        } catch let error as DsmNetworkError {
+            throw DsmErrorMapper.map(error)
+        }
+    }
+
+    public func listArchiveItems(
+        filePath: String,
+        codepage: String?,
+        password: String?
+    ) async throws -> [ArchiveItem] {
+        let capability = try requireCapability(DsmAPIName.fileStationExtract)
+        guard try selectedVersion(capability) >= 2 else {
+            throw AppError(
+                category: .versionUnsupported,
+                isRetryable: false,
+                safeUserMessage: "这台 NAS 的系统版本暂不支持读取压缩包内容。"
+            )
+        }
+        do {
+            var parameters: [String: DsmParameterValue] = [
+                "file_path": .string(filePath),
+                "offset": .integer(0),
+                "limit": .integer(200),
+                "sort_by": .string("name"),
+                "sort_direction": .string("asc"),
+                "item_id": .integer(-1)
+            ]
+            if let codepage, !codepage.isEmpty {
+                parameters["codepage"] = .string(codepage)
+            }
+            if let password, !password.isEmpty {
+                parameters["password"] = .string(password)
+            }
+            let payload = try await client.call(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: "list",
+                requestFormat: capability.requestFormat,
+                parameters: parameters,
+                credential: credential,
+                as: ArchiveListPayload.self
+            )
+            return (payload.items ?? []).map {
+                ArchiveItem(id: $0.itemid, name: $0.name, path: $0.path, isDirectory: $0.isDirectory)
+            }
         } catch let error as DsmNetworkError {
             throw DsmErrorMapper.map(error)
         }
@@ -988,7 +1346,10 @@ public actor DsmFileRepository: FileRepository {
             accessedAt: time?.atime.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
         let fileExtension = URL(fileURLWithPath: payload.name).pathExtension.lowercased()
-        let thumbnail = ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp"]
+        let thumbnail = [
+            "jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp",
+            "mp4", "m4v", "mov", "avi", "mkv", "webm", "mpeg", "mpg"
+        ]
             .contains(fileExtension)
 
         return FileItem(
@@ -1003,7 +1364,209 @@ public actor DsmFileRepository: FileRepository {
             times: times,
             permissions: permissions,
             thumbnailAvailable: thumbnail,
-            rawType: rawType
+            rawType: rawType,
+            mountPointType: payload.additional?.mountPointType
+        )
+    }
+
+    public func search(folderPath: String, query: String) async throws -> [FileItem] {
+        let capability = try requireCapability(DsmAPIName.fileStationSearch)
+        let start = try await client.call(
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: "start",
+            requestFormat: capability.requestFormat,
+            parameters: [
+                "folder_path": .string(folderPath),
+                "pattern": .string(query),
+                "recursive": .boolean(true),
+                "search_content": .boolean(false)
+            ],
+            credential: credential,
+            as: TaskStartPayload.self
+        )
+        do {
+            var delay: UInt64 = 250_000_000
+            while true {
+                try Task.checkCancellation()
+                let payload = try await client.call(
+                    path: capability.path,
+                    api: capability.name,
+                    version: try selectedVersion(capability),
+                    method: "list",
+                    requestFormat: capability.requestFormat,
+                    parameters: [
+                        "taskid": .string(start.taskid),
+                        "offset": .integer(0),
+                        "limit": .integer(2_000),
+                        "additional": .stringArray(Self.additionalFields)
+                    ],
+                    credential: credential,
+                    as: SearchListPayload.self
+                )
+                if payload.finished == true {
+                    try? await cleanSearch(capability: capability, taskID: start.taskid)
+                    return (payload.files ?? []).map(makeFileItem)
+                }
+                try await Task.sleep(nanoseconds: delay)
+                delay = min(delay * 2, 1_000_000_000)
+            }
+        } catch {
+            try? await stopSearch(capability: capability, taskID: start.taskid)
+            throw translate(error)
+        }
+    }
+
+    private func cleanSearch(capability: ApiCapability, taskID: String) async throws {
+        try await client.callVoid(
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: "clean",
+            requestFormat: capability.requestFormat,
+            parameters: ["taskid": .string(taskID)],
+            credential: credential
+        )
+    }
+
+    private func stopSearch(capability: ApiCapability, taskID: String) async throws {
+        try await client.callVoid(
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: "stop",
+            requestFormat: capability.requestFormat,
+            parameters: ["taskid": .string(taskID)],
+            credential: credential
+        )
+    }
+
+    public func listFavorites() async throws -> [FavoriteLocation] {
+        let capability = try requireCapability(DsmAPIName.fileStationFavorite)
+        let payload = try await client.call(
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: "list",
+            requestFormat: capability.requestFormat,
+            parameters: ["offset": .integer(0), "limit": .integer(500)],
+            credential: credential,
+            as: FavoriteListPayload.self
+        )
+        return (payload.favorites ?? []).map {
+            FavoriteLocation(name: $0.name ?? URL(fileURLWithPath: $0.path).lastPathComponent, path: $0.path)
+        }
+    }
+
+    public func addFavorite(path: String, name: String) async throws {
+        let capability = try requireCapability(DsmAPIName.fileStationFavorite)
+        try await client.callVoid(
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: "add",
+            requestFormat: capability.requestFormat,
+            parameters: ["path": .string(path), "name": .string(name)],
+            credential: credential
+        )
+    }
+
+    public func removeFavorite(path: String) async throws {
+        let capability = try requireCapability(DsmAPIName.fileStationFavorite)
+        try await client.callVoid(
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: "delete",
+            requestFormat: capability.requestFormat,
+            parameters: ["path": .string(path)],
+            credential: credential
+        )
+    }
+
+    public func listShareLinks() async throws -> [FileShareLink] {
+        let capability = try requireCapability(DsmAPIName.fileStationSharing)
+        let payload = try await client.call(
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: "list",
+            requestFormat: capability.requestFormat,
+            parameters: ["offset": .integer(0), "limit": .integer(500)],
+            credential: credential,
+            as: ShareListPayload.self
+        )
+        return (payload.links ?? []).compactMap(makeShareLink)
+    }
+
+    public func createShareLink(
+        paths: [String],
+        password: String?,
+        expiresAt: String?
+    ) async throws -> FileShareLink {
+        let capability = try requireCapability(DsmAPIName.fileStationSharing)
+        var parameters: [String: DsmParameterValue] = ["path": .stringArray(paths)]
+        if let password, !password.isEmpty { parameters["password"] = .string(password) }
+        if let expiresAt, !expiresAt.isEmpty { parameters["date_expired"] = .string(expiresAt) }
+        let payload = try await client.call(
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: "create",
+            requestFormat: capability.requestFormat,
+            parameters: parameters,
+            credential: credential,
+            as: ShareListPayload.self
+        )
+        if let link = payload.links?.first.flatMap(makeShareLink) {
+            return FileShareLink(
+                id: link.id,
+                name: link.name,
+                path: link.path,
+                url: link.url,
+                hasPassword: password?.isEmpty == false || link.hasPassword,
+                expiresAt: link.expiresAt ?? expiresAt
+            )
+        }
+        guard let id = payload.id, let url = payload.url else {
+            throw AppError(category: .invalidResponse, isRetryable: false, safeUserMessage: "分享已创建，但暂时无法读取链接，请打开分享管理重试。")
+        }
+        let path = paths.first ?? ""
+        return FileShareLink(
+            id: id,
+            name: URL(fileURLWithPath: path).lastPathComponent,
+            path: path,
+            url: url,
+            hasPassword: password?.isEmpty == false,
+            expiresAt: expiresAt
+        )
+    }
+
+    public func deleteShareLinks(ids: [String]) async throws {
+        guard !ids.isEmpty else { return }
+        let capability = try requireCapability(DsmAPIName.fileStationSharing)
+        try await client.callVoid(
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: "delete",
+            requestFormat: capability.requestFormat,
+            parameters: ["id": .stringArray(ids)],
+            credential: credential
+        )
+    }
+
+    private func makeShareLink(_ payload: SharePayload) -> FileShareLink? {
+        guard let url = payload.url ?? payload.linkURL, !url.isEmpty else { return nil }
+        let path = payload.path ?? ""
+        return FileShareLink(
+            id: payload.id,
+            name: payload.name ?? URL(fileURLWithPath: path).lastPathComponent,
+            path: path,
+            url: url,
+            hasPassword: payload.hasPassword ?? false,
+            expiresAt: payload.expiresAt
         )
     }
 

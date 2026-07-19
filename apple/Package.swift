@@ -32,7 +32,8 @@ let package = Package(
             path: "Apps/DsmMac/Sources",
             linkerSettings: [
                 .linkedFramework("AppKit"),
-                .linkedFramework("PDFKit")
+                .linkedFramework("PDFKit"),
+                .linkedFramework("UserNotifications")
             ]
         ),
         .testTarget(

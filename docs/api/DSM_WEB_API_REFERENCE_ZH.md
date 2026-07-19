@@ -111,7 +111,7 @@ serverID=<QUICKCONNECT_ID>
 
 建议默认采用 `POST` 和 `application/x-www-form-urlencoded`。虽然官方示例经常使用 GET，但 GET 会把密码、SID、文件路径等写入 URL、代理日志和浏览器历史。
 
-macOS 参考实现使用 `format=sid` 登录，并在后续 HTTPS 请求中同时发送安全 Cookie 请求头和 POST 正文 `_sid`。两处必须是同一个 SID；这样既兼容 DSM 的 Cookie 会话，也兼容只识别 `_sid` 的版本。Cookie 不写入磁盘，由 Keychain 中的 SID 在内存中临时构造。
+macOS 参考实现使用 `format=sid` 登录，并在后续 HTTPS 请求中同时发送安全 Cookie 请求头和 POST 正文 `_sid`。两处必须是同一个 SID；这样既兼容 DSM 的 Cookie 会话，也兼容只识别 `_sid` 的版本。Cookie 不写入磁盘，由应用沙盒 AES-GCM 加密文件中的 SID 在内存中临时构造。
 
 ### 2.3 `requestFormat=JSON`
 
@@ -284,7 +284,7 @@ curl --fail --silent --show-error \
 
 | 字段 | 说明 | 存储建议 |
 | --- | --- | --- |
-| `sid` | 授权会话 ID | Keychain/Android Keystore，退出后删除 |
+| `sid` | 授权会话 ID | 各平台受保护存储；macOS 使用应用沙盒 AES-GCM 加密文件，退出后删除 |
 | `did` | 可信设备 ID | 仅用户明确选择“信任设备”时安全存储 |
 | `synotoken` | CSRF 令牌 | 与 SID 同生命周期安全存储 |
 | `is_portal_port` | 门户端口标志 | 普通状态字段 |
@@ -352,7 +352,7 @@ _sid=<SID>
 | `SYNO.FileStation.Rename` | 2 | `rename` | 重命名 |
 | `SYNO.FileStation.CopyMove` | 3 | `start`, `status`, `stop` | 异步复制和移动 |
 | `SYNO.FileStation.Delete` | 2 | `start`, `status`, `stop`, `delete` | 异步或同步删除 |
-| `SYNO.FileStation.Extract` | 2 | `start`, `status`, `stop`, `list` | 解压和查看压缩包 |
+| `SYNO.FileStation.Extract` | 2 | `start`, `status`, `stop`, `list` | 解压和查看压缩包；`list` 用于开始前检测密码并比较文件名编码，`start` 必须沿用选定的 `codepage` |
 | `SYNO.FileStation.Compress` | 3 | `start`, `status`, `stop` | 异步压缩 |
 | `SYNO.FileStation.BackgroundTask` | 3 | `list` | 汇总后台文件任务 |
 
@@ -409,11 +409,13 @@ additional=["real_path","size","owner","time","perm","mount_point_type","volume_
 | `DirSize.status` | `taskid`，直到 `finished=true` |
 | `MD5.start` | `file_path`，返回 `taskid` |
 | `MD5.status` | 返回 `finished` 和 `md5` |
-| `CheckPermission.write` | `path`、`filename`，可带 `create_only` 或覆盖策略 |
+| `CheckPermission.write` | `path`、`filename`，公开契约用于检查目录中新建项目的写入权限；`create_only` 默认为 `true` |
 
 ### 5.6 上传
 
 `SYNO.FileStation.Upload.upload` 必须使用 `multipart/form-data`，文件二进制部分必须位于最后。
+
+覆盖已有文件时不要用已存在的文件名和 `create_only=false` 作为兼容性前置判断：部分 DSM 会返回未公开错误码。客户端应使用一次性名称检查目标目录的新建权限，再由带 `overwrite=true` 的 Upload 请求决定该文件能否被覆盖，并在响应成功后重新读取目标进行结果校验。
 
 请求必须发送准确的 `Content-Length`。DSM 会核对声明长度与实际收到的数据；缺少该请求头或长度不一致时会返回错误 `1800`。客户端应保留上传临时文件直到服务器响应，并将 `1800` 至 `1805` 映射为可操作的用户提示。
 
@@ -447,6 +449,7 @@ _sid=<SID>
 - `mode=open` 尝试返回真实 MIME；`mode=download` 返回附件。
 - 原生客户端应以流式方式写入临时文件，不能一次性读入内存。
 - 音乐和视频预览应通过受认证的请求头发送会话，并使用 `Range: bytes=<start>-<end>` 按需读取；服务端必须返回 `206 Partial Content`、正确的 `Content-Range` 和总长度。每次响应设置固定上限，避免 NAS 忽略 Range 时意外读取整个大文件。
+- 对 `.ts` 等同一扩展名可能代表视频或代码的文件，应先读取少量文件头并按文件签名识别类型，不能以文件大小作为判断依据。
 - 如果只能通过 URL 交给系统播放器，避免在 URL 中放 SID；优先使用应用内代理或带认证 Header 的播放器数据源。
 
 ### 5.8 共享链接

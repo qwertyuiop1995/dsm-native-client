@@ -12,16 +12,17 @@ struct RootView: View {
                     profiles: model.profiles,
                     selectedProfileID: model.selectedProfileID,
                     connectedWorkspaces: model.connectedWorkspaces,
+                    connectionRoute: model.currentConnectionRoute,
                     onAddNAS: {
                         model.newProfile()
                     },
                     onSelectNAS: { profileID in
                         model.selectProfile(id: profileID)
                     },
-                    hasFileClipboard: model.fileClipboard != nil,
+                    hasFileClipboard: model.fileClipboard != nil && !model.isPreparingPaste,
                     onCopy: { items in model.placeOnClipboard(items, moveSource: false) },
                     onCut: { items in model.placeOnClipboard(items, moveSource: true) },
-                    onPaste: { model.pasteClipboardIntoCurrentFolder() },
+                    onPaste: model.pasteClipboardIntoCurrentFolder,
                     onRenameNAS: { name in model.renameCurrentNAS(to: name) },
                     onLogout: {
                         await model.logout()
@@ -35,6 +36,31 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 980, minHeight: 640)
+        .alert("发现同名项目", isPresented: Binding(
+            get: { model.pendingPasteConflict != nil },
+            set: { if !$0 { model.cancelPendingPaste() } }
+        )) {
+            Button("取消", role: .cancel) {
+                model.cancelPendingPaste()
+            }
+            Button("跳过同名项目") {
+                model.resolvePendingPaste(replaceExisting: false)
+            }
+            Button("替换同名项目", role: .destructive) {
+                model.resolvePendingPaste(replaceExisting: true)
+            }
+        } message: {
+            if let prompt = model.pendingPasteConflict {
+                Text(pasteConflictMessage(prompt))
+            }
+        }
+    }
+
+    private func pasteConflictMessage(_ prompt: PasteConflictPrompt) -> String {
+        let count = prompt.conflictingNames.count
+        let examples = prompt.conflictingNames.prefix(3).map { "“\($0)”" }.joined(separator: "、")
+        let suffix = count > 3 ? "等，共 \(count) 个项目" : ""
+        return "目标文件夹中已有同名项目：\(examples)\(suffix)。你可以跳过这些项目，或用正在粘贴的项目替换它们。"
     }
 }
 
@@ -179,9 +205,27 @@ struct LoginView: View {
                                     )
                                     .textContentType(.password)
                                     .focused($focusedField, equals: .password)
-                                    Toggle("在这台 Mac 上记住密码", isOn: $model.rememberPassword)
-                                        .toggleStyle(.checkbox)
-                                        .font(.callout)
+                                    HStack(spacing: 18) {
+                                        Toggle(
+                                            "在这台 Mac 上记住密码",
+                                            isOn: Binding(
+                                                get: { model.rememberPassword },
+                                                set: { model.setRememberPassword($0) }
+                                            )
+                                        )
+                                        .help("使用应用内加密存储保存密码")
+
+                                        Toggle(
+                                            "自动登录",
+                                            isOn: Binding(
+                                                get: { model.autoLoginEnabled },
+                                                set: { model.setAutoLoginEnabled($0) }
+                                            )
+                                        )
+                                        .help("下次打开岚仓时自动连接这台 NAS")
+                                    }
+                                    .toggleStyle(.checkbox)
+                                    .font(.callout)
                                 }
                             }
                             if model.requiresOTP {
@@ -243,12 +287,6 @@ struct LoginView: View {
                         model.isBusy || model.host.isEmpty || model.account.isEmpty || model.password.isEmpty
                             || (model.requiresOTP && model.otpCode.isEmpty)
                     )
-
-                    Button("查看示例") {
-                        model.enterDemo()
-                    }
-                    .controlSize(.large)
-                    .disabled(model.isBusy)
 
                     Spacer()
 

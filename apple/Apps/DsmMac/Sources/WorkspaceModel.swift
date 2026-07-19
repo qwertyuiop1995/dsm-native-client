@@ -288,6 +288,7 @@ final class WorkspaceModel {
 
     private(set) var profile: NasProfile
     let allowsVerifiedRestore: Bool
+    let allowsRemoteMountManagement: Bool
 
     var shares: [FileItem] = []
     var recycleRoots: [FileItem] = []
@@ -301,8 +302,12 @@ final class WorkspaceModel {
     var isSearching = false
     var favorites: [FavoriteLocation] = []
     var recentLocations: [FavoriteLocation] = []
+    var remoteLocations: [FileItem] = []
     var shareLinks: [FileShareLink] = []
     var isLoadingShareLinks = false
+    var storageSpaceSummary: StorageSpaceSummary?
+    var isLoadingStorageSpace = false
+    var isManagingRemoteMount = false
     var isLoading = false
     var isRefreshing = false
     var isLoadingMore = false
@@ -355,6 +360,7 @@ final class WorkspaceModel {
         self.repository = repository
         self.transferNotifier = transferNotifier
         self.allowsVerifiedRestore = repository.allowsVerifiedRestore
+        self.allowsRemoteMountManagement = repository.allowsRemoteMountManagement
         if let data = UserDefaults.standard.data(forKey: "LanStash_RecentLocations_\(profile.id.uuidString)"),
            let saved = try? JSONDecoder().decode([FavoriteLocation].self, from: data) {
             recentLocations = saved
@@ -488,8 +494,10 @@ final class WorkspaceModel {
                 items = []
                 statusMessage = "当前用户没有可访问的共享文件夹。"
             }
+            await loadRemoteLocations()
             await discoverRecycleRoots()
             await loadFavorites()
+            await loadStorageSpace()
         } catch {
             isLoading = false
             show(error)
@@ -641,11 +649,108 @@ final class WorkspaceModel {
         }
     }
 
-    var remoteLocations: [FileItem] {
-        shares.filter {
-            guard let type = $0.mountPointType?.lowercased(), !type.isEmpty else { return false }
-            return type != "normal" && type != "shared_folder"
+    func loadStorageSpace() async {
+        guard !isLoadingStorageSpace else { return }
+        isLoadingStorageSpace = true
+        defer { isLoadingStorageSpace = false }
+        do {
+            storageSpaceSummary = try await repository.storageSpaceSummary()
+        } catch {
+            // 容量信息是辅助内容，读取失败不应阻断文件浏览。
+            storageSpaceSummary = nil
         }
+    }
+
+    private func loadRemoteLocations() async {
+        do {
+            remoteLocations = try await repository.listRemoteMounts(offset: 0, limit: 500).items
+        } catch {
+            // 旧版 DSM 未提供虚拟文件夹接口时，仍可识别共享列表中带挂载类型的项目。
+            remoteLocations = shares.filter {
+                guard let type = $0.mountPointType?.lowercased(), !type.isEmpty else { return false }
+                return type != "normal" && type != "shared_folder"
+            }
+        }
+    }
+
+    func createRemoteMount(_ configuration: RemoteMountConfiguration) async -> Bool {
+        guard !isManagingRemoteMount else { return false }
+        isManagingRemoteMount = true
+        defer { isManagingRemoteMount = false }
+        do {
+            try await repository.createRemoteMount(configuration)
+            try await reloadShares()
+            statusIsError = false
+            statusMessage = "远程位置已连接。"
+            return true
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
+    func updateRemoteMount(
+        _ item: FileItem,
+        configuration: RemoteMountConfiguration
+    ) async -> Bool {
+        guard !isManagingRemoteMount else { return false }
+        isManagingRemoteMount = true
+        defer { isManagingRemoteMount = false }
+        do {
+            try await repository.updateRemoteMount(
+                existingMountPoint: item.path,
+                configuration: configuration
+            )
+            try await reloadShares()
+            statusIsError = false
+            statusMessage = "远程位置已更新。"
+            return true
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
+    func removeRemoteMount(_ item: FileItem) async -> Bool {
+        guard !isManagingRemoteMount else { return false }
+        isManagingRemoteMount = true
+        defer { isManagingRemoteMount = false }
+        do {
+            try await repository.removeRemoteMount(mountPoint: item.path)
+            try await reloadShares()
+            statusIsError = false
+            statusMessage = "远程位置已删除。"
+            return true
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
+    private func reloadShares() async throws {
+        let page = try await repository.listShares(offset: 0, limit: 200)
+        shares = page.items
+        if currentPath == "/" {
+            items = shares.map { share in
+                FileItem(
+                    profileID: profile.id,
+                    name: share.name,
+                    path: share.path,
+                    kind: .directory,
+                    sizeBytes: share.sizeBytes,
+                    owner: share.owner,
+                    group: share.group,
+                    times: share.times,
+                    permissions: share.permissions,
+                    rawType: share.rawType,
+                    mountPointType: share.mountPointType
+                )
+            }
+            totalItemCount = items.count
+            selection.removeAll()
+        }
+        await loadRemoteLocations()
+        await loadStorageSpace()
     }
 
     func loadFavorites() async {
@@ -735,6 +840,16 @@ final class WorkspaceModel {
 
     func refresh() async {
         guard !currentPath.isEmpty else {
+            return
+        }
+        if currentPath == "/" {
+            isRefreshing = true
+            defer { isRefreshing = false }
+            do {
+                try await reloadShares()
+            } catch {
+                show(error)
+            }
             return
         }
         await navigate(to: currentPath, recordingHistory: false)

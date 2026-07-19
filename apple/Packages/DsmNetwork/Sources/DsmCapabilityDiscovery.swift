@@ -18,6 +18,9 @@ public enum DsmAPIName {
     public static let fileStationSearch = "SYNO.FileStation.Search"
     public static let fileStationFavorite = "SYNO.FileStation.Favorite"
     public static let fileStationSharing = "SYNO.FileStation.Sharing"
+    public static let fileStationVirtualFolder = "SYNO.FileStation.VirtualFolder"
+    /// DSM File Station 的未公开挂载接口；只在能力发现明确返回时启用。
+    public static let fileStationMount = "SYNO.FileStation.Mount"
 }
 
 private struct CapabilityPayload: Decodable, Sendable {
@@ -61,7 +64,9 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationExtract,
         DsmAPIName.fileStationSearch,
         DsmAPIName.fileStationFavorite,
-        DsmAPIName.fileStationSharing
+        DsmAPIName.fileStationSharing,
+        DsmAPIName.fileStationVirtualFolder,
+        DsmAPIName.fileStationMount
     ]
 
     private let client: DsmAPIClient
@@ -161,6 +166,8 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationExtract: 2...2,
         DsmAPIName.fileStationSearch: 1...2,
         DsmAPIName.fileStationFavorite: 1...2,
-        DsmAPIName.fileStationSharing: 1...3
+        DsmAPIName.fileStationSharing: 1...3,
+        DsmAPIName.fileStationVirtualFolder: 1...2,
+        DsmAPIName.fileStationMount: 1...1
     ]
 }

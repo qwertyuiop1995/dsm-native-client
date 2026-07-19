@@ -27,7 +27,9 @@
 | 子目录搜索 | `SYNO.FileStation.Search` 官方 API | 已实现 | 验证任务清理、中文、正则结果上限和无权限目录 |
 | 收藏夹 | `SYNO.FileStation.Favorite` 官方 API | 已实现 | 验证新增、移除和失效路径 |
 | 分享链接管理 | `SYNO.FileStation.Sharing` 官方 API | 已实现 | 验证密码、有效期、批量路径、复制和取消分享 |
-| 远程位置浏览 | `SYNO.FileStation.List` 的挂载类型字段 | 已实现只读入口 | 仅浏览已在 DSM 配置的位置，不调用内部挂载接口 |
+| 当前账号可见空间 | `SYNO.FileStation.List.list_share` 官方 API 的 `real_path` 与 `volume_status` | 已实现并按卷去重 | 验证多共享同卷、多卷、配额账号和字段缺失；结果不代表物理硬盘容量 |
+| 远程位置浏览 | `SYNO.FileStation.VirtualFolder` 官方 API；旧版回退共享列表挂载类型 | 已实现 | 验证 CIFS/SMB、NFS、失效位置和普通共享的区分 |
+| 远程位置创建、修改、删除 | `SYNO.FileStation.Mount` v1 内部实验性 API；`getinfo` 复查 | macOS 已实现、默认由能力发现控制，尚未实机验收 | 必须记录 DSM build；验证管理员/普通账号权限、只读、错误密码、重复提交、修改回滚和断开后远端文件不受影响 |
 
 ## 记录要求
 

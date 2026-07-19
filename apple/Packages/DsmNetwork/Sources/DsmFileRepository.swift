@@ -7,6 +7,7 @@ private struct FileListPayload: Decodable, Sendable {
     let total: Int?
     let files: [FilePayload]?
     let shares: [FilePayload]?
+    let folders: [FilePayload]?
 }
 
 private struct FileInfoPayload: Decodable, Sendable {
@@ -50,6 +51,8 @@ private struct FileAdditionalPayload: Decodable, Sendable {
     let owner: FileOwnerPayload?
     let perm: FilePermissionPayload?
     let mountPointType: String?
+    let realPath: String?
+    let volumeStatus: VolumeStatusPayload?
 
     private enum CodingKeys: String, CodingKey {
         case size
@@ -58,6 +61,8 @@ private struct FileAdditionalPayload: Decodable, Sendable {
         case owner
         case perm
         case mountPointType = "mount_point_type"
+        case realPath = "real_path"
+        case volumeStatus = "volume_status"
     }
 
     init(from decoder: Decoder) throws {
@@ -74,6 +79,51 @@ private struct FileAdditionalPayload: Decodable, Sendable {
         owner = try? container.decodeIfPresent(FileOwnerPayload.self, forKey: .owner)
         perm = try? container.decodeIfPresent(FilePermissionPayload.self, forKey: .perm)
         mountPointType = try? container.decodeIfPresent(String.self, forKey: .mountPointType)
+        realPath = try? container.decodeIfPresent(String.self, forKey: .realPath)
+        volumeStatus = try? container.decodeIfPresent(VolumeStatusPayload.self, forKey: .volumeStatus)
+    }
+}
+
+private struct VolumeStatusPayload: Decodable, Sendable {
+    let totalBytes: Int64?
+    let remainingBytes: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case totalspace
+        case totalSpace = "total_space"
+        case total
+        case freespace
+        case freeSpace = "free_space"
+        case free
+        case available
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        totalBytes = Self.decodeInteger(
+            from: container,
+            keys: [.totalspace, .totalSpace, .total]
+        )
+        remainingBytes = Self.decodeInteger(
+            from: container,
+            keys: [.freespace, .freeSpace, .free, .available]
+        )
+    }
+
+    private static func decodeInteger(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        keys: [CodingKeys]
+    ) -> Int64? {
+        for key in keys {
+            if let value = try? container.decode(Int64.self, forKey: key) {
+                return value
+            }
+            if let value = try? container.decode(String.self, forKey: key),
+               let integer = Int64(value) {
+                return integer
+            }
+        }
+        return nil
     }
 }
 
@@ -247,6 +297,7 @@ private struct StreamingUploadPlan: @unchecked Sendable {
 public actor DsmFileRepository: FileRepository {
     public nonisolated let profileID: UUID
     public nonisolated let allowsVerifiedRestore: Bool
+    public nonisolated let allowsRemoteMountManagement: Bool
 
     private let baseURL: URL
     private let expectedHost: String
@@ -272,6 +323,7 @@ public actor DsmFileRepository: FileRepository {
         let baseURL = try DsmEndpoint.baseURL(for: profile)
         profileID = profile.id
         allowsVerifiedRestore = capabilities[DsmAPIName.fileStationCopyMove]?.verified == true
+        allowsRemoteMountManagement = capabilities[DsmAPIName.fileStationMount]?.selectedVersion == 1
         self.baseURL = baseURL
         self.expectedHost = profile.host
         self.pinnedCertificateSHA256 = profile.pinnedCertificateSHA256
@@ -362,6 +414,41 @@ public actor DsmFileRepository: FileRepository {
                 as: FileInfoPayload.self
             )
             return payload.files.map(makeFileItem)
+        } catch let error as DsmNetworkError {
+            throw DsmErrorMapper.map(error)
+        }
+    }
+
+    public func listRemoteMounts(offset: Int, limit: Int) async throws -> FilePage {
+        let capability = try requireCapability(DsmAPIName.fileStationVirtualFolder)
+        do {
+            let payload = try await client.call(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: "list",
+                requestFormat: capability.requestFormat,
+                parameters: [
+                    "type": .string("all"),
+                    "offset": .integer(offset),
+                    "limit": .integer(limit),
+                    "sort_by": .string("name"),
+                    "sort_direction": .string("asc"),
+                    "additional": .stringArray(Self.additionalFields)
+                ],
+                credential: credential,
+                as: FileListPayload.self
+            )
+            let items = (payload.folders ?? payload.files ?? []).map(makeFileItem)
+            let resolvedOffset = payload.offset ?? offset
+            let total = payload.total ?? items.count
+            return FilePage(
+                folderPath: "/",
+                items: items,
+                offset: resolvedOffset,
+                total: total,
+                hasMore: resolvedOffset + items.count < total
+            )
         } catch let error as DsmNetworkError {
             throw DsmErrorMapper.map(error)
         }
@@ -1557,6 +1644,195 @@ public actor DsmFileRepository: FileRepository {
         )
     }
 
+    public func storageSpaceSummary() async throws -> StorageSpaceSummary? {
+        let capability = try requireCapability(DsmAPIName.fileStationList)
+        do {
+            var volumes: [String: (total: Int64, remaining: Int64)] = [:]
+            let pageSize = 500
+            var offset = 0
+            while true {
+                let payload = try await client.call(
+                    path: capability.path,
+                    api: capability.name,
+                    version: try selectedVersion(capability),
+                    method: "list_share",
+                    requestFormat: capability.requestFormat,
+                    parameters: listParameters(offset: offset, limit: pageSize),
+                    credential: credential,
+                    as: FileListPayload.self
+                )
+                let shares = payload.shares ?? []
+                for share in shares {
+                    guard let status = share.additional?.volumeStatus,
+                          let total = status.totalBytes,
+                          let remaining = status.remainingBytes,
+                          total > 0,
+                          remaining >= 0,
+                          let key = Self.volumeIdentity(realPath: share.additional?.realPath) else {
+                        continue
+                    }
+                    volumes[key] = (total, min(remaining, total))
+                }
+                offset += shares.count
+                let totalShares = payload.total ?? offset
+                if shares.isEmpty || shares.count < pageSize || offset >= totalShares { break }
+            }
+            guard !volumes.isEmpty else { return nil }
+
+            var totalBytes: Int64 = 0
+            var remainingBytes: Int64 = 0
+            for volume in volumes.values {
+                let totalResult = totalBytes.addingReportingOverflow(volume.total)
+                let remainingResult = remainingBytes.addingReportingOverflow(volume.remaining)
+                guard !totalResult.overflow, !remainingResult.overflow else {
+                    throw AppError(
+                        category: .invalidResponse,
+                        isRetryable: false,
+                        safeUserMessage: "NAS 返回的容量信息无法读取。"
+                    )
+                }
+                totalBytes = totalResult.partialValue
+                remainingBytes = remainingResult.partialValue
+            }
+            return StorageSpaceSummary(
+                totalBytes: totalBytes,
+                remainingBytes: remainingBytes,
+                volumeCount: volumes.count
+            )
+        } catch let error as DsmNetworkError {
+            throw DsmErrorMapper.map(error)
+        }
+    }
+
+    public func createRemoteMount(_ configuration: RemoteMountConfiguration) async throws {
+        let normalized = try Self.validateRemoteMount(configuration)
+        try await mountRemote(normalized)
+        try await verifyRemoteMount(at: normalized.mountPoint, shouldExist: true)
+    }
+
+    public func updateRemoteMount(
+        existingMountPoint: String,
+        configuration: RemoteMountConfiguration
+    ) async throws {
+        let currentMountPoint = try Self.validateMountPoint(existingMountPoint)
+        let normalized = try Self.validateRemoteMount(configuration)
+
+        if currentMountPoint != normalized.mountPoint {
+            try await mountRemote(normalized)
+            do {
+                try await verifyRemoteMount(at: normalized.mountPoint, shouldExist: true)
+                try await unmountRemote(at: currentMountPoint)
+                try await verifyRemoteMount(at: currentMountPoint, shouldExist: false)
+            } catch {
+                try? await unmountRemote(at: normalized.mountPoint)
+                throw error
+            }
+            return
+        }
+
+        try await unmountRemote(at: currentMountPoint)
+        try await verifyRemoteMount(at: currentMountPoint, shouldExist: false)
+        do {
+            try await mountRemote(normalized)
+            try await verifyRemoteMount(at: normalized.mountPoint, shouldExist: true)
+        } catch {
+            throw AppError(
+                category: .unknown,
+                isRetryable: true,
+                safeUserMessage: "原来的远程位置已经断开，但新设置没有连接成功。请检查地址和账号后重试。"
+            )
+        }
+    }
+
+    public func removeRemoteMount(mountPoint: String) async throws {
+        let normalized = try Self.validateMountPoint(mountPoint)
+        try await unmountRemote(at: normalized)
+        try await verifyRemoteMount(at: normalized, shouldExist: false)
+    }
+
+    private func mountRemote(_ configuration: RemoteMountConfiguration) async throws {
+        let capability = try requireCapability(DsmAPIName.fileStationMount)
+        let remoteSource: String
+        switch configuration.protocolType {
+        case .smb:
+            remoteSource = "//\(configuration.server)/\(configuration.remotePath)"
+        case .nfs:
+            remoteSource = "\(configuration.server):/\(configuration.remotePath)"
+        }
+        var parameters: [String: DsmParameterValue] = [
+            "mount_type": .string(configuration.protocolType.rawValue),
+            "connection_type": .string(configuration.protocolType.rawValue),
+            "remote_path": .string(remoteSource),
+            "src_folder": .string(remoteSource),
+            "server": .string(configuration.server),
+            "remote_folder": .string(configuration.remotePath),
+            "mount_point": .string(configuration.mountPoint),
+            "dst_folder": .string(configuration.mountPoint),
+            "read_only": .boolean(configuration.readOnly)
+        ]
+        if configuration.protocolType == .smb {
+            parameters["username"] = .string(configuration.username)
+            parameters["account"] = .string(configuration.username)
+            parameters["password"] = .string(configuration.password)
+            parameters["passwd"] = .string(configuration.password)
+            if !configuration.domain.isEmpty {
+                parameters["domain"] = .string(configuration.domain)
+            }
+        }
+        do {
+            try await client.callVoid(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: "mount_remote",
+                requestFormat: capability.requestFormat,
+                parameters: parameters,
+                credential: credential
+            )
+        } catch let error as DsmNetworkError {
+            throw DsmErrorMapper.map(error)
+        }
+    }
+
+    private func unmountRemote(at mountPoint: String) async throws {
+        let capability = try requireCapability(DsmAPIName.fileStationMount)
+        do {
+            try await client.callVoid(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: "unmount",
+                requestFormat: capability.requestFormat,
+                parameters: [
+                    "path": .string(mountPoint),
+                    "mount_point": .string(mountPoint),
+                    "folder_path": .string(mountPoint)
+                ],
+                credential: credential
+            )
+        } catch let error as DsmNetworkError {
+            throw DsmErrorMapper.map(error)
+        }
+    }
+
+    private func verifyRemoteMount(at mountPoint: String, shouldExist: Bool) async throws {
+        for attempt in 0..<4 {
+            let items = try? await getInfo(paths: [mountPoint])
+            let isMounted = items?.contains(where: Self.isRemoteMount) == true
+            if isMounted == shouldExist { return }
+            if attempt < 3 {
+                try await Task.sleep(for: .milliseconds(300))
+            }
+        }
+        throw AppError(
+            category: .invalidResponse,
+            isRetryable: true,
+            safeUserMessage: shouldExist
+                ? "NAS 已接收连接请求，但暂时无法确认远程位置。请刷新后查看。"
+                : "NAS 已接收断开请求，但暂时无法确认结果。请刷新后查看。"
+        )
+    }
+
     private func makeShareLink(_ payload: SharePayload) -> FileShareLink? {
         guard let url = payload.url ?? payload.linkURL, !url.isEmpty else { return nil }
         let path = payload.path ?? ""
@@ -1568,6 +1844,67 @@ public actor DsmFileRepository: FileRepository {
             hasPassword: payload.hasPassword ?? false,
             expiresAt: payload.expiresAt
         )
+    }
+
+    private static func isRemoteMount(_ item: FileItem) -> Bool {
+        guard let type = item.mountPointType?.lowercased(), !type.isEmpty else { return false }
+        return type != "normal" && type != "shared_folder"
+    }
+
+    private static func volumeIdentity(realPath: String?) -> String? {
+        if let realPath {
+            let components = realPath.split(separator: "/")
+            if let volume = components.first, volume.lowercased().hasPrefix("volume") {
+                return String(volume)
+            }
+        }
+        // 无法确认所属卷时不纳入汇总，避免把同卷重复计算或把等容量的不同卷错误合并。
+        return nil
+    }
+
+    private static func validateRemoteMount(
+        _ configuration: RemoteMountConfiguration
+    ) throws -> RemoteMountConfiguration {
+        let server = configuration.server.trimmingCharacters(in: .whitespacesAndNewlines)
+        let remotePath = configuration.remotePath
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/\\ ").union(.newlines))
+        let mountPoint = try validateMountPoint(configuration.mountPoint)
+        guard !server.isEmpty,
+              !remotePath.isEmpty,
+              !server.contains("/"),
+              !server.contains("\\"),
+              !server.contains("@") else {
+            throw AppError(
+                category: .unknown,
+                isRetryable: false,
+                safeUserMessage: "请填写有效的服务器地址和远程文件夹。"
+            )
+        }
+        return RemoteMountConfiguration(
+            protocolType: configuration.protocolType,
+            server: server,
+            remotePath: remotePath,
+            mountPoint: mountPoint,
+            username: configuration.username.trimmingCharacters(in: .whitespacesAndNewlines),
+            password: configuration.password,
+            domain: configuration.domain.trimmingCharacters(in: .whitespacesAndNewlines),
+            readOnly: configuration.readOnly
+        )
+    }
+
+    private static func validateMountPoint(_ value: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = trimmed.split(separator: "/", omittingEmptySubsequences: true)
+        guard trimmed.hasPrefix("/"),
+              !components.isEmpty,
+              components.allSatisfy({ $0 != "." && $0 != ".." }) else {
+            throw AppError(
+                category: .unknown,
+                isRetryable: false,
+                safeUserMessage: "挂载位置必须是 NAS 中的完整文件夹路径。"
+            )
+        }
+        return "/" + components.joined(separator: "/")
     }
 
     private func requireCapability(_ name: String) throws -> ApiCapability {
@@ -1840,6 +2177,6 @@ public actor DsmFileRepository: FileRepository {
     }
 
     private static let additionalFields = [
-        "real_path", "size", "owner", "time", "perm", "mount_point_type", "type"
+        "real_path", "size", "owner", "time", "perm", "mount_point_type", "volume_status", "type"
     ]
 }

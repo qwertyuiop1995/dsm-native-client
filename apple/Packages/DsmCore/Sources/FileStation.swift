@@ -127,6 +127,65 @@ public struct FileShareLink: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+/// 当前账号通过 File Station 可见的存储空间汇总，不代表管理员看到的物理硬盘容量。
+public struct StorageSpaceSummary: Codable, Hashable, Sendable {
+    public let totalBytes: Int64
+    public let remainingBytes: Int64
+    public let volumeCount: Int
+
+    public init(totalBytes: Int64, remainingBytes: Int64, volumeCount: Int) {
+        self.totalBytes = max(totalBytes, 0)
+        self.remainingBytes = min(max(remainingBytes, 0), max(totalBytes, 0))
+        self.volumeCount = max(volumeCount, 0)
+    }
+
+    public var usedBytes: Int64 {
+        max(totalBytes - remainingBytes, 0)
+    }
+
+    public var usedFraction: Double {
+        guard totalBytes > 0 else { return 0 }
+        return min(max(Double(usedBytes) / Double(totalBytes), 0), 1)
+    }
+}
+
+public enum RemoteMountProtocol: String, Codable, CaseIterable, Sendable {
+    case smb = "cifs"
+    case nfs
+}
+
+/// 挂载密码只在当前请求内存中使用，不得编码、记录或持久化。
+public struct RemoteMountConfiguration: Sendable, Equatable {
+    public let protocolType: RemoteMountProtocol
+    public let server: String
+    public let remotePath: String
+    public let mountPoint: String
+    public let username: String
+    public let password: String
+    public let domain: String
+    public let readOnly: Bool
+
+    public init(
+        protocolType: RemoteMountProtocol,
+        server: String,
+        remotePath: String,
+        mountPoint: String,
+        username: String = "",
+        password: String = "",
+        domain: String = "",
+        readOnly: Bool = false
+    ) {
+        self.protocolType = protocolType
+        self.server = server
+        self.remotePath = remotePath
+        self.mountPoint = mountPoint
+        self.username = username
+        self.password = password
+        self.domain = domain
+        self.readOnly = readOnly
+    }
+}
+
 public struct FilePage: Codable, Equatable, Sendable {
     public let folderPath: String
     public let items: [FileItem]
@@ -273,8 +332,10 @@ public struct MediaStreamSource: @unchecked Sendable {
 public protocol FileRepository: Sendable {
     var profileID: UUID { get }
     var allowsVerifiedRestore: Bool { get }
+    var allowsRemoteMountManagement: Bool { get }
 
     func listShares(offset: Int, limit: Int) async throws -> FilePage
+    func listRemoteMounts(offset: Int, limit: Int) async throws -> FilePage
     func listFolder(path: String, offset: Int, limit: Int) async throws -> FilePage
     func getInfo(paths: [String]) async throws -> [FileItem]
     func getThumbnail(path: String, size: ThumbnailSize) async throws -> Data
@@ -344,9 +405,22 @@ public protocol FileRepository: Sendable {
     func listShareLinks() async throws -> [FileShareLink]
     func createShareLink(paths: [String], password: String?, expiresAt: String?) async throws -> FileShareLink
     func deleteShareLinks(ids: [String]) async throws
+    func storageSpaceSummary() async throws -> StorageSpaceSummary?
+    func createRemoteMount(_ configuration: RemoteMountConfiguration) async throws
+    func updateRemoteMount(
+        existingMountPoint: String,
+        configuration: RemoteMountConfiguration
+    ) async throws
+    func removeRemoteMount(mountPoint: String) async throws
 }
 
 public extension FileRepository {
+    var allowsRemoteMountManagement: Bool { false }
+
+    func listRemoteMounts(offset: Int, limit: Int) async throws -> FilePage {
+        FilePage(folderPath: "/", items: [], offset: offset, total: 0, hasMore: false)
+    }
+
     func readPrefix(remotePath: String, maximumLength: Int) async throws -> Data {
         throw AppError(
             category: .apiUnavailable,
@@ -400,6 +474,35 @@ public extension FileRepository {
             category: .apiUnavailable,
             isRetryable: false,
             safeUserMessage: "当前连接暂不支持读取压缩包内容，请更新 DSM 后重试。"
+        )
+    }
+
+    func storageSpaceSummary() async throws -> StorageSpaceSummary? { nil }
+
+    func createRemoteMount(_ configuration: RemoteMountConfiguration) async throws {
+        throw AppError(
+            category: .apiUnavailable,
+            isRetryable: false,
+            safeUserMessage: "这台 NAS 暂不支持创建远程位置。"
+        )
+    }
+
+    func updateRemoteMount(
+        existingMountPoint: String,
+        configuration: RemoteMountConfiguration
+    ) async throws {
+        throw AppError(
+            category: .apiUnavailable,
+            isRetryable: false,
+            safeUserMessage: "这台 NAS 暂不支持修改远程位置。"
+        )
+    }
+
+    func removeRemoteMount(mountPoint: String) async throws {
+        throw AppError(
+            category: .apiUnavailable,
+            isRetryable: false,
+            safeUserMessage: "这台 NAS 暂不支持删除远程位置。"
         )
     }
 }

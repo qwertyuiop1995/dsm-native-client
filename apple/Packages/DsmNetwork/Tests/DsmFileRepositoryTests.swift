@@ -31,6 +31,32 @@ final class DsmFileRepositoryTests: XCTestCase {
         XCTAssertEqual(share.mountPointType, "cifs")
     }
 
+    func test使用公开虚拟文件夹接口列出远程位置() async throws {
+        let response = DsmHTTPResponse(
+            data: Data(
+                #"{"success":true,"data":{"offset":0,"total":1,"folders":[{"name":"远程资料","path":"/home/远程资料","isdir":true,"additional":{"mount_point_type":"nfs","perm":{"adv_right":{"read":true,"write":true}}}}]}}"#.utf8
+            ),
+            statusCode: 200
+        )
+        let transport = MockHTTPTransport(responses: [response])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationVirtualFolder: capability(DsmAPIName.fileStationVirtualFolder, version: 2)
+            ]),
+            transport: transport
+        )
+
+        let page = try await repository.listRemoteMounts(offset: 0, limit: 100)
+
+        XCTAssertEqual(page.total, 1)
+        XCTAssertEqual(page.items.first?.path, "/home/远程资料")
+        XCTAssertEqual(page.items.first?.mountPointType, "nfs")
+        let requests = await transport.recordedRequests()
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(requestParameter("api", in: request), DsmAPIName.fileStationVirtualFolder)
+        XCTAssertEqual(requestParameter("type", in: request), "all")
+    }
+
     func test二进制下载写入目标且凭据在URL中() async throws {
         let response = DsmHTTPResponse(
             data: Data("hello".utf8),
@@ -595,6 +621,129 @@ final class DsmFileRepositoryTests: XCTestCase {
         let links = try await repository.listShareLinks()
         XCTAssertEqual(links.map(\.id), ["link-1"])
         try await repository.deleteShareLinks(ids: ["link-1"])
+    }
+
+    func test容量只汇总当前账号可见卷并去除重复共享() async throws {
+        let response = DsmHTTPResponse(
+            data: Data(
+                #"{"success":true,"data":{"shares":[{"name":"home","path":"/home","isdir":true,"additional":{"real_path":"/volume1/homes/tester","volume_status":{"totalspace":"1000","freespace":"250"}}},{"name":"projects","path":"/projects","isdir":true,"additional":{"real_path":"/volume1/projects","volume_status":{"total_space":1000,"free_space":250}}},{"name":"archive","path":"/archive","isdir":true,"additional":{"real_path":"/volume2/archive","volume_status":{"total":2000,"available":800}}}]}}"#.utf8
+            ),
+            statusCode: 200
+        )
+        let transport = MockHTTPTransport(responses: [response])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationList: capability(DsmAPIName.fileStationList, version: 2)
+            ]),
+            transport: transport
+        )
+
+        let loadedSummary = try await repository.storageSpaceSummary()
+        let summary = try XCTUnwrap(loadedSummary)
+
+        XCTAssertEqual(summary.totalBytes, 3_000)
+        XCTAssertEqual(summary.remainingBytes, 1_050)
+        XCTAssertEqual(summary.usedBytes, 1_950)
+        XCTAssertEqual(summary.volumeCount, 2)
+    }
+
+    func test远程挂载创建后复查结果且密码不进入URL() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: Data(#"{"success":true}"#.utf8), statusCode: 200),
+            mountedInfo(path: "/home/远程资料", type: "cifs")
+        ])
+        let repository = try makeRemoteMountRepository(transport: transport)
+
+        try await repository.createRemoteMount(
+            RemoteMountConfiguration(
+                protocolType: .smb,
+                server: "192.0.2.20",
+                remotePath: "资料",
+                mountPoint: "/home/远程资料",
+                username: "tester",
+                password: "REDACTED_PASSWORD",
+                domain: "WORKGROUP",
+                readOnly: true
+            )
+        )
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.map { requestParameter("method", in: $0) }, ["mount_remote", "getinfo"])
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(requestParameter("mount_point", in: request), "/home/远程资料")
+        XCTAssertEqual(requestParameter("read_only", in: request), "true")
+        XCTAssertEqual(requestParameter("password", in: request), "REDACTED_PASSWORD")
+        XCTAssertFalse(request.url?.absoluteString.contains("REDACTED_PASSWORD") == true)
+    }
+
+    func test远程挂载修改会先确认新位置再断开旧位置() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: Data(#"{"success":true}"#.utf8), statusCode: 200),
+            mountedInfo(path: "/home/新远程资料", type: "nfs"),
+            DsmHTTPResponse(data: Data(#"{"success":true}"#.utf8), statusCode: 200),
+            mountedInfo(path: "/home/旧远程资料", type: "normal")
+        ])
+        let repository = try makeRemoteMountRepository(transport: transport)
+
+        try await repository.updateRemoteMount(
+            existingMountPoint: "/home/旧远程资料",
+            configuration: RemoteMountConfiguration(
+                protocolType: .nfs,
+                server: "192.0.2.30",
+                remotePath: "exports/media",
+                mountPoint: "/home/新远程资料"
+            )
+        )
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(
+            requests.map { requestParameter("method", in: $0) },
+            ["mount_remote", "getinfo", "unmount", "getinfo"]
+        )
+    }
+
+    func test删除远程挂载只断开并复查结果() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: Data(#"{"success":true}"#.utf8), statusCode: 200),
+            mountedInfo(path: "/home/远程资料", type: "normal")
+        ])
+        let repository = try makeRemoteMountRepository(transport: transport)
+
+        try await repository.removeRemoteMount(mountPoint: "/home/远程资料")
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.map { requestParameter("method", in: $0) }, ["unmount", "getinfo"])
+        XCTAssertEqual(requestParameter("mount_point", in: try XCTUnwrap(requests.first)), "/home/远程资料")
+    }
+
+    private func mountedInfo(path: String, type: String) -> DsmHTTPResponse {
+        let body = """
+        {"success":true,"data":{"files":[{"name":"\(URL(fileURLWithPath: path).lastPathComponent)","path":"\(path)","isdir":true,"additional":{"mount_point_type":"\(type)"}}]}}
+        """
+        return DsmHTTPResponse(data: Data(body.utf8), statusCode: 200)
+    }
+
+    private func requestParameter(_ name: String, in request: URLRequest) -> String? {
+        if let url = request.url,
+           let value = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == name })?.value {
+            return value
+        }
+        guard let body = request.httpBody.flatMap({ String(data: $0, encoding: .utf8) }) else {
+            return nil
+        }
+        return URLComponents(string: "?\(body)")?
+            .queryItems?.first(where: { $0.name == name })?.value
+    }
+
+    private func makeRemoteMountRepository(transport: MockHTTPTransport) throws -> DsmFileRepository {
+        try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationList: capability(DsmAPIName.fileStationList, version: 2),
+                DsmAPIName.fileStationMount: capability(DsmAPIName.fileStationMount, version: 1)
+            ]),
+            transport: transport
+        )
     }
 
     private func makeRepository(

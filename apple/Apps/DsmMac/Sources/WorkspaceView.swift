@@ -354,7 +354,7 @@ struct WorkspaceView: View {
                 onClearAll: model.clearRecentLocations
             )
         case .remoteLocations:
-            RemoteLocationsView(locations: model.remoteLocations, onOpen: { item in openLocation(item.path) })
+            RemoteLocationsView(model: model, onOpen: { item in openLocation(item.path) })
         case .sharedLinks:
             ShareLinksView(model: model)
         case .transfers:
@@ -765,6 +765,11 @@ private struct SidebarView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 Divider()
+                StorageCapacityView(
+                    summary: model.storageSpaceSummary,
+                    isLoading: model.isLoadingStorageSpace
+                )
+                Divider()
                 HStack(spacing: 10) {
                     Image(systemName: connectionRoute?.systemImage ?? "network")
                         .foregroundStyle(.green)
@@ -799,6 +804,59 @@ private struct SidebarView: View {
         } message: {
             Text("还有 \(model.activeTransferCount) 个任务正在进行。退出后，这些任务会被取消。")
         }
+    }
+}
+
+private struct StorageCapacityView: View {
+    let summary: StorageSpaceSummary?
+    let isLoading: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let summary {
+                HStack(spacing: 6) {
+                    Label("存储空间", systemImage: "internaldrive")
+                        .font(.caption.weight(.semibold))
+                    Spacer(minLength: 4)
+                    Text(Self.format(summary.totalBytes))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                ProgressView(value: summary.usedFraction)
+                    .progressViewStyle(.linear)
+                    .accessibilityLabel("存储空间使用情况")
+                    .accessibilityValue(
+                        "已使用 \(Self.format(summary.usedBytes))，剩余 \(Self.format(summary.remainingBytes))"
+                    )
+                Text("已用 \(Self.format(summary.usedBytes)) · 剩余 \(Self.format(summary.remainingBytes))")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if summary.volumeCount > 1 {
+                    Text("当前账号可见的 \(summary.volumeCount) 个存储空间合计")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            } else if isLoading {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("正在读取存储空间…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Label("暂时无法读取存储空间", systemImage: "internaldrive")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .help("显示当前登录账号可访问的存储空间，不包含无权查看的存储空间。")
+    }
+
+    private static func format(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
 
@@ -902,34 +960,240 @@ private struct RecentLocationsView: View {
 }
 
 private struct RemoteLocationsView: View {
-    let locations: [FileItem]
+    @Bindable var model: WorkspaceModel
     let onOpen: (FileItem) -> Void
+    @State private var showsCreate = false
+    @State private var editingItem: FileItem?
+    @State private var removingItem: FileItem?
+
+    private var defaultMountPoint: String {
+        let parent = model.shares.first(where: { $0.permissions?.canWrite == true })?.path
+            ?? model.shares.first?.path
+            ?? "/home"
+        return parent + "/远程位置"
+    }
 
     var body: some View {
         Group {
-            if locations.isEmpty {
-                ContentUnavailableView(
-                    "没有远程位置",
-                    systemImage: "network",
-                    description: Text("这里会显示已经连接到这台 NAS 的其他存储位置。")
-                )
+            if model.remoteLocations.isEmpty {
+                VStack(spacing: 16) {
+                    ContentUnavailableView(
+                        "没有远程位置",
+                        systemImage: "network",
+                        description: Text(
+                            model.allowsRemoteMountManagement
+                                ? "连接另一台设备上的共享文件夹后，会显示在这里。"
+                                : "这台 NAS 暂不提供远程位置管理。"
+                        )
+                    )
+                    if model.allowsRemoteMountManagement {
+                        Button("连接远程位置") { showsCreate = true }
+                    }
+                }
             } else {
-                List(locations) { location in
+                List(model.remoteLocations) { location in
                     Button { onOpen(location) } label: {
                         Label {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(location.name)
-                                Text("点按以浏览").font(.caption).foregroundStyle(.secondary)
+                                Text(remoteLocationDescription(location))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         } icon: {
                             Image(systemName: "network").foregroundStyle(.blue)
                         }
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("打开") { onOpen(location) }
+                        if model.allowsRemoteMountManagement {
+                            Divider()
+                            Button("修改连接…") { editingItem = location }
+                            Button("删除远程位置…", role: .destructive) { removingItem = location }
+                        }
+                    }
                 }
             }
         }
         .navigationTitle("远程位置")
+        .toolbar {
+            Button {
+                showsCreate = true
+            } label: {
+                Label("连接远程位置", systemImage: "plus")
+            }
+            .disabled(!model.allowsRemoteMountManagement || model.isManagingRemoteMount)
+            .help(
+                model.allowsRemoteMountManagement
+                    ? "连接另一台设备上的 SMB 或 NFS 共享文件夹"
+                    : "这台 NAS 暂不提供远程位置管理"
+            )
+        }
+        .sheet(isPresented: $showsCreate) {
+            RemoteMountEditorView(
+                existingItem: nil,
+                initialMountPoint: defaultMountPoint
+            ) { configuration in
+                let succeeded = await model.createRemoteMount(configuration)
+                return succeeded ? nil : (model.statusMessage ?? "远程位置没有连接成功，请检查设置后重试。")
+            }
+        }
+        .sheet(item: $editingItem) { item in
+            RemoteMountEditorView(
+                existingItem: item,
+                initialMountPoint: item.path
+            ) { configuration in
+                let succeeded = await model.updateRemoteMount(item, configuration: configuration)
+                return succeeded ? nil : (model.statusMessage ?? "远程位置没有更新，请检查设置后重试。")
+            }
+        }
+        .alert("删除这个远程位置？", isPresented: Binding(
+            get: { removingItem != nil },
+            set: { if !$0 { removingItem = nil } }
+        )) {
+            Button("取消", role: .cancel) { removingItem = nil }
+            Button("删除远程位置", role: .destructive) {
+                guard let item = removingItem else { return }
+                removingItem = nil
+                Task { _ = await model.removeRemoteMount(item) }
+            }
+        } message: {
+            Text("只会断开这个远程位置，不会删除远程设备中的文件。")
+        }
+    }
+
+    private func remoteLocationDescription(_ item: FileItem) -> String {
+        let type = item.mountPointType?.lowercased() ?? ""
+        let protocolName = type.contains("nfs") ? "NFS" : type.contains("cifs") || type.contains("smb") ? "SMB" : "远程存储"
+        return "\(protocolName) · \(item.path)"
+    }
+}
+
+private struct RemoteMountEditorView: View {
+    let existingItem: FileItem?
+    let onSave: (RemoteMountConfiguration) async -> String?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var protocolType: RemoteMountProtocol
+    @State private var server = ""
+    @State private var remotePath = ""
+    @State private var mountPoint: String
+    @State private var username = ""
+    @State private var password = ""
+    @State private var domain = ""
+    @State private var readOnly = false
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
+
+    init(
+        existingItem: FileItem?,
+        initialMountPoint: String,
+        onSave: @escaping (RemoteMountConfiguration) async -> String?
+    ) {
+        self.existingItem = existingItem
+        self.onSave = onSave
+        let rawType = existingItem?.mountPointType?.lowercased() ?? ""
+        _protocolType = State(initialValue: rawType.contains("nfs") ? .nfs : .smb)
+        _mountPoint = State(initialValue: initialMountPoint)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label(
+                existingItem == nil ? "连接远程位置" : "修改远程位置",
+                systemImage: "network"
+            )
+            .font(.title2.weight(.semibold))
+
+            if existingItem != nil {
+                Text("为保护连接密码，修改时需要重新填写远程地址和账号。保存时会短暂断开原连接。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("把另一台设备上的共享文件夹连接到这台 NAS。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Form {
+                Picker("连接方式", selection: $protocolType) {
+                    Text("SMB（常用）").tag(RemoteMountProtocol.smb)
+                    Text("NFS").tag(RemoteMountProtocol.nfs)
+                }
+                TextField("服务器地址", text: $server, prompt: Text("例如 192.168.1.20"))
+                TextField("远程共享文件夹", text: $remotePath, prompt: Text("例如 documents"))
+                TextField("挂载到", text: $mountPoint, prompt: Text("例如 /home/远程资料"))
+
+                if protocolType == .smb {
+                    TextField("用户名", text: $username)
+                    SecureField("密码", text: $password)
+                    TextField("域（可选）", text: $domain)
+                }
+                Toggle("只读连接", isOn: $readOnly)
+            }
+            .formStyle(.grouped)
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .accessibilityLabel("连接失败：\(errorMessage)")
+            }
+
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(isSubmitting)
+                Button(existingItem == nil ? "连接" : "保存修改") {
+                    submit()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSubmit || isSubmitting)
+                .overlay(alignment: .leading) {
+                    if isSubmitting {
+                        ProgressView().controlSize(.small).offset(x: -24)
+                    }
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+        .interactiveDismissDisabled(isSubmitting)
+    }
+
+    private var canSubmit: Bool {
+        !server.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !remotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && mountPoint.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
+    }
+
+    private func submit() {
+        guard canSubmit, !isSubmitting else { return }
+        isSubmitting = true
+        errorMessage = nil
+        let configuration = RemoteMountConfiguration(
+            protocolType: protocolType,
+            server: server,
+            remotePath: remotePath,
+            mountPoint: mountPoint,
+            username: username,
+            password: password,
+            domain: domain,
+            readOnly: readOnly
+        )
+        Task {
+            let failure = await onSave(configuration)
+            isSubmitting = false
+            if let failure {
+                errorMessage = failure
+            } else {
+                password = ""
+                dismiss()
+            }
+        }
     }
 }
 

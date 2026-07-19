@@ -371,6 +371,8 @@ additional=["real_path","size","owner","time","perm","mount_point_type","volume_
 
 关键响应字段：`shares[]`、`offset`、`total`。每个共享对象至少关注 `name`、`path`、`isdir`、`additional`。
 
+macOS 客户端使用公开的 `list_share` 响应中 `additional.volume_status` 显示当前账号可见的存储空间。相同 `real_path` 卷只汇总一次，因此多个共享目录位于同一存储空间时不会重复计算。这里表示当前账号可见卷的总量、已用量和剩余量，不等同于存储管理员页面中的物理硬盘容量；NAS 不返回该字段时，界面显示“暂时无法读取”，不会改用内部存储管理接口扩大权限范围。
+
 ### 5.3 列出目录与文件详情
 
 `method=list` 常用参数：
@@ -610,6 +612,17 @@ force_complete=false
 | `SYNO.Entry.Request` | `request` | 将多个子请求合并为批处理 | 中 |
 
 `SYNO.Entry.Request` 的子请求可能分别成功或失败，必须逐项检查结果。不要因为外层 `success=true` 就假定所有修改都完成。
+
+#### `SYNO.FileStation.Mount` 使用边界
+
+> **内部、实验性契约：** 当前审阅的群晖公开 File Station PDF 未提供 `SYNO.FileStation.Mount` 的稳定参数说明。客户端只在能力发现明确返回 v1 时显示创建、修改和删除远程位置入口，并且仍需在目标 DSM build 上实机验证。
+
+- 创建使用 `mount_remote`，支持 SMB/CIFS 与 NFS；远程地址、目标目录和只读选项随请求提交。
+- 修改不是假定存在稳定的 `edit` 方法：目标目录变化时先连接并确认新位置，再断开并确认旧位置；目标不变时明确提示会短暂断开后重连。
+- 删除使用 `unmount`，语义仅为断开远程位置，不删除远端文件；提交前必须二次确认。
+- SMB 密码只保留在当前表单内存和 HTTPS 请求正文中，不写入配置、日志、URL 或文档。修改连接时需要重新输入。
+- 所有写操作必须防止重复提交，并通过公开的 `SYNO.FileStation.List.getinfo` 复查 `mount_point_type`；仅收到内部接口的 `success=true` 不算完成。
+- API 未发现、权限不足或结果无法复查时必须关闭入口或给出可恢复提示，不能自动尝试更高权限账号。
 
 ### 8.3 系统状态、连接与日志 - 内部
 

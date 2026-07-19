@@ -144,23 +144,37 @@ final class PhotoLibraryModel {
     private(set) var spaces: [PhotoSpace] = []
     var selectedSpaceID: PhotoSpaceKind?
     private(set) var currentPath = ""
-    private(set) var items: [PhotoLibraryItem] = []
+    private(set) var items: [PhotoLibraryItem] = [] {
+        didSet { updateDisplayedItems() }
+    }
     private(set) var isLoading = false
     private(set) var isLoadingMore = false
     private(set) var hasMore = false
     private(set) var sourceTotal = 0
     private(set) var errorMessage: String?
     var browseMode: PhotoBrowseMode = .timeline {
-        didSet { restartThumbnailPrefetchIfPossible() }
+        didSet {
+            restartThumbnailPrefetchIfPossible()
+            updateDisplayedItems()
+        }
     }
     var mediaFilter: PhotoMediaFilter = .all {
-        didSet { restartThumbnailPrefetchIfPossible() }
+        didSet {
+            restartThumbnailPrefetchIfPossible()
+            updateDisplayedItems()
+        }
     }
     var searchText = "" {
-        didSet { restartThumbnailPrefetchIfPossible() }
+        didSet {
+            restartThumbnailPrefetchIfPossible()
+            updateDisplayedItems()
+        }
     }
     var selection: Set<PhotoLibraryItem.ID> = []
-    private(set) var timelineItems: [PhotoLibraryItem] = []
+    private(set) var timelineItems: [PhotoLibraryItem] = [] {
+        didSet { updateDisplayedItems() }
+    }
+    private(set) var displayedItems: [PhotoLibraryItem] = []
     private(set) var isLoadingTimeline = false
     private(set) var isRetryingTimelineFolders = false
     private(set) var timelineScannedFolderCount = 0
@@ -212,9 +226,9 @@ final class PhotoLibraryModel {
         return URL(fileURLWithPath: currentPath).lastPathComponent
     }
 
-    var displayedItems: [PhotoLibraryItem] {
+    private func updateDisplayedItems() {
         let source = browseMode == .timeline ? timelineItems : items
-        return source.filter { item in
+        displayedItems = source.filter { item in
             let matchesType: Bool
             switch mediaFilter {
             case .all: matchesType = true

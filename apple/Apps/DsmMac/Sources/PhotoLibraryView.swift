@@ -69,8 +69,8 @@ struct PhotoLibraryView: View {
     private var header: some View {
         HStack(spacing: 12) {
             Label(
-                model.browseMode == .timeline ? "时间线" : model.locationTitle,
-                systemImage: model.browseMode == .timeline ? "clock" : "photo.on.rectangle"
+                titleText,
+                systemImage: titleIcon
             )
             .font(.headline)
             .lineLimit(1)
@@ -78,6 +78,7 @@ struct PhotoLibraryView: View {
             Picker("浏览方式", selection: browseModeSelection) {
                 Label("文件夹", systemImage: "folder").tag(PhotoBrowseMode.folders)
                 Label("时间线", systemImage: "clock").tag(PhotoBrowseMode.timeline)
+                Label("相册", systemImage: "rectangle.stack").tag(PhotoBrowseMode.albums)
             }
             .pickerStyle(.segmented)
             .fixedSize()
@@ -150,37 +151,40 @@ struct PhotoLibraryView: View {
 
     private var mediaStatsBadge: some View {
         let stats = model.mediaStats
+        let isAlbums = model.browseMode == .albums
         return HStack(spacing: 5) {
             Label {
                 Text("\(Self.formattedNumber(stats.total))")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
             } icon: {
-                Image(systemName: "photo.stack.fill")
+                Image(systemName: isAlbums ? "rectangle.stack.fill" : "photo.stack.fill")
                     .foregroundStyle(Color.accentColor)
             }
 
-            Text("(")
-                .foregroundStyle(.secondary.opacity(0.6))
+            if !isAlbums {
+                Text("(")
+                    .foregroundStyle(.secondary.opacity(0.6))
 
-            Label("\(Self.formattedNumber(stats.images))", systemImage: "photo")
-                .foregroundStyle(.secondary)
+                Label("\(Self.formattedNumber(stats.images))", systemImage: "photo")
+                    .foregroundStyle(.secondary)
 
-            Text("·")
-                .foregroundStyle(.secondary.opacity(0.6))
+                Text("·")
+                    .foregroundStyle(.secondary.opacity(0.6))
 
-            Label("\(Self.formattedNumber(stats.videos))", systemImage: "video")
-                .foregroundStyle(.secondary)
+                Label("\(Self.formattedNumber(stats.videos))", systemImage: "video")
+                    .foregroundStyle(.secondary)
 
-            Text(")")
-                .foregroundStyle(.secondary.opacity(0.6))
+                Text(")")
+                    .foregroundStyle(.secondary.opacity(0.6))
+            }
         }
         .font(.caption)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(.quaternary.opacity(0.55), in: Capsule())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("媒体库共计 \(stats.total) 项，包含 \(stats.images) 张照片，\(stats.videos) 个视频")
+        .accessibilityLabel(isAlbums ? "共有 \(stats.total) 个相册" : "媒体库共计 \(stats.total) 项，包含 \(stats.images) 张照片，\(stats.videos) 个视频")
     }
 
     private static func formattedNumber(_ number: Int) -> String {
@@ -355,7 +359,7 @@ struct PhotoLibraryView: View {
                     onMove: { moveTarget = $0 }
                 )
                 .task {
-                    if model.browseMode == .folders, item.id == model.displayedItems.last?.id {
+                    if (model.browseMode == .folders || model.browseMode == .albums), item.id == model.displayedItems.last?.id {
                         await model.loadMore()
                     }
                 }
@@ -432,6 +436,22 @@ struct PhotoLibraryView: View {
         .accessibilityLabel("正在读取照片")
     }
 
+    private var titleText: String {
+        switch model.browseMode {
+        case .timeline: "时间线"
+        case .albums: "相册"
+        case .folders: model.locationTitle
+        }
+    }
+
+    private var titleIcon: String {
+        switch model.browseMode {
+        case .timeline: "clock"
+        case .albums: "rectangle.stack"
+        case .folders: "photo.on.rectangle"
+        }
+    }
+
     private var browseModeSelection: Binding<PhotoBrowseMode> {
         Binding(
             get: { model.browseMode },
@@ -460,6 +480,7 @@ struct PhotoLibraryView: View {
     private var emptyTitle: String {
         if !model.searchText.isEmpty { return "没有找到匹配项目" }
         if model.mediaFilter != .all { return "没有符合筛选条件的项目" }
+        if model.browseMode == .albums { return "这里还没有相册" }
         return "这里还没有照片"
     }
 
@@ -467,6 +488,7 @@ struct PhotoLibraryView: View {
         if !model.searchText.isEmpty || model.mediaFilter != .all {
             return "换一个关键词或清除筛选后再试。"
         }
+        if model.browseMode == .albums { return "当前照片空间中尚无文件夹。" }
         return "使用工具栏的“上传”把照片或视频添加到当前位置。"
     }
 
@@ -519,7 +541,7 @@ private struct PhotoLibraryCell: View {
         )
         .contextMenu {
             if item.isFolder {
-                Button("打开文件夹") { Task { await model.open(item) } }
+                Button(model.browseMode == .albums ? "打开相册" : "打开文件夹") { Task { await model.open(item) } }
             } else {
                 Button("打开预览") { onPreview(item) }
             }
@@ -553,7 +575,7 @@ private struct PhotoLibraryCell: View {
             }
         }
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint(item.isFolder ? "打开这个照片文件夹" : "单击选择，双击打开预览")
+        .accessibilityHint(item.isFolder ? (model.browseMode == .albums ? "打开这个相册" : "打开这个照片文件夹") : "单击选择，双击打开预览")
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
@@ -634,7 +656,7 @@ private struct PhotoLibraryCell: View {
     }
 
     private var accessibilityLabel: String {
-        if item.isFolder { return "文件夹，\(item.name)" }
+        if item.isFolder { return "\(model.browseMode == .albums ? "相册" : "文件夹")，\(item.name)" }
         return "\(item.kind == .video ? "视频" : "照片")，\(item.name)\(isSelected ? "，已选择" : "")"
     }
 

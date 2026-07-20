@@ -1038,7 +1038,7 @@ private struct FittedImagePreview: View {
     var body: some View {
         GeometryReader { geometry in
             let availableWidth = max(1, geometry.size.width - 32)
-            let availableHeight = max(1, geometry.size.height - 88)
+            let availableHeight = max(1, geometry.size.height - 32)
             let baseWidth = isBaseQuarterTurn ? originalHeight : originalWidth
             let baseHeight = isBaseQuarterTurn ? originalWidth : originalHeight
             let isQuarterTurn = abs(rotation) % 180 == 90
@@ -1058,40 +1058,6 @@ private struct FittedImagePreview: View {
                     .rotationEffect(.degrees(Double(rotation)))
                     .frame(width: visualWidth, height: visualHeight)
                     .clipped()
-
-                HStack(spacing: 4) {
-                    previewControl("向左旋转", systemImage: "rotate.left") {
-                        updateRotation(by: -90)
-                    }
-                    .keyboardShortcut("l", modifiers: .command)
-                    previewControl("向右旋转", systemImage: "rotate.right") {
-                        updateRotation(by: 90)
-                    }
-                    .keyboardShortcut("r", modifiers: .command)
-                    Divider().frame(height: 22).padding(.horizontal, 4)
-                    previewControl("缩小", systemImage: "minus.magnifyingglass") {
-                        updateZoom(zoom - 0.2)
-                    }
-                    .keyboardShortcut("-", modifiers: .command)
-                    Text("\(Int((zoom * 100).rounded()))%")
-                        .font(.caption.monospacedDigit())
-                        .frame(minWidth: 44)
-                        .accessibilityLabel("缩放比例百分之 \(Int((zoom * 100).rounded()))")
-                    previewControl("放大", systemImage: "plus.magnifyingglass") {
-                        updateZoom(zoom + 0.2)
-                    }
-                    .keyboardShortcut("=", modifiers: .command)
-                    Button("适合窗口") {
-                        updateZoom(1)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(zoom == 1)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(.regularMaterial, in: Capsule())
-                .padding(.bottom, 10)
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
@@ -1106,21 +1072,6 @@ private struct FittedImagePreview: View {
         .accessibilityLabel("图片预览，可使用滚轮缩放")
     }
 
-    private func previewControl(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(title)
-        .accessibilityLabel(title)
-    }
-
     private func updateZoom(_ value: CGFloat) {
         let newValue = min(5, max(0.25, value))
         if reduceMotion {
@@ -1128,17 +1079,6 @@ private struct FittedImagePreview: View {
         } else {
             withAnimation(.easeOut(duration: 0.12)) {
                 zoom = newValue
-            }
-        }
-    }
-
-    private func updateRotation(by degrees: Int) {
-        let newValue = (rotation + degrees) % 360
-        if reduceMotion {
-            rotation = newValue
-        } else {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                rotation = newValue
             }
         }
     }

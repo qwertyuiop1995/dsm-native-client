@@ -399,6 +399,13 @@ final class PhotoLibraryModel {
             }
         }
 
+        if browseMode == .albums {
+            filtered = filtered.filter(\.isFolder)
+            total = filtered.count
+            images = 0
+            videos = 0
+        }
+
         var sections: [PhotoTimelineSection] = []
         if browseMode == .timeline {
             let calendar = Calendar.current
@@ -491,6 +498,9 @@ final class PhotoLibraryModel {
 
     func open(_ item: PhotoLibraryItem) async {
         guard item.isFolder else { return }
+        if browseMode == .albums {
+            browseMode = .folders
+        }
         await loadFolder(item.path, recordingHistory: true)
     }
 
@@ -522,6 +532,9 @@ final class PhotoLibraryModel {
             if timelineItems.isEmpty { await loadTimeline() }
         } else {
             cancelTimelineScan()
+            if mode == .albums && items.isEmpty && !currentPath.isEmpty {
+                await loadFolder(currentPath, recordingHistory: false)
+            }
         }
     }
 

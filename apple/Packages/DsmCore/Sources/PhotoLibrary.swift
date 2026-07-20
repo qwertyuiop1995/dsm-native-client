@@ -39,6 +39,7 @@ public enum PhotoLibraryItemKind: String, Codable, Sendable {
 public enum PhotoBrowseMode: String, Codable, CaseIterable, Sendable {
     case folders
     case timeline
+    case albums
 }
 
 public enum PhotoMediaFilter: String, Codable, CaseIterable, Sendable {

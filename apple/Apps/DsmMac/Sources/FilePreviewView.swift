@@ -387,6 +387,8 @@ struct FileDetailView: View {
     @State private var confirmsCancelEditing = false
     @State private var livePhotoPlayer: AVPlayer?
     @State private var livePhotoResourceLoaderDelegate: DsmAVAssetResourceLoaderDelegate?
+    @State private var metadata: PhotoMetadata?
+    @State private var isLoadingMetadata = false
 
     var body: some View {
         Group {
@@ -557,6 +559,15 @@ struct FileDetailView: View {
                         .textSelection(.enabled)
                 }
                 Spacer()
+
+                if item.isRecyclePath {
+                    Button {
+                        onRestore(item)
+                    } label: {
+                        Label("恢复", systemImage: "arrow.uturn.backward.circle")
+                    }
+                    .help("将这个项目恢复到原来的位置")
+                }
             }
             .padding(16)
 
@@ -566,8 +577,21 @@ struct FileDetailView: View {
                 folderDetails(item)
             } else {
                 preview(item)
+
+                if isLoadingMetadata || metadata != nil {
+                    Divider()
+                    metadataPanel(for: item)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                }
             }
 
+        }
+        .task(id: item.id) {
+            metadata = nil
+            isLoadingMetadata = true
+            metadata = await model.metadata(for: item)
+            isLoadingMetadata = false
         }
         .onChange(of: item.id) { _, _ in
             livePhotoPlayer?.pause()
@@ -737,6 +761,80 @@ struct FileDetailView: View {
             }
         }
     }
+
+    @ViewBuilder
+    private func metadataPanel(for item: FileItem) -> some View {
+        if isLoadingMetadata {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("正在读取元数据…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else if let metadata {
+            VStack(alignment: .leading, spacing: 8) {
+                if let width = metadata.width, let height = metadata.height {
+                    metadataRow(label: "尺寸", value: "\(width) × \(height)")
+                }
+                if let creationDate = metadata.creationDate {
+                    metadataRow(
+                        label: "拍摄时间",
+                        value: Self.metadataDateFormatter.string(from: creationDate)
+                    )
+                } else if let creationDate = item.times?.createdAt {
+                    metadataRow(
+                        label: "创建时间",
+                        value: Self.metadataDateFormatter.string(from: creationDate)
+                    )
+                }
+                if let make = metadata.cameraMake, let model = metadata.cameraModel {
+                    metadataRow(label: "相机", value: "\(make) \(model)")
+                } else if let model = metadata.cameraModel {
+                    metadataRow(label: "相机", value: model)
+                } else if let make = metadata.cameraMake {
+                    metadataRow(label: "相机", value: make)
+                }
+                if let lens = metadata.lens {
+                    metadataRow(label: "镜头", value: lens)
+                }
+                if let iso = metadata.iso, !iso.isEmpty {
+                    metadataRow(label: "ISO", value: iso)
+                }
+                if let aperture = metadata.aperture, !aperture.isEmpty {
+                    metadataRow(label: "光圈", value: "f/\(aperture)")
+                }
+                if let shutter = metadata.shutterSpeed, !shutter.isEmpty {
+                    metadataRow(label: "快门", value: shutter)
+                }
+                if let focal = metadata.focalLength, !focal.isEmpty {
+                    metadataRow(label: "焦距", value: "\(focal) mm")
+                }
+                if let location = metadata.locationText, !location.isEmpty {
+                    metadataRow(label: "位置", value: location)
+                }
+            }
+            .font(.callout)
+        }
+    }
+
+    private func metadataRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .trailing)
+            Text(value)
+                .lineLimit(1)
+            Spacer()
+        }
+    }
+
+    private static let metadataDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.locale = Locale.current
+        return formatter
+    }()
 
     private func requestClose() {
         guard !model.isSavingText else { return }

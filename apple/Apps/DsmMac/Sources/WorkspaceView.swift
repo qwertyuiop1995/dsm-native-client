@@ -436,7 +436,8 @@ struct WorkspaceView: View {
                     presentFloatingPreview()
                 },
                 onDownload: presentPhotoDownload,
-                onDelete: { deleteTargets = $0.map(\.fileItem) }
+                onDelete: { deleteTargets = $0.map(\.fileItem) },
+                onRestore: { restoreTarget = $0.fileItem }
             )
         case .transfers:
             TransferCenterView(model: model, connectedWorkspaces: connectedWorkspaces)

@@ -7,10 +7,39 @@ struct PhotoLibraryView: View {
     let onPreview: (PhotoLibraryItem) -> Void
     let onDownload: ([PhotoLibraryItem]) -> Void
     let onDelete: ([PhotoLibraryItem]) -> Void
+    let onRestore: (PhotoLibraryItem) -> Void
+
+    @State private var timelineScrollTarget: Date?
 
     private let columns = [
         GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 12, alignment: .top)
     ]
+
+    private struct YearMonth: Identifiable, Hashable {
+        let id: Date
+        let title: String
+    }
+
+    private var timelineYearMonths: [YearMonth] {
+        guard model.browseMode == .timeline, !model.timelineSections.isEmpty else { return [] }
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: model.timelineSections) { section in
+            calendar.dateComponents([.year, .month], from: section.date)
+        }
+        let sorted = grouped.values.compactMap { sections -> YearMonth? in
+            guard let first = sections.first else { return nil }
+            let components = calendar.dateComponents([.year, .month], from: first.date)
+            guard let year = components.year, let month = components.month,
+                  let date = calendar.date(from: DateComponents(year: year, month: month, day: 1)) else {
+                return nil
+            }
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy 年 M 月"
+            formatter.locale = Locale(identifier: "zh_CN")
+            return YearMonth(id: date, title: formatter.string(from: date))
+        }
+        return sorted.sorted { $0.id < $1.id }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,6 +71,19 @@ struct PhotoLibraryView: View {
             .fixedSize()
 
             mediaStatsBadge
+
+            if model.browseMode == .timeline, !timelineYearMonths.isEmpty {
+                Menu {
+                    ForEach(timelineYearMonths) { yearMonth in
+                        Button(yearMonth.title) {
+                            timelineScrollTarget = yearMonth.id
+                        }
+                    }
+                } label: {
+                    Label("日期", systemImage: "calendar")
+                }
+                .help("跳到指定年月的照片")
+            }
 
             Spacer()
 
@@ -188,36 +230,45 @@ struct PhotoLibraryView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         } else {
-            ScrollView {
-                if let errorMessage = model.errorMessage {
-                    errorBanner(errorMessage)
-                }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    if let errorMessage = model.errorMessage {
+                        errorBanner(errorMessage)
+                    }
 
-                if model.timelineSkippedFolderCount > 0 || model.isRetryingTimelineFolders {
-                    timelineNoticeBanner
-                }
+                    if model.timelineSkippedFolderCount > 0 || model.isRetryingTimelineFolders {
+                        timelineNoticeBanner
+                    }
 
-                if model.browseMode == .timeline {
-                    LazyVStack(alignment: .leading, spacing: 18) {
-                        ForEach(model.timelineSections) { section in
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text(section.title)
-                                    .font(.headline)
-                                    .accessibilityAddTraits(.isHeader)
-                                photoGrid(section.items)
+                    if model.browseMode == .timeline {
+                        LazyVStack(alignment: .leading, spacing: 18) {
+                            ForEach(model.timelineSections) { section in
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text(section.title)
+                                        .font(.headline)
+                                        .accessibilityAddTraits(.isHeader)
+                                    photoGrid(section.items)
+                                }
+                                .id(section.date)
                             }
                         }
-                    }
-                    .padding(16)
-                } else {
-                    photoGrid(model.displayedItems)
                         .padding(16)
-                }
+                    } else {
+                        photoGrid(model.displayedItems)
+                            .padding(16)
+                    }
 
-                if model.isLoadingMore {
-                    ProgressView("正在载入更多照片…")
-                        .controlSize(.small)
-                        .padding(.bottom, 20)
+                    if model.isLoadingMore {
+                        ProgressView("正在载入更多照片…")
+                            .controlSize(.small)
+                            .padding(.bottom, 20)
+                    }
+                }
+                .onChange(of: timelineScrollTarget) { _, target in
+                    guard let target else { return }
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo(target, anchor: .top)
+                    }
                 }
             }
         }
@@ -287,7 +338,8 @@ struct PhotoLibraryView: View {
                     isSelected: model.selection.contains(item.id),
                     onPreview: onPreview,
                     onDownload: onDownload,
-                    onDelete: onDelete
+                    onDelete: onDelete,
+                    onRestore: onRestore
                 )
                 .task {
                     if model.browseMode == .folders, item.id == model.displayedItems.last?.id {
@@ -428,6 +480,11 @@ private struct PhotoLibraryCell: View {
     let onPreview: (PhotoLibraryItem) -> Void
     let onDownload: ([PhotoLibraryItem]) -> Void
     let onDelete: ([PhotoLibraryItem]) -> Void
+    let onRestore: (PhotoLibraryItem) -> Void
+
+    private var isRecyclePath: Bool {
+        RecycleLocation(recyclePath: item.path) != nil
+    }
 
     var body: some View {
         Button {
@@ -461,10 +518,18 @@ private struct PhotoLibraryCell: View {
                 Label(contextTargets.count > 1 ? "下载 \(contextTargets.count) 项" : "下载", systemImage: "square.and.arrow.down")
             }
 
-            Button(role: .destructive) {
-                onDelete(contextTargets)
-            } label: {
-                Label(contextTargets.count > 1 ? "删除 \(contextTargets.count) 项…" : "删除…", systemImage: "trash")
+            if isRecyclePath {
+                Button {
+                    onRestore(item)
+                } label: {
+                    Label("恢复到原位置", systemImage: "arrow.uturn.backward.circle")
+                }
+            } else {
+                Button(role: .destructive) {
+                    onDelete(contextTargets)
+                } label: {
+                    Label(contextTargets.count > 1 ? "删除 \(contextTargets.count) 项…" : "删除…", systemImage: "trash")
+                }
             }
         }
         .accessibilityLabel(accessibilityLabel)

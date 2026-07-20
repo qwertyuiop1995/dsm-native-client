@@ -136,9 +136,14 @@ public struct PhotoLibraryItem: Identifiable, Codable, Hashable, Sendable {
     }
 
     /// 自动匹配同一目录下同名的图片 (.heic/.jpg) 与短视频 (.mov/.mp4) 为动态照片 Live Photo
-    public static func pairLivePhotos(_ items: [PhotoLibraryItem]) -> [PhotoLibraryItem] {
+    /// - Parameter isCancelled: 可选的取消检查闭包，用于大量数据在后台计算时尽早停止。
+    public static func pairLivePhotos(
+        _ items: [PhotoLibraryItem],
+        isCancelled: (@Sendable () -> Bool)? = nil
+    ) -> [PhotoLibraryItem] {
         var videosByStem: [String: PhotoLibraryItem] = [:]
         for item in items where item.kind == .video {
+            if isCancelled?() == true { return [] }
             let directory = (item.path as NSString).deletingLastPathComponent
             let stem = ((item.name as NSString).deletingPathExtension).lowercased()
             let key = "\(directory)/\(stem)"
@@ -149,6 +154,7 @@ public struct PhotoLibraryItem: Identifiable, Codable, Hashable, Sendable {
         var result: [PhotoLibraryItem] = []
 
         for item in items {
+            if isCancelled?() == true { return [] }
             if item.kind == .image {
                 let directory = (item.path as NSString).deletingLastPathComponent
                 let stem = ((item.name as NSString).deletingPathExtension).lowercased()

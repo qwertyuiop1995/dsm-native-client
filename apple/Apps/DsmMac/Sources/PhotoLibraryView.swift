@@ -137,7 +137,7 @@ struct PhotoLibraryView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.isLoadingTimeline && model.displayedItems.isEmpty {
+        if (model.isLoadingTimeline || (model.browseMode == .timeline && model.isSyncingTimeline)) && model.displayedItems.isEmpty {
             timelineLoadingState
         } else if model.isLoading && model.displayedItems.isEmpty {
             loadingGrid
@@ -188,38 +188,36 @@ struct PhotoLibraryView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         } else {
-            GeometryReader { viewport in
-                ScrollView {
-                    if let errorMessage = model.errorMessage {
-                        errorBanner(errorMessage)
-                    }
+            ScrollView {
+                if let errorMessage = model.errorMessage {
+                    errorBanner(errorMessage)
+                }
 
-                    if model.timelineSkippedFolderCount > 0 || model.isRetryingTimelineFolders {
-                        timelineNoticeBanner
-                    }
+                if model.timelineSkippedFolderCount > 0 || model.isRetryingTimelineFolders {
+                    timelineNoticeBanner
+                }
 
-                    if model.browseMode == .timeline {
-                        LazyVStack(alignment: .leading, spacing: 18) {
-                            ForEach(model.timelineSections) { section in
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text(section.title)
-                                        .font(.headline)
-                                        .accessibilityAddTraits(.isHeader)
-                                    photoGrid(section.items)
-                                }
+                if model.browseMode == .timeline {
+                    LazyVStack(alignment: .leading, spacing: 18) {
+                        ForEach(model.timelineSections) { section in
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(section.title)
+                                    .font(.headline)
+                                    .accessibilityAddTraits(.isHeader)
+                                photoGrid(section.items)
                             }
                         }
+                    }
+                    .padding(16)
+                } else {
+                    photoGrid(model.displayedItems)
                         .padding(16)
-                    } else {
-                        photoGrid(model.displayedItems)
-                            .padding(16)
-                    }
+                }
 
-                    if model.isLoadingMore {
-                        ProgressView("正在载入更多照片…")
-                            .controlSize(.small)
-                            .padding(.bottom, 20)
-                    }
+                if model.isLoadingMore {
+                    ProgressView("正在载入更多照片…")
+                        .controlSize(.small)
+                        .padding(.bottom, 20)
                 }
             }
         }
@@ -567,12 +565,12 @@ private struct PhotoLibraryCell: View {
 private struct PhotoGridThumbnail: View {
     @Bindable var model: PhotoLibraryModel
     let item: PhotoLibraryItem
-    @State private var data: Data?
+    @State private var image: NSImage?
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                if let data, let image = NSImage(data: data) {
+                if let image {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFill()
@@ -597,23 +595,19 @@ private struct PhotoGridThumbnail: View {
         .task(priority: .userInitiated) {
             model.thumbnailBecameVisible(item)
             if let cached = await model.cachedThumbnailData(for: item) {
-                data = cached
+                image = NSImage(data: cached)
                 model.thumbnailRequestDidFinish(for: item)
                 return
             }
             let loadedData = await model.thumbnailData(for: item)
             model.thumbnailRequestDidFinish(for: item)
             guard !Task.isCancelled else { return }
-            data = loadedData
+            image = loadedData.flatMap { NSImage(data: $0) }
         }
         .onDisappear {
-            // 离屏时取消可见标记，并立即清空 data，释放像素位图内存
+            // 离屏时取消可见标记，并立即清空 image，释放像素位图内存
             model.thumbnailBecameHidden(item)
-            data = nil
+            image = nil
         }
     }
-}
-
-private enum PhotoViewportCoordinateSpace {
-    static let name = "photo-library-viewport"
 }

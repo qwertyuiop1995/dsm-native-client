@@ -187,9 +187,14 @@ final class PhotoLibraryModel {
     @ObservationIgnored private var loadingVisibleThumbnailIDs: Set<PhotoLibraryItem.ID> = []
     @ObservationIgnored private var thumbnailPrefetchTask: Task<Void, Never>?
     @ObservationIgnored private var thumbnailPrefetchGeneration = 0
+    @ObservationIgnored private var prefetchScheduleTask: Task<Void, Never>?
+    @ObservationIgnored private var orderedMediaItems: [PhotoLibraryItem] = []
+    @ObservationIgnored private var mediaIndexByID: [PhotoLibraryItem.ID: Int] = [:]
     @ObservationIgnored private var timelineTask: Task<Void, Never>?
     @ObservationIgnored private var timelineGeneration = 0
     @ObservationIgnored private var displayedItemsUpdateTask: Task<Void, Never>?
+    @ObservationIgnored private var displayedItemsComputationTask: Task<Void, Never>?
+    @ObservationIgnored private var displayedItemsComputationGeneration = 0
     @ObservationIgnored private var timelineFolderItemPaths: [String: [String]] = [:]
     @ObservationIgnored private let cacheStore: PhotoLibraryCacheStore
     @ObservationIgnored private let thumbnailDiskCacheStore: PhotoThumbnailDiskCacheStore
@@ -230,17 +235,7 @@ final class PhotoLibraryModel {
         return URL(fileURLWithPath: currentPath).lastPathComponent
     }
 
-    var mediaStats: (total: Int, images: Int, videos: Int) {
-        let mediaItems = PhotoLibraryItem.pairLivePhotos(displayedItems.isEmpty ? (browseMode == .timeline ? timelineItems : items) : displayedItems)
-            .filter { !$0.isFolder }
-        var imageCount = 0
-        var videoCount = 0
-        for item in mediaItems {
-            if item.kind == .image { imageCount += 1 }
-            else if item.kind == .video { videoCount += 1 }
-        }
-        return (mediaItems.count, imageCount, videoCount)
-    }
+    private(set) var mediaStats: (total: Int, images: Int, videos: Int) = (0, 0, 0)
 
     private(set) var timelineSections: [PhotoTimelineSection] = []
 
@@ -250,14 +245,12 @@ final class PhotoLibraryModel {
     private func scheduleDisplayedItemsUpdate() {
         displayedItemsUpdateTask?.cancel()
         if Self.isRunningTests {
-            restartThumbnailPrefetchIfPossible()
             updateDisplayedItems()
             return
         }
         displayedItemsUpdateTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard let self, !Task.isCancelled else { return }
-            self.restartThumbnailPrefetchIfPossible()
             self.updateDisplayedItems()
         }
     }
@@ -268,46 +261,122 @@ final class PhotoLibraryModel {
     }
 
     private func updateDisplayedItems() {
-        let rawSource = browseMode == .timeline ? timelineItems : items
-        let pairedSource = PhotoLibraryItem.pairLivePhotos(rawSource)
-        displayedItems = pairedSource.filter { item in
+        let source = browseMode == .timeline ? timelineItems : items
+        let filter = mediaFilter
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let browseMode = self.browseMode
+
+        displayedItemsComputationTask?.cancel()
+        displayedItemsComputationGeneration += 1
+        let generation = displayedItemsComputationGeneration
+
+        if Self.isRunningTests {
+            let result = Self.computeDisplayedItems(
+                source: source,
+                filter: filter,
+                query: query,
+                browseMode: browseMode,
+                generation: generation,
+                isCancelled: { false }
+            )
+            displayedItems = result.displayedItems
+            timelineSections = result.timelineSections
+            mediaStats = result.mediaStats
+            orderedMediaItems = result.orderedMediaItems
+            mediaIndexByID = result.mediaIndexByID
+            restartThumbnailPrefetchIfPossible()
+            return
+        }
+
+        displayedItemsComputationTask = Task.detached(priority: .userInitiated) {
+            let result = Self.computeDisplayedItems(
+                source: source,
+                filter: filter,
+                query: query,
+                browseMode: browseMode,
+                generation: generation,
+                isCancelled: { Task.isCancelled }
+            )
+            await MainActor.run { [weak self] in
+                guard let self, result.generation == self.displayedItemsComputationGeneration else { return }
+                self.displayedItems = result.displayedItems
+                self.timelineSections = result.timelineSections
+                self.mediaStats = result.mediaStats
+                self.orderedMediaItems = result.orderedMediaItems
+                self.mediaIndexByID = result.mediaIndexByID
+                self.restartThumbnailPrefetchIfPossible()
+            }
+        }
+    }
+
+    private static nonisolated func computeDisplayedItems(
+        source: [PhotoLibraryItem],
+        filter: PhotoMediaFilter,
+        query: String,
+        browseMode: PhotoBrowseMode,
+        generation: Int,
+        isCancelled: @escaping @Sendable () -> Bool
+    ) -> (
+        displayedItems: [PhotoLibraryItem],
+        timelineSections: [PhotoTimelineSection],
+        mediaStats: (total: Int, images: Int, videos: Int),
+        orderedMediaItems: [PhotoLibraryItem],
+        mediaIndexByID: [PhotoLibraryItem.ID: Int],
+        generation: Int
+    ) {
+        let paired = PhotoLibraryItem.pairLivePhotos(source, isCancelled: isCancelled)
+
+        var filtered: [PhotoLibraryItem] = []
+        var orderedMediaItems: [PhotoLibraryItem] = []
+        var mediaIndexByID: [PhotoLibraryItem.ID: Int] = [:]
+        var total = 0
+        var images = 0
+        var videos = 0
+        for item in paired {
+            if isCancelled() { return (displayedItems: [], timelineSections: [], mediaStats: (0, 0, 0), orderedMediaItems: [], mediaIndexByID: [:], generation: generation) }
             let matchesType: Bool
-            switch mediaFilter {
+            switch filter {
             case .all: matchesType = true
             case .images: matchesType = item.kind == .image || item.isFolder
             case .videos: matchesType = (item.kind == .video && !item.isLivePhoto) || item.isFolder
             }
-            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-            return matchesType && (query.isEmpty || item.name.localizedCaseInsensitiveContains(query))
+            if matchesType && (query.isEmpty || item.name.localizedCaseInsensitiveContains(query)) {
+                filtered.append(item)
+                if !item.isFolder {
+                    mediaIndexByID[item.id] = orderedMediaItems.count
+                    orderedMediaItems.append(item)
+                    total += 1
+                    if item.kind == .image { images += 1 }
+                    else if item.kind == .video { videos += 1 }
+                }
+            }
         }
-        updateTimelineSections()
-    }
 
-    private func updateTimelineSections() {
-        guard browseMode == .timeline else {
-            timelineSections = []
-            return
+        var sections: [PhotoTimelineSection] = []
+        if browseMode == .timeline {
+            let calendar = Calendar.current
+            var grouped: [Date: [PhotoLibraryItem]] = [:]
+            for item in filtered {
+                if isCancelled() { return (displayedItems: [], timelineSections: [], mediaStats: (0, 0, 0), orderedMediaItems: [], mediaIndexByID: [:], generation: generation) }
+                let day = calendar.startOfDay(for: item.createdAt ?? item.modifiedAt ?? .distantPast)
+                grouped[day, default: []].append(item)
+            }
+            let sortedDates = grouped.keys.sorted(by: >)
+            let dayFormatter = DateFormatter()
+            dayFormatter.locale = .current
+            dayFormatter.dateStyle = .long
+            dayFormatter.timeStyle = .none
+            sections = sortedDates.map { date in
+                PhotoTimelineSection(
+                    date: date,
+                    title: date == .distantPast ? "日期未知" : dayFormatter.string(from: date),
+                    items: grouped[date] ?? []
+                )
+            }
         }
-        let calendar = Calendar.current
-        let grouped = Dictionary(grouping: displayedItems) { item in
-            calendar.startOfDay(for: item.createdAt ?? item.modifiedAt ?? .distantPast)
-        }
-        timelineSections = grouped.keys.sorted(by: >).map { date in
-            PhotoTimelineSection(
-                date: date,
-                title: date == .distantPast ? "日期未知" : Self.dayFormatter.string(from: date),
-                items: grouped[date] ?? []
-            )
-        }
-    }
 
-    private static let dayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.dateStyle = .long
-        formatter.timeStyle = .none
-        return formatter
-    }()
+        return (displayedItems: filtered, timelineSections: sections, mediaStats: (total, images, videos), orderedMediaItems: orderedMediaItems, mediaIndexByID: mediaIndexByID, generation: generation)
+    }
 
     var selectedItems: [PhotoLibraryItem] {
         displayedItems.filter { selection.contains($0.id) }
@@ -606,7 +675,7 @@ final class PhotoLibraryModel {
     func thumbnailBecameHidden(_ item: PhotoLibraryItem) {
         visibleThumbnailIDs.remove(item.id)
         loadingVisibleThumbnailIDs.remove(item.id)
-        restartThumbnailPrefetchIfPossible()
+        scheduleThumbnailPrefetchDebounced()
     }
 
     func thumbnailRequestDidFinish(for item: PhotoLibraryItem) {
@@ -746,7 +815,7 @@ final class PhotoLibraryModel {
 
         if let repositoryData,
            !Task.isCancelled,
-           Self.isDisplayableImageData(repositoryData) {
+           await Self.isDisplayableImageData(repositoryData) {
             cacheThumbnail(repositoryData, for: item)
             return repositoryData
         }
@@ -767,7 +836,7 @@ final class PhotoLibraryModel {
 
         guard !Task.isCancelled,
               let fallbackData,
-              Self.isDisplayableImageData(fallbackData) else {
+              await Self.isDisplayableImageData(fallbackData) else {
             // HEIC/MOV 的本机生成可能因文件大小或临时连接失败，保留后续重试机会。
             return nil
         }
@@ -844,29 +913,47 @@ final class PhotoLibraryModel {
         thumbnailPrefetchGeneration += 1
         thumbnailPrefetchTask?.cancel()
         thumbnailPrefetchTask = nil
+        prefetchScheduleTask?.cancel()
+        prefetchScheduleTask = nil
+    }
+
+    private func scheduleThumbnailPrefetchDebounced() {
+        prefetchScheduleTask?.cancel()
+        prefetchScheduleTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard let self, !Task.isCancelled else { return }
+            scheduleThumbnailPrefetchIfPossible()
+        }
     }
 
     private func scheduleThumbnailPrefetchIfPossible() {
         guard thumbnailPrefetchTask == nil,
               !visibleThumbnailIDs.isEmpty,
-              loadingVisibleThumbnailIDs.isEmpty else { return }
+              loadingVisibleThumbnailIDs.isEmpty,
+              !orderedMediaItems.isEmpty else { return }
 
-        let orderedMedia = displayedItems.filter { !$0.isFolder }
-        let visibleIndexes = orderedMedia.indices.filter {
-            visibleThumbnailIDs.contains(orderedMedia[$0].id)
+        // 通过 mediaIndexByID 在 O(可见数量) 内找到最下方可见项的索引
+        var lastVisibleIndex: Int?
+        for id in visibleThumbnailIDs {
+            guard let index = mediaIndexByID[id] else { continue }
+            if lastVisibleIndex == nil || index > lastVisibleIndex! {
+                lastVisibleIndex = index
+            }
         }
-        guard let lastVisibleIndex = visibleIndexes.max(), lastVisibleIndex + 1 < orderedMedia.count else {
-            return
-        }
+        guard let lastVisibleIndex, lastVisibleIndex + 1 < orderedMediaItems.count else { return }
 
         // 只预取视窗之后的一小段，防止长时间空闲时把整个照片库读入缓存。
-        let candidates = orderedMedia[(lastVisibleIndex + 1)...]
-            .filter {
-                thumbnailCache[$0.id] == nil
-                    && !unavailableThumbnails.contains($0.id)
-                    && !visibleThumbnailIDs.contains($0.id)
+        var candidates: [PhotoLibraryItem] = []
+        candidates.reserveCapacity(48)
+        for index in (lastVisibleIndex + 1)..<orderedMediaItems.count {
+            let item = orderedMediaItems[index]
+            if thumbnailCache[item.id] == nil,
+               !unavailableThumbnails.contains(item.id),
+               !visibleThumbnailIDs.contains(item.id) {
+                candidates.append(item)
             }
-            .prefix(48)
+            if candidates.count == 48 { break }
+        }
         guard !candidates.isEmpty else { return }
 
         thumbnailPrefetchGeneration += 1
@@ -885,8 +972,12 @@ final class PhotoLibraryModel {
         }
     }
 
-    private static func isDisplayableImageData(_ data: Data) -> Bool {
-        !data.isEmpty && NSImage(data: data) != nil
+    private static func isDisplayableImageData(_ data: Data) async -> Bool {
+        guard !data.isEmpty else { return false }
+        return await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return false }
+            return CGImageSourceCreateImageAtIndex(source, 0, nil) != nil
+        }.value
     }
 
     private func loadFolder(_ path: String, recordingHistory: Bool) async {

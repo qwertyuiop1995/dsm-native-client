@@ -2154,7 +2154,11 @@ final class WorkspaceModel {
                 if deletingFromPhotos {
                     try await verifyDeletedPhotoPaths(paths)
                     photoLibrary.removeDeletedItems(at: paths)
-                    remaining = Set(photoLibrary.displayedItems.map(\.path))
+                    // displayedItems 是 items/timelineItems 异步刷新后的派生数组，
+                    // 这里直接用源数组判断才能避免“删除成功但仍提示存在”的误报。
+                    remaining = Set(
+                        (photoLibrary.items.map(\.path) + photoLibrary.timelineItems.map(\.path))
+                    )
                 } else {
                     await refresh()
                     remaining = Set(items.map(\.path))

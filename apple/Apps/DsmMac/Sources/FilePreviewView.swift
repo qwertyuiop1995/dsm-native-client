@@ -1008,14 +1008,13 @@ private struct FittedImagePreview: View {
             let visualWidth = isQuarterTurn ? imageHeight : imageWidth
             let visualHeight = isQuarterTurn ? imageWidth : imageHeight
 
-            ZStack(alignment: .bottom) {
+            ZStack(alignment: .center) {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
                     .frame(width: imageWidth, height: imageHeight)
                     .rotationEffect(.degrees(Double(rotation)))
                     .frame(width: visualWidth, height: visualHeight)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     .clipped()
 
                 HStack(spacing: 4) {
@@ -1046,11 +1045,14 @@ private struct FittedImagePreview: View {
                     .buttonStyle(.borderless)
                     .disabled(zoom == 1)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
                 .background(.regularMaterial, in: Capsule())
                 .padding(.bottom, 10)
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
             .background {
                 ImageScrollWheelReader { delta, isPrecise in
                     let step = isPrecise ? delta * 0.012 : delta * 0.08

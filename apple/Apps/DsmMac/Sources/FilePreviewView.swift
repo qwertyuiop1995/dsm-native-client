@@ -1012,6 +1012,7 @@ private struct FittedImagePreview: View {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
+                    .renderingMode(.original)
                     .frame(width: imageWidth, height: imageHeight)
                     .rotationEffect(.degrees(Double(rotation)))
                     .frame(width: visualWidth, height: visualHeight)

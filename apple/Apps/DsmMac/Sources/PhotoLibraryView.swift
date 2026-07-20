@@ -661,6 +661,7 @@ private struct PhotoGridThumbnail: View {
             ZStack {
                 if let image {
                     Image(nsImage: image)
+                        .renderingMode(.original)
                         .resizable()
                         .scaledToFill()
                         .frame(width: geo.size.width, height: geo.size.height)

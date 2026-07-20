@@ -3965,6 +3965,7 @@ private struct FileGridThumbnail: View {
             if let thumbnailData, let image = NSImage(data: thumbnailData) {
                 ZStack {
                     Image(nsImage: image)
+                        .renderingMode(.original)
                         .resizable()
                         .interpolation(.medium)
                         .scaledToFill()

@@ -1930,7 +1930,7 @@ private struct FileBrowserView: View {
             Button("恢复到原位置…") { onRestore(item) }
         }
         Divider()
-        Button("显示简介") {
+        Button("查看详情") {
             showingInfoItem = item
         }
         .keyboardShortcut("i", modifiers: .command)
@@ -3823,7 +3823,7 @@ struct FilePropertiesView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("显示简介")
+                Text("查看详情")
                     .font(.headline.weight(.semibold))
                 Spacer()
                 Button {

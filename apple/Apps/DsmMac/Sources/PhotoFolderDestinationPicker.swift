@@ -127,6 +127,8 @@ struct PhotoFolderDestinationPicker: View {
     }
 
     private func setupPicker() async {
+        // 选择器只需要文件夹浏览，提前设置模式可防止 loadIfNeeded 触发时间线扫描而阻塞界面。
+        pickerModel.browseMode = .folders
         await pickerModel.loadIfNeeded()
 
         guard let space = pickerModel.spaces.first(where: { sourcePath.hasPrefix($0.rootPath) }) ?? pickerModel.spaces.first else {

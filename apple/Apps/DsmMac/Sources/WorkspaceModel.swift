@@ -936,7 +936,10 @@ final class WorkspaceModel {
     func metadata(for item: FileItem) async -> PhotoMetadata? {
         let kind = PreviewKind.classify(item)
         guard kind == .image || kind == .video else { return nil }
-        return await PhotoMetadataExtractor(files: repository).extract(for: item)
+        let extractor = PhotoMetadataExtractor(files: repository)
+        return await Task.detached(priority: .userInitiated) {
+            await extractor.extract(for: item)
+        }.value
     }
 
     func folderStatistics(for item: FileItem) async throws -> FolderStatistics {

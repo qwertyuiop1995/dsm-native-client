@@ -634,9 +634,9 @@ struct FileDetailView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .image(let data):
-            if let image = NSImage(data: data) {
+            if let decoded = decodedImage(from: data) {
                 ZStack {
-                    FittedImagePreview(image: image)
+                    FittedImagePreview(cgImage: decoded.cgImage, orientation: decoded.orientation)
                         .id(item.id)
                     if livePhotoPlayer != nil {
                         VideoPlayerRepresentable(
@@ -988,31 +988,49 @@ private struct PreviewSpaceShortcutHandler: NSViewRepresentable {
 }
 
 private struct FittedImagePreview: View {
-    let image: NSImage
+    let cgImage: CGImage
+    let orientation: Image.Orientation
     @State private var zoom: CGFloat = 1
     @State private var rotation = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.displayScale) private var displayScale
+
+    private var originalWidth: CGFloat {
+        CGFloat(cgImage.width) / displayScale
+    }
+
+    private var originalHeight: CGFloat {
+        CGFloat(cgImage.height) / displayScale
+    }
+
+    private var isBaseQuarterTurn: Bool {
+        switch orientation {
+        case .left, .leftMirrored, .right, .rightMirrored:
+            return true
+        default:
+            return false
+        }
+    }
 
     var body: some View {
         GeometryReader { geometry in
             let availableWidth = max(1, geometry.size.width - 32)
             let availableHeight = max(1, geometry.size.height - 88)
-            let originalWidth = max(1, image.size.width)
-            let originalHeight = max(1, image.size.height)
+            let baseWidth = isBaseQuarterTurn ? originalHeight : originalWidth
+            let baseHeight = isBaseQuarterTurn ? originalWidth : originalHeight
             let isQuarterTurn = abs(rotation) % 180 == 90
-            let rotatedWidth = isQuarterTurn ? originalHeight : originalWidth
-            let rotatedHeight = isQuarterTurn ? originalWidth : originalHeight
+            let rotatedWidth = isQuarterTurn ? baseHeight : baseWidth
+            let rotatedHeight = isQuarterTurn ? baseWidth : baseHeight
             let fittedScale = min(1, availableWidth / rotatedWidth, availableHeight / rotatedHeight)
-            let imageWidth = originalWidth * fittedScale * zoom
-            let imageHeight = originalHeight * fittedScale * zoom
+            let imageWidth = baseWidth * fittedScale * zoom
+            let imageHeight = baseHeight * fittedScale * zoom
             let visualWidth = isQuarterTurn ? imageHeight : imageWidth
             let visualHeight = isQuarterTurn ? imageWidth : imageHeight
 
             ZStack(alignment: .center) {
-                Image(nsImage: image)
+                Image(decorative: cgImage, scale: displayScale, orientation: orientation)
                     .resizable()
                     .interpolation(.high)
-                    .renderingMode(.original)
                     .frame(width: imageWidth, height: imageHeight)
                     .rotationEffect(.degrees(Double(rotation)))
                     .frame(width: visualWidth, height: visualHeight)

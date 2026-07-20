@@ -29,16 +29,12 @@ struct PhotoLibraryView: View {
             calendar.dateComponents([.year, .month], from: section.date)
         }
         let sorted = grouped.values.compactMap { sections -> YearMonth? in
-            guard let first = sections.first else { return nil }
-            let components = calendar.dateComponents([.year, .month], from: first.date)
-            guard let year = components.year, let month = components.month,
-                  let date = calendar.date(from: DateComponents(year: year, month: month, day: 1)) else {
-                return nil
-            }
+            let sortedSections = sections.sorted { $0.date < $1.date }
+            guard let first = sortedSections.first else { return nil }
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy 年 M 月"
             formatter.locale = Locale(identifier: "zh_CN")
-            return YearMonth(id: date, title: formatter.string(from: date))
+            return YearMonth(id: first.date, title: formatter.string(from: first.date))
         }
         return sorted.sorted { $0.id < $1.id }
     }
@@ -654,14 +650,13 @@ private struct PhotoLibraryCell: View {
 private struct PhotoGridThumbnail: View {
     @Bindable var model: PhotoLibraryModel
     let item: PhotoLibraryItem
-    @State private var image: NSImage?
+    @State private var displayedImage: (cgImage: CGImage, orientation: Image.Orientation)?
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                if let image {
-                    Image(nsImage: image)
-                        .renderingMode(.original)
+                if let decoded = displayedImage {
+                    Image(decorative: decoded.cgImage, scale: 1, orientation: decoded.orientation)
                         .resizable()
                         .scaledToFill()
                         .frame(width: geo.size.width, height: geo.size.height)
@@ -685,19 +680,19 @@ private struct PhotoGridThumbnail: View {
         .task(priority: .userInitiated) {
             model.thumbnailBecameVisible(item)
             if let cached = await model.cachedThumbnailData(for: item) {
-                image = NSImage(data: cached)
+                displayedImage = decodedImage(from: cached)
                 model.thumbnailRequestDidFinish(for: item)
                 return
             }
             let loadedData = await model.thumbnailData(for: item)
             model.thumbnailRequestDidFinish(for: item)
             guard !Task.isCancelled else { return }
-            image = loadedData.flatMap { NSImage(data: $0) }
+            displayedImage = loadedData.flatMap { decodedImage(from: $0) }
         }
         .onDisappear {
-            // 离屏时取消可见标记，并立即清空 image，释放像素位图内存
+            // 离屏时取消可见标记，并立即清空 displayedImage，释放像素位图内存
             model.thumbnailBecameHidden(item)
-            image = nil
+            displayedImage = nil
         }
     }
 }

@@ -4,6 +4,37 @@ import DsmCore
 import Foundation
 import ImageIO
 import Observation
+import SwiftUI
+
+extension Image.Orientation {
+    init(_ cgImageOrientation: CGImagePropertyOrientation) {
+        switch cgImageOrientation {
+        case .up: self = .up
+        case .upMirrored: self = .upMirrored
+        case .down: self = .down
+        case .downMirrored: self = .downMirrored
+        case .left: self = .left
+        case .leftMirrored: self = .leftMirrored
+        case .right: self = .right
+        case .rightMirrored: self = .rightMirrored
+        }
+    }
+}
+
+func decodedImage(from data: Data) -> (cgImage: CGImage, orientation: Image.Orientation)? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+    let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
+    guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) else { return nil }
+    let orientation: Image.Orientation
+    if let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, options as CFDictionary) as? [String: Any],
+       let orientationValue = properties[kCGImagePropertyOrientation as String] as? NSNumber,
+       let cgOrientation = CGImagePropertyOrientation(rawValue: orientationValue.uint32Value) {
+        orientation = Image.Orientation(cgOrientation)
+    } else {
+        orientation = .up
+    }
+    return (cgImage, orientation)
+}
 
 protocol PhotoThumbnailFallbackProviding: Sendable {
     func canGenerateThumbnail(for item: PhotoLibraryItem) -> Bool

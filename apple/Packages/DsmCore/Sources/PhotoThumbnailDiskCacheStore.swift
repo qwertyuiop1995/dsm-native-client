@@ -22,6 +22,12 @@ public struct PhotoThumbnailDiskCacheStore: Sendable {
         return try? Data(contentsOf: fileURL)
     }
 
+    /// 同步检查对应项目的缩略图是否已持久化到磁盘，用于在发起后台读取前快速过滤空缓存。
+    public func cacheFileExists(profileID: UUID, itemID: String) -> Bool {
+        let fileURL = cacheFileURL(profileID: profileID, itemID: itemID)
+        return FileManager.default.fileExists(atPath: fileURL.path)
+    }
+
     /// 将缩略图数据保存至本地磁盘
     public func save(_ data: Data, profileID: UUID, itemID: String) {
         let fileURL = cacheFileURL(profileID: profileID, itemID: itemID)

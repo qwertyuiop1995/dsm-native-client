@@ -788,6 +788,10 @@ final class PhotoLibraryModel {
         // 从磁盘加载缩略图持久化缓存，放到后台线程，避免阻塞主线程。
         let profileID = activeProfileID ?? item.profileID
         let diskStore = thumbnailDiskCacheStore
+        // 同步快速判断文件是否存在：空缓存时直接返回，避免创建后台 Task。
+        guard diskStore.cacheFileExists(profileID: profileID, itemID: item.id) else {
+            return nil
+        }
         let diskData = await Task.detached(priority: .userInitiated) {
             diskStore.load(profileID: profileID, itemID: item.id)
         }.value

@@ -23,11 +23,20 @@ jobs:
       - name: 运行共享包测试
         run: swift test --package-path apple
 
-      - name: 构建 macOS App
-        run: |
-          xcodebuild \
-            -workspace apple/DsmNativeClient.xcworkspace \
-            -scheme DsmMac \
-            -configuration Debug \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+      - name: 打包 macOS 应用
+        working-directory: apple/Apps/DsmMac
+        env:
+          LANSTASH_NON_INTERACTIVE: 1
+          LANSTASH_BUILD_TYPE: Release
+          LANSTASH_TARGET_ARCH: native
+          LANSTASH_RUN_AFTER_PACKAGE: 0
+        run: ./package.sh
+
+      - name: 上传打包产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanStash-macOS
+          path: |
+            apple/Apps/DsmMac/dist/*.app
+            apple/Apps/DsmMac/dist/*.dmg
+          if-no-files-found: error

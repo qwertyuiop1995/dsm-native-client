@@ -198,9 +198,25 @@ configure_package() {
     done
 }
 
-[[ $# -eq 0 ]] || fail "无需命令行参数，请直接运行 ./package.sh 后按菜单选择"
-
-configure_package
+if [[ -n "${LANSTASH_NON_INTERACTIVE:-}" ]]; then
+    # CI / 自动化打包：通过环境变量固定选项
+    case "${LANSTASH_BUILD_TYPE:-Release}" in
+        Release|Debug) CONFIGURATION="${LANSTASH_BUILD_TYPE:-Release}" ;;
+        *) fail "不支持的构建类型：${LANSTASH_BUILD_TYPE}，请使用 Release 或 Debug" ;;
+    esac
+    case "${LANSTASH_TARGET_ARCH:-native}" in
+        native|universal|arm64|x86_64) TARGET_ARCH="${LANSTASH_TARGET_ARCH:-native}" ;;
+        *) fail "不支持的架构：${LANSTASH_TARGET_ARCH}，请使用 native / universal / arm64 / x86_64" ;;
+    esac
+    SIGNING_IDENTITY="${LANSTASH_SIGNING_IDENTITY:--}"
+    case "${LANSTASH_RUN_AFTER_PACKAGE:-1}" in
+        0|1) RUN_AFTER_PACKAGE="${LANSTASH_RUN_AFTER_PACKAGE:-1}" ;;
+        *) fail "LANSTASH_RUN_AFTER_PACKAGE 只能是 0 或 1" ;;
+    esac
+else
+    [[ $# -eq 0 ]] || fail "无需命令行参数，请直接运行 ./package.sh 后按菜单选择"
+    configure_package
+fi
 
 for command in xcodebuild codesign hdiutil ditto lipo open; do
     command -v "$command" >/dev/null 2>&1 || fail "未找到命令 ${command}，请先安装完整 Xcode"

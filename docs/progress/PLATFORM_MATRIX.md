@@ -67,3 +67,22 @@
 | 桌面拖放导入导出 | 已实现系统选择器上传和批量导出；照片墙直接拖放待实现 | 系统选择器 | 系统选择器 | 系统选择器 | PH8 计划 |
 
 照片功能详细顺序和出口参见[照片管理开发计划](../development/NATIVE_DSM_PHOTOS_DEVELOPMENT_PLAN_ZH.md)。
+
+## 已识别但未支持的能力
+
+| 能力 | macOS | iPhone | iPad | Android | Windows |
+| --- | --- | --- | --- | --- | --- |
+| File Station 扩展（后台任务、DirSize、MD5、VFS/批量） | 未开始 | 复用 Apple 共享契约 | 复用 Apple 共享契约 | 计划 | 计划 |
+| Download Station | 未开始 | 计划 | 计划 | 计划 | 计划 |
+| Virtual Machine Manager | 未开始 | 计划 | 计划 | 计划 | 计划 |
+| Container Manager / Docker | 未开始 | 计划 | 计划 | 计划 | 计划 |
+| 系统与硬件监控/控制 | 未开始 | 计划 | 计划 | 计划 | 计划 |
+| 用户/群组/共享/配额管理 | 未开始 | 计划 | 计划 | 计划 | 计划 |
+| Audio Station / Video Station / Note Station | 未开始 | 计划 | 计划 | 计划 | 计划 |
+| Synology Drive / Calendar / Contacts | 未开始 | 计划 | 计划 | 计划 | 计划 |
+| Surveillance Station | 未开始 | 计划 | 计划 | 计划 | 计划 |
+| Hyper Backup / Active Backup / Synology Office | 未开始 | 计划 | 计划 | 计划 | 计划 |
+| 系统照片库自动备份 | 不适用 | 未开始 | 未开始 | 未开始 | 不适用 |
+| 后台上传/下载与离线任务恢复 | 未开始 | 未开始 | 未开始 | 未开始 | 未开始 |
+
+这些能力在 `STATUS.md` 和 `ROADMAP.md` 中有更详细的 DSM API 拆分与接入原则。

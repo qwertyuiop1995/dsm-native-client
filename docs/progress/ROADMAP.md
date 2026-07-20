@@ -58,9 +58,9 @@
 状态：进行中；PH1 文件夹扫描已获实机确认，PH2/PH3 的时间线、查看和基础管理主流程已实现，等待完整验收。
 
 - 完成照片领域契约、基础照片库和能力降级模型。
-- 已实现个人空间、共享空间、文件夹浏览和按天分组的基础时间线；年/月快速定位待补齐。
-- 已实现惰性照片墙、搜索筛选，并复用全屏图片/视频查看和基础详情。
-- 已实现上传、批量导出、删除确认和分享；移动、收藏、基础相册与照片页恢复入口待补齐。
+- 已实现个人空间、共享空间、文件夹浏览和按天分组的基础时间线；**年/月快速定位、年视图与月视图入口待补齐**。
+- 已实现惰性照片墙、搜索筛选，并复用全屏图片/视频查看和基础详情；**EXIF 详情（分辨率、相机、镜头、位置、拍摄参数）待补齐**。
+- 已实现上传、批量导出、删除确认和分享；**移动、收藏、基础相册、照片页回收站恢复入口待补齐**。
 - 完成 1 千、1 万和 10 万项目性能验证，以及 macOS 键盘、VoiceOver、深色模式和降低动态效果验收。
 
 详细批次和完成门槛参见[照片管理开发计划](../development/NATIVE_DSM_PHOTOS_DEVELOPMENT_PLAN_ZH.md)。
@@ -69,10 +69,10 @@
 
 状态：计划。
 
-- 在能力发现、真实版本契约测试和功能开关保护下接入 Synology Photos 内部 Adapter。
-- 复用 NAS 时间轴、相册、最近添加、标签、人物、主题、地点、缩略图和可用转码结果。
+- 在能力发现、真实版本契约测试和功能开关保护下接入 Synology Photos 内部 Adapter（`SYNO.Foto*` / `SYNO.FotoTeam*`）。
+- 复用 NAS 时间轴、相册、最近添加、标签、人物、主题、地点、缩略图和可用转码结果；逐一记录 DSM build 与 Synology Photos 套件版本。
 - 每项增强能力可独立失败和降级，不阻止基础照片浏览。
-- 每个已启用版本记录 DSM build 和 Synology Photos 套件版本。
+- 能力范围：相册创建/编辑/删除、向相册添加/移除项目、人物/主题/地点/标签浏览与命名、最近添加、视频转码结果复用。
 
 ## M7：Apple 移动端与照片备份
 
@@ -91,9 +91,44 @@
 - Windows 初始化 C#/WinUI 3 solution，并实现桌面照片浏览、导入和导出。
 - 三套原生实现共同遵循照片契约、安全语义和兼容矩阵，不引入跨平台 UI 运行时。
 
+## 已识别但未排期的能力
+
+按 DSM 套件与风险等级整理，后续逐个按能力发现 + 版本契约测试 + 功能开关方式接入：
+
+### File Station 扩展
+- `SYNO.FileStation.BackgroundTask` 后台任务汇总
+- `SYNO.FileStation.DirSize` 异步目录大小计算
+- `SYNO.FileStation.MD5` 异步文件 MD5 计算
+- `SYNO.FileStation.VFS.Connection` / `SYNO.Entry.Request` 批量与 VFS 扩展
+- 回收站恢复在照片页的直接入口
+
+### 下载与传输套件
+- Download Station：`SYNO.DownloadStation.*` 官方接口与 `SYNO.DownloadStation2.*` 内部适配
+- 后台下载/上传、离线任务恢复、多端同步、版本历史与冲突合并
+
+### 虚拟化与容器
+- Virtual Machine Manager：`SYNO.Virtualization.API.*` / `SYNO.Virtualization.*` 虚拟机生命周期、电源控制、镜像管理
+- Container Manager / Docker：`SYNO.Docker.*` 容器、镜像、网络、项目管理
+
+### 系统与硬件控制
+- 系统信息/利用率/进程/连接/日志：`SYNO.Core.System*`、`SYNO.Core.SyslogClient*`、`SYNO.LogCenter.History`
+- 存储/硬盘/SMART：`SYNO.Storage.*`、`SYNO.Core.Storage.*`
+- 硬件控制：风扇、LED、蜂鸣器、电源计划、UPS、ZRAM
+- 网络/DDNS/代理/防火墙：`SYNO.Core.Network*`、`SYNO.Core.DDNS.*`、`SYNO.Core.Security.*`
+- 用户/群组/共享/配额：`SYNO.Core.User*`、`SYNO.Core.Group*`、`SYNO.Core.Share*`、`SYNO.Core.Quota*`
+- 套件管理：`SYNO.Core.Package.*` 安装、启停、卸载
+- 计划任务：`SYNO.Core.TaskScheduler`、`SYNO.Core.EventScheduler`
+- 终端 SSH/Telnet：`SYNO.Core.Terminal`
+
+### 其他套件
+- Audio Station、Video Station、Note Station
+- Synology Drive（`SYNO.SynologyDrive.*`）
+- Calendar、Contacts
+- Surveillance Station
+- Hyper Backup / Active Backup
+- Synology Office
+
 ## 后续候选
 
-- Download Station 等独立套件能力。
-- Docker、虚拟机和系统管理功能；需要单独的权限与危险操作设计。
-- 后台传输、离线任务恢复和更完整的系统文件集成。
-- 多端同步、版本历史和冲突合并；不纳入当前文件客户端里程碑。
+- 按用户优先级和 DSM 版本验证情况，从“已识别但未排期的能力”中挑选进入里程碑。
+- 每项内部接口默认关闭，通过 `SYNO.API.Info` 能力发现、版本契约测试和实机验证后才启用。

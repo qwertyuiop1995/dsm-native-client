@@ -41,6 +41,30 @@
 | 安全删除 | 已实现确认、权限检查、任务轮询和结果校验 | 完成不同共享目录回收站设置的真实验证 |
 | 回收站恢复 | 已实现候选路径和受兼容开关保护的恢复流程 | 必须按 DSM build 验证后才能标记完成 |
 
+## 已识别但未实现的能力
+
+以下能力已从源码、接口文档和 DSM Web API 参考中梳理出来，尚未进入当前里程碑：
+
+### File Station 扩展
+- `SYNO.FileStation.BackgroundTask` 后台任务汇总
+- `SYNO.FileStation.DirSize` 异步目录大小
+- `SYNO.FileStation.MD5` 异步文件 MD5
+- `SYNO.FileStation.VFS.Connection` / `SYNO.Entry.Request` 批量与 VFS 扩展
+- 照片页回收站恢复直接入口
+
+### 其他 DSM 套件与功能
+- **Download Station**：`SYNO.DownloadStation.*` 官方接口与 `SYNO.DownloadStation2.*` 内部适配（任务列表、创建、暂停/继续、删除、BT Tracker/Peer、RSS、BT 搜索）
+- **Virtual Machine Manager**：`SYNO.Virtualization.API.*` / `SYNO.Virtualization.*` 虚拟机生命周期、电源控制、镜像管理
+- **Container Manager / Docker**：`SYNO.Docker.*` 容器、镜像、网络、项目管理
+- **系统与硬件**：系统信息/利用率/进程/连接/日志、存储/硬盘/SMART、风扇/LED/蜂鸣器/电源计划/UPS、网络/DDNS/代理/防火墙、用户/群组/共享/配额、套件启停安装、计划任务、SSH/Telnet 终端
+- **其他套件**：Audio Station、Video Station、Note Station、Synology Drive、Calendar、Contacts、Surveillance Station、Hyper Backup / Active Backup、Synology Office
+
+### 平台实现
+- iPhone、iPad、Android、Windows 原生客户端工程尚未初始化
+- 系统照片库自动备份、后台上传、释放设备空间、离线任务恢复
+
+状态：`未开始/计划`。接入时必须按 DSM build 和套件版本完成能力发现、契约测试和功能开关保护。
+
 ## 自动化验证
 
 - `swift test --package-path apple`：100 项执行通过，1 项需要真实环境的可选测试跳过。

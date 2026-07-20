@@ -389,6 +389,8 @@ struct FileDetailView: View {
     @State private var livePhotoResourceLoaderDelegate: DsmAVAssetResourceLoaderDelegate?
     @State private var metadata: PhotoMetadata?
     @State private var isLoadingMetadata = false
+    @State private var decodedPreview: DecodedImage?
+    @State private var previewDecodingFailed = false
 
     var body: some View {
         Group {
@@ -634,44 +636,65 @@ struct FileDetailView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .image(let data):
-            if let decoded = decodedImage(from: data) {
-                ZStack {
-                    FittedImagePreview(cgImage: decoded.cgImage, orientation: decoded.orientation)
-                        .id(item.id)
-                    if livePhotoPlayer != nil {
-                        VideoPlayerRepresentable(
-                            player: $livePhotoPlayer,
-                            controlsStyle: .none,
-                            showsFrameSteppingButtons: false,
-                            showsSharingServiceButton: false
-                        )
-                        .background(Color.black)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                    if model.canPreviewPreviousImage || model.canPreviewNextImage {
-                        HStack {
-                            imageNavigationButton(
-                                title: "上一张",
-                                systemImage: "chevron.left",
-                                isEnabled: model.canPreviewPreviousImage,
-                                shortcut: .leftArrow,
-                                action: model.previewPreviousImage
+            Group {
+                if let decoded = decodedPreview {
+                    ZStack {
+                        FittedImagePreview(cgImage: decoded.cgImage, orientation: decoded.orientation)
+                            .id(item.id)
+                        if livePhotoPlayer != nil {
+                            VideoPlayerRepresentable(
+                                player: $livePhotoPlayer,
+                                controlsStyle: .none,
+                                showsFrameSteppingButtons: false,
+                                showsSharingServiceButton: false
                             )
-                            Spacer()
-                            imageNavigationButton(
-                                title: "下一张",
-                                systemImage: "chevron.right",
-                                isEnabled: model.canPreviewNextImage,
-                                shortcut: .rightArrow,
-                                action: model.previewNextImage
-                            )
+                            .background(Color.black)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
-                        .padding(.horizontal, 18)
+                        if model.canPreviewPreviousImage || model.canPreviewNextImage {
+                            HStack {
+                                imageNavigationButton(
+                                    title: "上一张",
+                                    systemImage: "chevron.left",
+                                    isEnabled: model.canPreviewPreviousImage,
+                                    shortcut: .leftArrow,
+                                    action: model.previewPreviousImage
+                                )
+                                Spacer()
+                                imageNavigationButton(
+                                    title: "下一张",
+                                    systemImage: "chevron.right",
+                                    isEnabled: model.canPreviewNextImage,
+                                    shortcut: .rightArrow,
+                                    action: model.previewNextImage
+                                )
+                            }
+                            .padding(.horizontal, 18)
+                        }
                     }
+                } else if previewDecodingFailed {
+                    previewMessage("无法读取这张图片。", systemImage: "photo.badge.exclamationmark") {
+                        onDownload(item, .archive)
+                    }
+                } else {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("正在解码图片…")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            } else {
-                previewMessage("无法读取这张图片。", systemImage: "photo.badge.exclamationmark") {
-                    onDownload(item, .archive)
+            }
+            .task(id: data) {
+                decodedPreview = nil
+                previewDecodingFailed = false
+                let decoded = await Task.detached(priority: .userInitiated) { () -> DecodedImage? in
+                    DecodedImage(from: data)
+                }.value
+                if let decoded {
+                    self.decodedPreview = decoded
+                } else {
+                    previewDecodingFailed = true
                 }
             }
         case .text(let text, let truncated):

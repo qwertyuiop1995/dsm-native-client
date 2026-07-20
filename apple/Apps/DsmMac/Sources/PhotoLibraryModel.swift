@@ -36,6 +36,18 @@ func decodedImage(from data: Data) -> (cgImage: CGImage, orientation: Image.Orie
     return (cgImage, orientation)
 }
 
+/// 将解码后的 CGImage 与方向封装为 @unchecked Sendable，便于在后台 Task 中解码并传回主线程。
+final class DecodedImage: @unchecked Sendable {
+    let cgImage: CGImage
+    let orientation: Image.Orientation
+
+    init?(from data: Data) {
+        guard let decoded = decodedImage(from: data) else { return nil }
+        self.cgImage = decoded.cgImage
+        self.orientation = decoded.orientation
+    }
+}
+
 protocol PhotoThumbnailFallbackProviding: Sendable {
     func canGenerateThumbnail(for item: PhotoLibraryItem) -> Bool
     func thumbnailData(for item: PhotoLibraryItem) async -> Data?

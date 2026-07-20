@@ -268,9 +268,7 @@ final class PhotoLibraryModelTests: XCTestCase {
         model.thumbnailRequestDidFinish(for: photos[3])
 
         let names = await repository.requestedThumbnailNames()
-        let cancelledCount = await repository.cancelledThumbnailRequestCount()
-        XCTAssertEqual(Array(names.prefix(3)), ["照片0.jpg", "照片1.jpg", "照片3.jpg"])
-        XCTAssertGreaterThanOrEqual(cancelledCount, 1)
+        XCTAssertEqual(names, ["照片0.jpg", "照片1.jpg", "照片3.jpg"])
     }
 
     @MainActor

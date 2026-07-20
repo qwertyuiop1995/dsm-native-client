@@ -101,6 +101,9 @@ struct WorkspaceView: View {
             Task { await model.activate(section) }
         }
         .onChange(of: model.selection) { _, _ in
+            // 照片模块的选中态由 PhotoLibraryModel 独立维护，WorkspaceModel.selection 仅在发起预览时被设置，
+            // 不应被当作「用户切换选择」而关闭预览窗口。
+            guard isFileSection else { return }
             if model.selectionChanged() {
                 previewWindowController?.closeFromModel()
             }

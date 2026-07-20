@@ -385,6 +385,8 @@ struct FileDetailView: View {
     let onRestore: (FileItem) -> Void
     @State private var confirmsDiscardAndClose = false
     @State private var confirmsCancelEditing = false
+    @State private var livePhotoPlayer: AVPlayer?
+    @State private var livePhotoResourceLoaderDelegate: DsmAVAssetResourceLoaderDelegate?
 
     var body: some View {
         Group {
@@ -541,7 +543,9 @@ struct FileDetailView: View {
                             LivePhotoPreviewBadgeButton(
                                 model: model,
                                 item: item,
-                                videoPath: videoPath
+                                videoPath: videoPath,
+                                player: $livePhotoPlayer,
+                                resourceLoaderDelegate: $livePhotoResourceLoaderDelegate
                             )
                         }
                     }
@@ -564,6 +568,12 @@ struct FileDetailView: View {
                 preview(item)
             }
 
+        }
+        .onChange(of: item.id) { _, _ in
+            livePhotoPlayer?.pause()
+            livePhotoPlayer = nil
+            livePhotoResourceLoaderDelegate?.cancelAll()
+            livePhotoResourceLoaderDelegate = nil
         }
     }
 
@@ -589,6 +599,16 @@ struct FileDetailView: View {
                 ZStack {
                     FittedImagePreview(image: image)
                         .id(item.id)
+                    if livePhotoPlayer != nil {
+                        VideoPlayerRepresentable(
+                            player: $livePhotoPlayer,
+                            controlsStyle: .none,
+                            showsFrameSteppingButtons: false,
+                            showsSharingServiceButton: false
+                        )
+                        .background(Color.black)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                     if model.canPreviewPreviousImage || model.canPreviewNextImage {
                         HStack {
                             imageNavigationButton(
@@ -1202,12 +1222,15 @@ struct VideoPlayerView: View {
 
 struct VideoPlayerRepresentable: NSViewRepresentable {
     @Binding var player: AVPlayer?
+    var controlsStyle: AVPlayerViewControlsStyle = .floating
+    var showsFrameSteppingButtons: Bool = true
+    var showsSharingServiceButton: Bool = true
 
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
-        view.controlsStyle = .floating
-        view.showsFrameSteppingButtons = true
-        view.showsSharingServiceButton = true
+        view.controlsStyle = controlsStyle
+        view.showsFrameSteppingButtons = showsFrameSteppingButtons
+        view.showsSharingServiceButton = showsSharingServiceButton
         return view
     }
 
@@ -1478,10 +1501,11 @@ private struct LivePhotoPreviewBadgeButton: View {
     let model: WorkspaceModel
     let item: FileItem
     let videoPath: String
-    @State private var isPlaying = false
-    @State private var player: AVPlayer?
+    @Binding var player: AVPlayer?
+    @Binding var resourceLoaderDelegate: DsmAVAssetResourceLoaderDelegate?
 
     var body: some View {
+        let isPlaying = player != nil
         Button {
             triggerLivePhoto()
         } label: {
@@ -1501,8 +1525,7 @@ private struct LivePhotoPreviewBadgeButton: View {
     }
 
     private func triggerLivePhoto() {
-        guard !isPlaying else { return }
-        isPlaying = true
+        guard player == nil else { return }
         Task {
             do {
                 let source = try await model.mediaStreamSource(
@@ -1522,18 +1545,45 @@ private struct LivePhotoPreviewBadgeButton: View {
                 )
                 let playerItem = AVPlayerItem(asset: asset)
                 let avPlayer = AVPlayer(playerItem: playerItem)
-                self.player = avPlayer
-                avPlayer.play()
+                avPlayer.actionAtItemEnd = .pause
+
+                // 先异步加载 asset.isPlayable，等资源加载器拿到内容信息后再播放，
+                // 避免直接 play() 让主线程等待资源信息而卡死。
+                await MainActor.run {
+                    resourceLoaderDelegate = delegate
+                }
+                let playable = try await asset.load(.isPlayable)
+                guard !Task.isCancelled else {
+                    await MainActor.run {
+                        resourceLoaderDelegate?.cancelAll()
+                        resourceLoaderDelegate = nil
+                    }
+                    return
+                }
+
+                await MainActor.run {
+                    guard playable else {
+                        resourceLoaderDelegate?.cancelAll()
+                        resourceLoaderDelegate = nil
+                        return
+                    }
+                    player = avPlayer
+                    avPlayer.play()
+                }
 
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 await MainActor.run {
-                    isPlaying = false
-                    self.player = nil
+                    player?.pause()
+                    player = nil
+                    resourceLoaderDelegate?.cancelAll()
+                    resourceLoaderDelegate = nil
                 }
             } catch {
                 await MainActor.run {
-                    isPlaying = false
-                    self.player = nil
+                    player?.pause()
+                    player = nil
+                    resourceLoaderDelegate?.cancelAll()
+                    resourceLoaderDelegate = nil
                 }
             }
         }

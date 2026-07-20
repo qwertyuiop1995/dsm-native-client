@@ -176,10 +176,12 @@ final class PhotoLibraryModel {
     }
     private(set) var displayedItems: [PhotoLibraryItem] = []
     private(set) var isLoadingTimeline = false
+    private(set) var isSyncingTimeline = false
     private(set) var isRetryingTimelineFolders = false
     private(set) var timelineScannedFolderCount = 0
     private(set) var timelineSkippedFolderPaths: [String] = []
     private(set) var timelineRetryMessage: String?
+    private(set) var activeProfileID: UUID?
 
     @ObservationIgnored private let repository: any PhotoLibraryRepository
     @ObservationIgnored private var history: [String] = []
@@ -196,13 +198,23 @@ final class PhotoLibraryModel {
     @ObservationIgnored private var thumbnailPrefetchGeneration = 0
     @ObservationIgnored private var timelineTask: Task<Void, Never>?
     @ObservationIgnored private var timelineGeneration = 0
+    @ObservationIgnored private var timelineFolderItemPaths: [String: [String]] = [:]
+    @ObservationIgnored private let cacheStore: PhotoLibraryCacheStore
+    @ObservationIgnored private let thumbnailDiskCacheStore: PhotoThumbnailDiskCacheStore
+    @ObservationIgnored private var cachedItemsCountOnDisk: Int = 0
 
     init(
         repository: any PhotoLibraryRepository,
-        thumbnailFallback: (any PhotoThumbnailFallbackProviding)? = nil
+        profileID: UUID? = nil,
+        thumbnailFallback: (any PhotoThumbnailFallbackProviding)? = nil,
+        cacheStore: PhotoLibraryCacheStore = PhotoLibraryCacheStore(),
+        thumbnailDiskCacheStore: PhotoThumbnailDiskCacheStore = PhotoThumbnailDiskCacheStore()
     ) {
         self.repository = repository
+        self.activeProfileID = profileID
         self.thumbnailFallback = thumbnailFallback
+        self.cacheStore = cacheStore
+        self.thumbnailDiskCacheStore = thumbnailDiskCacheStore
     }
 
     var selectedSpace: PhotoSpace? {
@@ -226,19 +238,61 @@ final class PhotoLibraryModel {
         return URL(fileURLWithPath: currentPath).lastPathComponent
     }
 
+    var mediaStats: (total: Int, images: Int, videos: Int) {
+        let mediaItems = PhotoLibraryItem.pairLivePhotos(displayedItems.isEmpty ? (browseMode == .timeline ? timelineItems : items) : displayedItems)
+            .filter { !$0.isFolder }
+        var imageCount = 0
+        var videoCount = 0
+        for item in mediaItems {
+            if item.kind == .image { imageCount += 1 }
+            else if item.kind == .video { videoCount += 1 }
+        }
+        return (mediaItems.count, imageCount, videoCount)
+    }
+
+    private(set) var timelineSections: [PhotoTimelineSection] = []
+
     private func updateDisplayedItems() {
-        let source = browseMode == .timeline ? timelineItems : items
-        displayedItems = source.filter { item in
+        let rawSource = browseMode == .timeline ? timelineItems : items
+        let pairedSource = PhotoLibraryItem.pairLivePhotos(rawSource)
+        displayedItems = pairedSource.filter { item in
             let matchesType: Bool
             switch mediaFilter {
             case .all: matchesType = true
             case .images: matchesType = item.kind == .image || item.isFolder
-            case .videos: matchesType = item.kind == .video || item.isFolder
+            case .videos: matchesType = (item.kind == .video && !item.isLivePhoto) || item.isFolder
             }
             let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             return matchesType && (query.isEmpty || item.name.localizedCaseInsensitiveContains(query))
         }
+        updateTimelineSections()
     }
+
+    private func updateTimelineSections() {
+        guard browseMode == .timeline else {
+            timelineSections = []
+            return
+        }
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: displayedItems) { item in
+            calendar.startOfDay(for: item.createdAt ?? item.modifiedAt ?? .distantPast)
+        }
+        timelineSections = grouped.keys.sorted(by: >).map { date in
+            PhotoTimelineSection(
+                date: date,
+                title: date == .distantPast ? "日期未知" : Self.dayFormatter.string(from: date),
+                items: grouped[date] ?? []
+            )
+        }
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateStyle = .long
+        formatter.timeStyle = .none
+        return formatter
+    }()
 
     var selectedItems: [PhotoLibraryItem] {
         displayedItems.filter { selection.contains($0.id) }
@@ -293,9 +347,11 @@ final class PhotoLibraryModel {
         guard let space = spaces.first(where: { $0.id == id }), selectedSpaceID != id else {
             return
         }
+        saveCacheIfNeeded()
         selectedSpaceID = id
         history.removeAll()
         timelineItems = []
+        timelineFolderItemPaths = [:]
         selection.removeAll()
         cancelTimelineScan()
         await loadFolder(space.rootPath, recordingHistory: false)
@@ -338,33 +394,106 @@ final class PhotoLibraryModel {
         }
     }
 
-    func loadTimeline() async {
+    func loadTimeline(forceRescan: Bool = false) async {
         guard let selectedSpace else { return }
         cancelTimelineScan()
         timelineGeneration += 1
         let generation = timelineGeneration
-        timelineItems = []
-        timelineScannedFolderCount = 0
-        timelineSkippedFolderPaths = []
         timelineRetryMessage = nil
         errorMessage = nil
-        isLoadingTimeline = true
+
+        let profileID = activeProfileID ?? timelineItems.first?.profileID
+        if let profileID {
+            activeProfileID = profileID
+        }
+
+        // 优先尝试恢复本地持久化磁盘缓存，在后台 Task 中异步解码，避免卡死主线程
+        if !forceRescan, let targetProfileID = activeProfileID ?? profileID {
+            let store = cacheStore
+            let spaceKind = selectedSpace.id
+            let cached = await Task.detached(priority: .userInitiated) {
+                store.load(profileID: targetProfileID, spaceKind: spaceKind)
+            }.value
+
+            if generation == timelineGeneration {
+                if let cached, !cached.items.isEmpty {
+                    if timelineItems.count < cached.items.count {
+                        self.timelineItems = cached.items
+                        self.timelineFolderItemPaths = cached.folderItemPaths
+                        self.cachedItemsCountOnDisk = cached.items.count
+                    }
+                    self.isLoadingTimeline = false
+                    self.isSyncingTimeline = true
+                } else {
+                    self.isLoadingTimeline = timelineItems.isEmpty
+                    self.isSyncingTimeline = true
+                }
+            }
+        } else {
+            if forceRescan {
+                self.timelineItems = []
+                self.timelineFolderItemPaths = [:]
+            }
+            self.isLoadingTimeline = timelineItems.isEmpty
+            self.isSyncingTimeline = true
+        }
+
+        timelineScannedFolderCount = 0
+        timelineSkippedFolderPaths = []
 
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                try await repository.scanTimeline(in: selectedSpace) { [weak self] update in
+                try await repository.scanTimeline(
+                    in: selectedSpace,
+                    startingAt: [selectedSpace.rootPath],
+                    existingFolderItemPaths: self.timelineFolderItemPaths
+                ) { [weak self] update in
                     await MainActor.run {
                         guard let self, generation == self.timelineGeneration else { return }
-                        let knownIDs = Set(self.timelineItems.map(\.id))
-                        self.timelineItems.append(contentsOf: update.items.filter { !knownIDs.contains($0.id) })
-                        self.timelineItems.sort(by: Self.timelineSort)
+                        // 1. 同步剔除已被删除的文件
+                        if !update.removedPaths.isEmpty {
+                            self.removeDeletedItems(at: update.removedPaths)
+                        }
+
+                        // 2. 增量追加并重新排序
+                        if !update.items.isEmpty {
+                            var itemMap = Dictionary(uniqueKeysWithValues: self.timelineItems.map { ($0.id, $0) })
+                            for item in update.items {
+                                itemMap[item.id] = item
+                            }
+                            self.timelineItems = Array(itemMap.values).sorted(by: Self.timelineSort)
+                        }
+
+                        // 3. 跟踪各个文件夹的文件路径映射
+                        if let firstItem = update.items.first {
+                            let folderPath = URL(fileURLWithPath: firstItem.path).deletingLastPathComponent().path
+                            self.timelineFolderItemPaths[folderPath] = update.items.map(\.path)
+                            if self.activeProfileID == nil {
+                                self.activeProfileID = firstItem.profileID
+                            }
+                        }
+
                         self.timelineScannedFolderCount = update.scannedFolderCount
                         self.timelineSkippedFolderPaths = update.skippedFolderPaths
+                        if self.isLoadingTimeline {
+                            self.isLoadingTimeline = false
+                        }
+                        if !update.items.isEmpty || !update.removedPaths.isEmpty {
+                            self.saveCacheIfNeeded()
+                        }
                     }
                 }
+
+                await MainActor.run {
+                    guard generation == self.timelineGeneration else { return }
+                    self.saveCacheIfNeeded()
+                }
             } catch is CancellationError {
-                // 用户切换到文件夹浏览时正常结束，不显示错误。
+                await MainActor.run {
+                    guard generation == self.timelineGeneration else { return }
+                    self.saveCacheIfNeeded()
+                }
             } catch {
                 await MainActor.run {
                     guard generation == self.timelineGeneration else { return }
@@ -375,6 +504,7 @@ final class PhotoLibraryModel {
             await MainActor.run {
                 guard generation == self.timelineGeneration else { return }
                 self.isLoadingTimeline = false
+                self.isSyncingTimeline = false
             }
         }
         timelineTask = task
@@ -394,14 +524,29 @@ final class PhotoLibraryModel {
         timelineRetryMessage = nil
 
         do {
-            try await repository.scanTimeline(in: selectedSpace, startingAt: targetPaths) { [weak self] update in
+            try await repository.scanTimeline(
+                in: selectedSpace,
+                startingAt: targetPaths,
+                existingFolderItemPaths: timelineFolderItemPaths
+            ) { [weak self] update in
                 await MainActor.run {
                     guard let self, generation == self.timelineGeneration else { return }
-                    let knownIDs = Set(self.timelineItems.map(\.id))
-                    self.timelineItems.append(contentsOf: update.items.filter { !knownIDs.contains($0.id) })
-                    self.timelineItems.sort(by: Self.timelineSort)
+                    if !update.removedPaths.isEmpty {
+                        self.removeDeletedItems(at: update.removedPaths)
+                    }
+                    if !update.items.isEmpty {
+                        var itemMap = Dictionary(uniqueKeysWithValues: self.timelineItems.map { ($0.id, $0) })
+                        for item in update.items {
+                            itemMap[item.id] = item
+                        }
+                        self.timelineItems = Array(itemMap.values).sorted(by: Self.timelineSort)
+                    }
                     self.timelineSkippedFolderPaths = update.skippedFolderPaths
                 }
+            }
+            await MainActor.run {
+                guard generation == self.timelineGeneration else { return }
+                self.saveCacheIfNeeded()
             }
         } catch is CancellationError {
             // 用户离开时间线时正常结束，不显示错误。
@@ -417,10 +562,12 @@ final class PhotoLibraryModel {
     }
 
     func cancelTimelineScan() {
+        saveCacheIfNeeded()
         timelineTask?.cancel()
         timelineTask = nil
         timelineGeneration += 1
         isLoadingTimeline = false
+        isSyncingTimeline = false
         isRetryingTimelineFolders = false
     }
 
@@ -436,10 +583,6 @@ final class PhotoLibraryModel {
 
     func clearSelection() {
         selection.removeAll()
-    }
-
-    func cachedThumbnailData(for item: PhotoLibraryItem) -> Data? {
-        thumbnailCache[item.id]
     }
 
     func thumbnailBecameVisible(_ item: PhotoLibraryItem) {
@@ -479,8 +622,17 @@ final class PhotoLibraryModel {
         items.removeAll(where: isDeleted)
         timelineItems.removeAll(where: isDeleted)
 
+        for (folderPath, existingPaths) in timelineFolderItemPaths {
+            timelineFolderItemPaths[folderPath] = existingPaths.filter { path in
+                !normalizedPaths.contains { deleted in
+                    path == deleted || path.hasPrefix(deleted + "/")
+                }
+            }
+        }
+
         let removedIDs = Set((removedFolderItems + removedTimelineItems).map(\.id))
         selection.subtract(removedIDs)
+        thumbnailCacheOrder.removeAll(where: { removedIDs.contains($0) })
         for id in removedIDs {
             thumbnailCache[id] = nil
             unavailableThumbnails.remove(id)
@@ -491,6 +643,33 @@ final class PhotoLibraryModel {
         visibleThumbnailIDs.subtract(removedIDs)
         loadingVisibleThumbnailIDs.subtract(removedIDs)
         restartThumbnailPrefetchIfPossible()
+        saveCacheIfNeeded()
+    }
+
+    private func saveCacheIfNeeded() {
+        guard let selectedSpace else { return }
+        let profileID = activeProfileID ?? timelineItems.first?.profileID
+        guard let profileID else { return }
+        if activeProfileID == nil {
+            activeProfileID = profileID
+        }
+
+        // 防覆写安全屏障：使用内存记录的 cachedItemsCountOnDisk 进行快速对比，绝不在主线程反复同步读取 21MB 文件
+        if cachedItemsCountOnDisk > (timelineItems.count + 50) && isSyncingTimeline {
+            return
+        }
+
+        cachedItemsCountOnDisk = max(cachedItemsCountOnDisk, timelineItems.count)
+        let cache = PhotoSpaceCache(
+            items: timelineItems,
+            folderItemPaths: timelineFolderItemPaths,
+            lastScannedAt: Date()
+        )
+        let store = cacheStore
+        let spaceKind = selectedSpace.id
+        Task.detached(priority: .utility) {
+            store.save(cache, profileID: profileID, spaceKind: spaceKind)
+        }
     }
 
     func loadMore() async {
@@ -515,7 +694,7 @@ final class PhotoLibraryModel {
 
     func thumbnailData(for item: PhotoLibraryItem) async -> Data? {
         guard !item.isFolder else { return nil }
-        if let cached = thumbnailCache[item.id] { return cached }
+        if let cached = cachedThumbnailData(for: item) { return cached }
         guard !unavailableThumbnails.contains(item.id) else { return nil }
         guard let requestToken = await thumbnailRequestGate.acquire() else { return nil }
 
@@ -535,7 +714,7 @@ final class PhotoLibraryModel {
         if let repositoryData,
            !Task.isCancelled,
            Self.isDisplayableImageData(repositoryData) {
-            cacheThumbnail(repositoryData, for: item.id)
+            cacheThumbnail(repositoryData, for: item)
             return repositoryData
         }
 
@@ -559,18 +738,60 @@ final class PhotoLibraryModel {
             // HEIC/MOV 的本机生成可能因文件大小或临时连接失败，保留后续重试机会。
             return nil
         }
-        cacheThumbnail(fallbackData, for: item.id)
+        cacheThumbnail(fallbackData, for: item)
         return fallbackData
     }
 
-    private func cacheThumbnail(_ data: Data, for id: PhotoLibraryItem.ID) {
-        if thumbnailCache.count >= 300 {
-            let removableKeys = thumbnailCache.keys.filter { !visibleThumbnailIDs.contains($0) }
-            for key in removableKeys.prefix(60) {
-                thumbnailCache[key] = nil
+    @ObservationIgnored private var thumbnailCacheOrder: [PhotoLibraryItem.ID] = []
+
+    func cachedThumbnailData(for item: PhotoLibraryItem) -> Data? {
+        if let data = thumbnailCache[item.id] {
+            if let index = thumbnailCacheOrder.firstIndex(of: item.id) {
+                thumbnailCacheOrder.remove(at: index)
+                thumbnailCacheOrder.append(item.id)
+            }
+            return data
+        }
+        // 尝试从磁盘加载缩略图持久化缓存，重启 App 后瞬间完成离线秒显！
+        let profileID = activeProfileID ?? item.profileID
+        if let diskData = thumbnailDiskCacheStore.load(profileID: profileID, itemID: item.id) {
+            thumbnailCache[item.id] = diskData
+            thumbnailCacheOrder.append(item.id)
+            return diskData
+        }
+        return nil
+    }
+
+    private func cacheThumbnail(_ data: Data, for item: PhotoLibraryItem) {
+        let id = item.id
+        if let existingIndex = thumbnailCacheOrder.firstIndex(of: id) {
+            thumbnailCacheOrder.remove(at: existingIndex)
+        }
+        thumbnailCacheOrder.append(id)
+        thumbnailCache[id] = data
+
+        // 异步写入磁盘落盘持久化
+        let profileID = activeProfileID ?? item.profileID
+        let diskStore = thumbnailDiskCacheStore
+        Task.detached(priority: .utility) {
+            diskStore.save(data, profileID: profileID, itemID: id)
+        }
+
+        if thumbnailCache.count > 1000 {
+            let overflowCount = thumbnailCache.count - 1000
+            var removedCount = 0
+            var i = 0
+            while i < thumbnailCacheOrder.count && removedCount < overflowCount {
+                let key = thumbnailCacheOrder[i]
+                if !visibleThumbnailIDs.contains(key) {
+                    thumbnailCache[key] = nil
+                    thumbnailCacheOrder.remove(at: i)
+                    removedCount += 1
+                } else {
+                    i += 1
+                }
             }
         }
-        thumbnailCache[id] = data
     }
 
     private func restartThumbnailPrefetchIfPossible() {

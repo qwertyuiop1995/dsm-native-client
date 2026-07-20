@@ -367,6 +367,7 @@ final class WorkspaceModel {
         self.allowsRemoteMountManagement = repository.allowsRemoteMountManagement
         self.photoLibrary = PhotoLibraryModel(
             repository: FileStationPhotoRepository(files: repository),
+            profileID: profile.id,
             thumbnailFallback: LocalPhotoThumbnailFallback(files: repository)
         )
         if let data = UserDefaults.standard.data(forKey: "LanStash_RecentLocations_\(profile.id.uuidString)"),
@@ -434,15 +435,24 @@ final class WorkspaceModel {
         }
     }
 
+    private var defaultPreviewSourceItems: [FileItem] {
+        if section == .photos {
+            return photoLibrary.displayedItems.map(\.fileItem)
+        }
+        return filteredItems
+    }
+
     var selectedItems: [FileItem] {
-        (previewContextItems ?? filteredItems).filter { selection.contains($0.id) }
+        let source = previewContextItems ?? defaultPreviewSourceItems
+        return source.filter { selection.contains($0.id) }
     }
 
     var selectedItem: FileItem? {
         guard selection.count == 1, let id = selection.first else {
             return nil
         }
-        return (previewContextItems ?? filteredItems).first { $0.id == id }
+        let source = previewContextItems ?? defaultPreviewSourceItems
+        return source.first { $0.id == id }
     }
 
     var canEditSelectedText: Bool {
@@ -768,7 +778,8 @@ final class WorkspaceModel {
         do {
             favorites = try await repository.listFavorites()
         } catch {
-            show(error)
+            // 收藏夹为侧边栏辅助功能，后台读取失败时不污染主内容区错误状态
+            favorites = []
         }
     }
 
@@ -799,7 +810,10 @@ final class WorkspaceModel {
         defer { isLoadingShareLinks = false }
         do {
             shareLinks = try await repository.listShareLinks()
-        } catch { show(error) }
+        } catch {
+            // 分享链接列表为辅助功能，不污染主文件列表状态
+            shareLinks = []
+        }
     }
 
     func createShareLink(paths: [String], password: String?, expiresAt: String?) async -> FileShareLink? {
@@ -1008,10 +1022,16 @@ final class WorkspaceModel {
         }
 
         isPreviewPresented = true
-        preview = .loading
+        // 尝试从内存/缓存中先提取已有缩略图，0.00 秒闪电展现，拒绝空白等待
+        if let photoItem = photoLibrary.displayedItems.first(where: { $0.id == item.id }),
+           let cachedData = photoLibrary.cachedThumbnailData(for: photoItem) {
+            preview = .image(cachedData)
+        } else {
+            preview = .loading
+        }
         previewLoadingSpeedBytesPerSecond = nil
         previewProgressEstimator = TransferProgressEstimator()
-        previewTask = Task { [weak self] in
+        previewTask = Task(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             do {
                 let kind = try await resolvedKindForPreview(item)
@@ -1019,10 +1039,28 @@ final class WorkspaceModel {
                 resolvedPreviewKind = kind
                 switch kind {
                 case .image:
-                    let data = try await repository.getThumbnail(path: item.path, size: .large)
-                    try Task.checkCancellation()
-                    previewLoadingSpeedBytesPerSecond = nil
-                    preview = .image(data)
+                    do {
+                        let data = try await repository.getThumbnail(path: item.path, size: .large)
+                        try Task.checkCancellation()
+                        previewLoadingSpeedBytesPerSecond = nil
+                        preview = .image(data)
+                    } catch {
+                        // 若获取 NAS 大缩略图失败（例如 HEIC/HEIF 照片未预生成大图），自动回退到下载原图并由 macOS 系统原生解码展示
+                        let url = temporaryPreviewURL(for: item)
+                        let progress = previewProgressHandler()
+                        try await repository.download(
+                            remotePath: item.path,
+                            to: url,
+                            expectedSize: item.sizeBytes
+                        ) { completed, total in
+                            progress(completed, total)
+                        }
+                        try Task.checkCancellation()
+                        let data = try Data(contentsOf: url)
+                        previewFileURL = url
+                        previewLoadingSpeedBytesPerSecond = nil
+                        preview = .image(data)
+                    }
                 case .text:
                     let limit: Int64 = 5 * 1_024 * 1_024
                     // 文件可能刚在编辑器或其他客户端中被修改，列表里的大小会滞后。
@@ -2602,6 +2640,7 @@ final class WorkspaceModel {
     }
 
     private func show(_ error: Error) {
+        guard !Self.isCancellation(error) else { return }
         statusIsError = true
         statusMessage = Self.userMessage(for: error)
         if let error = error as? AppError {
@@ -2697,5 +2736,13 @@ final class WorkspaceModel {
             ? [.caseInsensitive]
             : []
         return try NSRegularExpression(pattern: parsed.pattern, options: options)
+    }
+
+    func mediaStreamSource(path: String, fileExtension: String?) async throws -> MediaStreamSource {
+        try await repository.mediaStreamSource(
+            remotePath: path,
+            fileExtension: fileExtension,
+            expectedContentLength: nil
+        )
     }
 }

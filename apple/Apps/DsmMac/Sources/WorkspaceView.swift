@@ -106,7 +106,7 @@ struct WorkspaceView: View {
             }
         }
         .onChange(of: model.isPreviewPresented) { _, isPresented in
-            if isPresented && shouldShowFloatingPreview {
+            if isPresented {
                 presentFloatingPreview()
             } else {
                 previewWindowController?.closeFromModel()
@@ -382,7 +382,7 @@ struct WorkspaceView: View {
         case .transfers:
             return "传输中心"
         case .settings:
-            return "这台 NAS"
+            return "设置"
         default:
             return (model.currentPath.isEmpty || model.currentPath == "/") ? model.profile.displayName : (model.currentPath.split(separator: "/").last.map(String.init) ?? model.currentPath)
         }
@@ -430,6 +430,7 @@ struct WorkspaceView: View {
                         .filter { !$0.isFolder }
                         .map(\.fileItem)
                     model.preparePhotoPreview(items: previewItems, selected: item.fileItem)
+                    presentFloatingPreview()
                 },
                 onDownload: presentPhotoDownload,
                 onDelete: { deleteTargets = $0.map(\.fileItem) }
@@ -878,7 +879,7 @@ private struct SidebarView: View {
                         .badge(model.activeTransferCount)
                 }
                 NavigationLink(value: WorkspaceSection.settings) {
-                    Label("这台 NAS", systemImage: "gearshape")
+                    Label("设置", systemImage: "gearshape")
                 }
             }
         }
@@ -3561,11 +3562,21 @@ private struct SettingsRow: View {
     }
 }
 
+struct CacheCleanupOptions: OptionSet {
+    let rawValue: Int
+    static let safeTrash = CacheCleanupOptions(rawValue: 1 << 0)
+    static let photoCache = CacheCleanupOptions(rawValue: 1 << 1)
+    static let all: CacheCleanupOptions = [.safeTrash, .photoCache]
+}
+
 private struct AppStorageSnapshot {
     let previewCache: Int64
+    let photoCache: Int64
     let systemCache: Int64
     let protectedData: Int64
-    var reclaimable: Int64 { previewCache + systemCache }
+
+    var safeTrash: Int64 { previewCache + systemCache }
+    var reclaimable: Int64 { safeTrash + photoCache }
     var total: Int64 { reclaimable + protectedData }
 }
 
@@ -3573,17 +3584,34 @@ private enum AppStorageInspector {
     static func snapshot() -> AppStorageSnapshot {
         AppStorageSnapshot(
             previewCache: size(of: previewDirectory),
+            photoCache: size(of: photoCacheDirectory) + size(of: photoThumbnailDirectory),
             systemCache: size(of: cacheDirectory),
             protectedData: size(of: secureDataDirectory)
         )
     }
 
-    static func clearReclaimableData() throws {
-        try removeContents(of: previewDirectory, expectedLastComponent: "LanStashPreview")
-        if let bundleID = Bundle.main.bundleIdentifier {
-            try removeContents(of: cacheDirectory, expectedLastComponent: bundleID)
+    static func clearReclaimableData(options: CacheCleanupOptions = .safeTrash) throws {
+        if options.contains(.safeTrash) {
+            try removeContents(of: previewDirectory, expectedLastComponent: "LanStashPreview")
+            if let bundleID = Bundle.main.bundleIdentifier {
+                try removeContents(of: cacheDirectory, expectedLastComponent: bundleID)
+            }
+            URLCache.shared.removeAllCachedResponses()
         }
-        URLCache.shared.removeAllCachedResponses()
+        if options.contains(.photoCache) {
+            try removeContents(of: photoCacheDirectory, expectedLastComponent: "lanstash-photo-cache")
+            try removeContents(of: photoThumbnailDirectory, expectedLastComponent: "lanstash-photo-thumbnails")
+        }
+    }
+
+    private static var photoCacheDirectory: URL {
+        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        return root.appendingPathComponent("lanstash-photo-cache", isDirectory: true)
+    }
+
+    private static var photoThumbnailDirectory: URL {
+        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        return root.appendingPathComponent("lanstash-photo-thumbnails", isDirectory: true)
     }
 
     private static var previewDirectory: URL {
@@ -3633,8 +3661,9 @@ private struct SettingsView: View {
     @AppStorage("LanStash_DownloadChunkSize") private var chunkSizeSetting = 8
     @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
     @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = true
-    @State private var storage = AppStorageSnapshot(previewCache: 0, systemCache: 0, protectedData: 0)
+    @State private var storage = AppStorageInspector.snapshot()
     @State private var confirmsCacheCleanup = false
+    @State private var showsSelectiveCleanupSheet = false
     @State private var storageMessage: String?
 
     var body: some View {
@@ -3744,10 +3773,12 @@ private struct SettingsView: View {
                 ) {
                     SettingsRow(label: "本地数据与缓存", value: ByteCountFormatter.string(fromByteCount: storage.total, countStyle: .file))
                     Divider().opacity(0.3)
-                    SettingsRow(label: "可清理缓存", value: ByteCountFormatter.string(fromByteCount: storage.reclaimable, countStyle: .file))
+                    SettingsRow(label: "无风险临时垃圾 (默认清理)", value: ByteCountFormatter.string(fromByteCount: storage.safeTrash, countStyle: .file))
                     Divider().opacity(0.3)
-                    SettingsRow(label: "登录与设置数据", value: ByteCountFormatter.string(fromByteCount: storage.protectedData, countStyle: .file))
-                    Text("清理缓存不会删除登录信息、设置、任务记录或 NAS 中的文件。")
+                    SettingsRow(label: "照片库时间线缓存", value: ByteCountFormatter.string(fromByteCount: storage.photoCache, countStyle: .file))
+                    Divider().opacity(0.3)
+                    SettingsRow(label: "登录与设置数据 (强制保护)", value: ByteCountFormatter.string(fromByteCount: storage.protectedData, countStyle: .file))
+                    Text("默认清理仅删除无影响的临时文件与网络缓存。您可在‘选择性清理’中单独清除照片索引缓存，清理后再次进入照片会自动从 NAS 重新同步。")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     HStack {
@@ -3756,8 +3787,10 @@ private struct SettingsView: View {
                         }
                         Spacer()
                         Button("重新计算") { storage = AppStorageInspector.snapshot() }
-                        Button("清理缓存…") { confirmsCacheCleanup = true }
+                        Button("选择性清理…") { showsSelectiveCleanupSheet = true }
                             .disabled(storage.reclaimable == 0)
+                        Button("清理无风险垃圾") { confirmsCacheCleanup = true }
+                            .disabled(storage.safeTrash == 0)
                     }
                 }
             }
@@ -3766,20 +3799,32 @@ private struct SettingsView: View {
             .frame(maxWidth: .infinity)
         }
         .task { storage = AppStorageInspector.snapshot() }
-        .alert("清理应用缓存？", isPresented: $confirmsCacheCleanup) {
+        .alert("清理无风险应用垃圾？", isPresented: $confirmsCacheCleanup) {
             Button("取消", role: .cancel) {}
             Button("清理", role: .destructive) {
                 model.dismissPreview()
                 do {
-                    try AppStorageInspector.clearReclaimableData()
+                    try AppStorageInspector.clearReclaimableData(options: .safeTrash)
                     storage = AppStorageInspector.snapshot()
-                    storageMessage = "缓存已清理。"
+                    storageMessage = "无风险临时垃圾已成功清理。"
                 } catch {
                     storageMessage = "部分缓存未能清理，请稍后重试。"
                 }
             }
         } message: {
-            Text("将删除可重新生成的预览临时文件和系统缓存，不影响应用正常使用。")
+            Text("将清理文件预览临时解包文件和系统 HTTP 缓存，对应用正常使用没有任何影响。")
+        }
+        .sheet(isPresented: $showsSelectiveCleanupSheet) {
+            SelectiveCacheCleanupSheet(storage: storage) { options in
+                model.dismissPreview()
+                do {
+                    try AppStorageInspector.clearReclaimableData(options: options)
+                    storage = AppStorageInspector.snapshot()
+                    storageMessage = "选定缓存已成功清理。"
+                } catch {
+                    storageMessage = "部分缓存未能清理，请稍后重试。"
+                }
+            }
         }
         .alert("修改 NAS 名称", isPresented: $showsRenamePrompt) {
             TextField("设备名称", text: $renamedNAS)
@@ -4153,6 +4198,85 @@ struct FilePropertiesView: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .medium
         return formatter.string(from: date)
+    }
+}
+
+private struct SelectiveCacheCleanupSheet: View {
+    let storage: AppStorageSnapshot
+    let onClean: (CacheCleanupOptions) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var cleanSafeTrash = true
+    @State private var cleanPhotoCache = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                Image(systemName: "trash.circle.fill")
+                    .font(.title)
+                    .foregroundStyle(.teal)
+                Text("选择性清理本地缓存")
+                    .font(.title2.weight(.bold))
+            }
+
+            Text("请勾选您希望清理的项。清理本地缓存绝对不会删除登录凭据、设置项或 NAS 中的真实文件。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 14) {
+                Toggle(isOn: $cleanSafeTrash) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text("无风险临时垃圾")
+                                .font(.body.weight(.medium))
+                            Spacer()
+                            Text(ByteCountFormatter.string(fromByteCount: storage.safeTrash, countStyle: .file))
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("包含文件临时解包预览和网络请求缓存，清理对应用使用没有任何影响（推荐清理）。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                Toggle(isOn: $cleanPhotoCache) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text("照片库时间线索引缓存")
+                                .font(.body.weight(.medium))
+                            Spacer()
+                            Text(ByteCountFormatter.string(fromByteCount: storage.photoCache, countStyle: .file))
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("包含磁盘存储的照片索引元数据。清理后不会影响 NAS 照片，下次进入照片功能会自动重新扫描。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(14)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }
+                    .keyboardShortcut(.escape, modifiers: [])
+                Button("清理选中项") {
+                    var selected: CacheCleanupOptions = []
+                    if cleanSafeTrash { selected.insert(.safeTrash) }
+                    if cleanPhotoCache { selected.insert(.photoCache) }
+                    onClean(selected)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .disabled(!cleanSafeTrash && !cleanPhotoCache)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
     }
 }
 

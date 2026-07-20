@@ -41,6 +41,8 @@ struct PhotoLibraryView: View {
             .pickerStyle(.segmented)
             .fixedSize()
 
+            mediaStatsBadge
+
             Spacer()
 
             HStack(spacing: 6) {
@@ -92,6 +94,47 @@ struct PhotoLibraryView: View {
         .padding(.vertical, 10)
     }
 
+    private var mediaStatsBadge: some View {
+        let stats = model.mediaStats
+        return HStack(spacing: 5) {
+            Label {
+                Text("\(Self.formattedNumber(stats.total))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+            } icon: {
+                Image(systemName: "photo.stack.fill")
+                    .foregroundStyle(Color.accentColor)
+            }
+
+            Text("(")
+                .foregroundStyle(.secondary.opacity(0.6))
+
+            Label("\(Self.formattedNumber(stats.images))", systemImage: "photo")
+                .foregroundStyle(.secondary)
+
+            Text("·")
+                .foregroundStyle(.secondary.opacity(0.6))
+
+            Label("\(Self.formattedNumber(stats.videos))", systemImage: "video")
+                .foregroundStyle(.secondary)
+
+            Text(")")
+                .foregroundStyle(.secondary.opacity(0.6))
+        }
+        .font(.caption)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.quaternary.opacity(0.55), in: Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("媒体库共计 \(stats.total) 项，包含 \(stats.images) 张照片，\(stats.videos) 个视频")
+    }
+
+    private static func formattedNumber(_ number: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: number)) ?? "\(number)"
+    }
+
     @ViewBuilder
     private var content: some View {
         if model.isLoadingTimeline && model.displayedItems.isEmpty {
@@ -99,36 +142,51 @@ struct PhotoLibraryView: View {
         } else if model.isLoading && model.displayedItems.isEmpty {
             loadingGrid
         } else if model.spaces.isEmpty {
-            ContentUnavailableView {
-                Label("没有可浏览的照片空间", systemImage: "photo.badge.exclamationmark")
-            } description: {
-                Text(model.errorMessage ?? "请确认个人照片空间或共享照片空间已在 NAS 中启用，并允许当前账号访问。")
-            } actions: {
-                Button("重新检查") { Task { await model.reloadSpaces() } }
+            VStack(spacing: 0) {
+                Spacer().frame(height: 36)
+                ContentUnavailableView {
+                    Label("没有可浏览的照片空间", systemImage: "photo.badge.exclamationmark")
+                } description: {
+                    Text(model.errorMessage ?? "请确认个人照片空间或共享照片空间已在 NAS 中启用，并允许当前账号访问。")
+                } actions: {
+                    Button("重新检查") { Task { await model.reloadSpaces() } }
+                }
+                Spacer()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         } else if let errorMessage = model.errorMessage, model.displayedItems.isEmpty {
-            ContentUnavailableView {
-                Label("照片暂时无法显示", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(errorMessage)
-            } actions: {
-                Button("重新扫描全部照片") { Task { await model.refreshAll() } }
-            }
-        } else if model.displayedItems.isEmpty {
-            ContentUnavailableView {
-                Label(emptyTitle, systemImage: model.searchText.isEmpty ? "photo" : "magnifyingglass")
-            } description: {
-                Text(emptyDescription)
-            } actions: {
-                if !model.searchText.isEmpty || model.mediaFilter != .all {
-                    Button("清除筛选") {
-                        model.searchText = ""
-                        model.mediaFilter = .all
-                    }
-                } else {
+            VStack(spacing: 0) {
+                Spacer().frame(height: 36)
+                ContentUnavailableView {
+                    Label("照片暂时无法显示", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(errorMessage)
+                } actions: {
                     Button("重新扫描全部照片") { Task { await model.refreshAll() } }
                 }
+                Spacer()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        } else if model.displayedItems.isEmpty {
+            VStack(spacing: 0) {
+                Spacer().frame(height: 36)
+                ContentUnavailableView {
+                    Label(emptyTitle, systemImage: model.searchText.isEmpty ? "photo" : "magnifyingglass")
+                } description: {
+                    Text(emptyDescription)
+                } actions: {
+                    if !model.searchText.isEmpty || model.mediaFilter != .all {
+                        Button("清除筛选") {
+                            model.searchText = ""
+                            model.mediaFilter = .all
+                        }
+                    } else {
+                        Button("重新扫描全部照片") { Task { await model.refreshAll() } }
+                    }
+                }
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         } else {
             GeometryReader { viewport in
                 ScrollView {
@@ -142,25 +200,19 @@ struct PhotoLibraryView: View {
 
                     if model.browseMode == .timeline {
                         LazyVStack(alignment: .leading, spacing: 18) {
-                            ForEach(timelineSections) { section in
+                            ForEach(model.timelineSections) { section in
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text(section.title)
                                         .font(.headline)
                                         .accessibilityAddTraits(.isHeader)
-                                    photoGrid(
-                                        section.items,
-                                        viewportSize: viewport.size
-                                    )
+                                    photoGrid(section.items)
                                 }
                             }
                         }
                         .padding(16)
                     } else {
-                        photoGrid(
-                            model.displayedItems,
-                            viewportSize: viewport.size
-                        )
-                        .padding(16)
+                        photoGrid(model.displayedItems)
+                            .padding(16)
                     }
 
                     if model.isLoadingMore {
@@ -169,14 +221,13 @@ struct PhotoLibraryView: View {
                             .padding(.bottom, 20)
                     }
                 }
-                .coordinateSpace(name: PhotoViewportCoordinateSpace.name)
             }
         }
     }
 
     private var shouldShowTimelineScanStatus: Bool {
         model.browseMode == .timeline
-            && model.isLoadingTimeline
+            && (model.isLoadingTimeline || model.isSyncingTimeline)
             && !model.timelineItems.isEmpty
     }
 
@@ -185,14 +236,14 @@ struct PhotoLibraryView: View {
             ProgressView()
                 .controlSize(.small)
                 .accessibilityLabel(
-                    "正在扫描照片，已发现 \(model.timelineItems.count) 项，已扫描 \(model.timelineScannedFolderCount) 个文件夹"
+                    "正在检查照片变更，已载入 \(model.timelineItems.count) 项，已检查 \(model.timelineScannedFolderCount) 个文件夹"
                 )
 
-            Text("正在扫描照片")
+            Text("正在检查照片变更")
                 .font(.callout.weight(.medium))
                 .accessibilityHidden(true)
 
-            Text("已发现 \(model.timelineItems.count) 项 · 已扫描 \(model.timelineScannedFolderCount) 个文件夹")
+            Text("已载入 \(model.timelineItems.count) 项 · 已检查 \(model.timelineScannedFolderCount) 个文件夹")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
@@ -229,16 +280,12 @@ struct PhotoLibraryView: View {
         }
     }
 
-    private func photoGrid(
-        _ items: [PhotoLibraryItem],
-        viewportSize: CGSize
-    ) -> some View {
+    private func photoGrid(_ items: [PhotoLibraryItem]) -> some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
             ForEach(items) { item in
                 PhotoLibraryCell(
                     model: model,
                     item: item,
-                    viewportSize: viewportSize,
                     isSelected: model.selection.contains(item.id),
                     onPreview: onPreview,
                     onDownload: onDownload,
@@ -393,7 +440,6 @@ private struct PhotoTimelineSection: Identifiable {
 private struct PhotoLibraryCell: View {
     @Bindable var model: PhotoLibraryModel
     let item: PhotoLibraryItem
-    let viewportSize: CGSize
     let isSelected: Bool
     let onPreview: (PhotoLibraryItem) -> Void
     let onDownload: ([PhotoLibraryItem]) -> Void
@@ -444,45 +490,69 @@ private struct PhotoLibraryCell: View {
 
     private var cellContents: some View {
         VStack(alignment: .leading, spacing: 7) {
-            GeometryReader { proxy in
-                ZStack(alignment: .topTrailing) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(item.isFolder ? Color.accentColor.opacity(0.09) : Color.secondary.opacity(0.08))
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    ZStack(alignment: .topTrailing) {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(item.isFolder ? Color.accentColor.opacity(0.09) : Color.secondary.opacity(0.08))
 
-                    if item.isFolder {
-                        Image(systemName: "folder.fill")
-                            .font(.system(size: 44))
-                            .foregroundStyle(.blue)
-                            .frame(width: proxy.size.width, height: proxy.size.height)
-                    } else {
-                        PhotoGridThumbnail(
-                            model: model,
-                            item: item,
-                            viewportSize: viewportSize
-                        )
-                            .frame(width: proxy.size.width, height: proxy.size.height)
+                        if item.isFolder {
+                            Image(systemName: "folder.fill")
+                                .font(.system(size: 44))
+                                .foregroundStyle(.blue)
+                        } else {
+                            PhotoGridThumbnail(
+                                model: model,
+                                item: item
+                            )
+                        }
+
+                        if item.isLivePhoto {
+                            VStack {
+                                Spacer()
+                                HStack {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "livephoto")
+                                            .font(.caption2.weight(.bold))
+                                        Text("LIVE")
+                                            .font(.system(size: 9, weight: .bold))
+                                    }
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 3)
+                                    .background(.ultraThinMaterial, in: Capsule())
+                                    .foregroundStyle(.white)
+                                    .shadow(color: .black.opacity(0.3), radius: 2)
+                                    .padding(6)
+                                    Spacer()
+                                }
+                            }
+                        }
+
+                        let isMultiSelecting = model.selection.count > 1
+                        if isSelected && isMultiSelecting {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.title3)
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, Color.accentColor)
+                                .padding(7)
+                                .accessibilityHidden(true)
+                        }
                     }
-
-                    if isSelected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.title3)
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, Color.accentColor)
-                            .padding(7)
-                            .accessibilityHidden(true)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                            .padding(-6)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(
+                                isSelected ? (model.selection.count > 1 ? Color.accentColor : Color.accentColor.opacity(0.6)) : Color(nsColor: .separatorColor).opacity(0.55),
+                                lineWidth: isSelected ? (model.selection.count > 1 ? 3 : 1.5) : 0.5
+                            )
                     }
                 }
-                .frame(width: proxy.size.width, height: proxy.size.height)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            .aspectRatio(1, contentMode: .fit)
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(
-                        isSelected ? Color.accentColor : Color(nsColor: .separatorColor).opacity(0.55),
-                        lineWidth: isSelected ? 3 : 0.5
-                    )
-            }
 
             Text(item.name)
                 .font(.caption)
@@ -511,29 +581,22 @@ private struct PhotoLibraryCell: View {
 private struct PhotoGridThumbnail: View {
     @Bindable var model: PhotoLibraryModel
     let item: PhotoLibraryItem
-    let viewportSize: CGSize
     @State private var data: Data?
-    @State private var isVisible = false
 
     var body: some View {
-        GeometryReader { proxy in
-            let cellFrame = proxy.frame(in: .named(PhotoViewportCoordinateSpace.name))
-            let visibleRect = CGRect(origin: .zero, size: viewportSize)
-            let cellIsVisible = cellFrame.width > 0
-                && cellFrame.height > 0
-                && cellFrame.intersects(visibleRect)
-
+        GeometryReader { geo in
             ZStack {
                 if let data, let image = NSImage(data: data) {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
                 } else {
                     Image(systemName: item.kind == .video ? "video.fill" : "photo.fill")
                         .font(.system(size: 32))
                         .foregroundStyle(.secondary)
+                        .frame(width: geo.size.width, height: geo.size.height)
                 }
 
                 if item.kind == .video {
@@ -544,23 +607,8 @@ private struct PhotoGridThumbnail: View {
                         .shadow(radius: 2)
                 }
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .clipped()
-            .task(id: cellIsVisible, priority: .userInitiated) {
-                await updateVisibility(cellIsVisible)
-            }
         }
-        .onDisappear {
-            isVisible = false
-            model.thumbnailBecameHidden(item)
-        }
-    }
-
-    private func updateVisibility(_ visible: Bool) async {
-        guard visible != isVisible || (visible && data == nil) else { return }
-        isVisible = visible
-
-        if visible {
+        .task(priority: .userInitiated) {
             model.thumbnailBecameVisible(item)
             if let cached = model.cachedThumbnailData(for: item) {
                 data = cached
@@ -569,11 +617,13 @@ private struct PhotoGridThumbnail: View {
             }
             let loadedData = await model.thumbnailData(for: item)
             model.thumbnailRequestDidFinish(for: item)
-            guard !Task.isCancelled, isVisible else { return }
+            guard !Task.isCancelled else { return }
             data = loadedData
-        } else {
-            // 离开视窗立即取消正在执行或排队的请求，把连接让给当前可见项目。
+        }
+        .onDisappear {
+            // 离屏时取消可见标记，并立即清空 data，释放像素位图内存
             model.thumbnailBecameHidden(item)
+            data = nil
         }
     }
 }

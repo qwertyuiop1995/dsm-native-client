@@ -54,7 +54,7 @@ public struct FileStationPhotoRepository: PhotoLibraryRepository, Sendable {
         )
         return PhotoLibraryPage(
             folderPath: page.folderPath,
-            items: page.items.compactMap(PhotoLibraryItem.init),
+            items: page.items.compactMap { PhotoLibraryItem($0) },
             offset: page.offset,
             nextOffset: page.offset + page.items.count,
             sourceTotal: page.total,
@@ -76,6 +76,7 @@ public struct FileStationPhotoRepository: PhotoLibraryRepository, Sendable {
     public func scanTimeline(
         in space: PhotoSpace,
         startingAt folderPaths: [String],
+        existingFolderItemPaths: [String: [String]] = [:],
         onUpdate: @escaping @Sendable (PhotoTimelineScanUpdate) async -> Void
     ) async throws {
         guard !folderPaths.isEmpty,
@@ -125,9 +126,15 @@ public struct FileStationPhotoRepository: PhotoLibraryRepository, Sendable {
                 skippedFolderPaths.insert(folderPath)
             }
 
+            // 计算在此文件夹中，历史上存在但最新扫描已不存在的文件路径（即删除项目）
+            let currentPaths = Set(discoveredInFolder.map(\.path))
+            let previousPaths = Set(existingFolderItemPaths[folderPath] ?? [])
+            let removedInFolder = Array(previousPaths.subtracting(currentPaths))
+
             await onUpdate(
                 PhotoTimelineScanUpdate(
                     items: discoveredInFolder,
+                    removedPaths: removedInFolder,
                     scannedFolderCount: visitedFolders.count,
                     skippedFolderPaths: skippedFolderPaths.sorted()
                 )

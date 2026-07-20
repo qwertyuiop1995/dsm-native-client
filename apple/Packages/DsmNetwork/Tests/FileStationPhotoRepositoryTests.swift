@@ -172,6 +172,32 @@ final class FileStationPhotoRepositoryTests: XCTestCase {
         XCTAssertEqual(skippedFolders, 1)
     }
 
+    func test时间线增量对比识别已在NAS中删除的照片() async throws {
+        let profileID = UUID()
+        let rootItems = [
+            FileItem(profileID: profileID, name: "新图.jpg", path: "/photo/新图.jpg", kind: .file)
+        ]
+        let files = PhotoFileServerStub(
+            shares: Self.page(path: "/", items: []),
+            folders: ["/photo": Self.page(path: "/photo", items: rootItems)]
+        )
+
+        let existingPaths: [String: [String]] = [
+            "/photo": ["/photo/旧图.jpg", "/photo/新图.jpg"]
+        ]
+        let collector = PhotoTimelineCollector()
+
+        try await FileStationPhotoRepository(files: files).scanTimeline(
+            in: .shared,
+            existingFolderItemPaths: existingPaths
+        ) { update in
+            await collector.append(update)
+        }
+
+        let removed = await collector.removedPaths()
+        XCTAssertEqual(removed, ["/photo/旧图.jpg"])
+    }
+
     private static func page(path: String, items: [FileItem]) -> FilePage {
         FilePage(
             folderPath: path,
@@ -185,10 +211,12 @@ final class FileStationPhotoRepositoryTests: XCTestCase {
 
 private actor PhotoTimelineCollector {
     private var collected: [PhotoLibraryItem] = []
+    private var removed: [String] = []
     private var skipped = 0
 
     func append(_ update: PhotoTimelineScanUpdate) {
         collected.append(contentsOf: update.items)
+        removed.append(contentsOf: update.removedPaths)
         skipped = update.skippedFolderCount
     }
 
@@ -199,6 +227,8 @@ private actor PhotoTimelineCollector {
             return left > right
         }
     }
+
+    func removedPaths() -> [String] { removed }
 
     func skippedFolders() -> Int { skipped }
 }

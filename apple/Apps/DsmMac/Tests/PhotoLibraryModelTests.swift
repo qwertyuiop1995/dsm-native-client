@@ -273,6 +273,44 @@ final class PhotoLibraryModelTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(cancelledCount, 1)
     }
 
+    @MainActor
+    func testLoadTimelineLoadsFromCacheInstantly() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PhotoCacheTest-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let cacheStore = PhotoLibraryCacheStore(baseURL: tempDir)
+        let profileID = UUID()
+        let cachedItem = try XCTUnwrap(
+            PhotoLibraryItem(
+                FileItem(
+                    profileID: profileID,
+                    name: "cached.jpg",
+                    path: "/home/Photos/cached.jpg",
+                    kind: .file
+                )
+            )
+        )
+        let spaceCache = PhotoSpaceCache(
+            items: [cachedItem],
+            folderItemPaths: ["/home/Photos": ["/home/Photos/cached.jpg"]],
+            lastScannedAt: Date()
+        )
+        cacheStore.save(spaceCache, profileID: profileID, spaceKind: .personal)
+
+        let repository = PhotoLibraryRepositoryStub(
+            spaces: [.personal],
+            pages: [0: PhotoLibraryPage(folderPath: "/home/Photos", items: [cachedItem], offset: 0, nextOffset: 0, sourceTotal: 1, hasMore: false)]
+        )
+
+        let model = PhotoLibraryModel(repository: repository, profileID: profileID, cacheStore: cacheStore)
+        await model.reloadSpaces()
+
+        XCTAssertFalse(model.timelineItems.isEmpty)
+        XCTAssertEqual(model.timelineItems.first?.name, "cached.jpg")
+    }
+
     private func photoItem(name: String, path: String) -> PhotoLibraryItem? {
         PhotoLibraryItem(
             FileItem(
@@ -366,6 +404,7 @@ private actor PhotoLibraryRepositoryStub: PhotoLibraryRepository {
     func scanTimeline(
         in space: PhotoSpace,
         startingAt folderPaths: [String],
+        existingFolderItemPaths: [String: [String]] = [:],
         onUpdate: @escaping @Sendable (PhotoTimelineScanUpdate) async -> Void
     ) async throws {
         timelineRoots.append(folderPaths)

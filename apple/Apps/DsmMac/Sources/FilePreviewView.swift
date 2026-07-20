@@ -506,15 +506,45 @@ struct FileDetailView: View {
         }
     }
 
+    private func livePhotoVideoPath(for item: FileItem) -> String? {
+        if model.section == .photos {
+            if let photoItem = model.photoLibrary.displayedItems.first(where: { $0.id == item.id }),
+               let videoPath = photoItem.livePhotoVideoPath {
+                return videoPath
+            }
+        }
+        let directory = (item.path as NSString).deletingLastPathComponent
+        let stem = ((item.name as NSString).deletingPathExtension).lowercased()
+        for candidate in model.filteredItems {
+            guard candidate.id != item.id else { continue }
+            let candidateDir = (candidate.path as NSString).deletingLastPathComponent
+            let candidateStem = ((candidate.name as NSString).deletingPathExtension).lowercased()
+            let candidateExt = candidate.fileExtension?.lowercased() ?? ""
+            if candidateDir == directory && candidateStem == stem && ["mov", "mp4"].contains(candidateExt) {
+                return candidate.path
+            }
+        }
+        return nil
+    }
+
     private func detail(for item: FileItem) -> some View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 FileIcon(item: item)
                     .font(.system(size: 30))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(item.name)
-                        .font(.title3.weight(.semibold))
-                        .lineLimit(2)
+                    HStack(spacing: 8) {
+                        Text(item.name)
+                            .font(.title3.weight(.semibold))
+                            .lineLimit(2)
+                        if let videoPath = livePhotoVideoPath(for: item) {
+                            LivePhotoPreviewBadgeButton(
+                                model: model,
+                                item: item,
+                                videoPath: videoPath
+                            )
+                        }
+                    }
                     Text(item.path)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1442,4 +1472,70 @@ private func networkSpeedText(_ bytesPerSecond: Double) -> String {
         countStyle: .file
     )
     return "\(formatted)/秒"
+}
+
+private struct LivePhotoPreviewBadgeButton: View {
+    let model: WorkspaceModel
+    let item: FileItem
+    let videoPath: String
+    @State private var isPlaying = false
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        Button {
+            triggerLivePhoto()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isPlaying ? "livephoto.play" : "livephoto")
+                    .font(.caption.weight(.bold))
+                Text("LIVE")
+                    .font(.caption2.weight(.bold))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(isPlaying ? Color.accentColor : Color.secondary.opacity(0.18), in: Capsule())
+            .foregroundStyle(isPlaying ? .white : .primary)
+        }
+        .buttonStyle(.plain)
+        .help("播放动态照片动画")
+    }
+
+    private func triggerLivePhoto() {
+        guard !isPlaying else { return }
+        isPlaying = true
+        Task {
+            do {
+                let source = try await model.mediaStreamSource(
+                    path: videoPath,
+                    fileExtension: "mov"
+                )
+                guard let assetURL = URL(string: "lanstash-media://stream/\(UUID().uuidString).mov") else { return }
+                let asset = AVURLAsset(url: assetURL)
+                let delegate = DsmAVAssetResourceLoaderDelegate(
+                    source: source,
+                    onFailure: { _ in },
+                    onLoadingMetrics: { _, _ in }
+                )
+                asset.resourceLoader.setDelegate(
+                    delegate,
+                    queue: DispatchQueue(label: "io.github.qwertyuiop1995.lanstash.livephoto-loader")
+                )
+                let playerItem = AVPlayerItem(asset: asset)
+                let avPlayer = AVPlayer(playerItem: playerItem)
+                self.player = avPlayer
+                avPlayer.play()
+
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                await MainActor.run {
+                    isPlaying = false
+                    self.player = nil
+                }
+            } catch {
+                await MainActor.run {
+                    isPlaying = false
+                    self.player = nil
+                }
+            }
+        }
+    }
 }

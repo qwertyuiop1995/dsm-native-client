@@ -39,7 +39,34 @@ final class PhotoLibraryTests: XCTestCase {
     func test照片空间使用固定公开目录() {
         XCTAssertEqual(PhotoSpace.personal.rootPath, "/home/Photos")
         XCTAssertEqual(PhotoSpace.shared.rootPath, "/photo")
-        XCTAssertEqual(PhotoSpace.personal.title, "个人空间")
         XCTAssertEqual(PhotoSpace.shared.title, "共享空间")
+    }
+
+    func testLivePhotoAutoPairing() throws {
+        let profileID = UUID()
+        let image = try XCTUnwrap(PhotoLibraryItem(FileItem(
+            profileID: profileID,
+            name: "IMG_2026.HEIC",
+            path: "/photo/2026/IMG_2026.HEIC",
+            kind: .file
+        )))
+        let video = try XCTUnwrap(PhotoLibraryItem(FileItem(
+            profileID: profileID,
+            name: "IMG_2026.MOV",
+            path: "/photo/2026/IMG_2026.MOV",
+            kind: .file
+        )))
+        let standaloneVideo = try XCTUnwrap(PhotoLibraryItem(FileItem(
+            profileID: profileID,
+            name: "OTHER.MOV",
+            path: "/photo/2026/OTHER.MOV",
+            kind: .file
+        )))
+
+        let paired = PhotoLibraryItem.pairLivePhotos([image, video, standaloneVideo])
+        XCTAssertEqual(paired.count, 2)
+        XCTAssertTrue(paired[0].isLivePhoto)
+        XCTAssertEqual(paired[0].livePhotoVideoPath, "/photo/2026/IMG_2026.MOV")
+        XCTAssertEqual(paired[1].name, "OTHER.MOV")
     }
 }

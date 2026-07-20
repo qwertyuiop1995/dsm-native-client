@@ -58,8 +58,9 @@ public struct PhotoLibraryItem: Identifiable, Codable, Hashable, Sendable {
     public let modifiedAt: Date?
     public let fileExtension: String?
     public let thumbnailAvailable: Bool?
+    public var livePhotoVideoPath: String?
 
-    public init?(_ file: FileItem) {
+    public init?(_ file: FileItem, livePhotoVideoPath: String? = nil) {
         let itemKind: PhotoLibraryItemKind
         if file.isDirectory {
             itemKind = .folder
@@ -84,10 +85,41 @@ public struct PhotoLibraryItem: Identifiable, Codable, Hashable, Sendable {
         modifiedAt = file.times?.modifiedAt
         fileExtension = file.fileExtension
         thumbnailAvailable = file.thumbnailAvailable
+        self.livePhotoVideoPath = livePhotoVideoPath
+    }
+
+    public init(
+        id: String,
+        profileID: UUID,
+        name: String,
+        path: String,
+        kind: PhotoLibraryItemKind,
+        sizeBytes: Int64?,
+        createdAt: Date?,
+        modifiedAt: Date?,
+        fileExtension: String?,
+        thumbnailAvailable: Bool?,
+        livePhotoVideoPath: String? = nil
+    ) {
+        self.id = id
+        self.profileID = profileID
+        self.name = name
+        self.path = path
+        self.kind = kind
+        self.sizeBytes = sizeBytes
+        self.createdAt = createdAt
+        self.modifiedAt = modifiedAt
+        self.fileExtension = fileExtension
+        self.thumbnailAvailable = thumbnailAvailable
+        self.livePhotoVideoPath = livePhotoVideoPath
     }
 
     public var isFolder: Bool {
         kind == .folder
+    }
+
+    public var isLivePhoto: Bool {
+        livePhotoVideoPath != nil
     }
 
     public var fileItem: FileItem {
@@ -101,6 +133,49 @@ public struct PhotoLibraryItem: Identifiable, Codable, Hashable, Sendable {
             times: FileTimes(modifiedAt: modifiedAt, createdAt: createdAt, accessedAt: nil),
             thumbnailAvailable: thumbnailAvailable
         )
+    }
+
+    /// 自动匹配同一目录下同名的图片 (.heic/.jpg) 与短视频 (.mov/.mp4) 为动态照片 Live Photo
+    public static func pairLivePhotos(_ items: [PhotoLibraryItem]) -> [PhotoLibraryItem] {
+        var videosByStem: [String: PhotoLibraryItem] = [:]
+        for item in items where item.kind == .video {
+            let directory = (item.path as NSString).deletingLastPathComponent
+            let stem = ((item.name as NSString).deletingPathExtension).lowercased()
+            let key = "\(directory)/\(stem)"
+            videosByStem[key] = item
+        }
+
+        var pairedVideoPaths: Set<String> = []
+        var result: [PhotoLibraryItem] = []
+
+        for item in items {
+            if item.kind == .image {
+                let directory = (item.path as NSString).deletingLastPathComponent
+                let stem = ((item.name as NSString).deletingPathExtension).lowercased()
+                let key = "\(directory)/\(stem)"
+                if let videoItem = videosByStem[key] {
+                    pairedVideoPaths.insert(videoItem.path)
+                    var pairedItem = item
+                    pairedItem.livePhotoVideoPath = videoItem.path
+                    result.append(pairedItem)
+                } else {
+                    result.append(item)
+                }
+            } else if item.kind == .video {
+                if !pairedVideoPaths.contains(item.path) {
+                    result.append(item)
+                }
+            } else {
+                result.append(item)
+            }
+        }
+
+        return result.filter { item in
+            if item.kind == .video && pairedVideoPaths.contains(item.path) {
+                return false
+            }
+            return true
+        }
     }
 }
 
@@ -131,11 +206,18 @@ public struct PhotoLibraryPage: Codable, Equatable, Sendable {
 
 public struct PhotoTimelineScanUpdate: Sendable {
     public let items: [PhotoLibraryItem]
+    public let removedPaths: [String]
     public let scannedFolderCount: Int
     public let skippedFolderPaths: [String]
 
-    public init(items: [PhotoLibraryItem], scannedFolderCount: Int, skippedFolderPaths: [String] = []) {
+    public init(
+        items: [PhotoLibraryItem],
+        removedPaths: [String] = [],
+        scannedFolderCount: Int,
+        skippedFolderPaths: [String] = []
+    ) {
         self.items = items
+        self.removedPaths = removedPaths
         self.scannedFolderCount = scannedFolderCount
         self.skippedFolderPaths = skippedFolderPaths
     }
@@ -165,6 +247,7 @@ public protocol PhotoLibraryRepository: Sendable {
     func scanTimeline(
         in space: PhotoSpace,
         startingAt folderPaths: [String],
+        existingFolderItemPaths: [String: [String]],
         onUpdate: @escaping @Sendable (PhotoTimelineScanUpdate) async -> Void
     ) async throws
 }
@@ -172,8 +255,52 @@ public protocol PhotoLibraryRepository: Sendable {
 public extension PhotoLibraryRepository {
     func scanTimeline(
         in space: PhotoSpace,
+        startingAt folderPaths: [String],
         onUpdate: @escaping @Sendable (PhotoTimelineScanUpdate) async -> Void
     ) async throws {
-        try await scanTimeline(in: space, startingAt: [space.rootPath], onUpdate: onUpdate)
+        try await scanTimeline(
+            in: space,
+            startingAt: folderPaths,
+            existingFolderItemPaths: [:],
+            onUpdate: onUpdate
+        )
+    }
+
+    func scanTimeline(
+        in space: PhotoSpace,
+        onUpdate: @escaping @Sendable (PhotoTimelineScanUpdate) async -> Void
+    ) async throws {
+        try await scanTimeline(
+            in: space,
+            startingAt: [space.rootPath],
+            existingFolderItemPaths: [:],
+            onUpdate: onUpdate
+        )
+    }
+
+    func scanTimeline(
+        in space: PhotoSpace,
+        existingFolderItemPaths: [String: [String]],
+        onUpdate: @escaping @Sendable (PhotoTimelineScanUpdate) async -> Void
+    ) async throws {
+        try await scanTimeline(
+            in: space,
+            startingAt: [space.rootPath],
+            existingFolderItemPaths: existingFolderItemPaths,
+            onUpdate: onUpdate
+        )
+    }
+}
+
+public struct PhotoTimelineSection: Identifiable, Sendable {
+    public let date: Date
+    public let title: String
+    public let items: [PhotoLibraryItem]
+    public var id: Date { date }
+
+    public init(date: Date, title: String, items: [PhotoLibraryItem]) {
+        self.date = date
+        self.title = title
+        self.items = items
     }
 }

@@ -175,6 +175,10 @@ final class PhotoLibraryModel {
     private(set) var activeProfileID: UUID?
 
     @ObservationIgnored private let repository: any PhotoLibraryRepository
+
+    /// 供移动目标选择器等需要独立浏览照片空间的场景复用同一 Repository。
+    var photoRepository: any PhotoLibraryRepository { repository }
+
     @ObservationIgnored private var history: [String] = []
     @ObservationIgnored private var nextOffset = 0
     @ObservationIgnored private var navigationGeneration = 0

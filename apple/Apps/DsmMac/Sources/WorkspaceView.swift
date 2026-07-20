@@ -80,15 +80,7 @@ struct WorkspaceView: View {
                 isRestoringSectionAfterUnsavedEdit = false
                 return
             }
-            if model.hasUnsavedTextEdits, section != previousSection {
-                let alert = NSAlert()
-                alert.messageText = "请先处理未保存的修改"
-                alert.informativeText = "保存或取消当前文件的修改后，才能离开文件管理。"
-                alert.alertStyle = .warning
-                alert.addButton(withTitle: "继续编辑")
-                alert.runModal()
-                isRestoringSectionAfterUnsavedEdit = true
-                model.section = previousSection
+            if blockSectionChangeDueToUnsavedEdits(previousSection: previousSection, newSection: section) {
                 return
             }
             switch section {
@@ -222,16 +214,7 @@ struct WorkspaceView: View {
                     .disabled(!isFileSection)
 
                     if viewMode == .grid {
-                        Menu {
-                            Picker("分组方式", selection: $fileGrouping) {
-                                ForEach(FileGrouping.allCases) { grouping in
-                                    Text(grouping.title).tag(grouping)
-                                }
-                            }
-                        } label: {
-                            Label(fileGrouping.title, systemImage: "rectangle.3.group")
-                        }
-                        .help("选择图标视图中的文件分组方式")
+                        groupingMenu
                     }
 
                 } else if model.section == .photos {
@@ -363,11 +346,45 @@ struct WorkspaceView: View {
                 Task { await onSessionExpired(message) }
             }
         } message: {
-            Text(
-                "\(model.statusMessage ?? "NAS 没有接受当前登录状态。")你可以先重试；如果仍然失败，请重新登录。"
-            )
+            Text(reauthenticationMessage)
         }
         .navigationTitle(navigationTitle)
+    }
+
+    private var reauthenticationMessage: String {
+        "\(model.statusMessage ?? "NAS 没有接受当前登录状态。")你可以先重试；如果仍然失败，请重新登录。"
+    }
+
+    /// 如果当前有未保存的文本编辑，弹出警告并阻止切换侧边栏栏目。
+    /// 返回 `true` 表示已阻止切换，调用方应直接 `return`。
+    private func blockSectionChangeDueToUnsavedEdits(
+        previousSection: WorkspaceSection?,
+        newSection: WorkspaceSection?
+    ) -> Bool {
+        guard model.hasUnsavedTextEdits, newSection != previousSection else { return false }
+        let alert = NSAlert()
+        alert.messageText = "请先处理未保存的修改"
+        alert.informativeText = "保存或取消当前文件的修改后，才能离开文件管理。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "继续编辑")
+        alert.runModal()
+        isRestoringSectionAfterUnsavedEdit = true
+        model.section = previousSection
+        return true
+    }
+
+    @ViewBuilder
+    private var groupingMenu: some View {
+        Menu {
+            Picker("分组方式", selection: $fileGrouping) {
+                ForEach(FileGrouping.allCases) { grouping in
+                    Text(grouping.title).tag(grouping)
+                }
+            }
+        } label: {
+            Label(fileGrouping.title, systemImage: "rectangle.3.group")
+        }
+        .help("选择图标视图中的文件分组方式")
     }
 
     private var navigationTitle: String {
@@ -437,7 +454,16 @@ struct WorkspaceView: View {
                 },
                 onDownload: presentPhotoDownload,
                 onDelete: { deleteTargets = $0.map(\.fileItem) },
-                onRestore: { restoreTarget = $0.fileItem }
+                onRestore: { restoreTarget = $0.fileItem },
+                onMove: { item, destinationPath in
+                    let destination = FileItem(
+                        profileID: model.profile.id,
+                        name: (destinationPath as NSString).lastPathComponent,
+                        path: destinationPath,
+                        kind: .directory
+                    )
+                    model.moveByDragging([item.fileItem], to: destination)
+                }
             )
         case .transfers:
             TransferCenterView(model: model, connectedWorkspaces: connectedWorkspaces)

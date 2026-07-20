@@ -488,6 +488,11 @@ struct FileDetailView: View {
         return kind == .image || kind == .video
     }
 
+    private var isFavorite: Bool {
+        guard let item = model.selectedItem else { return false }
+        return model.favorites.contains { $0.path == item.path }
+    }
+
     private func fullScreenPreview(_ item: FileItem) -> some View {
         ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
@@ -567,6 +572,16 @@ struct FileDetailView: View {
                         Label("恢复", systemImage: "arrow.uturn.backward.circle")
                     }
                     .help("将这个项目恢复到原来的位置")
+                } else if !item.isDirectory {
+                    Button {
+                        model.toggleFavorite(item)
+                    } label: {
+                        Label(
+                            isFavorite ? "取消收藏" : "收藏",
+                            systemImage: isFavorite ? "star.fill" : "star"
+                        )
+                    }
+                    .help(isFavorite ? "从收藏中移除" : "添加到收藏")
                 }
             }
             .padding(16)

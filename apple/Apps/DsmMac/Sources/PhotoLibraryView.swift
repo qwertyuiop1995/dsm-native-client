@@ -8,8 +8,10 @@ struct PhotoLibraryView: View {
     let onDownload: ([PhotoLibraryItem]) -> Void
     let onDelete: ([PhotoLibraryItem]) -> Void
     let onRestore: (PhotoLibraryItem) -> Void
+    let onMove: (PhotoLibraryItem, String) -> Void
 
     @State private var timelineScrollTarget: Date?
+    @State private var moveTarget: PhotoLibraryItem?
 
     private let columns = [
         GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 12, alignment: .top)
@@ -52,6 +54,20 @@ struct PhotoLibraryView: View {
             content
         }
         .task { await model.loadIfNeeded() }
+        .sheet(item: $moveTarget) { item in
+            PhotoFolderDestinationPicker(
+                repository: model.photoRepository,
+                profileID: model.activeProfileID,
+                sourcePath: item.path,
+                onSelect: { destinationPath in
+                    moveTarget = nil
+                    onMove(item, destinationPath)
+                },
+                onCancel: {
+                    moveTarget = nil
+                }
+            )
+        }
     }
 
     private var header: some View {
@@ -339,7 +355,8 @@ struct PhotoLibraryView: View {
                     onPreview: onPreview,
                     onDownload: onDownload,
                     onDelete: onDelete,
-                    onRestore: onRestore
+                    onRestore: onRestore,
+                    onMove: { moveTarget = $0 }
                 )
                 .task {
                     if model.browseMode == .folders, item.id == model.displayedItems.last?.id {
@@ -481,6 +498,7 @@ private struct PhotoLibraryCell: View {
     let onDownload: ([PhotoLibraryItem]) -> Void
     let onDelete: ([PhotoLibraryItem]) -> Void
     let onRestore: (PhotoLibraryItem) -> Void
+    let onMove: (PhotoLibraryItem) -> Void
 
     private var isRecyclePath: Bool {
         RecycleLocation(recyclePath: item.path) != nil
@@ -525,6 +543,12 @@ private struct PhotoLibraryCell: View {
                     Label("恢复到原位置", systemImage: "arrow.uturn.backward.circle")
                 }
             } else {
+                Button {
+                    onMove(item)
+                } label: {
+                    Label("移动到…", systemImage: "folder.badge.arrow.right")
+                }
+
                 Button(role: .destructive) {
                     onDelete(contextTargets)
                 } label: {

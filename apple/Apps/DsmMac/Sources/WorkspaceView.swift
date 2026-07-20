@@ -3073,19 +3073,25 @@ private struct TransferCenterView: View {
                             description: Text("当前过滤条件下没有任务显示，可尝试切换标签。")
                         )
                     } else {
-                        List(filteredTasks) { task in
-                            let taskWorkspace = connectedWorkspaces.first(where: { ws in
-                                ws.transfers.contains(where: { $0.id == task.id })
-                            }) ?? model
+                        ScrollView {
+                            LazyVStack(spacing: 12) {
+                                ForEach(filteredTasks) { task in
+                                    let taskWorkspace = connectedWorkspaces.first(where: { ws in
+                                        ws.transfers.contains(where: { $0.id == task.id })
+                                    }) ?? model
 
-                            TransferRow(
-                                task: task,
-                                onPause: { taskWorkspace.pauseTransfer(task.id) },
-                                onResume: { taskWorkspace.resumeTransfer(task.id) },
-                                onRetry: { taskWorkspace.retryTransfer(task.id) },
-                                onCancel: { taskWorkspace.cancelTransfer(task.id) },
-                                onDelete: { taskWorkspace.deleteTransfer(task.id) }
-                            )
+                                    TransferRow(
+                                        task: task,
+                                        onPause: { taskWorkspace.pauseTransfer(task.id) },
+                                        onResume: { taskWorkspace.resumeTransfer(task.id) },
+                                        onRetry: { taskWorkspace.retryTransfer(task.id) },
+                                        onCancel: { taskWorkspace.cancelTransfer(task.id) },
+                                        onDelete: { taskWorkspace.deleteTransfer(task.id) }
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
                         }
                     }
                 }
@@ -3106,81 +3112,136 @@ private struct TransferRow: View {
     let onRetry: () -> Void
     let onCancel: () -> Void
     let onDelete: () -> Void
+    
     @State private var isConfirmingDeletion = false
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(iconColor)
-                .frame(width: 28)
+        VStack(alignment: .leading, spacing: 10) {
+            // 头部：图标 + 文件名/路径 + 状态 Badge
+            HStack(alignment: .center, spacing: 12) {
+                // 圆形高亮类型图标
+                ZStack {
+                    Circle()
+                        .fill(iconThemeColor.opacity(0.12))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: icon)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(iconThemeColor)
+                }
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(task.displayName)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    Spacer()
-                    Text(stateLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let total = task.totalUnits, total > 0 {
-                    ProgressView(
-                        value: Double(min(max(task.completedUnits, 0), total)),
-                        total: Double(total)
-                    )
-                    .accessibilityLabel("\(task.displayName)传输进度")
-                    .accessibilityValue(progressAccessibilityValue(total: total))
-                } else if task.state == .running || task.state == .cancelling {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let transferDetails {
-                            Text(transferDetails)
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                        if let failure = task.failureMessage {
-                            Text(failure)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        } else {
-                            Text(task.remotePath)
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                    }
-                    Spacer()
+                
+                // 任务名称与详情路径
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        if task.state == .running, task.kind == .download || task.kind == .upload {
-                            TransferActionButton(icon: "pause.fill", label: "暂停", color: .blue, action: onPause)
-                        } else if task.state == .paused {
-                            TransferActionButton(icon: "play.fill", label: task.kind == .upload ? "重传" : "继续", color: .green, action: onResume)
-                        } else if task.state == .failed || task.state == .cancelled {
-                            TransferActionButton(icon: "arrow.clockwise", label: "重试", color: .blue, action: onRetry)
-                        }
+                        Text(task.displayName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
                         
-                        if task.state == .queued || task.state == .running || task.state == .paused {
-                            TransferActionButton(icon: "xmark", label: "取消", color: .orange, action: onCancel)
-                        }
-                        
-                        TransferActionButton(icon: "trash", label: "删除", color: .red, action: {
-                            if task.state == .running || task.state == .queued || task.state == .paused {
+                        Text(kindBadgeLabel)
+                            .font(.system(size: 10, weight: .medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.primary.opacity(0.06))
+                            .foregroundStyle(.secondary)
+                            .clipShape(Capsule())
+                    }
+                    
+                    if let failure = task.failureMessage {
+                        Text(failure)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .lineLimit(1)
+                    } else {
+                        Text(task.remotePath)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                
+                Spacer(minLength: 8)
+                
+                // 状态彩色胶囊 Tag
+                Text(stateLabel)
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(stateBadgeBackground)
+                    .foregroundStyle(stateBadgeForeground)
+                    .clipShape(Capsule())
+            }
+
+            // 进度条
+            if let total = task.totalUnits, total > 0 {
+                ProgressView(
+                    value: Double(min(max(task.completedUnits, 0), total)),
+                    total: Double(total)
+                )
+                .progressViewStyle(.linear)
+                .tint(progressTint)
+                .accessibilityLabel("\(task.displayName)传输进度")
+                .accessibilityValue(progressAccessibilityValue(total: total))
+            } else if task.state == .running || task.state == .cancelling {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // 底部元信息与突出显眼的操作按钮区
+            HStack(alignment: .center, spacing: 8) {
+                if let transferDetails {
+                    Text(transferDetails)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                
+                Spacer()
+
+                HStack(spacing: 8) {
+                    if task.state == .running, task.kind == .download || task.kind == .upload {
+                        TransferActionButton(icon: "pause.fill", label: "暂停", color: .blue, action: onPause)
+                    } else if task.state == .paused {
+                        TransferActionButton(icon: "play.fill", label: task.kind == .upload ? "重新上传" : "继续", color: .green, action: onResume)
+                    } else if task.state == .failed || task.state == .cancelled {
+                        TransferActionButton(icon: "arrow.clockwise", label: "重试", color: .blue, action: onRetry)
+                    }
+                    
+                    if task.state == .queued || task.state == .running || task.state == .paused {
+                        TransferActionButton(icon: "xmark", label: "取消", color: .orange, action: onCancel)
+                    }
+                    
+                    // 醒目明确的删除任务按钮
+                    TransferDeleteButton(
+                        label: isFinishedState ? "删除记录" : "删除任务",
+                        action: {
+                            if !isFinishedState {
                                 isConfirmingDeletion = true
                             } else {
                                 onDelete()
                             }
-                        })
-                    }
+                        }
+                    )
                 }
             }
         }
-        .padding(.vertical, 6)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(NSColor.controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isHovered ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .onHover { inside in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = inside
+            }
+        }
         .accessibilityElement(children: .combine)
         .contextMenu {
             if task.state == .running, task.kind == .download || task.kind == .upload {
@@ -3197,11 +3258,15 @@ private struct TransferRow: View {
             }
             Divider()
             Button(
-                task.state == .running || task.state == .queued || task.state == .paused
-                    ? "取消并删除任务"
-                    : "删除任务",
+                isFinishedState ? "删除传输记录" : "取消并删除任务",
                 role: .destructive,
-                action: { isConfirmingDeletion = true }
+                action: {
+                    if !isFinishedState {
+                        isConfirmingDeletion = true
+                    } else {
+                        onDelete()
+                    }
+                }
             )
         }
         .confirmationDialog(
@@ -3210,9 +3275,7 @@ private struct TransferRow: View {
             titleVisibility: .visible
         ) {
             Button(
-                task.state == .running || task.state == .queued || task.state == .paused
-                    ? "取消并删除任务"
-                    : "删除任务",
+                "取消并删除任务",
                 role: .destructive,
                 action: onDelete
             )
@@ -3224,25 +3287,72 @@ private struct TransferRow: View {
         }
     }
 
+    private var isFinishedState: Bool {
+        task.state == .succeeded || task.state == .failed || task.state == .cancelled
+    }
+
     private var icon: String {
         switch task.kind {
-        case .upload: "arrow.up.circle.fill"
-        case .download: "arrow.down.circle.fill"
-        case .copy: "doc.on.doc.fill"
-        case .move: "folder.fill.badge.arrow.forward"
-        case .delete: "trash.circle.fill"
-        case .restore: "arrow.uturn.backward.circle.fill"
-        case .compress: "archivebox.circle.fill"
-        case .extract: "archivebox.fill"
+        case .upload: "arrow.up"
+        case .download: "arrow.down"
+        case .copy: "doc.on.doc"
+        case .move: "folder.badge.gearshape"
+        case .delete: "trash"
+        case .restore: "arrow.uturn.backward"
+        case .compress: "archivebox"
+        case .extract: "doc.zipper"
         }
     }
 
-    private var iconColor: Color {
+    private var iconThemeColor: Color {
+        switch task.kind {
+        case .upload: .blue
+        case .download: .green
+        case .copy, .move: .purple
+        case .delete: .red
+        case .restore: .orange
+        case .compress, .extract: .indigo
+        }
+    }
+
+    private var kindBadgeLabel: String {
+        switch task.kind {
+        case .upload: "上传"
+        case .download: "下载"
+        case .copy: "复制"
+        case .move: "移动"
+        case .delete: "删除"
+        case .restore: "恢复"
+        case .compress: "压缩"
+        case .extract: "解压"
+        }
+    }
+
+    private var stateBadgeBackground: Color {
+        switch task.state {
+        case .succeeded: .green.opacity(0.12)
+        case .failed: .red.opacity(0.12)
+        case .paused: .orange.opacity(0.12)
+        case .cancelled: .secondary.opacity(0.12)
+        default: .blue.opacity(0.12)
+        }
+    }
+
+    private var stateBadgeForeground: Color {
         switch task.state {
         case .succeeded: .green
         case .failed: .red
         case .paused: .orange
         case .cancelled: .secondary
+        default: .blue
+        }
+    }
+
+    private var progressTint: Color {
+        switch task.state {
+        case .succeeded: .green
+        case .failed: .red
+        case .paused: .orange
         default: .blue
         }
     }
@@ -3256,7 +3366,7 @@ private struct TransferRow: View {
                 return "\(min(max(percentage, 0), 100))%"
             }
             return "进行中"
-        case .paused: return task.kind == .upload ? "已暂停（继续时重新上传）" : "已暂停"
+        case .paused: return task.kind == .upload ? "已暂停（继续重传）" : "已暂停"
         case .cancelling: return "正在取消"
         case .succeeded: return "已完成"
         case .failed: return "失败"
@@ -3274,28 +3384,28 @@ private struct TransferRow: View {
 
         var parts: [String] = []
         if let fileSize = task.fileSizeBytes {
-            parts.append("文件大小 \(formatBytes(fileSize))")
+            parts.append("大小 \(formatBytes(fileSize))")
         }
         if let total = task.totalUnits, total > 0 {
             let prefix: String
             if (task.kind == .copy || task.kind == .move), task.fileSizeBytes != nil {
-                prefix = "中转进度 "
+                prefix = "中转 "
             } else if task.kind == .copy || task.kind == .move {
-                prefix = "已传输 "
+                prefix = "进度 "
             } else {
                 prefix = ""
             }
             parts.append("\(prefix)\(formatBytes(task.completedUnits)) / \(formatBytes(total))")
         } else if task.completedUnits > 0 {
-            parts.append("已传输 \(formatBytes(task.completedUnits))")
+            parts.append("已完成 \(formatBytes(task.completedUnits))")
         }
         if let speed = task.bytesPerSecond, speed > 0,
            task.state == .running || task.state == .cancelling {
-            parts.append("\(formatBytes(Int64(speed)))/秒")
+            parts.append("\(formatBytes(Int64(speed)))/s")
         }
         if let remaining = task.estimatedSecondsRemaining, remaining.isFinite, remaining > 0,
            task.state == .running {
-            parts.append("剩余约 \(formatDuration(remaining))")
+            parts.append("剩余 \(formatDuration(remaining))")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
@@ -3307,14 +3417,14 @@ private struct TransferRow: View {
     private func formatDuration(_ seconds: TimeInterval) -> String {
         let rounded = max(Int(seconds.rounded(.up)), 1)
         if rounded < 60 {
-            return "\(rounded) 秒"
+            return "\(rounded)秒"
         }
         if rounded < 3_600 {
-            return "\((rounded + 59) / 60) 分钟"
+            return "\((rounded + 59) / 60)分钟"
         }
         let hours = rounded / 3_600
         let minutes = (rounded % 3_600 + 59) / 60
-        return minutes > 0 ? "\(hours) 小时 \(minutes) 分钟" : "\(hours) 小时"
+        return minutes > 0 ? "\(hours)小时\(minutes)分" : "\(hours)小时"
     }
 
     private func progressAccessibilityValue(total: Int64) -> String {
@@ -3328,6 +3438,7 @@ private struct TransferActionButton: View {
     let label: String
     let color: Color
     let action: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
@@ -3337,22 +3448,64 @@ private struct TransferActionButton: View {
                 Text(label)
                     .font(.system(size: 11, weight: .semibold))
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3.5)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(color.opacity(0.08))
+                .fill(isHovered ? color.opacity(0.18) : color.opacity(0.10))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(color.opacity(0.22), lineWidth: 0.8)
+                .stroke(color.opacity(0.25), lineWidth: 1)
         )
         .foregroundStyle(color)
+        .onHover { inside in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                isHovered = inside
+            }
+        }
     }
 }
+
+private struct TransferDeleteButton: View {
+    let label: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "trash.fill")
+                    .font(.system(size: 10, weight: .bold))
+                Text(label)
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundStyle(Color.red)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4.5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isHovered ? Color.red.opacity(0.18) : Color.red.opacity(0.10))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.red.opacity(0.25), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                isHovered = inside
+            }
+        }
+        .help("删除此传输任务记录")
+    }
+}
+
 
 private struct SettingsSectionCard<Content: View>: View {
     let title: String
@@ -3955,12 +4108,43 @@ struct FilePropertiesView: View {
     }
 
     private func formatBytesDetailed(_ bytes: Int64, isComplete: Bool) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        let bytesString = formatter.string(from: NSNumber(value: bytes)) ?? "\(bytes)"
-        let readableString = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
         let prefix = isComplete ? "" : "至少 "
-        return "\(prefix)\(bytesString) 字节 (\(readableString))"
+        if bytes < 0 {
+            return "\(prefix)0 字节"
+        }
+        if bytes < 1024 {
+            return "\(prefix)\(bytes) 字节"
+        }
+
+        let doubleBytes = Double(bytes)
+        let formattedSize: String
+
+        if bytes < 1024 * 1024 {
+            let kb = doubleBytes / 1024.0
+            formattedSize = "\(trimTrailingZeros(kb)) KB"
+        } else if bytes < 1024 * 1024 * 1024 {
+            let mb = doubleBytes / (1024.0 * 1024.0)
+            formattedSize = "\(trimTrailingZeros(mb)) MB"
+        } else if bytes < 1024 * 1024 * 1024 * 1024 {
+            let gb = doubleBytes / (1024.0 * 1024.0 * 1024.0)
+            formattedSize = "\(trimTrailingZeros(gb)) GB"
+        } else {
+            let tb = doubleBytes / (1024.0 * 1024.0 * 1024.0 * 1024.0)
+            formattedSize = "\(trimTrailingZeros(tb)) TB"
+        }
+
+        return "\(prefix)\(formattedSize)"
+    }
+
+    private func trimTrailingZeros(_ value: Double) -> String {
+        var str = String(format: "%.2f", value)
+        while str.hasSuffix("0") {
+            str.removeLast()
+        }
+        if str.hasSuffix(".") {
+            str.removeLast()
+        }
+        return str
     }
 
     private func formatDateString(_ date: Date?) -> String {

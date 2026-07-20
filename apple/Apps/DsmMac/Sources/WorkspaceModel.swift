@@ -1022,17 +1022,16 @@ final class WorkspaceModel {
         }
 
         isPreviewPresented = true
-        // 尝试从内存/缓存中先提取已有缩略图，0.00 秒闪电展现，拒绝空白等待
-        if let photoItem = photoLibrary.displayedItems.first(where: { $0.id == item.id }),
-           let cachedData = photoLibrary.cachedThumbnailData(for: photoItem) {
-            preview = .image(cachedData)
-        } else {
-            preview = .loading
-        }
+        preview = .loading
         previewLoadingSpeedBytesPerSecond = nil
         previewProgressEstimator = TransferProgressEstimator()
         previewTask = Task(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            // 先异步读取内存/磁盘缩略图缓存，快速显示已有缩略图
+            if let photoItem = photoLibrary.displayedItems.first(where: { $0.id == item.id }),
+               let cachedData = await photoLibrary.cachedThumbnailData(for: photoItem) {
+                preview = .image(cachedData)
+            }
             do {
                 let kind = try await resolvedKindForPreview(item)
                 try Task.checkCancellation()

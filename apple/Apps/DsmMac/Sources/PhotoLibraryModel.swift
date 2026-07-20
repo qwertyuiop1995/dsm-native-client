@@ -153,22 +153,13 @@ final class PhotoLibraryModel {
     private(set) var sourceTotal = 0
     private(set) var errorMessage: String?
     var browseMode: PhotoBrowseMode = .timeline {
-        didSet {
-            restartThumbnailPrefetchIfPossible()
-            updateDisplayedItems()
-        }
+        didSet { scheduleDisplayedItemsUpdate() }
     }
     var mediaFilter: PhotoMediaFilter = .all {
-        didSet {
-            restartThumbnailPrefetchIfPossible()
-            updateDisplayedItems()
-        }
+        didSet { scheduleDisplayedItemsUpdate() }
     }
     var searchText = "" {
-        didSet {
-            restartThumbnailPrefetchIfPossible()
-            updateDisplayedItems()
-        }
+        didSet { scheduleDisplayedItemsUpdate() }
     }
     var selection: Set<PhotoLibraryItem.ID> = []
     private(set) var timelineItems: [PhotoLibraryItem] = [] {
@@ -198,6 +189,7 @@ final class PhotoLibraryModel {
     @ObservationIgnored private var thumbnailPrefetchGeneration = 0
     @ObservationIgnored private var timelineTask: Task<Void, Never>?
     @ObservationIgnored private var timelineGeneration = 0
+    @ObservationIgnored private var displayedItemsUpdateTask: Task<Void, Never>?
     @ObservationIgnored private var timelineFolderItemPaths: [String: [String]] = [:]
     @ObservationIgnored private let cacheStore: PhotoLibraryCacheStore
     @ObservationIgnored private let thumbnailDiskCacheStore: PhotoThumbnailDiskCacheStore
@@ -251,6 +243,29 @@ final class PhotoLibraryModel {
     }
 
     private(set) var timelineSections: [PhotoTimelineSection] = []
+
+    /// 防抖调度显示项更新：搜索输入、筛选切换或浏览方式变化时不会立即重算，
+    /// 等用户停止操作约 0.25 秒后再统一执行，减少大量数据时的卡顿。
+    /// 测试运行时直接同步执行，避免 XCTest 断言时机问题。
+    private func scheduleDisplayedItemsUpdate() {
+        displayedItemsUpdateTask?.cancel()
+        if Self.isRunningTests {
+            restartThumbnailPrefetchIfPossible()
+            updateDisplayedItems()
+            return
+        }
+        displayedItemsUpdateTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, !Task.isCancelled else { return }
+            self.restartThumbnailPrefetchIfPossible()
+            self.updateDisplayedItems()
+        }
+    }
+
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
+    }
 
     private func updateDisplayedItems() {
         let rawSource = browseMode == .timeline ? timelineItems : items
@@ -456,13 +471,9 @@ final class PhotoLibraryModel {
                             self.removeDeletedItems(at: update.removedPaths)
                         }
 
-                        // 2. 增量追加并重新排序
+                        // 2. 增量归并新扫描到的项目，避免每批都重建字典并全局排序
                         if !update.items.isEmpty {
-                            var itemMap = Dictionary(uniqueKeysWithValues: self.timelineItems.map { ($0.id, $0) })
-                            for item in update.items {
-                                itemMap[item.id] = item
-                            }
-                            self.timelineItems = Array(itemMap.values).sorted(by: Self.timelineSort)
+                            self.mergeTimelineItems(update.items)
                         }
 
                         // 3. 跟踪各个文件夹的文件路径映射
@@ -535,11 +546,7 @@ final class PhotoLibraryModel {
                         self.removeDeletedItems(at: update.removedPaths)
                     }
                     if !update.items.isEmpty {
-                        var itemMap = Dictionary(uniqueKeysWithValues: self.timelineItems.map { ($0.id, $0) })
-                        for item in update.items {
-                            itemMap[item.id] = item
-                        }
-                        self.timelineItems = Array(itemMap.values).sorted(by: Self.timelineSort)
+                        self.mergeTimelineItems(update.items)
                     }
                     self.timelineSkippedFolderPaths = update.skippedFolderPaths
                 }
@@ -605,6 +612,29 @@ final class PhotoLibraryModel {
     func thumbnailRequestDidFinish(for item: PhotoLibraryItem) {
         loadingVisibleThumbnailIDs.remove(item.id)
         scheduleThumbnailPrefetchIfPossible()
+    }
+
+    /// 将新扫描到的时间线项目按排序顺序增量归并到现有数组中，避免每批都重建字典并全局排序。
+    private func mergeTimelineItems(_ newItems: [PhotoLibraryItem]) {
+        let existingIDs = Set(timelineItems.map(\.id))
+        let sortedNewItems = newItems.filter { !existingIDs.contains($0.id) }
+            .sorted(by: Self.timelineSort)
+        guard !sortedNewItems.isEmpty else { return }
+
+        var merged = timelineItems
+        var newIndex = 0
+        var insertIndex = 0
+        while insertIndex < merged.count && newIndex < sortedNewItems.count {
+            if Self.timelineSort(sortedNewItems[newIndex], merged[insertIndex]) {
+                merged.insert(sortedNewItems[newIndex], at: insertIndex)
+                newIndex += 1
+            }
+            insertIndex += 1
+        }
+        if newIndex < sortedNewItems.count {
+            merged.append(contentsOf: sortedNewItems[newIndex...])
+        }
+        timelineItems = merged
     }
 
     /// 删除任务已由 NAS 确认并复查后，只更新受影响的本地集合，避免重新扫描整个照片空间。
@@ -692,11 +722,14 @@ final class PhotoLibraryModel {
         }
     }
 
-    func thumbnailData(for item: PhotoLibraryItem) async -> Data? {
+    func thumbnailData(
+        for item: PhotoLibraryItem,
+        priority: ThumbnailRequestGate.Priority = .high
+    ) async -> Data? {
         guard !item.isFolder else { return nil }
-        if let cached = cachedThumbnailData(for: item) { return cached }
+        if let cached = await cachedThumbnailData(for: item) { return cached }
         guard !unavailableThumbnails.contains(item.id) else { return nil }
-        guard let requestToken = await thumbnailRequestGate.acquire() else { return nil }
+        guard let requestToken = await thumbnailRequestGate.acquire(priority: priority) else { return nil }
 
         var repositoryError: AppError?
         var repositoryData: Data?
@@ -744,7 +777,7 @@ final class PhotoLibraryModel {
 
     @ObservationIgnored private var thumbnailCacheOrder: [PhotoLibraryItem.ID] = []
 
-    func cachedThumbnailData(for item: PhotoLibraryItem) -> Data? {
+    func cachedThumbnailData(for item: PhotoLibraryItem) async -> Data? {
         if let data = thumbnailCache[item.id] {
             if let index = thumbnailCacheOrder.firstIndex(of: item.id) {
                 thumbnailCacheOrder.remove(at: index)
@@ -752,9 +785,13 @@ final class PhotoLibraryModel {
             }
             return data
         }
-        // 尝试从磁盘加载缩略图持久化缓存，重启 App 后瞬间完成离线秒显！
+        // 从磁盘加载缩略图持久化缓存，放到后台线程，避免阻塞主线程。
         let profileID = activeProfileID ?? item.profileID
-        if let diskData = thumbnailDiskCacheStore.load(profileID: profileID, itemID: item.id) {
+        let diskStore = thumbnailDiskCacheStore
+        let diskData = await Task.detached(priority: .userInitiated) {
+            diskStore.load(profileID: profileID, itemID: item.id)
+        }.value
+        if let diskData {
             thumbnailCache[item.id] = diskData
             thumbnailCacheOrder.append(item.id)
             return diskData
@@ -837,7 +874,7 @@ final class PhotoLibraryModel {
                 guard !Task.isCancelled,
                       generation == thumbnailPrefetchGeneration,
                       loadingVisibleThumbnailIDs.isEmpty else { return }
-                _ = await thumbnailData(for: item)
+                _ = await thumbnailData(for: item, priority: .low)
             }
             guard generation == thumbnailPrefetchGeneration else { return }
             thumbnailPrefetchTask = nil
@@ -928,21 +965,29 @@ final class PhotoLibraryModel {
 }
 
 /// 限制缩略图并发，并允许离开可视区域的等待任务立即让出队列位置。
-private actor ThumbnailRequestGate {
+/// 支持高/低优先级：可见项使用高优先级，预取使用低优先级，避免滚动时预取抢占可见项。
+internal actor ThumbnailRequestGate {
+    enum Priority: Sendable {
+        case high
+        case low
+    }
+
     private struct Waiter {
         let token: UUID
         let continuation: CheckedContinuation<Bool, Never>
+        let priority: Priority
     }
 
     private let limit: Int
     private var activeCount = 0
-    private var waiters: [Waiter] = []
+    private var highPriorityWaiters: [Waiter] = []
+    private var lowPriorityWaiters: [Waiter] = []
 
     init(limit: Int) {
         self.limit = max(1, limit)
     }
 
-    func acquire() async -> UUID? {
+    func acquire(priority: Priority = .high) async -> UUID? {
         guard !Task.isCancelled else { return nil }
         let token = UUID()
         if activeCount < limit {
@@ -952,7 +997,12 @@ private actor ThumbnailRequestGate {
 
         let granted = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                waiters.append(Waiter(token: token, continuation: continuation))
+                let waiter = Waiter(token: token, continuation: continuation, priority: priority)
+                if priority == .high {
+                    highPriorityWaiters.append(waiter)
+                } else {
+                    lowPriorityWaiters.append(waiter)
+                }
             }
         } onCancel: {
             Task { await self.cancelWaiting(token) }
@@ -973,14 +1023,27 @@ private actor ThumbnailRequestGate {
     }
 
     private func cancelWaiting(_ token: UUID) {
-        guard let index = waiters.firstIndex(where: { $0.token == token }) else { return }
-        let waiter = waiters.remove(at: index)
-        waiter.continuation.resume(returning: false)
+        if let index = highPriorityWaiters.firstIndex(where: { $0.token == token }) {
+            let waiter = highPriorityWaiters.remove(at: index)
+            waiter.continuation.resume(returning: false)
+            return
+        }
+        if let index = lowPriorityWaiters.firstIndex(where: { $0.token == token }) {
+            let waiter = lowPriorityWaiters.remove(at: index)
+            waiter.continuation.resume(returning: false)
+        }
     }
 
     private func resumeNextWaiter() {
-        guard !waiters.isEmpty, activeCount < limit else { return }
-        let waiter = waiters.removeFirst()
+        guard activeCount < limit else { return }
+        if let waiter = highPriorityWaiters.first {
+            highPriorityWaiters.removeFirst()
+            activeCount += 1
+            waiter.continuation.resume(returning: true)
+            return
+        }
+        guard !lowPriorityWaiters.isEmpty else { return }
+        let waiter = lowPriorityWaiters.removeFirst()
         activeCount += 1
         waiter.continuation.resume(returning: true)
     }

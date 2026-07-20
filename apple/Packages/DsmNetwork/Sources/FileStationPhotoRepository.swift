@@ -88,58 +88,162 @@ public struct FileStationPhotoRepository: PhotoLibraryRepository, Sendable {
             )
         }
 
-        var pendingFolders = folderPaths
+        // 批量聚合，降低每次扫描后 UI 重算的频率。
+        // 每累积超过 500 个项目时统一刷新一次。
+        let itemBatchThreshold = 500
+        let concurrentFolderLimit = 6
         var visitedFolders = Set<String>()
-        var nextFolderIndex = 0
         var skippedFolderPaths = Set<String>()
+        var batchedItems: [PhotoLibraryItem] = []
+        var batchedRemoved: [String] = []
 
-        while nextFolderIndex < pendingFolders.count {
-            try Task.checkCancellation()
-            let folderPath = pendingFolders[nextFolderIndex]
-            nextFolderIndex += 1
-            guard visitedFolders.insert(folderPath).inserted else { continue }
-
-            var offset = 0
-            var discoveredInFolder: [PhotoLibraryItem] = []
-            do {
-                while true {
-                    try Task.checkCancellation()
-                    let page = try await files.listFolder(path: folderPath, offset: offset, limit: 500)
-                    for file in page.items {
-                        if file.isDirectory {
-                            guard !file.name.hasPrefix("@"), file.name != "#recycle" else { continue }
-                            if Self.contains(path: file.path, in: space.rootPath) {
-                                pendingFolders.append(file.path)
-                            }
-                        } else if let item = PhotoLibraryItem(file) {
-                            discoveredInFolder.append(item)
-                        }
-                    }
-
-                    let nextOffset = page.offset + page.items.count
-                    guard page.hasMore, nextOffset > offset else { break }
-                    offset = nextOffset
-                }
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch let error as AppError where folderPath != space.rootPath && Self.canSkipTimelineFolder(error) {
-                skippedFolderPaths.insert(folderPath)
-            }
-
-            // 计算在此文件夹中，历史上存在但最新扫描已不存在的文件路径（即删除项目）
-            let currentPaths = Set(discoveredInFolder.map(\.path))
-            let previousPaths = Set(existingFolderItemPaths[folderPath] ?? [])
-            let removedInFolder = Array(previousPaths.subtracting(currentPaths))
-
+        func flushBatch(isFinal: Bool = false) async {
+            if batchedItems.isEmpty && batchedRemoved.isEmpty && !isFinal { return }
             await onUpdate(
                 PhotoTimelineScanUpdate(
-                    items: discoveredInFolder,
-                    removedPaths: removedInFolder,
+                    items: batchedItems,
+                    removedPaths: batchedRemoved,
                     scannedFolderCount: visitedFolders.count,
                     skippedFolderPaths: skippedFolderPaths.sorted()
                 )
             )
+            batchedItems.removeAll(keepingCapacity: true)
+            batchedRemoved.removeAll(keepingCapacity: true)
         }
+
+        /// 按目录层级并发扫描：同一层级的文件夹用 TaskGroup 并行读取，
+        /// 扫描完成后把子文件夹加入下一层级，直到没有新文件夹为止。
+        var currentLevel = folderPaths
+        while !currentLevel.isEmpty {
+            try Task.checkCancellation()
+
+            let toScan = currentLevel.compactMap { path -> String? in
+                guard visitedFolders.insert(path).inserted else { return nil }
+                return path
+            }
+            currentLevel.removeAll(keepingCapacity: true)
+
+            let results: [TimelineScanFolderResult] = try await withThrowingTaskGroup(of: TimelineScanFolderResult.self) { group in
+                for folderPath in toScan.prefix(concurrentFolderLimit) {
+                    group.addTask {
+                        await self.scanSingleFolder(
+                            folderPath: folderPath,
+                            in: space,
+                            existingFolderItemPaths: existingFolderItemPaths
+                        )
+                    }
+                }
+
+                var remaining = Array(toScan.dropFirst(concurrentFolderLimit))
+                var collected: [TimelineScanFolderResult] = []
+                for try await result in group {
+                    collected.append(result)
+                    if let next = remaining.first {
+                        remaining.removeFirst()
+                        group.addTask {
+                            await self.scanSingleFolder(
+                                folderPath: next,
+                                in: space,
+                                existingFolderItemPaths: existingFolderItemPaths
+                            )
+                        }
+                    }
+                }
+                return collected
+            }
+
+            for result in results {
+                if result.skipped {
+                    skippedFolderPaths.insert(result.folderPath)
+                } else {
+                    batchedItems.append(contentsOf: result.items)
+                    batchedRemoved.append(contentsOf: result.removed)
+                    currentLevel.append(contentsOf: result.subfolders)
+                }
+            }
+
+            if batchedItems.count >= itemBatchThreshold {
+                await flushBatch()
+            }
+        }
+
+        await flushBatch(isFinal: true)
+    }
+
+    /// 扫描单个文件夹，返回照片项、子文件夹、删除项路径以及是否被跳过。
+    private func scanSingleFolder(
+        folderPath: String,
+        in space: PhotoSpace,
+        existingFolderItemPaths: [String: [String]]
+    ) async -> TimelineScanFolderResult {
+        do {
+            try Task.checkCancellation()
+            var offset = 0
+            var discovered: [PhotoLibraryItem] = []
+            var subfolders: [String] = []
+            while true {
+                try Task.checkCancellation()
+                let page = try await files.listFolder(path: folderPath, offset: offset, limit: 500)
+                for file in page.items {
+                    if file.isDirectory {
+                        guard !file.name.hasPrefix("@"), file.name != "#recycle" else { continue }
+                        if Self.contains(path: file.path, in: space.rootPath) {
+                            subfolders.append(file.path)
+                        }
+                    } else if let item = PhotoLibraryItem(file) {
+                        discovered.append(item)
+                    }
+                }
+
+                let nextOffset = page.offset + page.items.count
+                guard page.hasMore, nextOffset > offset else { break }
+                offset = nextOffset
+            }
+
+            let currentPaths = Set(discovered.map(\.path))
+            let previousPaths = Set(existingFolderItemPaths[folderPath] ?? [])
+            let removed = Array(previousPaths.subtracting(currentPaths))
+
+            return TimelineScanFolderResult(
+                items: discovered,
+                subfolders: subfolders,
+                removed: removed,
+                skipped: false,
+                folderPath: folderPath
+            )
+        } catch is CancellationError {
+            return TimelineScanFolderResult(
+                items: [],
+                subfolders: [],
+                removed: [],
+                skipped: true,
+                folderPath: folderPath
+            )
+        } catch let error as AppError where folderPath != space.rootPath && Self.canSkipTimelineFolder(error) {
+            return TimelineScanFolderResult(
+                items: [],
+                subfolders: [],
+                removed: [],
+                skipped: true,
+                folderPath: folderPath
+            )
+        } catch {
+            return TimelineScanFolderResult(
+                items: [],
+                subfolders: [],
+                removed: [],
+                skipped: folderPath != space.rootPath,
+                folderPath: folderPath
+            )
+        }
+    }
+
+    private struct TimelineScanFolderResult: Sendable {
+        let items: [PhotoLibraryItem]
+        let subfolders: [String]
+        let removed: [String]
+        let skipped: Bool
+        let folderPath: String
     }
 
     private static func contains(path: String, in rootPath: String) -> Bool {

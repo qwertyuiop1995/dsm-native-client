@@ -407,20 +407,6 @@ struct PhotoLibraryView: View {
         return "使用工具栏的“上传”把照片或视频添加到当前位置。"
     }
 
-    private var timelineSections: [PhotoTimelineSection] {
-        let calendar = Calendar.current
-        let grouped = Dictionary(grouping: model.displayedItems) { item in
-            calendar.startOfDay(for: item.createdAt ?? item.modifiedAt ?? .distantPast)
-        }
-        return grouped.keys.sorted(by: >).map { date in
-            PhotoTimelineSection(
-                date: date,
-                title: date == .distantPast ? "日期未知" : Self.dayFormatter.string(from: date),
-                items: grouped[date] ?? []
-            )
-        }
-    }
-
     private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = .current
@@ -610,7 +596,7 @@ private struct PhotoGridThumbnail: View {
         }
         .task(priority: .userInitiated) {
             model.thumbnailBecameVisible(item)
-            if let cached = model.cachedThumbnailData(for: item) {
+            if let cached = await model.cachedThumbnailData(for: item) {
                 data = cached
                 model.thumbnailRequestDidFinish(for: item)
                 return

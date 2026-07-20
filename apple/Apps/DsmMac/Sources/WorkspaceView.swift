@@ -35,6 +35,7 @@ struct WorkspaceView: View {
     let connectionRoute: AppModel.ConnectionRoute?
     let onAddNAS: () -> Void
     let onSelectNAS: (UUID) -> Void
+    let onMoveProfiles: (IndexSet, Int) -> Void
     let hasFileClipboard: Bool
     let onCopy: ([FileItem]) -> Void
     let onCut: ([FileItem]) -> Void
@@ -62,6 +63,7 @@ struct WorkspaceView: View {
                 connectionRoute: connectionRoute,
                 onAddNAS: onAddNAS,
                 onSelectNAS: { profile in onSelectNAS(profile.id) },
+                onMoveProfiles: onMoveProfiles,
                 onLogout: onLogout
             )
                 .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
@@ -805,6 +807,7 @@ private struct SidebarView: View {
     let connectionRoute: AppModel.ConnectionRoute?
     let onAddNAS: () -> Void
     let onSelectNAS: (NasProfile) -> Void
+    let onMoveProfiles: (IndexSet, Int) -> Void
     let onLogout: () async -> Void
 
     @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
@@ -860,6 +863,7 @@ private struct SidebarView: View {
                         }
                     }
                 }
+                .onMove(perform: onMoveProfiles)
 
                 HStack {
                     Label("添加 NAS", systemImage: "plus")

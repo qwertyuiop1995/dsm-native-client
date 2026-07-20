@@ -63,7 +63,7 @@ final class NasProfileStore {
               let profiles = try? JSONDecoder().decode([NasProfile].self, from: data) else {
             return []
         }
-        return profiles.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        return profiles
     }
 
     func save(_ profiles: [NasProfile]) throws {
@@ -165,6 +165,7 @@ final class AppModel {
     private var didLoad = false
     private var workspacesByProfileID: [UUID: WorkspaceModel] = [:]
     private var connectionContextsByProfileID: [UUID: ConnectionContext] = [:]
+    @ObservationIgnored private var loginTask: Task<Void, Never>?
 
     var connectedWorkspaces: [WorkspaceModel] {
         profiles.compactMap { workspacesByProfileID[$0.id] }
@@ -388,10 +389,27 @@ final class AppModel {
         }
     }
 
+    func cancelLogin() {
+        loginTask?.cancel()
+        loginTask = nil
+        isBusy = false
+        statusIsError = false
+        statusMessage = "已取消登录。"
+    }
+
     func connect() async {
-        guard !isBusy else {
-            return
+        guard !isBusy else { return }
+        loginTask?.cancel()
+        let task = Task<Void, Never> { [weak self] in
+            await self?.performConnect()
         }
+        loginTask = task
+        await task.value
+        loginTask = nil
+    }
+
+    private func performConnect() async {
+        guard !isBusy else { return }
         isBusy = true
         statusIsError = false
         statusMessage = "正在检查 NAS…"
@@ -453,6 +471,8 @@ final class AppModel {
             if passwordStorageFailed {
                 statusMessage = "已连接，但无法在这台 Mac 上保存密码。下次需要重新输入。"
             }
+        } catch is CancellationError {
+            return
         } catch let error as DsmCertificateTrustError {
             certificateRetryMode = .connect
             pendingCertificate = CertificatePrompt(
@@ -904,13 +924,27 @@ final class AppModel {
             || (parts[0] == 169 && parts[1] == 254)
     }
 
+    func moveProfile(from source: IndexSet, to destination: Int) {
+        guard let sourceIndex = source.first else { return }
+        let profileID = profiles[sourceIndex].id
+        profiles.move(fromOffsets: source, toOffset: destination)
+        if selectedProfileID == profileID {
+            selectedProfileID = profileID
+        }
+        do {
+            try profileStore.save(profiles)
+        } catch {
+            statusIsError = true
+            statusMessage = "无法保存 NAS 排序，请重试。"
+        }
+    }
+
     private func upsertProfile(_ profile: NasProfile) {
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = profile
         } else {
             profiles.append(profile)
         }
-        profiles.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         selectedProfileID = profile.id
         do {
             try profileStore.save(profiles)

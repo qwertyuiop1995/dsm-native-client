@@ -19,6 +19,9 @@ struct RootView: View {
                     onSelectNAS: { profileID in
                         model.selectProfile(id: profileID)
                     },
+                    onMoveProfiles: { source, destination in
+                        model.moveProfile(from: source, to: destination)
+                    },
                     hasFileClipboard: model.fileClipboard != nil && !model.isPreparingPaste,
                     onCopy: { items in model.placeOnClipboard(items, moveSource: false) },
                     onCut: { items in model.placeOnClipboard(items, moveSource: true) },
@@ -136,10 +139,25 @@ struct LoginView: View {
                             }
                         }
                     }
+                    .onMove(perform: model.moveProfile)
                 }
             }
             .onChange(of: model.selectedProfileID) { _, id in
                 model.selectProfile(id: id)
+            }
+            .onMoveCommand { direction in
+                guard let selectedID = model.selectedProfileID,
+                      let currentIndex = model.profiles.firstIndex(where: { $0.id == selectedID }) else { return }
+                let destination: Int
+                switch direction {
+                case .up:
+                    destination = max(0, currentIndex - 1)
+                case .down:
+                    destination = min(model.profiles.count, currentIndex + 2)
+                default:
+                    return
+                }
+                model.moveProfile(from: IndexSet(integer: currentIndex), to: destination)
             }
 
             Divider()
@@ -271,28 +289,40 @@ struct LoginView: View {
                 )
 
                 HStack(spacing: 12) {
-                    Button {
-                        Task { await model.connect() }
-                    } label: {
-                        Label(
-                            model.requiresOTP ? "验证并连接" : "连接",
-                            systemImage: "arrow.right.circle.fill"
+                    if model.isBusy {
+                        ProgressView()
+                            .controlSize(.small)
+                        Button("取消登录", role: .cancel) {
+                            model.cancelLogin()
+                        }
+                        .keyboardShortcut(.cancelAction)
+                        .controlSize(.large)
+
+                        Spacer()
+                    } else {
+                        Button {
+                            Task { await model.connect() }
+                        } label: {
+                            Label(
+                                model.requiresOTP ? "验证并连接" : "连接",
+                                systemImage: "arrow.right.circle.fill"
+                            )
+                            .frame(minWidth: 112)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(
+                            model.host.isEmpty || model.account.isEmpty || model.password.isEmpty
+                                || (model.requiresOTP && model.otpCode.isEmpty)
                         )
-                        .frame(minWidth: 112)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(
-                        model.isBusy || model.host.isEmpty || model.account.isEmpty || model.password.isEmpty
-                            || (model.requiresOTP && model.otpCode.isEmpty)
-                    )
 
-                    Spacer()
+                        Spacer()
 
-                    if model.selectedProfileID != nil {
-                        Button("移除这台 NAS", role: .destructive) {
-                            confirmsProfileDeletion = true
+                        if model.selectedProfileID != nil {
+                            Button("移除这台 NAS", role: .destructive) {
+                                confirmsProfileDeletion = true
+                            }
                         }
                     }
                 }

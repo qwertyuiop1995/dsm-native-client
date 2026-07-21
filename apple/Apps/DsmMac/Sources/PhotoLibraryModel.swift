@@ -371,6 +371,25 @@ final class PhotoLibraryModel {
         mediaIndexByID: [PhotoLibraryItem.ID: Int],
         generation: Int
     ) {
+        // 相册模式只需要文件夹，跳过 Live Photo 配对与媒体计数，直接按筛选/查询过滤文件夹。
+        if browseMode == .albums {
+            var filtered: [PhotoLibraryItem] = []
+            for item in source {
+                if isCancelled() { return (displayedItems: [], timelineSections: [], mediaStats: (0, 0, 0), orderedMediaItems: [], mediaIndexByID: [:], generation: generation) }
+                guard item.isFolder else { continue }
+                let matchesType: Bool
+                switch filter {
+                case .all: matchesType = true
+                case .images: matchesType = true
+                case .videos: matchesType = true
+                }
+                if matchesType && (query.isEmpty || item.name.localizedCaseInsensitiveContains(query)) {
+                    filtered.append(item)
+                }
+            }
+            return (displayedItems: filtered, timelineSections: [], mediaStats: (filtered.count, 0, 0), orderedMediaItems: [], mediaIndexByID: [:], generation: generation)
+        }
+
         let paired = PhotoLibraryItem.pairLivePhotos(source, isCancelled: isCancelled)
 
         var filtered: [PhotoLibraryItem] = []
@@ -397,13 +416,6 @@ final class PhotoLibraryModel {
                     else if item.kind == .video { videos += 1 }
                 }
             }
-        }
-
-        if browseMode == .albums {
-            filtered = filtered.filter(\.isFolder)
-            total = filtered.count
-            images = 0
-            videos = 0
         }
 
         var sections: [PhotoTimelineSection] = []

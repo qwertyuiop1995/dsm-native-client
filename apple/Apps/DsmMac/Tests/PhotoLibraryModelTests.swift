@@ -67,6 +67,36 @@ final class PhotoLibraryModelTests: XCTestCase {
         XCTAssertEqual(requestedOffsets, [0, 300])
     }
 
+    func test相册模式只显示文件夹() async throws {
+        let folder = try XCTUnwrap(folderItem(name: "旅行", path: "/photo/旅行"))
+        let image = try XCTUnwrap(photoItem(name: "海边.jpg", path: "/photo/海边.jpg"))
+        let repository = PhotoLibraryRepositoryStub(
+            spaces: [.shared],
+            pages: [
+                0: PhotoLibraryPage(
+                    folderPath: "/photo",
+                    items: [folder, image],
+                    offset: 0,
+                    nextOffset: 2,
+                    sourceTotal: 2,
+                    hasMore: false
+                )
+            ]
+        )
+        let model = PhotoLibraryModel(repository: repository)
+
+        await model.loadIfNeeded()
+        await model.setBrowseMode(.albums)
+
+        XCTAssertEqual(model.displayedItems.map(\.name), ["旅行"])
+        XCTAssertEqual(model.mediaStats.total, 1)
+
+        let album = try XCTUnwrap(model.displayedItems.first)
+        await model.open(album)
+
+        XCTAssertEqual(model.browseMode, .folders)
+    }
+
     func test时间线支持类型名称筛选和多选() async throws {
         let image = try XCTUnwrap(photoItem(name: "海边.jpg", path: "/photo/海边.jpg"))
         let video = try XCTUnwrap(photoItem(name: "旅行.mp4", path: "/photo/旅行.mp4"))
@@ -316,6 +346,17 @@ final class PhotoLibraryModelTests: XCTestCase {
                 name: name,
                 path: path,
                 kind: .file
+            )
+        )
+    }
+
+    private func folderItem(name: String, path: String) -> PhotoLibraryItem? {
+        PhotoLibraryItem(
+            FileItem(
+                profileID: UUID(),
+                name: name,
+                path: path,
+                kind: .directory
             )
         )
     }

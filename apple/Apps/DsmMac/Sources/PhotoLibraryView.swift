@@ -359,7 +359,8 @@ struct PhotoLibraryView: View {
                     onMove: { moveTarget = $0 }
                 )
                 .task {
-                    if (model.browseMode == .folders || model.browseMode == .albums), item.id == model.displayedItems.last?.id {
+                    let shouldLoadMore = model.browseMode == .folders || (model.browseMode == .albums && item.isFolder)
+                    if shouldLoadMore, item.id == model.displayedItems.last?.id {
                         await model.loadMore()
                     }
                 }

@@ -94,7 +94,7 @@ final class PhotoLibraryModelTests: XCTestCase {
         let album = try XCTUnwrap(model.displayedItems.first)
         await model.open(album)
 
-        XCTAssertEqual(model.browseMode, .folders)
+        XCTAssertEqual(model.browseMode, .albums)
     }
 
     func test时间线支持类型名称筛选和多选() async throws {

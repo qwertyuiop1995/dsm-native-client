@@ -3761,7 +3761,7 @@ private struct SettingsView: View {
                                     Text("照片管理")
                                         .font(.body.weight(.medium))
                                 }
-                                Text("在侧边栏显示个人和共享照片空间，支持按文件夹浏览照片与视频。")
+                                Text("在侧边栏显示个人和共享照片空间，支持按相册浏览照片与视频。")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

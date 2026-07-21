@@ -312,6 +312,7 @@ final class PhotoLibraryModel {
         let filter = mediaFilter
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let browseMode = self.browseMode
+        let isAtSpaceRoot = currentPath == selectedSpace?.rootPath
 
         displayedItemsComputationTask?.cancel()
         displayedItemsComputationGeneration += 1
@@ -323,6 +324,7 @@ final class PhotoLibraryModel {
                 filter: filter,
                 query: query,
                 browseMode: browseMode,
+                isAtSpaceRoot: isAtSpaceRoot,
                 generation: generation,
                 isCancelled: { false }
             )
@@ -341,6 +343,7 @@ final class PhotoLibraryModel {
                 filter: filter,
                 query: query,
                 browseMode: browseMode,
+                isAtSpaceRoot: isAtSpaceRoot,
                 generation: generation,
                 isCancelled: { Task.isCancelled }
             )
@@ -361,6 +364,7 @@ final class PhotoLibraryModel {
         filter: PhotoMediaFilter,
         query: String,
         browseMode: PhotoBrowseMode,
+        isAtSpaceRoot: Bool,
         generation: Int,
         isCancelled: @escaping @Sendable () -> Bool
     ) -> (
@@ -371,8 +375,8 @@ final class PhotoLibraryModel {
         mediaIndexByID: [PhotoLibraryItem.ID: Int],
         generation: Int
     ) {
-        // 相册模式只需要文件夹，跳过 Live Photo 配对与媒体计数，直接按筛选/查询过滤文件夹。
-        if browseMode == .albums {
+        // 相册模式在照片空间根目录时展示相册列表（只含文件夹），进入相册后展示其中的照片和视频。
+        if browseMode == .albums && isAtSpaceRoot {
             var filtered: [PhotoLibraryItem] = []
             for item in source {
                 if isCancelled() { return (displayedItems: [], timelineSections: [], mediaStats: (0, 0, 0), orderedMediaItems: [], mediaIndexByID: [:], generation: generation) }
@@ -510,9 +514,6 @@ final class PhotoLibraryModel {
 
     func open(_ item: PhotoLibraryItem) async {
         guard item.isFolder else { return }
-        if browseMode == .albums {
-            browseMode = .folders
-        }
         await loadFolder(item.path, recordingHistory: true)
     }
 

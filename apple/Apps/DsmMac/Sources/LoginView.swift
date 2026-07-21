@@ -290,8 +290,6 @@ struct LoginView: View {
 
                 HStack(spacing: 12) {
                     if model.isBusy {
-                        ProgressView()
-                            .controlSize(.small)
                         Button("取消登录", role: .cancel) {
                             model.cancelLogin()
                         }

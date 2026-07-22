@@ -93,7 +93,7 @@
 
 ## M9：Synology Chat 协议与 macOS 聊天模块
 
-状态：已立项，尚未开始实现。
+状态：进行中。共同 Schema、Apple Chat 领域模型、macOS 界面和真实 DSM 会话适配器已实现；用户、会话、历史分页、文字发送、私人群聊创建/邀请和提醒设置已接线，等待专用测试 NAS 逐项联调。
 
 - 在专用测试 NAS 上验证 Chat Server 套件、用户会话、完整客户端接口和实时同步方式。
 - 明确公开 `SYNO.Chat.External` 不用于普通用户聊天，建立独立用户聊天内部 Adapter。

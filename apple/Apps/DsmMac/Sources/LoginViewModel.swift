@@ -790,8 +790,17 @@ final class AppModel {
             capabilities: capabilities,
             session: session
         )
+        let chatRepository = try DsmChatRepository(
+            profile: connectionProfile,
+            capabilities: capabilities,
+            session: session
+        )
         activeConnectionProfile = connectionProfile
-        let openedWorkspace = WorkspaceModel(profile: profile, repository: repository)
+        let openedWorkspace = WorkspaceModel(
+            profile: profile,
+            repository: repository,
+            chatRepository: chatRepository
+        )
         workspacesByProfileID[profile.id] = openedWorkspace
         connectionContextsByProfileID[profile.id] = ConnectionContext(
             connectionProfile: connectionProfile,

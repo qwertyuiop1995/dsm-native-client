@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/chat-poll.schema.json",
+  "title": "ChatPoll",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "question", "allowsMultipleSelection", "isAnonymous", "isClosed", "options"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "question": { "type": "string", "minLength": 1 },
+    "allowsMultipleSelection": { "type": "boolean" },
+    "isAnonymous": { "type": "boolean" },
+    "closesAt": { "type": ["string", "null"], "format": "date-time" },
+    "isClosed": { "type": "boolean" },
+    "options": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text", "voteCount", "isSelectedByCurrentUser"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "text": { "type": "string", "minLength": 1 },
+          "voteCount": { "type": "integer", "minimum": 0 },
+          "isSelectedByCurrentUser": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

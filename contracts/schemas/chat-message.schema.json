@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/chat-message.schema.json",
+  "title": "ChatMessage",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "conversationID", "senderID", "sentAt", "attachments", "deliveryState", "encryptionState"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "clientRequestID": { "type": ["string", "null"], "format": "uuid" },
+    "conversationID": { "type": "string", "minLength": 1 },
+    "senderID": { "type": "string", "minLength": 1 },
+    "senderDisplayName": { "type": ["string", "null"] },
+    "isFromCurrentUser": { "type": ["boolean", "null"] },
+    "sentAt": { "type": "string", "format": "date-time" },
+    "text": { "type": ["string", "null"] },
+    "attachments": {
+      "type": "array",
+      "items": { "$ref": "chat-attachment.schema.json" }
+    },
+    "poll": {
+      "oneOf": [
+        { "$ref": "chat-poll.schema.json" },
+        { "type": "null" }
+      ]
+    },
+    "deliveryState": { "type": "string", "enum": ["sending", "sent", "failed"] },
+    "encryptionState": {
+      "type": "string",
+      "enum": ["notEncrypted", "locked", "unlocked", "recoveryRequired", "unsupported"]
+    }
+  },
+  "anyOf": [
+    { "required": ["text"] },
+    {
+      "properties": {
+        "attachments": { "minItems": 1 }
+      }
+    },
+    { "required": ["poll"] }
+  ]
+}

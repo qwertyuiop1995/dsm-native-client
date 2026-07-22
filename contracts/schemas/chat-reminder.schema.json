@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/chat-reminder.schema.json",
+  "title": "ChatReminder",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "messageID", "remindAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "messageID": { "type": "string", "minLength": 1 },
+    "remindAt": { "type": "string", "format": "date-time" }
+  }
+}

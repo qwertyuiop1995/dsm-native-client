@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/chat-attachment.schema.json",
+  "title": "ChatAttachment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "fileName"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "kind": { "type": "string", "enum": ["image", "video", "file", "voice"] },
+    "fileName": { "type": "string" },
+    "mediaType": { "type": ["string", "null"] },
+    "sizeBytes": { "type": ["integer", "null"], "minimum": 0 },
+    "durationMilliseconds": { "type": ["integer", "null"], "minimum": 0 },
+    "thumbnailAvailable": { "type": ["boolean", "null"] }
+  }
+}

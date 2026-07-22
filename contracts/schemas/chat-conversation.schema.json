@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/chat-conversation.schema.json",
+  "title": "ChatConversation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "title", "memberIDs", "unreadCount", "isEncrypted"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "kind": { "type": "string", "enum": ["direct", "group"] },
+    "title": { "type": "string" },
+    "memberIDs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "memberCount": { "type": ["integer", "null"], "minimum": 0 },
+    "lastMessageSummary": { "type": ["string", "null"] },
+    "lastActivityAt": { "type": ["string", "null"], "format": "date-time" },
+    "unreadCount": { "type": "integer", "minimum": 0 },
+    "isEncrypted": { "type": "boolean" }
+  }
+}

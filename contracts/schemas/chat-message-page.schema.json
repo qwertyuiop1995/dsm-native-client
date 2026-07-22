@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/chat-message-page.schema.json",
+  "title": "ChatMessagePage",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["messages", "hasMoreBefore"],
+  "properties": {
+    "messages": {
+      "type": "array",
+      "items": { "$ref": "chat-message.schema.json" }
+    },
+    "previousCursor": { "type": ["string", "null"] },
+    "hasMoreBefore": { "type": "boolean" }
+  }
+}

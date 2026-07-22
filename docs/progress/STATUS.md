@@ -12,7 +12,7 @@
 | Apple 共享工程 | 进行中 | Swift Package、macOS App 和 Apple CI 已建立；iPhone/iPad UI 尚未初始化 |
 | macOS 文件客户端 | 需要验证 | 主要功能已实现并通过自动化测试，正在收集真实 NAS 兼容证据 |
 | 照片管理模块 | 进行中 | 文件夹扫描已获实机确认；macOS 时间线、搜索筛选、预览、详情和基础管理源码已实现，等待完整实机与性能验收 |
-| Synology Chat 模块 | 已立项 | 范围为一对一、私人群聊、文字、Emoji、媒体与文件、语音消息、提醒、投票和加密会话；CH0 尚未开始 |
+| Synology Chat 模块 | 进行中 | 实机已确认用户、会话和消息数据可加载；已修正成员/发送者识别、日期时间、用户搜索和空状态布局，文字发送、建群/邀请和提醒继续实机联调 |
 | Android 客户端 | 未开始 | 保留原生扩展目录，后续初始化 Kotlin/Jetpack Compose 工程 |
 | Windows 客户端 | 未开始 | 保留原生扩展目录，后续初始化 C#/WinUI 3 solution |
 
@@ -58,18 +58,18 @@
 - **Virtual Machine Manager**：`SYNO.Virtualization.API.*` / `SYNO.Virtualization.*` 虚拟机生命周期、电源控制、镜像管理
 - **Container Manager / Docker**：`SYNO.Docker.*` 容器、镜像、网络、项目管理
 - **系统与硬件**：系统信息/利用率/进程/连接/日志、存储/硬盘/SMART、风扇/LED/蜂鸣器/电源计划/UPS、网络/DDNS/代理/防火墙、用户/群组/共享/配额、套件启停安装、计划任务、SSH/Telnet 终端
-- **Synology Chat**：普通用户聊天模块已立项；公开 `SYNO.Chat.External` 不满足一对一、私人群聊和附件收发需求，实际用户接口待 CH0 实机验证
+- **Synology Chat**：已建立普通用户聊天契约与独立内部适配器；公开 `SYNO.Chat.External` 不用于普通用户聊天。第一批 `SYNO.Chat.*` 能力已按运行时发现接入，附件、语音、投票和加密仍待实机协议验证
 - **其他套件**：Audio Station、Video Station、Note Station、Synology Drive、Calendar、Contacts、Surveillance Station、Hyper Backup / Active Backup、Synology Office
 
 ### 平台实现
 - iPhone、iPad、Android、Windows 原生客户端工程尚未初始化
 - 系统照片库自动备份、后台上传、释放设备空间、离线任务恢复
 
-状态：`未开始/计划`。接入时必须按 DSM build 和套件版本完成能力发现、契约测试和功能开关保护。
+状态：除 Synology Chat 基础契约外，其余为`未开始/计划`。接入时必须按 DSM build 和套件版本完成能力发现、契约测试和功能开关保护。
 
 ## 自动化验证
 
-- `swift test --package-path apple`：100 项执行通过，1 项需要真实环境的可选测试跳过。
+- `swift test --package-path apple`：129 项执行通过，1 项需要真实环境的可选测试跳过。
 - `DsmMac` Debug、无代码签名构建通过。
 - 本地化文件和 Git 差异格式检查通过。
 - 自动化通过不替代真实 NAS 权限、网络、套件版本和回收站行为验证。
@@ -94,16 +94,16 @@
 
 | 里程碑 | 状态 | 下一出口 |
 | --- | --- | --- |
-| CH0 协议与会话探测 | 未开始 | 验证用户列表、聊天、媒体、语音、提醒、投票和加密边界，形成脱敏契约样本 |
-| CH1 macOS 一对一文字聊天 | 未开始 | 两个普通账号稳定收发文字和 Unicode Emoji，无重复发送 |
-| CH2 macOS 私人群聊 | 未开始 | 至少三个专用测试账号完成建群和多人收发验证 |
-| CH3 macOS 媒体、文件和语音 | 未开始 | 一对一和群聊均可收发、预览或播放全部附件类型 |
-| CH4 macOS 提醒与投票 | 未开始 | 提醒和单选/多选投票通过权限、弱网和同步验证 |
+| CH0 协议与会话探测 | 进行中 | 实机已确认会话和消息加载；用户目录已扩展根数组/容器/对象字典兼容并接入受限头像读取，下一步在当前 NAS 复验用户和发送者字段，再确认首次单聊与媒体协议 |
+| CH1 macOS 一对一文字聊天 | 需要验证 | 已增加用户搜索、发送者目录回填、真实头像回退、双向气泡及每条消息完整年月日时分秒；已有双人会话可打开，首次匿名会话写入仍待安全确认 |
+| CH2 macOS 私人群聊 | 需要验证 | 已接入命名私人群聊创建、加入、邀请、重复提交保护和成员复查；下一出口是至少三个专用测试账号完成建群和多人收发验证 |
+| CH3 macOS 媒体、文件和语音 | 进行中（附件界面基础） | 图片、视频和文件选择及消息附件展示已实现；下一出口是一对一和群聊均可收发、预览或播放全部附件类型 |
+| CH4 macOS 提醒与投票 | 进行中 | 提醒设置接口已接入并去重，修改/取消/到期通知和投票仍待实现及实机验证 |
 | CH5 macOS 加密会话 | 未开始 | 密钥生命周期、安全评审和跨设备验证通过，无明文降级 |
 | CH6 macOS 发布验收 | 未开始 | 稳定性、兼容、安全、性能与可访问性出口通过 |
 | CH7 其他平台对齐 | 未开始 | iPhone/iPad、Android、Windows 按相同范围原生实现 |
 
-Chat 模块按[Synology Chat 原生聊天功能开发计划](../development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)推进。当前没有 Chat 实现代码；下一步必须先完成 CH0，不能根据未验证接口名称直接开发正式功能。
+Chat 模块按[Synology Chat 原生聊天功能开发计划](../development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)推进。基础契约、Apple 领域模型、关闭型适配器、macOS 会话列表、聊天页、新建聊天和输入区已经建立；下一步必须在专用测试 NAS 上完成 CH0 协议验证，不能根据未验证接口名称直接开发正式收发功能。
 
 ## 下一步
 

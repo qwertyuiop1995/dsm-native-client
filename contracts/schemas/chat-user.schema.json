@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/chat-user.schema.json",
+  "title": "ChatUser",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "displayName", "isDisabled"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "displayName": { "type": "string" },
+    "avatarAvailable": { "type": ["boolean", "null"] },
+    "avatarData": { "type": ["string", "null"], "contentEncoding": "base64" },
+    "isDisabled": { "type": "boolean" },
+    "isCurrentUser": { "type": ["boolean", "null"] }
+  }
+}

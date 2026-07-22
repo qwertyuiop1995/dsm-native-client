@@ -32,6 +32,7 @@ enum WorkspaceSection: Hashable, Identifiable {
     case remoteLocations
     case sharedLinks
     case transfers
+    case chat
     case settings
 
     var id: String {
@@ -44,6 +45,7 @@ enum WorkspaceSection: Hashable, Identifiable {
         case .remoteLocations: "remote-locations"
         case .sharedLinks: "shared-links"
         case .transfers: "transfers"
+        case .chat: "chat"
         case .settings: "settings"
         }
     }
@@ -311,6 +313,7 @@ final class WorkspaceModel {
     let allowsVerifiedRestore: Bool
     let allowsRemoteMountManagement: Bool
     let photoLibrary: PhotoLibraryModel
+    let chat: ChatWorkspaceModel
 
     var shares: [FileItem] = []
     var recycleRoots: [FileItem] = []
@@ -395,6 +398,7 @@ final class WorkspaceModel {
     init(
         profile: NasProfile,
         repository: any FileRepository,
+        chatRepository: any ChatRepository = UnverifiedDsmChatRepository(),
         transferNotifier: any TransferNotifying = TransferNotifierFactory.makeDefault()
     ) {
         self.profile = profile
@@ -407,6 +411,7 @@ final class WorkspaceModel {
             profileID: profile.id,
             thumbnailFallback: LocalPhotoThumbnailFallback(files: repository)
         )
+        self.chat = ChatWorkspaceModel(repository: chatRepository)
         if let data = UserDefaults.standard.data(forKey: "LanStash_RecentLocations_\(profile.id.uuidString)"),
            let saved = try? JSONDecoder().decode([FavoriteLocation].self, from: data) {
             recentLocations = saved
@@ -571,6 +576,8 @@ final class WorkspaceModel {
             }
         case .photos:
             await photoLibrary.loadIfNeeded()
+        case .chat:
+            await chat.loadIfNeeded()
         case .favorites, .recent, .remoteLocations, .sharedLinks, .transfers, .settings:
             break
         }

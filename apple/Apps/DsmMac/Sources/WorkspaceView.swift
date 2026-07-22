@@ -414,6 +414,8 @@ struct WorkspaceView: View {
             return "照片"
         case .transfers:
             return "传输中心"
+        case .chat:
+            return "消息"
         case .settings:
             return "设置"
         default:
@@ -480,6 +482,8 @@ struct WorkspaceView: View {
             )
         case .transfers:
             TransferCenterView(model: model, connectedWorkspaces: connectedWorkspaces)
+        case .chat:
+            ChatWorkspaceView(model: model.chat)
         case .settings:
             SettingsView(model: model, onRenameNAS: onRenameNAS)
         default:
@@ -800,6 +804,7 @@ private struct SidebarView: View {
 
     @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
     @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = true
+    @AppStorage("LanStash_Module_Chat") private var isChatModuleEnabled = true
     @State private var isNasListExpanded = true
     @State private var connectingProfileID: UUID? = nil
     @State private var confirmsLogout = false
@@ -891,6 +896,15 @@ private struct SidebarView: View {
                     NavigationLink(value: WorkspaceSection.photos) {
                         Label("照片", systemImage: "photo.on.rectangle.angled")
                             .foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            if isChatModuleEnabled {
+                Section("沟通") {
+                    NavigationLink(value: WorkspaceSection.chat) {
+                        Label("消息", systemImage: "bubble.left.and.bubble.right.fill")
+                            .foregroundStyle(.indigo)
                     }
                 }
             }
@@ -3683,6 +3697,7 @@ private struct SettingsView: View {
     @AppStorage("LanStash_DownloadChunkSize") private var chunkSizeSetting = 8
     @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
     @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = true
+    @AppStorage("LanStash_Module_Chat") private var isChatModuleEnabled = true
     @State private var storage = AppStorageInspector.snapshot()
     @State private var confirmsCacheCleanup = false
     @State private var showsSelectiveCleanupSheet = false
@@ -3750,6 +3765,19 @@ private struct SettingsView: View {
                                         .font(.body.weight(.medium))
                                 }
                                 Text("在侧边栏显示个人和共享照片空间，支持按相册浏览照片与视频。")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+
+                        Divider().opacity(0.3)
+
+                        Toggle(isOn: $isChatModuleEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("消息")
+                                    .font(.body.weight(.medium))
+                                Text("在侧边栏显示聊天入口。消息服务接入完成后，可用于一对一聊天、群聊和发送附件。")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

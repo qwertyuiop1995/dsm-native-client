@@ -21,6 +21,20 @@ public enum DsmAPIName {
     public static let fileStationVirtualFolder = "SYNO.FileStation.VirtualFolder"
     /// DSM File Station 的未公开挂载接口；只在能力发现明确返回时启用。
     public static let fileStationMount = "SYNO.FileStation.Mount"
+    /// Synology Chat 套件内部接口；仅在 DSM 能力发现明确返回时启用。
+    public static let chatChannel = "SYNO.Chat.Channel"
+    /// Synology Chat 命名会话内部接口；用于创建群聊和邀请成员。
+    public static let chatChannelNamed = "SYNO.Chat.Channel.Named"
+    /// Synology Chat 匿名会话内部接口；可能用于首次创建一对一会话，写入方法实机确认前不调用。
+    public static let chatChannelAnonymous = "SYNO.Chat.Channel.Anonymous"
+    /// Synology Chat 用户目录内部接口。
+    public static let chatUser = "SYNO.Chat.User"
+    /// Synology Chat 用户头像内部接口；仅用于读取当前账号可见的头像。
+    public static let chatUserAvatar = "SYNO.Chat.User.Avatar"
+    /// Synology Chat 消息内部接口。
+    public static let chatPost = "SYNO.Chat.Post"
+    /// Synology Chat 消息提醒内部接口。
+    public static let chatPostReminder = "SYNO.Chat.Post.Reminder"
 }
 
 private struct CapabilityPayload: Decodable, Sendable {
@@ -66,7 +80,14 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationFavorite,
         DsmAPIName.fileStationSharing,
         DsmAPIName.fileStationVirtualFolder,
-        DsmAPIName.fileStationMount
+        DsmAPIName.fileStationMount,
+        DsmAPIName.chatChannel,
+        DsmAPIName.chatChannelNamed,
+        DsmAPIName.chatChannelAnonymous,
+        DsmAPIName.chatUser,
+        DsmAPIName.chatUserAvatar,
+        DsmAPIName.chatPost,
+        DsmAPIName.chatPostReminder
     ]
 
     private let client: DsmAPIClient
@@ -168,6 +189,14 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationFavorite: 1...2,
         DsmAPIName.fileStationSharing: 1...3,
         DsmAPIName.fileStationVirtualFolder: 1...2,
-        DsmAPIName.fileStationMount: 1...1
+        DsmAPIName.fileStationMount: 1...1,
+        // Chat Server 没有公开普通用户聊天契约，范围按运行时返回值与已验证实现取交集。
+        DsmAPIName.chatChannel: 1...5,
+        DsmAPIName.chatChannelNamed: 1...1,
+        DsmAPIName.chatChannelAnonymous: 1...2,
+        DsmAPIName.chatUser: 1...3,
+        DsmAPIName.chatUserAvatar: 1...1,
+        DsmAPIName.chatPost: 1...8,
+        DsmAPIName.chatPostReminder: 1...8
     ]
 }

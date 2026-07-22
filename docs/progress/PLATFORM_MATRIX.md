@@ -85,4 +85,22 @@
 | 系统照片库自动备份 | 不适用 | 未开始 | 未开始 | 未开始 | 不适用 |
 | 后台上传/下载与离线任务恢复 | 未开始 | 未开始 | 未开始 | 未开始 | 未开始 |
 
+## Synology Chat 规划
+
+| 能力 | macOS | iPhone | iPad | Android | Windows |
+| --- | --- | --- | --- | --- | --- |
+| Chat 套件、版本与权限发现 | CH0 计划 | 复用 Apple 契约 | 复用 Apple 契约 | 按共同 Schema 实现 | 按共同 Schema 实现 |
+| 一对一聊天与文字消息 | CH1 计划 | CH7 计划 | CH7 计划 | CH7 计划 | CH7 计划 |
+| 创建私人群聊与多人聊天 | CH2 计划 | CH7 计划 | CH7 计划 | CH7 计划 | CH7 计划 |
+| Unicode Emoji 输入与显示 | CH1 计划 | CH7 计划 | CH7 计划 | CH7 计划 | CH7 计划 |
+| 图片发送、预览与保存 | CH3 计划 | CH7 计划 | CH7 计划 | CH7 计划 | CH7 计划 |
+| 视频发送、播放与保存 | CH3 计划 | CH7 计划 | CH7 计划 | CH7 计划 | CH7 计划 |
+| 文件附件发送、下载与打开 | CH3 计划 | CH7 计划 | CH7 计划 | CH7 计划 | CH7 计划 |
+| 语音消息录制、发送与播放 | CH3 计划 | CH7 计划 | CH7 计划 | CH7 计划 | CH7 计划 |
+| 消息提醒 | CH4 计划 | CH7 计划 | CH7 计划 | CH7 计划 | CH7 计划 |
+| 单选/多选投票 | CH4 计划 | CH7 计划 | CH7 计划 | CH7 计划 | CH7 计划 |
+| 加密一对一与私人群聊 | CH5 计划；验证前关闭 | CH7 计划 | CH7 计划 | CH7 计划 | CH7 计划 |
+
+完整范围、阶段和发布条件参见[Synology Chat 原生聊天功能开发计划](../development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)。当前不实现公开频道、机器人、高级消息管理或实时通话；内部用户接口和加密协议未通过 DSM build 与 Chat Server 版本验证时保持关闭。
+
 这些能力在 `STATUS.md` 和 `ROADMAP.md` 中有更详细的 DSM API 拆分与接入原则。

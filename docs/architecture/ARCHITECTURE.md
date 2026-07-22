@@ -30,6 +30,7 @@
 | Files | 共享目录、分页、详情、缩略图和预览 |
 | Transfer | 下载、上传、进度、取消和后台状态 |
 | Recycle | 回收站发现、恢复计划、冲突和校验 |
+| Chat | 一对一聊天、私人群聊、文字、Emoji、媒体附件、语音消息、提醒、投票、加密会话和消息同步 |
 | Local Storage | 非秘密配置、能力缓存和任务元数据 |
 | Secure Storage | SID、SynoToken、DID 和证书绑定 |
 
@@ -40,7 +41,8 @@
 ## API 边界
 
 - 官方：`SYNO.API.*`、公开 File Station API。
+- 官方 Chat 集成：`SYNO.Chat.External`，仅用于 Bot、Webhook 和机器人可见数据。
 - 内部：`SYNO.Core.*` 等未公开接口。
-- 内部能力默认关闭，必须按 DSM build 和套件版本验证。
+- 普通用户聊天所需的未公开接口属于内部能力，默认关闭，必须按 DSM build 和 Chat Server 套件版本逐项验证。
 
 当前工作范围和验收顺序参见[当前开发与验收计划](../development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)；早期完整规格保存在[第一阶段开发文档归档](../archive/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_V1_ARCHIVE_ZH.md)。

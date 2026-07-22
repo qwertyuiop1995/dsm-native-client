@@ -1,6 +1,6 @@
 # 产品路线图
 
-> 最后更新：2026-07-19
+> 最后更新：2026-07-22
 > “已实现”表示源码和自动化测试路径已经建立；“已验收”必须有真实 NAS 和版本记录。
 
 ## M0：工程基础与安全登录
@@ -91,6 +91,37 @@
 - Windows 初始化 C#/WinUI 3 solution，并实现桌面照片浏览、导入和导出。
 - 三套原生实现共同遵循照片契约、安全语义和兼容矩阵，不引入跨平台 UI 运行时。
 
+## M9：Synology Chat 协议与 macOS 聊天模块
+
+状态：已立项，尚未开始实现。
+
+- 在专用测试 NAS 上验证 Chat Server 套件、用户会话、完整客户端接口和实时同步方式。
+- 明确公开 `SYNO.Chat.External` 不用于普通用户聊天，建立独立用户聊天内部 Adapter。
+- 建立用户、会话、私人群聊、消息、附件和同步游标的共同契约。
+- 完成 macOS 一对一聊天、创建私人群聊、文字与 Unicode Emoji 收发。
+- 完成图片、视频、普通文件和语音消息的录制或选择、发送、预览、播放、下载和打开。
+- 完成消息提醒、单选/多选投票及结果同步。
+- 在密钥协议、安全存储、恢复、轮换和跨设备验证通过后支持加密一对一与私人群聊。
+- 所有内部能力按 DSM build 与 Chat Server 版本执行能力发现、契约测试、功能开关和失败降级。
+
+## M10：Apple 移动端 Chat
+
+状态：计划。
+
+- iPhone 和 iPad 复用 Apple Chat 领域层、Repository、同步和安全实现。
+- 实现一对一聊天、私人群聊、文字、Emoji、图片、视频、文件、语音消息、提醒、投票和加密会话的原生移动体验。
+- 完成触控、横竖屏、文件选择、媒体播放、VoiceOver、动态文字和弱网恢复验收。
+
+## M11：Android 与 Windows Chat 对齐
+
+状态：计划。
+
+- Android 使用 Kotlin、Jetpack Compose、OkHttp 和 Android Keystore 实现相同聊天与加密范围。
+- Windows 使用 C#、WinUI 3、HttpClient 和 Credential Locker/DPAPI 实现相同聊天与加密范围。
+- 三端分别遵循平台原生导航、通知、键盘、触控、屏幕阅读器和窗口行为。
+
+Chat 的阶段、接口边界、安全规则和发布门槛参见[Synology Chat 原生聊天功能开发计划](../development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)。
+
 ## 已识别但未排期的能力
 
 按 DSM 套件与风险等级整理，后续逐个按能力发现 + 版本契约测试 + 功能开关方式接入：
@@ -124,6 +155,7 @@
 - Audio Station、Video Station、Note Station
 - Synology Drive（`SYNO.SynologyDrive.*`）
 - Calendar、Contacts
+- Synology Chat 已移入 M9-M11，不再作为未排期候选
 - Surveillance Station
 - Hyper Backup / Active Backup
 - Synology Office

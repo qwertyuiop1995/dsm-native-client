@@ -24,6 +24,7 @@ macOS 当前重点：
 
 - [DSM Web API 参考](docs/api/DSM_WEB_API_REFERENCE_ZH.md)
 - [当前开发与验收计划](docs/development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)
+- [Synology Chat 原生聊天功能开发计划](docs/development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)
 - [第一阶段开发文档归档](docs/archive/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_V1_ARCHIVE_ZH.md)
 - [当前进度](docs/progress/STATUS.md)
 - [产品路线图](docs/progress/ROADMAP.md)

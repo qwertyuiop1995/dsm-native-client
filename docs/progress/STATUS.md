@@ -1,6 +1,6 @@
 # 当前开发进度
 
-> 最后更新：2026-07-19
+> 最后更新：2026-07-22
 > 当前里程碑：`macOS 文件客户端实机验收与稳定性收敛`
 
 ## 总体状态
@@ -12,6 +12,7 @@
 | Apple 共享工程 | 进行中 | Swift Package、macOS App 和 Apple CI 已建立；iPhone/iPad UI 尚未初始化 |
 | macOS 文件客户端 | 需要验证 | 主要功能已实现并通过自动化测试，正在收集真实 NAS 兼容证据 |
 | 照片管理模块 | 进行中 | 文件夹扫描已获实机确认；macOS 时间线、搜索筛选、预览、详情和基础管理源码已实现，等待完整实机与性能验收 |
+| Synology Chat 模块 | 已立项 | 范围为一对一、私人群聊、文字、Emoji、媒体与文件、语音消息、提醒、投票和加密会话；CH0 尚未开始 |
 | Android 客户端 | 未开始 | 保留原生扩展目录，后续初始化 Kotlin/Jetpack Compose 工程 |
 | Windows 客户端 | 未开始 | 保留原生扩展目录，后续初始化 C#/WinUI 3 solution |
 
@@ -57,6 +58,7 @@
 - **Virtual Machine Manager**：`SYNO.Virtualization.API.*` / `SYNO.Virtualization.*` 虚拟机生命周期、电源控制、镜像管理
 - **Container Manager / Docker**：`SYNO.Docker.*` 容器、镜像、网络、项目管理
 - **系统与硬件**：系统信息/利用率/进程/连接/日志、存储/硬盘/SMART、风扇/LED/蜂鸣器/电源计划/UPS、网络/DDNS/代理/防火墙、用户/群组/共享/配额、套件启停安装、计划任务、SSH/Telnet 终端
+- **Synology Chat**：普通用户聊天模块已立项；公开 `SYNO.Chat.External` 不满足一对一、私人群聊和附件收发需求，实际用户接口待 CH0 实机验证
 - **其他套件**：Audio Station、Video Station、Note Station、Synology Drive、Calendar、Contacts、Surveillance Station、Hyper Backup / Active Backup、Synology Office
 
 ### 平台实现
@@ -88,6 +90,21 @@
 
 照片模块按[照片管理开发计划](../development/NATIVE_DSM_PHOTOS_DEVELOPMENT_PLAN_ZH.md)推进。基础照片主流程已建立；下一步集中验证大图库、权限、弱网和写操作，并继续补齐相册与智能能力。
 
+## Synology Chat 进度
+
+| 里程碑 | 状态 | 下一出口 |
+| --- | --- | --- |
+| CH0 协议与会话探测 | 未开始 | 验证用户列表、聊天、媒体、语音、提醒、投票和加密边界，形成脱敏契约样本 |
+| CH1 macOS 一对一文字聊天 | 未开始 | 两个普通账号稳定收发文字和 Unicode Emoji，无重复发送 |
+| CH2 macOS 私人群聊 | 未开始 | 至少三个专用测试账号完成建群和多人收发验证 |
+| CH3 macOS 媒体、文件和语音 | 未开始 | 一对一和群聊均可收发、预览或播放全部附件类型 |
+| CH4 macOS 提醒与投票 | 未开始 | 提醒和单选/多选投票通过权限、弱网和同步验证 |
+| CH5 macOS 加密会话 | 未开始 | 密钥生命周期、安全评审和跨设备验证通过，无明文降级 |
+| CH6 macOS 发布验收 | 未开始 | 稳定性、兼容、安全、性能与可访问性出口通过 |
+| CH7 其他平台对齐 | 未开始 | iPhone/iPad、Android、Windows 按相同范围原生实现 |
+
+Chat 模块按[Synology Chat 原生聊天功能开发计划](../development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)推进。当前没有 Chat 实现代码；下一步必须先完成 CH0，不能根据未验证接口名称直接开发正式功能。
+
 ## 下一步
 
 1. 为测试 NAS 记录脱敏后的 DSM build、File Station 版本、证书类型和连接方式。
@@ -96,6 +113,7 @@
 4. 修复验证中发现的问题，并为关键回归补充正式自动化测试。
 5. 完成 macOS 发布前的无障碍、签名、公证、隐私和性能检查。
 6. 使用专用测试照片完成 PH0/PH1 只读实机验收，并补充完全脱敏 fixture 和版本记录。
+7. 为 Synology Chat 准备至少三个专用测试账号及虚构文字、图片、视频、文件、语音、提醒和投票数据，开始 CH0 协议与加密会话探测。
 
 ## 阻塞项
 

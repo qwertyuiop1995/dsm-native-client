@@ -195,7 +195,12 @@ struct PhotoLibraryView: View {
     @ViewBuilder
     private var content: some View {
         if (model.isLoadingTimeline || (model.browseMode == .timeline && model.isSyncingTimeline)) && model.displayedItems.isEmpty {
-            timelineLoadingState
+            VStack(spacing: 0) {
+                Spacer().frame(height: 36)
+                timelineLoadingState
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         } else if model.isLoading && model.displayedItems.isEmpty {
             loadingGrid
         } else if model.spaces.isEmpty {
@@ -673,7 +678,7 @@ private struct PhotoLibraryCell: View {
 private struct PhotoGridThumbnail: View {
     @Bindable var model: PhotoLibraryModel
     let item: PhotoLibraryItem
-    @State private var displayedImage: (cgImage: CGImage, orientation: Image.Orientation)?
+    @State private var displayedImage: DecodedImage?
 
     var body: some View {
         GeometryReader { geo in
@@ -703,14 +708,22 @@ private struct PhotoGridThumbnail: View {
         .task(priority: .userInitiated) {
             model.thumbnailBecameVisible(item)
             if let cached = await model.cachedThumbnailData(for: item) {
-                displayedImage = decodedImage(from: cached)
+                let decoded = await Task.detached(priority: .userInitiated) {
+                    DecodedImage(from: cached)
+                }.value
                 model.thumbnailRequestDidFinish(for: item)
+                guard !Task.isCancelled else { return }
+                displayedImage = decoded
                 return
             }
             let loadedData = await model.thumbnailData(for: item)
             model.thumbnailRequestDidFinish(for: item)
+            guard !Task.isCancelled, let loadedData else { return }
+            let decoded = await Task.detached(priority: .userInitiated) {
+                DecodedImage(from: loadedData)
+            }.value
             guard !Task.isCancelled else { return }
-            displayedImage = loadedData.flatMap { decodedImage(from: $0) }
+            displayedImage = decoded
         }
         .onDisappear {
             // 离屏时取消可见标记，并立即清空 displayedImage，释放像素位图内存

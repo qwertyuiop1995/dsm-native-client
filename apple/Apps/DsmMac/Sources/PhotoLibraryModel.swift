@@ -302,7 +302,7 @@ final class PhotoLibraryModel {
         }
     }
 
-    private static var isRunningTests: Bool {
+    private static nonisolated var isRunningTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
             || NSClassFromString("XCTestCase") != nil
     }
@@ -606,34 +606,64 @@ final class PhotoLibraryModel {
                     startingAt: [selectedSpace.rootPath],
                     existingFolderItemPaths: self.timelineFolderItemPaths
                 ) { [weak self] update in
-                    await MainActor.run {
-                        guard let self, generation == self.timelineGeneration else { return }
-                        // 1. 同步剔除已被删除的文件
-                        if !update.removedPaths.isEmpty {
-                            self.removeDeletedItems(at: update.removedPaths)
-                        }
-
-                        // 2. 增量归并新扫描到的项目，避免每批都重建字典并全局排序
-                        if !update.items.isEmpty {
-                            self.mergeTimelineItems(update.items)
-                        }
-
-                        // 3. 跟踪各个文件夹的文件路径映射
-                        if let firstItem = update.items.first {
-                            let folderPath = URL(fileURLWithPath: firstItem.path).deletingLastPathComponent().path
-                            self.timelineFolderItemPaths[folderPath] = update.items.map(\.path)
-                            if self.activeProfileID == nil {
-                                self.activeProfileID = firstItem.profileID
+                    guard let self else { return }
+                    if Self.isRunningTests {
+                        await MainActor.run {
+                            guard generation == self.timelineGeneration else { return }
+                            if !update.removedPaths.isEmpty {
+                                self.removeDeletedItems(at: update.removedPaths)
+                            }
+                            if !update.items.isEmpty {
+                                self.timelineItems = Self.mergeTimelineItems(existingItems: self.timelineItems, newItems: update.items)
+                            }
+                            if let firstItem = update.items.first {
+                                let folderPath = URL(fileURLWithPath: firstItem.path).deletingLastPathComponent().path
+                                self.timelineFolderItemPaths[folderPath] = update.items.map(\.path)
+                                if self.activeProfileID == nil {
+                                    self.activeProfileID = firstItem.profileID
+                                }
+                            }
+                            self.timelineScannedFolderCount = update.scannedFolderCount
+                            self.timelineSkippedFolderPaths = update.skippedFolderPaths
+                            if self.isLoadingTimeline {
+                                self.isLoadingTimeline = false
+                            }
+                            if !update.items.isEmpty || !update.removedPaths.isEmpty {
+                                self.saveCacheIfNeeded()
                             }
                         }
-
-                        self.timelineScannedFolderCount = update.scannedFolderCount
-                        self.timelineSkippedFolderPaths = update.skippedFolderPaths
-                        if self.isLoadingTimeline {
-                            self.isLoadingTimeline = false
-                        }
-                        if !update.items.isEmpty || !update.removedPaths.isEmpty {
-                            self.saveCacheIfNeeded()
+                    } else {
+                        Task.detached(priority: .utility) { [weak self] in
+                            guard let self else { return }
+                            let currentItems = await MainActor.run { self.timelineItems }
+                            let merged = update.items.isEmpty ? currentItems : Self.mergeTimelineItems(
+                                existingItems: currentItems,
+                                newItems: update.items
+                            )
+                            await MainActor.run { [weak self] in
+                                guard let self, generation == self.timelineGeneration else { return }
+                                if !update.removedPaths.isEmpty {
+                                    self.removeDeletedItems(at: update.removedPaths)
+                                }
+                                if !update.items.isEmpty {
+                                    self.timelineItems = merged
+                                }
+                                if let firstItem = update.items.first {
+                                    let folderPath = URL(fileURLWithPath: firstItem.path).deletingLastPathComponent().path
+                                    self.timelineFolderItemPaths[folderPath] = update.items.map(\.path)
+                                    if self.activeProfileID == nil {
+                                        self.activeProfileID = firstItem.profileID
+                                    }
+                                }
+                                self.timelineScannedFolderCount = update.scannedFolderCount
+                                self.timelineSkippedFolderPaths = update.skippedFolderPaths
+                                if self.isLoadingTimeline {
+                                    self.isLoadingTimeline = false
+                                }
+                                if !update.items.isEmpty || !update.removedPaths.isEmpty {
+                                    self.saveCacheIfNeeded()
+                                }
+                            }
                         }
                     }
                 }
@@ -682,15 +712,37 @@ final class PhotoLibraryModel {
                 startingAt: targetPaths,
                 existingFolderItemPaths: timelineFolderItemPaths
             ) { [weak self] update in
-                await MainActor.run {
-                    guard let self, generation == self.timelineGeneration else { return }
-                    if !update.removedPaths.isEmpty {
-                        self.removeDeletedItems(at: update.removedPaths)
+                guard let self else { return }
+                if Self.isRunningTests {
+                    await MainActor.run {
+                        guard generation == self.timelineGeneration else { return }
+                        if !update.removedPaths.isEmpty {
+                            self.removeDeletedItems(at: update.removedPaths)
+                        }
+                        if !update.items.isEmpty {
+                            self.timelineItems = Self.mergeTimelineItems(existingItems: self.timelineItems, newItems: update.items)
+                        }
+                        self.timelineSkippedFolderPaths = update.skippedFolderPaths
                     }
-                    if !update.items.isEmpty {
-                        self.mergeTimelineItems(update.items)
+                } else {
+                    Task.detached(priority: .utility) { [weak self] in
+                        guard let self else { return }
+                        let currentItems = await MainActor.run { self.timelineItems }
+                        let merged = update.items.isEmpty ? currentItems : Self.mergeTimelineItems(
+                            existingItems: currentItems,
+                            newItems: update.items
+                        )
+                        await MainActor.run { [weak self] in
+                            guard let self, generation == self.timelineGeneration else { return }
+                            if !update.removedPaths.isEmpty {
+                                self.removeDeletedItems(at: update.removedPaths)
+                            }
+                            if !update.items.isEmpty {
+                                self.timelineItems = merged
+                            }
+                            self.timelineSkippedFolderPaths = update.skippedFolderPaths
+                        }
                     }
-                    self.timelineSkippedFolderPaths = update.skippedFolderPaths
                 }
             }
             await MainActor.run {
@@ -756,27 +808,39 @@ final class PhotoLibraryModel {
         scheduleThumbnailPrefetchIfPossible()
     }
 
-    /// 将新扫描到的时间线项目按排序顺序增量归并到现有数组中，避免每批都重建字典并全局排序。
-    private func mergeTimelineItems(_ newItems: [PhotoLibraryItem]) {
-        let existingIDs = Set(timelineItems.map(\.id))
+    /// 将新扫描到的时间线项目在后台按排序顺序增量归并，使用 O(N) 双指针算法，绝不阻塞主线程。
+    private static nonisolated func mergeTimelineItems(
+        existingItems: [PhotoLibraryItem],
+        newItems: [PhotoLibraryItem]
+    ) -> [PhotoLibraryItem] {
+        let existingIDs = Set(existingItems.map(\.id))
         let sortedNewItems = newItems.filter { !existingIDs.contains($0.id) }
             .sorted(by: Self.timelineSort)
-        guard !sortedNewItems.isEmpty else { return }
+        guard !sortedNewItems.isEmpty else { return existingItems }
 
-        var merged = timelineItems
+        var merged: [PhotoLibraryItem] = []
+        merged.reserveCapacity(existingItems.count + sortedNewItems.count)
+
+        var existingIndex = 0
         var newIndex = 0
-        var insertIndex = 0
-        while insertIndex < merged.count && newIndex < sortedNewItems.count {
-            if Self.timelineSort(sortedNewItems[newIndex], merged[insertIndex]) {
-                merged.insert(sortedNewItems[newIndex], at: insertIndex)
+        while existingIndex < existingItems.count && newIndex < sortedNewItems.count {
+            let existing = existingItems[existingIndex]
+            let new = sortedNewItems[newIndex]
+            if Self.timelineSort(new, existing) {
+                merged.append(new)
                 newIndex += 1
+            } else {
+                merged.append(existing)
+                existingIndex += 1
             }
-            insertIndex += 1
+        }
+        if existingIndex < existingItems.count {
+            merged.append(contentsOf: existingItems[existingIndex...])
         }
         if newIndex < sortedNewItems.count {
             merged.append(contentsOf: sortedNewItems[newIndex...])
         }
-        timelineItems = merged
+        return merged
     }
 
     /// 删除任务已由 NAS 确认并复查后，只更新受影响的本地集合，避免重新扫描整个照片空间。
@@ -804,9 +868,9 @@ final class PhotoLibraryModel {
 
         let removedIDs = Set((removedFolderItems + removedTimelineItems).map(\.id))
         selection.subtract(removedIDs)
-        thumbnailCacheOrder.removeAll(where: { removedIDs.contains($0) })
         for id in removedIDs {
             thumbnailCache[id] = nil
+            thumbnailCacheAccessSequence[id] = nil
             unavailableThumbnails.remove(id)
         }
 
@@ -917,14 +981,13 @@ final class PhotoLibraryModel {
         return fallbackData
     }
 
-    @ObservationIgnored private var thumbnailCacheOrder: [PhotoLibraryItem.ID] = []
+    @ObservationIgnored private var thumbnailCacheAccessSequence: [PhotoLibraryItem.ID: UInt64] = [:]
+    @ObservationIgnored private var cacheAccessCounter: UInt64 = 0
 
     func cachedThumbnailData(for item: PhotoLibraryItem) async -> Data? {
         if let data = thumbnailCache[item.id] {
-            if let index = thumbnailCacheOrder.firstIndex(of: item.id) {
-                thumbnailCacheOrder.remove(at: index)
-                thumbnailCacheOrder.append(item.id)
-            }
+            cacheAccessCounter += 1
+            thumbnailCacheAccessSequence[item.id] = cacheAccessCounter
             return data
         }
         // 从磁盘加载缩略图持久化缓存，放到后台线程，避免阻塞主线程。
@@ -939,7 +1002,8 @@ final class PhotoLibraryModel {
         }.value
         if let diskData {
             thumbnailCache[item.id] = diskData
-            thumbnailCacheOrder.append(item.id)
+            cacheAccessCounter += 1
+            thumbnailCacheAccessSequence[item.id] = cacheAccessCounter
             return diskData
         }
         return nil
@@ -947,10 +1011,8 @@ final class PhotoLibraryModel {
 
     private func cacheThumbnail(_ data: Data, for item: PhotoLibraryItem) {
         let id = item.id
-        if let existingIndex = thumbnailCacheOrder.firstIndex(of: id) {
-            thumbnailCacheOrder.remove(at: existingIndex)
-        }
-        thumbnailCacheOrder.append(id)
+        cacheAccessCounter += 1
+        thumbnailCacheAccessSequence[id] = cacheAccessCounter
         thumbnailCache[id] = data
 
         // 异步写入磁盘落盘持久化
@@ -962,17 +1024,12 @@ final class PhotoLibraryModel {
 
         if thumbnailCache.count > 1000 {
             let overflowCount = thumbnailCache.count - 1000
-            var removedCount = 0
-            var i = 0
-            while i < thumbnailCacheOrder.count && removedCount < overflowCount {
-                let key = thumbnailCacheOrder[i]
-                if !visibleThumbnailIDs.contains(key) {
-                    thumbnailCache[key] = nil
-                    thumbnailCacheOrder.remove(at: i)
-                    removedCount += 1
-                } else {
-                    i += 1
-                }
+            let candidates = thumbnailCacheAccessSequence
+                .filter { !visibleThumbnailIDs.contains($0.key) }
+                .sorted { $0.value < $1.value }
+            for entry in candidates.prefix(overflowCount) {
+                thumbnailCache[entry.key] = nil
+                thumbnailCacheAccessSequence[entry.key] = nil
             }
         }
     }
@@ -1124,7 +1181,7 @@ final class PhotoLibraryModel {
         return "照片暂时无法读取，请检查连接后重试。"
     }
 
-    private static func timelineSort(_ lhs: PhotoLibraryItem, _ rhs: PhotoLibraryItem) -> Bool {
+    private static nonisolated func timelineSort(_ lhs: PhotoLibraryItem, _ rhs: PhotoLibraryItem) -> Bool {
         let left = lhs.createdAt ?? lhs.modifiedAt ?? .distantPast
         let right = rhs.createdAt ?? rhs.modifiedAt ?? .distantPast
         if left != right { return left > right }

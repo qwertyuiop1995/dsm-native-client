@@ -14,6 +14,7 @@ final class DsmChatRepositoryTests: XCTestCase {
         XCTAssertTrue(availability.supportedFeatures.contains(.groupConversation))
         XCTAssertTrue(availability.supportedFeatures.contains(.textMessage))
         XCTAssertTrue(availability.supportedFeatures.contains(.reminder))
+        XCTAssertTrue(availability.supportedFeatures.contains(.poll))
         XCTAssertTrue(availability.supportedFeatures.contains(.deleteOwnMessage))
         XCTAssertTrue(availability.supportedFeatures.contains(.closeConversation))
         XCTAssertTrue(availability.supportedFeatures.contains(.imageAttachment))
@@ -165,6 +166,67 @@ final class DsmChatRepositoryTests: XCTestCase {
         XCTAssertEqual(first.clientRequestID, requestID)
     }
 
+    func test首次单聊使用匿名会话接口并在创建后复查() async throws {
+        let users = response(#"{"success":true,"data":{"current_user_id":"1","users":[{"user_id":"1","nickname":"测试账号"},{"user_id":"2","nickname":"林青"}]}}"#)
+        let emptyChannels = response(#"{"success":true,"data":{"channels":[]}}"#)
+        let createdChannels = response(#"{"success":true,"data":{"channels":[{"channel_id":"27","type":"anonymous","members":["1","2"],"member_count":2}]}}"#)
+        let transport = MockHTTPTransport(responses: [
+            users,
+            emptyChannels,
+            response(#"{"success":true,"data":{"channel_id":"27"}}"#),
+            users,
+            createdChannels
+        ])
+        let repository = try makeRepository(transport: transport)
+        let requestID = UUID()
+
+        let first = try await repository.openDirectConversation(userID: "2", clientRequestID: requestID)
+        let second = try await repository.openDirectConversation(userID: "2", clientRequestID: requestID)
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.id, "27")
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 5)
+        let fields = try decodeForm(requests[2].httpBody)
+        XCTAssertEqual(fields["api"], DsmAPIName.chatChannelAnonymous)
+        XCTAssertEqual(fields["version"], "2")
+        XCTAssertEqual(fields["method"], "initiate")
+        XCTAssertEqual(fields["user_ids"], #"["2"]"#)
+        XCTAssertEqual(fields["encrypted"], "false")
+        XCTAssertEqual(fields["channel_key_encs"], "[]")
+    }
+
+    func test创建投票使用已确认契约并对同一请求去重() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"post_id":"9100","channel_id":"27","creator_id":"1","is_my_post":true,"create_at":1774166400000,"message":"周末去哪？"}}"#)
+        ])
+        let repository = try makeRepository(transport: transport)
+        let requestID = UUID()
+        let draft = try ChatPollDraft(
+            clientRequestID: requestID,
+            conversationID: "27",
+            question: "周末去哪？",
+            options: ["公园", "博物馆"],
+            allowsMultipleSelection: true,
+            isAnonymous: false
+        )
+
+        let first = try await repository.createPoll(draft)
+        let second = try await repository.createPoll(draft)
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.poll?.question, "周末去哪？")
+        XCTAssertEqual(first.poll?.options.map(\.text), ["公园", "博物馆"])
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 1)
+        let fields = try decodeForm(requests[0].httpBody)
+        XCTAssertEqual(fields["api"], DsmAPIName.chatPostVote)
+        XCTAssertEqual(fields["version"], "1")
+        XCTAssertEqual(fields["method"], "create")
+        XCTAssertEqual(fields["choices"], #"["公园","博物馆"]"#)
+        XCTAssertEqual(fields["options"], #"{"add_option":false,"anonymous":false,"multiple":true}"#)
+    }
+
     func test附件使用已验证的ChatPostV5多段上传且报告进度() async throws {
         let transport = MockHTTPTransport(responses: [
             response(#"{"success":true,"data":{"post_id":"9010","channel_id":"27","creator_id":"1","create_at":1774166400000,"message":"测试附件","type":"file","file_props":{"file_id":"f-1","name":"sample.png","size":7,"type":"png"}}}"#)
@@ -298,9 +360,11 @@ final class DsmChatRepositoryTests: XCTestCase {
         var names = [
             DsmAPIName.chatChannel: 5,
             DsmAPIName.chatChannelNamed: 1,
+            DsmAPIName.chatChannelAnonymous: 2,
             DsmAPIName.chatUser: 3,
             DsmAPIName.chatPost: 8,
-            DsmAPIName.chatPostReminder: 1
+            DsmAPIName.chatPostReminder: 1,
+            DsmAPIName.chatPostVote: 1
         ]
         if includesAvatarCapability {
             names[DsmAPIName.chatUserAvatar] = 1

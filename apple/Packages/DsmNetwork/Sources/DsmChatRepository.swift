@@ -12,6 +12,7 @@ public actor DsmChatRepository: ChatRepository {
     private let baseURL: URL
     private let transport: any DsmHTTPTransport
     private var completedMessages: [UUID: ChatMessage] = [:]
+    private var completedDirectConversations: [UUID: ChatConversation] = [:]
     private var completedGroups: [UUID: ChatConversation] = [:]
     private var completedReminders: [UUID: ChatReminder] = [:]
     private var completedMessageDeletions: Set<UUID> = []
@@ -63,6 +64,9 @@ public actor DsmChatRepository: ChatRepository {
         }
         if hasCapability(DsmAPIName.chatPostReminder) {
             features.insert(.reminder)
+        }
+        if hasCapability(DsmAPIName.chatPostVote) {
+            features.insert(.poll)
         }
         if supportsAttachmentUpload {
             features.formUnion([.imageAttachment, .videoAttachment, .fileAttachment])
@@ -138,20 +142,39 @@ public actor DsmChatRepository: ChatRepository {
         userID: String,
         clientRequestID: UUID
     ) async throws -> ChatConversation {
+        if let completed = completedDirectConversations[clientRequestID] { return completed }
         let normalizedID = userID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedID.isEmpty else { throw ChatContractError.emptyUserID }
         let conversations = try await listConversations()
         if let existing = conversations.first(where: {
             $0.kind == .direct && $0.memberIDs.contains(normalizedID)
         }) {
+            completedDirectConversations[clientRequestID] = existing
             return existing
         }
-        // Chat Server 没有暴露创建一对一匿名会话的方法；不能用建群接口伪造私聊。
-        throw AppError(
-            category: .apiUnavailable,
-            isRetryable: false,
-            safeUserMessage: "还没有与这位用户的聊天。请先在群晖 Chat 中向对方发送一条消息，再回到岚仓继续。"
+
+        // 内部 API：契约来自当前 Chat Server 官方网页客户端。
+        // 创建前先查重、创建后再读取会话复查，避免重复点击产生多个会话。
+        _ = try await call(
+            DsmAPIName.chatChannelAnonymous,
+            method: "initiate",
+            parameters: [
+                "user_ids": .stringArray([normalizedID]),
+                "encrypted": .boolean(false),
+                "channel_key_encs": .string("[]")
+            ]
         )
+        guard let verified = try await listConversations().first(where: {
+            $0.kind == .direct && $0.memberIDs.contains(normalizedID)
+        }) else {
+            throw AppError(
+                category: .partialFailure,
+                isRetryable: true,
+                safeUserMessage: "聊天可能已经创建，但暂时无法确认。请刷新会话列表后再试。"
+            )
+        }
+        completedDirectConversations[clientRequestID] = verified
+        return verified
     }
 
     public func createGroup(_ draft: ChatGroupDraft) async throws -> ChatConversation {
@@ -562,7 +585,80 @@ public actor DsmChatRepository: ChatRepository {
     }
 
     public func createPoll(_ draft: ChatPollDraft) async throws -> ChatMessage {
-        throw unsupported("投票协议仍需在实机确认，当前版本不会发送未经验证的投票请求。")
+        if let completed = completedMessages[draft.clientRequestID] { return completed }
+        let options = try pollOptionsJSON(for: draft)
+        let payload = try await call(
+            DsmAPIName.chatPostVote,
+            method: "create",
+            parameters: [
+                "channel_id": .string(draft.conversationID),
+                "message": .string(draft.question),
+                "choices": .stringArray(draft.options),
+                "options": .string(options)
+            ]
+        )
+        var parsed = makeMessage(from: payload, fallbackConversationID: draft.conversationID)
+        if parsed == nil,
+           let page = try? await listMessages(
+               conversationID: draft.conversationID,
+               before: nil,
+               limit: 50
+           ) {
+            parsed = page.messages.last {
+                $0.text == draft.question
+                    && isOwnedByCurrentUser($0)
+                    && abs($0.sentAt.timeIntervalSinceNow) <= 180
+            }
+        }
+        guard let parsed else {
+            throw AppError(
+                category: .partialFailure,
+                isRetryable: false,
+                safeUserMessage: "投票可能已经创建，但暂时无法确认。请刷新会话后再决定是否重试。"
+            )
+        }
+        let poll = ChatPoll(
+            id: parsed.id,
+            question: draft.question,
+            allowsMultipleSelection: draft.allowsMultipleSelection,
+            isAnonymous: draft.isAnonymous,
+            closesAt: draft.closesAt,
+            options: draft.options.enumerated().map {
+                ChatPollOption(id: "\(parsed.id)-choice-\($0.offset)", text: $0.element)
+            }
+        )
+        let result = ChatMessage(
+            id: parsed.id,
+            clientRequestID: draft.clientRequestID,
+            conversationID: parsed.conversationID,
+            senderID: parsed.senderID,
+            senderDisplayName: parsed.senderDisplayName,
+            isFromCurrentUser: true,
+            sentAt: parsed.sentAt,
+            text: parsed.text ?? draft.question,
+            attachments: parsed.attachments,
+            poll: poll,
+            deliveryState: .sent,
+            encryptionState: parsed.encryptionState
+        )
+        completedMessages[draft.clientRequestID] = result
+        return result
+    }
+
+    private func pollOptionsJSON(for draft: ChatPollDraft) throws -> String {
+        guard draft.closesAt == nil else {
+            throw unsupported("当前版本还不能安全设置投票截止时间，请先创建不设截止时间的投票。")
+        }
+        let values: [String: Any] = [
+            "multiple": draft.allowsMultipleSelection,
+            "anonymous": draft.isAnonymous,
+            "add_option": false
+        ]
+        let data = try JSONSerialization.data(withJSONObject: values, options: [.sortedKeys])
+        guard let result = String(data: data, encoding: .utf8) else {
+            throw invalidChatResponse()
+        }
+        return result
     }
 
     private func call(

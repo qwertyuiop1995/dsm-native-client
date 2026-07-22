@@ -369,6 +369,7 @@ private struct ChatConversationView: View {
     let conversation: ChatConversation
     @State private var attachmentURLs: [URL] = []
     @State private var presentsFileImporter = false
+    @State private var presentsPollComposer = false
     @State private var selectedMessageIDs: Set<String> = []
     @State private var pendingMessageDeletion: Set<String> = []
     @State private var presentsMessageDeletionConfirmation = false
@@ -510,6 +511,9 @@ private struct ChatConversationView: View {
             if case .success(let urls) = result {
                 attachmentURLs = Array(urls.prefix(1))
             }
+        }
+        .sheet(isPresented: $presentsPollComposer) {
+            CreatePollSheet(model: model, conversation: conversation)
         }
         .alert(
             pendingMessageDeletion.count == 1 ? "删除这条消息？" : "删除这 \(pendingMessageDeletion.count) 条消息？",
@@ -672,6 +676,17 @@ private struct ChatConversationView: View {
                 .help("打开系统表情与符号")
                 .accessibilityLabel("插入表情")
 
+                Button {
+                    presentsPollComposer = true
+                } label: {
+                    Label("创建投票", systemImage: "chart.bar.xaxis")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 28, height: 28)
+                }
+                .disabled(!model.canCreatePoll || model.isPerformingAction)
+                .help(model.canCreatePoll ? "创建投票" : "这台 NAS 尚未开放投票")
+                .accessibilityLabel("创建投票")
+
                 TextField("输入消息", text: draftText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
@@ -766,6 +781,111 @@ private struct ChatConversationView: View {
               !model.isPerformingAction else { return }
         pendingMessageDeletion = ids
         presentsMessageDeletionConfirmation = true
+    }
+}
+
+private struct CreatePollSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var model: ChatWorkspaceModel
+    let conversation: ChatConversation
+    @State private var question = ""
+    @State private var options = ["", ""]
+    @State private var allowsMultipleSelection = false
+    @State private var isAnonymous = false
+    @FocusState private var focusedField: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("创建投票")
+                        .font(.title2.bold())
+                    Text("发送到“\(conversation.title)”")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("取消") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+
+            TextField("投票问题", text: $question, axis: .vertical)
+                .lineLimit(1...3)
+                .textFieldStyle(.roundedBorder)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("选项")
+                    .font(.headline)
+                ForEach(options.indices, id: \.self) { index in
+                    HStack {
+                        TextField("选项 \(index + 1)", text: $options[index])
+                            .focused($focusedField, equals: index)
+                        if options.count > 2 {
+                            Button {
+                                options.remove(at: index)
+                            } label: {
+                                Label("移除选项 \(index + 1)", systemImage: "minus.circle")
+                                    .labelStyle(.iconOnly)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+                if options.count < 10 {
+                    Button {
+                        options.append("")
+                        focusedField = options.count - 1
+                    } label: {
+                        Label("添加选项", systemImage: "plus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            Toggle("允许选择多个选项", isOn: $allowsMultipleSelection)
+            Toggle("匿名投票", isOn: $isAnonymous)
+
+            HStack {
+                Text("至少填写两个不同的选项。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    Task {
+                        if await model.createPoll(
+                            question: question,
+                            options: options,
+                            allowsMultipleSelection: allowsMultipleSelection,
+                            isAnonymous: isAnonymous
+                        ) {
+                            dismiss()
+                        }
+                    }
+                } label: {
+                    if model.isPerformingAction {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("发送投票")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSubmit || model.isPerformingAction)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 460, minHeight: 390)
+    }
+
+    private var canSubmit: Bool {
+        let normalizedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedOptions = options
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let canonical = normalizedOptions.map { $0.lowercased() }
+        return !normalizedQuestion.isEmpty
+            && normalizedOptions.count >= 2
+            && Set(canonical).count == normalizedOptions.count
     }
 }
 

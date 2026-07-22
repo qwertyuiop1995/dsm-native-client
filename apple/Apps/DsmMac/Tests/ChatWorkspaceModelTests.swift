@@ -57,6 +57,24 @@ final class ChatWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(sentTexts, ["你好 👋"])
     }
 
+    func test创建投票后加入当前会话并显示成功提示() async throws {
+        let active = conversation(id: "conversation-1", title: "测试聊天", activity: Date())
+        let repository = ChatRepositoryStub(conversations: [active])
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+
+        let succeeded = await model.createPoll(
+            question: "周末去哪？",
+            options: ["公园", "博物馆"],
+            allowsMultipleSelection: false,
+            isAnonymous: true
+        )
+
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(model.messages.last?.poll?.question, "周末去哪？")
+        XCTAssertEqual(model.activeToast?.text, "投票已发送")
+    }
+
     func test向上分页会合并更早消息并保持唯一顺序() async {
         let active = conversation(id: "conversation-1", title: "测试聊天", activity: Date())
         let older = [
@@ -352,6 +370,7 @@ private actor ChatRepositoryStub: ChatRepository {
             .imageAttachment,
             .videoAttachment,
             .fileAttachment,
+            .poll,
             .deleteOwnMessage,
             .closeConversation
         ]

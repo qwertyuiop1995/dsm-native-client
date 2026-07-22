@@ -1,7 +1,7 @@
 # Synology DSM Web API 原生应用开发参考
 
-> 文档版本：1.0.0
-> 整理日期：2026-07-16
+> 文档版本：1.1.0
+> 整理日期：2026-07-23
 > 项目源码基线：`apaipai/dsm_helper` 的 `dev` 分支提交 `8c104e9a783a1acaf366a250e5fcd1d623f14eb2`
 > 该提交日期：2024-06-25；本文不会把更晚的 DSM/套件行为推断为已经验证
 > 适用范围：面向 Android、iOS、macOS 等原生客户端的 HTTP API 调用层设计
@@ -38,6 +38,17 @@
 - 安装的 File Station、Download Station、Container Manager、Synology Photos、VMM 版本。
 - 管理员与普通用户的权限差异。
 - 请求格式、返回字段和错误码的实际差异。
+
+### 1.3 当前实机只读确认
+
+2026-07-23 在一台已登录的测试 NAS 上完成了只读核对。为避免泄漏真实环境，本文只记录版本和能力结论：
+
+- DSM `7.2.1-69057 Update 12`；Virtual Machine Manager `2.6.5-12202`；Container Manager `24.0.2-1535`；Chat Server `2.4.1-22111`。
+- 使用无凭据的 `SYNO.API.Info query=all` 确认 API 名称、路径、版本范围与请求格式；使用已登录网页只核对菜单、字段和官方前端静态契约。
+- 未读取或保存 Cookie、SID、SynoToken、DID、浏览器存储、真实主机地址、账号、消息、虚拟机名称、容器名称或文件路径。
+- 未执行删除、断开连接、网络修改、虚拟机电源控制、容器控制、消息发送等写操作。
+
+本文把证据分成四级：`能力可发现`、`官方界面可见`、`官方前端静态契约确认`、`行为验证通过`。前三者都不能替代最后一级。
 
 ## 2. DSM Web API 通用协议
 
@@ -581,12 +592,15 @@ force_complete=false
 
 | API | 方法 | 观察用途 |
 | --- | --- | --- |
-| `SYNO.Virtualization.Cluster` | `get` | 集群摘要 |
-| `SYNO.Virtualization.Host` | `list` | 主机列表 |
-| `SYNO.Virtualization.Guest` | `list` | 虚拟机列表 |
-| `SYNO.Virtualization.Guest.Action` | `pwr_ctl`, `can_save`, `save`, `restore` | 电源、保存和恢复状态 |
+| `SYNO.Virtualization.Cluster` | `get` v2 | 集群摘要 |
+| `SYNO.Virtualization.Host` | `list`, `get` v2 | 主机列表与详情 |
+| `SYNO.Virtualization.Guest` | `list`, `get`, `get_basic`, `set`, `delete` v2 | 虚拟机列表、详情与配置 |
+| `SYNO.Virtualization.Guest.Action` | `pwr_ctl`, `reset`, `clone`, `move`, `export`, `check_poweron` v1 | 电源和生命周期动作 |
+| `SYNO.Virtualization.Guest.Image` | `list`, `create`, `delete`, `edit` v2 | 镜像管理 |
+| `SYNO.Virtualization.Network` | `list`, `get` v2 | 虚拟网络 |
+| `SYNO.Virtualization.Repo` | `list`, `get` v2 | 存储库 |
 
-这组调用应标记为内部接口，不能用官方 `SYNO.Virtualization.API.*` 文档来推断其参数。
+上述方法由当前 VMM 官方网页前端静态代码和 `SYNO.API.Info` 交叉确认，但没有执行写操作。它们仍应标记为内部接口，不能用官方 `SYNO.Virtualization.API.*` 文档来推断参数，也不能把“方法存在”写成“生命周期操作已通过”。当前测试环境没有可用于只读核对的虚拟机实例。
 
 ## 8. 项目源码中的内部与混合接口目录
 
@@ -632,8 +646,8 @@ force_complete=false
 | `SYNO.Core.System.Utilization` | `get` | `resource`, `type`；CPU、内存、网络等 | 低 |
 | `SYNO.Core.System.Process` | `list` | 进程列表 | 中 |
 | `SYNO.Core.System.ProcessGroup` | `list`, `service_info` | 服务进程组 | 中 |
-| `SYNO.Core.CurrentConnection` | `get`, `kick_connection` | 当前连接与踢出连接 | 高 |
-| `SYNO.Core.FileHandle` | `get`, `kick` | 打开的文件与强制断开 | 高 |
+| `SYNO.Core.CurrentConnection` | `list_by_user`, `download`, `kick_connection` | 当前连接、导出与踢出连接 | 高 |
+| `SYNO.Core.FileHandle` | `kickable_list`, `export`, `delete_db` | 打开的文件、导出与强制断开 | 高 |
 | `SYNO.Core.Service` | `get` | 服务状态 | 低 |
 | `SYNO.Core.Service.PortInfo` | `load` | 服务端口 | 低 |
 | `SYNO.Core.Desktop.Initdata` | `get` | DSM 桌面初始化数据 | 中 |
@@ -731,6 +745,9 @@ force_complete=false
 | `SYNO.Core.DDNS.Record` | `list`, `set`, `update_ip_address`, `delete`, `test` | 高 |
 | `SYNO.Core.DDNS.ExtIP` | `list` | 中 |
 | `SYNO.Core.DDNS.Synology` | `get_myds_account` | 高 |
+| `SYNO.Core.QuickConnect` | `get` v2、`set` v2、`check_availability` v3、`get_misc_config` v3、`set_server_alias` v2、`status` v1 | 高 |
+| `SYNO.Core.QuickConnect.Permission` | `get` v1 | 中 |
+| `SYNO.Core.QuickConnect.Hostname` | `get_ip` v1 | 中 |
 
 网络与 DDNS 响应可能包含公网 IP、域名、账号和代理配置。抓包样本必须删除这些字段后才能共享。
 
@@ -738,16 +755,16 @@ force_complete=false
 
 | API | 观察到的方法 | 风险 |
 | --- | --- | --- |
-| `SYNO.Docker.Container` | `list`, `get`, `start`, `restart`, `stop`, `signal`, `delete`, `get_process` | 高 |
+| `SYNO.Docker.Container` | `list`, `get`, `create`, `set`, `start`, `restart`, `stop`, `signal`, `delete`, `stats`, `get_process` | 高 |
 | `SYNO.Docker.Container.Resource` | `get` | 低 |
-| `SYNO.Docker.Container.Log` | `get`, `get_date_list` | 高 |
-| `SYNO.Docker.Image` | `list`, `delete`, `upgrade_start`, `upgrade_status`, `pull_start`, `pull_status` | 高 |
-| `SYNO.Docker.Registry` | `search`, `tags` | 中 |
-| `SYNO.Docker.Network` | `list` | 中 |
-| `SYNO.Docker.Project` | `list`, `get`, `create`, `delete` | 高 |
+| `SYNO.Docker.Container.Log` | `get`, `export` | 高 |
+| `SYNO.Docker.Image` | `list`, `get`, `import`, `upload`, `export`, `delete`, `prune`, `pull`, `upgrade` | 高 |
+| `SYNO.Docker.Registry` | `search`, `tags`, `get`, `create`, `set`, `delete`, `using` | 中 |
+| `SYNO.Docker.Network` | `list`, `list_container`, `create`, `set`, `remove` | 高 |
+| `SYNO.Docker.Project` | `list`, `get`, `create`, `update`, `delete`, `log`, `get_share_info` | 高 |
 | `SYNO.Docker.Log` | `list` | 高 |
 
-这些名称对应旧 Docker/Container Manager Web UI 内部接口。套件升级时名称、字段和流式日志方式很容易改变。容器环境变量、挂载路径、Registry 凭据和日志应视为秘密。
+这些名称由当前 Container Manager 官方网页前端和能力清单确认；本轮只查看概览与列表，没有控制容器或读取环境变量、挂载路径和日志。套件升级时名称、字段和流式日志方式很容易改变。容器环境变量、挂载路径、Registry 凭据和日志应视为秘密。
 
 ### 8.9 Synology Photos - 内部
 
@@ -765,7 +782,25 @@ force_complete=false
 
 源码还包含 DSM 6 时代 Moments/Photo 相关变体，应按产品版本拆分适配。特别注意：项目中部分缩略图和下载 URL 把 `_sid` 拼在查询串中；新应用不要照搬，应使用带认证的请求数据源，避免 SID 出现在日志、历史或第三方播放器中。
 
-### 8.10 其他内部接口
+### 8.10 Synology Chat - 内部
+
+当前 Chat Server 官方网页客户端与 `SYNO.API.Info` 交叉确认以下契约。它们都不是公开的第三方普通用户聊天 API；公开的 `SYNO.Chat.External` 不能替代这些用户会话接口。
+
+| API | 版本/方法 | 已确认参数或用途 |
+| --- | --- | --- |
+| `SYNO.Chat.Channel.Anonymous` | v2 `initiate` | `user_ids`, `encrypted`, `channel_key_encs`；首次一对一会话 |
+| `SYNO.Chat.Channel.Named` | v1 `create`, `join`, `invite` | 私人群聊 |
+| `SYNO.Chat.Post` | v5 `create` | 文字或 multipart `file` 附件 |
+| `SYNO.Chat.Post.File` | v2 `get`, `thumbnail` | `get(post_id)`；`thumbnail(post_id,type)` |
+| `SYNO.Chat.Post.Reminder` | v1 `set`, `list`, `delete`, `get` | `set(post_id,remind_at)`；`delete(post_id)` |
+| `SYNO.Chat.Post.Schedule` | v1 `create`, `set`, `list`, `delete` | `channel_id`, `message`, `send_at`；修改时使用 `cronjob_id` |
+| `SYNO.Chat.Post.Vote` | v1 `create`, `close`, `delete`, `set`, `get_choices`, `vote`, `create_option` | 创建时使用 `channel_id`, `message`, `choices`, `options`；`options` 含 `multiple`, `anonymous`, `add_option` 和可选 `expire_at` |
+
+官方网页客户端的实时同步使用当前源站下的 Socket.IO 路径 `sc/socket.io`，初始化后取得连接标识，处理消息创建/更新/删除、频道加入/关闭、输入状态和用户更新等事件。认证字段属于秘密，不得写入本文、日志或 URL 遥测。岚仓当前仍使用前台轻量刷新；在完成断线重连、事件去重、会话撤销和后台策略前不直接切换实时通道。
+
+直接会话还存在 `encrypted` 与 `channel_key_encs`，官方前端包含密钥处理代码；这只证明加密能力存在，不足以安全复现密钥生成、恢复、轮换和设备撤销，因此保持关闭。网页端可播放音频附件，但没有确认独立的录音消息创建契约。
+
+### 8.11 其他内部接口
 
 | API | 方法/用途 | 风险 |
 | --- | --- | --- |
@@ -775,7 +810,7 @@ force_complete=false
 | `SYNO.Core.MediaIndexing.MobileEnabled` | `get`, `set` | 中 |
 | `SYNO.Core.MediaIndexing.MediaConverter` | `status` 及动态转换动作 | 中 |
 
-### 8.11 内部接口的调用规则
+### 8.12 内部接口的调用规则
 
 每个内部 API 必须满足以下条件才能启用：
 

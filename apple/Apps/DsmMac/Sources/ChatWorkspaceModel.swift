@@ -118,6 +118,10 @@ final class ChatWorkspaceModel {
         )
     }
 
+    var canCreatePoll: Bool {
+        canUseMessaging && availability.supportedFeatures.contains(.poll)
+    }
+
     var canDeleteOwnMessages: Bool {
         canUseMessaging && availability.supportedFeatures.contains(.deleteOwnMessage)
     }
@@ -327,6 +331,37 @@ final class ChatWorkspaceModel {
             let conversation = try await repository.createGroup(draft)
             merge(conversation)
             await selectConversation(id: conversation.id)
+            return true
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
+    func createPoll(
+        question: String,
+        options: [String],
+        allowsMultipleSelection: Bool,
+        isAnonymous: Bool
+    ) async -> Bool {
+        guard canCreatePoll, !isPerformingAction,
+              let conversationID = selectedConversationID else { return false }
+        isPerformingAction = true
+        defer { isPerformingAction = false }
+        do {
+            let draft = try ChatPollDraft(
+                conversationID: conversationID,
+                question: question,
+                options: options,
+                allowsMultipleSelection: allowsMultipleSelection,
+                isAnonymous: isAnonymous
+            )
+            let message = try await repository.createPoll(draft)
+            guard selectedConversationID == conversationID else { return true }
+            messages.removeAll { $0.id == message.id }
+            messages.append(message)
+            messages.sort(by: Self.messageSort)
+            showToast("投票已发送", icon: "chart.bar.fill")
             return true
         } catch {
             show(error)

@@ -411,7 +411,10 @@ final class WorkspaceModel {
             profileID: profile.id,
             thumbnailFallback: LocalPhotoThumbnailFallback(files: repository)
         )
-        self.chat = ChatWorkspaceModel(repository: chatRepository)
+        self.chat = ChatWorkspaceModel(
+            repository: chatRepository,
+            currentAccountName: profile.usernameHint
+        )
         if let data = UserDefaults.standard.data(forKey: "LanStash_RecentLocations_\(profile.id.uuidString)"),
            let saved = try? JSONDecoder().decode([FavoriteLocation].self, from: data) {
             recentLocations = saved

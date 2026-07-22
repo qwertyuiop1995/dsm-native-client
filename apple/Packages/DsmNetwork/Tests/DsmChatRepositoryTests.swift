@@ -14,6 +14,8 @@ final class DsmChatRepositoryTests: XCTestCase {
         XCTAssertTrue(availability.supportedFeatures.contains(.groupConversation))
         XCTAssertTrue(availability.supportedFeatures.contains(.textMessage))
         XCTAssertTrue(availability.supportedFeatures.contains(.reminder))
+        XCTAssertTrue(availability.supportedFeatures.contains(.deleteOwnMessage))
+        XCTAssertTrue(availability.supportedFeatures.contains(.closeConversation))
         XCTAssertFalse(availability.supportedFeatures.contains(.fileAttachment))
     }
 
@@ -161,6 +163,87 @@ final class DsmChatRepositoryTests: XCTestCase {
         XCTAssertEqual(first.clientRequestID, requestID)
     }
 
+    func test删除自己的消息并复查结果且重复请求只执行一次() async throws {
+        let ownPost = #"{"success":true,"data":{"posts":[{"post_id":"9001","channel_id":"27","creator_id":"1","creator_name":"testaccount","create_at":1774166400000,"message":"待删除"}]}}"#
+        let transport = MockHTTPTransport(responses: [
+            response(ownPost),
+            response(#"{"success":true}"#),
+            response(#"{"success":true,"data":{"posts":[]}}"#)
+        ])
+        let repository = try makeRepository(transport: transport)
+        let requestID = UUID()
+
+        try await repository.deleteMessage(
+            conversationID: "27",
+            messageID: "9001",
+            clientRequestID: requestID
+        )
+        try await repository.deleteMessage(
+            conversationID: "27",
+            messageID: "9001",
+            clientRequestID: requestID
+        )
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 3)
+        let deleteFields = try decodeForm(requests[1].httpBody)
+        XCTAssertEqual(deleteFields["api"], DsmAPIName.chatPost)
+        XCTAssertEqual(deleteFields["method"], "delete")
+        XCTAssertEqual(deleteFields["post_id"], "9001")
+    }
+
+    func test拒绝删除其他成员发送的消息且不发送写请求() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"posts":[{"post_id":"9001","channel_id":"27","creator_id":"2","creator_name":"other","create_at":1774166400000,"message":"其他成员消息"}]}}"#)
+        ])
+        let repository = try makeRepository(transport: transport)
+
+        do {
+            try await repository.deleteMessage(
+                conversationID: "27",
+                messageID: "9001",
+                clientRequestID: UUID()
+            )
+            XCTFail("应拒绝删除其他成员的消息")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .permissionDenied)
+        }
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func test关闭会话后复查会话已移除() async throws {
+        let users = response(#"{"success":true,"data":{"current_user_id":"1","users":[{"user_id":"1","nickname":"testaccount"},{"user_id":"2","nickname":"other"}]}}"#)
+        let existingChannels = response(#"{"success":true,"data":{"channels":[{"channel_id":"27","type":"anonymous","members":["1","2"]}]}}"#)
+        let emptyChannels = response(#"{"success":true,"data":{"channels":[]}}"#)
+        let transport = MockHTTPTransport(responses: [
+            users,
+            existingChannels,
+            response(#"{"success":true}"#),
+            users,
+            emptyChannels
+        ])
+        let repository = try makeRepository(transport: transport)
+        let requestID = UUID()
+
+        try await repository.closeConversation(
+            conversationID: "27",
+            clientRequestID: requestID
+        )
+        try await repository.closeConversation(
+            conversationID: "27",
+            clientRequestID: requestID
+        )
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 5)
+        let closeFields = try decodeForm(requests[2].httpBody)
+        XCTAssertEqual(closeFields["api"], DsmAPIName.chatChannel)
+        XCTAssertEqual(closeFields["method"], "close")
+        XCTAssertEqual(closeFields["channel_id"], "27")
+    }
+
     private func makeRepository(
         transport: MockHTTPTransport,
         includesAvatarCapability: Bool = false
@@ -186,7 +269,12 @@ final class DsmChatRepositoryTests: XCTestCase {
             ))
         }))
         return try DsmChatRepository(
-            profile: NasProfile(displayName: "测试设备", host: "nas.example.invalid", port: 5_001),
+            profile: NasProfile(
+                displayName: "测试设备",
+                host: "nas.example.invalid",
+                port: 5_001,
+                usernameHint: "testaccount"
+            ),
             capabilities: capabilities,
             session: AuthSession(
                 sid: "SANITIZED_TEST_SID",

@@ -14,8 +14,11 @@ public actor DsmChatRepository: ChatRepository {
     private var completedMessages: [UUID: ChatMessage] = [:]
     private var completedGroups: [UUID: ChatConversation] = [:]
     private var completedReminders: [UUID: ChatReminder] = [:]
+    private var completedMessageDeletions: Set<UUID> = []
+    private var completedConversationClosures: Set<UUID> = []
     private var knownUsersByID: [String: ChatUser] = [:]
     private var cachedCurrentUserID: String?
+    private let currentAccountName: String?
     private var avatarCache: [String: Data] = [:]
     private var unavailableAvatarUserIDs: Set<String> = []
 
@@ -34,6 +37,7 @@ public actor DsmChatRepository: ChatRepository {
         self.capabilities = capabilities
         self.baseURL = resolvedBaseURL
         self.transport = resolvedTransport
+        currentAccountName = Self.normalizedIdentityName(profile.usernameHint)
         credential = DsmSessionCredential(sid: session.sid, synoToken: session.synoToken)
         client = DsmAPIClient(
             baseURL: resolvedBaseURL,
@@ -47,7 +51,13 @@ public actor DsmChatRepository: ChatRepository {
               hasCapability(DsmAPIName.chatPost) else {
             return ChatAvailability(status: .unavailable)
         }
-        var features: Set<ChatFeature> = [.directConversation, .textMessage, .emoji]
+        var features: Set<ChatFeature> = [
+            .directConversation,
+            .textMessage,
+            .emoji,
+            .deleteOwnMessage,
+            .closeConversation
+        ]
         if hasCapability(DsmAPIName.chatChannelNamed) {
             features.insert(.groupConversation)
         }
@@ -265,6 +275,91 @@ public actor DsmChatRepository: ChatRepository {
         return result
     }
 
+    public func deleteMessage(
+        conversationID: String,
+        messageID: String,
+        clientRequestID: UUID
+    ) async throws {
+        if completedMessageDeletions.contains(clientRequestID) { return }
+        let normalizedConversationID = conversationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedMessageID = messageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedConversationID.isEmpty else { throw ChatContractError.emptyConversationID }
+        guard !normalizedMessageID.isEmpty else {
+            throw AppError(
+                category: .notFound,
+                isRetryable: false,
+                safeUserMessage: "没有找到要删除的消息，请刷新后重试。"
+            )
+        }
+
+        let currentPage = try await listMessages(
+            conversationID: normalizedConversationID,
+            before: nil,
+            limit: 100
+        )
+        guard let message = currentPage.messages.first(where: { $0.id == normalizedMessageID }) else {
+            completedMessageDeletions.insert(clientRequestID)
+            return
+        }
+        guard isOwnedByCurrentUser(message) else {
+            throw AppError(
+                category: .permissionDenied,
+                isRetryable: false,
+                safeUserMessage: "只能删除自己发送的消息。"
+            )
+        }
+
+        // 内部 API：SYNO.Chat.Post/delete 尚无公开开发者契约，必须由能力发现和实机复查共同保护。
+        try await callVoid(
+            DsmAPIName.chatPost,
+            method: "delete",
+            parameters: ["post_id": .string(normalizedMessageID)]
+        )
+        let verifiedPage = try await listMessages(
+            conversationID: normalizedConversationID,
+            before: nil,
+            limit: 100
+        )
+        guard !verifiedPage.messages.contains(where: { $0.id == normalizedMessageID }) else {
+            throw AppError(
+                category: .partialFailure,
+                isRetryable: true,
+                safeUserMessage: "消息没有从会话中移除，请确认管理员允许删除消息后重试。"
+            )
+        }
+        completedMessageDeletions.insert(clientRequestID)
+    }
+
+    public func closeConversation(
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws {
+        if completedConversationClosures.contains(clientRequestID) { return }
+        let normalizedID = conversationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedID.isEmpty else { throw ChatContractError.emptyConversationID }
+        let currentConversations = try await listConversations()
+        guard currentConversations.contains(where: { $0.id == normalizedID }) else {
+            completedConversationClosures.insert(clientRequestID)
+            return
+        }
+
+        // 内部 API：群晖客户端称此操作为“关闭会话”；消息会进入 Chat 归档而不是本地直接抹除。
+        try await callVoid(
+            DsmAPIName.chatChannel,
+            method: "close",
+            parameters: ["channel_id": .string(normalizedID)]
+        )
+        let verifiedConversations = try await listConversations()
+        guard !verifiedConversations.contains(where: { $0.id == normalizedID }) else {
+            throw AppError(
+                category: .partialFailure,
+                isRetryable: true,
+                safeUserMessage: "会话仍然存在，可能没有关闭权限。请刷新后重试。"
+            )
+        }
+        completedConversationClosures.insert(clientRequestID)
+    }
+
     public func setReminder(
         messageID: String,
         remindAt: Date,
@@ -304,6 +399,32 @@ public actor DsmChatRepository: ChatRepository {
                 parameters: parameters,
                 credential: credential,
                 as: ChatJSON.self
+            )
+        } catch let error as DsmNetworkError {
+            throw mapChatError(error)
+        }
+    }
+
+    /// 调用只返回成功状态、不携带 `data` 的 Chat 写操作。
+    ///
+    /// Chat Server 的删除消息、关闭会话等内部接口在成功时通常只返回
+    /// `{ "success": true }`。若按读取接口强制解析 `data`，会在写入已经
+    /// 生效后错误地向用户报告失败。
+    private func callVoid(
+        _ name: String,
+        method: String,
+        parameters: [String: DsmParameterValue]
+    ) async throws {
+        let capability = try requireCapability(name)
+        do {
+            try await client.callVoid(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: method,
+                requestFormat: capability.requestFormat,
+                parameters: parameters,
+                credential: credential
             )
         } catch let error as DsmNetworkError {
             throw mapChatError(error)
@@ -403,6 +524,21 @@ public actor DsmChatRepository: ChatRepository {
     private static func date(from raw: Double?) -> Date? {
         guard let raw else { return nil }
         return Date(timeIntervalSince1970: raw > 10_000_000_000 ? raw / 1_000 : raw)
+    }
+
+    private func isOwnedByCurrentUser(_ message: ChatMessage) -> Bool {
+        if message.isFromCurrentUser == true { return true }
+        if cachedCurrentUserID == message.senderID { return true }
+        guard let currentAccountName else { return false }
+        return Self.normalizedIdentityName(message.senderDisplayName) == currentAccountName
+            || Self.normalizedIdentityName(knownUsersByID[message.senderID]?.displayName) == currentAccountName
+    }
+
+    private static func normalizedIdentityName(_ value: String?) -> String? {
+        let normalized = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized?.isEmpty == false ? normalized : nil
     }
 
     private func makeUser(from value: ChatJSON, currentUserID: String?) -> ChatUser? {

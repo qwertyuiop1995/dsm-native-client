@@ -7,6 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APPLE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$APPLE_DIR/.." && pwd)"
 WORKSPACE="$APPLE_DIR/DsmNativeClient.xcworkspace"
 SCHEME="DsmMac"
 PRODUCT_NAME="LanStash"
@@ -26,6 +27,27 @@ SELECTED_CHOICE=""
 fail() {
     echo "错误：$*" >&2
     exit 1
+}
+
+validate_xcode_source_membership() {
+    local project_file="$SCRIPT_DIR/DsmMac.xcodeproj/project.pbxproj"
+    local source_file=""
+    local source_name=""
+    local missing_sources=()
+
+    [[ -f "$project_file" ]] || fail "找不到 Xcode 项目文件：$project_file"
+    shopt -s nullglob
+    for source_file in "$SCRIPT_DIR/Sources/"*.swift; do
+        source_name="$(basename "$source_file")"
+        if ! /usr/bin/grep -Fq "/* $source_name in Sources */" "$project_file"; then
+            missing_sources[${#missing_sources[@]}]="$source_name"
+        fi
+    done
+    shopt -u nullglob
+
+    if [[ ${#missing_sources[@]} -gt 0 ]]; then
+        fail "以下源码尚未加入 macOS App 构建目标：${missing_sources[*]}"
+    fi
 }
 
 cleanup_old_packages() {
@@ -224,6 +246,16 @@ done
 
 [[ -d "$WORKSPACE" ]] || fail "找不到 Xcode 工作区：$WORKSPACE"
 [[ -f "$ENTITLEMENTS" ]] || fail "找不到权限文件：$ENTITLEMENTS"
+validate_xcode_source_membership
+
+SOURCE_COMMIT="$(git -C "$REPO_ROOT" rev-parse --verify HEAD)"
+SOURCE_BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --quiet --short HEAD || echo detached)"
+SOURCE_STATE="clean"
+if [[ -n "$(git -C "$REPO_ROOT" status --short)" ]]; then
+    SOURCE_STATE="包含未提交改动"
+fi
+
+echo "==> 源码：$SOURCE_BRANCH @ ${SOURCE_COMMIT:0:12}（${SOURCE_STATE}）"
 
 HOST_ARCH="$(uname -m)"
 case "$TARGET_ARCH" in
@@ -270,6 +302,20 @@ APP_PATH="$DIST_DIR/$PRODUCT_NAME.app"
 rm -rf "$APP_PATH"
 /usr/bin/ditto "$BUILT_APP" "$APP_PATH"
 
+PLIST_BUDDY="/usr/libexec/PlistBuddy"
+[[ -x "$PLIST_BUDDY" ]] || fail "找不到 PlistBuddy"
+if ! "$PLIST_BUDDY" -c "Add :LanStashSourceCommit string $SOURCE_COMMIT" "$APP_PATH/Contents/Info.plist" 2>/dev/null; then
+    "$PLIST_BUDDY" -c "Set :LanStashSourceCommit $SOURCE_COMMIT" "$APP_PATH/Contents/Info.plist"
+fi
+
+if [[ -f "$SCRIPT_DIR/Sources/ChatWorkspaceView.swift" ]] \
+    && ! /usr/bin/grep -a -Fq "ChatWorkspaceView" "$APP_PATH/Contents/MacOS/$PRODUCT_NAME"; then
+    fail "源码包含 Chat，但构建产物未发现 ChatWorkspaceView，请检查 Release target"
+fi
+if [[ -f "$SCRIPT_DIR/Sources/ChatWorkspaceView.swift" ]]; then
+    echo "==> 已验证 Chat 界面进入构建产物"
+fi
+
 echo "==> 签名应用"
 if [[ "$SIGNING_IDENTITY" == "-" ]]; then
     /usr/bin/codesign \
@@ -292,8 +338,6 @@ else
 fi
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
-PLIST_BUDDY="/usr/libexec/PlistBuddy"
-[[ -x "$PLIST_BUDDY" ]] || fail "找不到 PlistBuddy"
 VERSION="$($PLIST_BUDDY -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
 BUILD_NUMBER="$($PLIST_BUDDY -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist")"
 EXECUTABLE="$APP_PATH/Contents/MacOS/$PRODUCT_NAME"
@@ -346,6 +390,6 @@ else
 fi
 
 if [[ "$RUN_AFTER_PACKAGE" -eq 1 ]]; then
-    echo "==> 启动 $PRODUCT_NAME"
-    /usr/bin/open "$APP_PATH"
+    echo "==> 启动刚生成的 $PRODUCT_NAME（新实例）"
+    /usr/bin/open -n "$APP_PATH"
 fi

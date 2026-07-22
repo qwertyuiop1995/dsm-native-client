@@ -41,6 +41,21 @@ public actor UnverifiedDsmChatRepository: ChatRepository {
         throw unavailableError()
     }
 
+    public func deleteMessage(
+        conversationID: String,
+        messageID: String,
+        clientRequestID: UUID
+    ) async throws {
+        throw unavailableError()
+    }
+
+    public func closeConversation(
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws {
+        throw unavailableError()
+    }
+
     public func setReminder(
         messageID: String,
         remindAt: Date,

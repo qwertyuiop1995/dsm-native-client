@@ -57,6 +57,135 @@ final class ChatWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(sentTexts, ["你好 👋"])
     }
 
+    func test使用登录账号识别当前用户并将其消息标记为自己() async {
+        let repository = ChatRepositoryStub(
+            conversations: [conversation(
+                id: "conversation-1",
+                title: "测试聊天",
+                activity: Date(timeIntervalSince1970: 1_000)
+            )],
+            users: [ChatUser(id: "user-1", displayName: "YuangY")]
+        )
+        let model = ChatWorkspaceModel(
+            repository: repository,
+            currentAccountName: " yuangy "
+        )
+        await model.loadIfNeeded()
+        let ownMessage = ChatMessage(
+            id: "message-1",
+            conversationID: "conversation-1",
+            senderID: "user-1",
+            isFromCurrentUser: false,
+            sentAt: Date(),
+            text: "这是我发送的消息"
+        )
+
+        XCTAssertEqual(model.currentUserID, "user-1")
+        XCTAssertTrue(model.isCurrentUser(ownMessage))
+    }
+
+    func test登录账号不会把其他成员的消息标记为自己() async {
+        let repository = ChatRepositoryStub(
+            conversations: [conversation(
+                id: "conversation-1",
+                title: "测试聊天",
+                activity: Date(timeIntervalSince1970: 1_000)
+            )],
+            users: [
+                ChatUser(id: "current-user", displayName: "yuangy"),
+                ChatUser(id: "other-user", displayName: "chenwh")
+            ]
+        )
+        let model = ChatWorkspaceModel(
+            repository: repository,
+            currentAccountName: "yuangy"
+        )
+        await model.loadIfNeeded()
+        let otherMessage = ChatMessage(
+            id: "message-2",
+            conversationID: "conversation-1",
+            senderID: "other-user",
+            senderDisplayName: "chenwh",
+            sentAt: Date(),
+            text: "这是其他成员的消息"
+        )
+
+        XCTAssertFalse(model.isCurrentUser(otherMessage))
+    }
+
+    func test批量删除自己的消息后直接同步当前会话() async {
+        let activeConversation = conversation(
+            id: "conversation-1",
+            title: "测试聊天",
+            activity: Date(timeIntervalSince1970: 1_000)
+        )
+        let ownMessages = ["message-1", "message-2"].map { id in
+            ChatMessage(
+                id: id,
+                conversationID: activeConversation.id,
+                senderID: "current-user",
+                isFromCurrentUser: true,
+                sentAt: Date(),
+                text: "待删除消息"
+            )
+        }
+        let repository = ChatRepositoryStub(
+            conversations: [activeConversation],
+            messagesByConversation: [activeConversation.id: ownMessages]
+        )
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+
+        let deletedCount = await model.deleteMessages(ids: Set(ownMessages.map(\.id)))
+
+        XCTAssertEqual(deletedCount, 2)
+        XCTAssertTrue(model.messages.isEmpty)
+        XCTAssertEqual(model.statusMessage, "已删除 2 条消息。")
+    }
+
+    func test不能删除其他成员发送的消息() async {
+        let activeConversation = conversation(
+            id: "conversation-1",
+            title: "测试聊天",
+            activity: Date(timeIntervalSince1970: 1_000)
+        )
+        let otherMessage = ChatMessage(
+            id: "message-1",
+            conversationID: activeConversation.id,
+            senderID: "other-user",
+            isFromCurrentUser: false,
+            sentAt: Date(),
+            text: "其他成员消息"
+        )
+        let repository = ChatRepositoryStub(
+            conversations: [activeConversation],
+            messagesByConversation: [activeConversation.id: [otherMessage]]
+        )
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+
+        let deletedCount = await model.deleteMessages(ids: [otherMessage.id])
+
+        XCTAssertEqual(deletedCount, 0)
+        XCTAssertEqual(model.messages.map(\.id), [otherMessage.id])
+        XCTAssertEqual(model.statusMessage, "只能删除自己发送的消息。")
+    }
+
+    func test批量关闭会话后直接同步会话列表() async {
+        let first = conversation(id: "conversation-1", title: "聊天一", activity: Date())
+        let second = conversation(id: "conversation-2", title: "聊天二", activity: Date())
+        let repository = ChatRepositoryStub(conversations: [first, second])
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+
+        let closedCount = await model.closeConversations(ids: [first.id, second.id])
+
+        XCTAssertEqual(closedCount, 2)
+        XCTAssertTrue(model.conversations.isEmpty)
+        XCTAssertNil(model.selectedConversationID)
+        XCTAssertEqual(model.statusMessage, "已删除 2 个会话，消息已进入群晖 Chat 归档。")
+    }
+
     private func conversation(
         id: String,
         title: String,
@@ -101,7 +230,9 @@ private actor ChatRepositoryStub: ChatRepository {
             .emoji,
             .imageAttachment,
             .videoAttachment,
-            .fileAttachment
+            .fileAttachment,
+            .deleteOwnMessage,
+            .closeConversation
         ]
     ) {
         self.storedConversations = conversations
@@ -172,6 +303,22 @@ private actor ChatRepositoryStub: ChatRepository {
         )
         messagesByConversation[draft.conversationID, default: []].append(sent)
         return sent
+    }
+
+    func deleteMessage(
+        conversationID: String,
+        messageID: String,
+        clientRequestID: UUID
+    ) async throws {
+        messagesByConversation[conversationID, default: []].removeAll { $0.id == messageID }
+    }
+
+    func closeConversation(
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws {
+        storedConversations.removeAll { $0.id == conversationID }
+        messagesByConversation[conversationID] = nil
     }
 
     func setReminder(

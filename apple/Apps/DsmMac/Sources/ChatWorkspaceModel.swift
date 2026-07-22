@@ -17,10 +17,15 @@ final class ChatWorkspaceModel {
     private(set) var statusIsError = false
 
     @ObservationIgnored private let repository: any ChatRepository
+    @ObservationIgnored private let currentAccountName: String?
     @ObservationIgnored private var hasLoaded = false
 
-    init(repository: any ChatRepository) {
+    init(
+        repository: any ChatRepository,
+        currentAccountName: String? = nil
+    ) {
         self.repository = repository
+        self.currentAccountName = Self.normalizedIdentityName(currentAccountName)
     }
 
     var selectedConversation: ChatConversation? {
@@ -29,7 +34,13 @@ final class ChatWorkspaceModel {
     }
 
     var currentUserID: String? {
-        users.first(where: { $0.isCurrentUser == true })?.id
+        if let explicitUserID = users.first(where: { $0.isCurrentUser == true })?.id {
+            return explicitUserID
+        }
+        guard let currentAccountName else { return nil }
+        return users.first {
+            Self.normalizedIdentityName($0.displayName) == currentAccountName
+        }?.id
     }
 
     func displayName(for userID: String) -> String? {
@@ -37,9 +48,24 @@ final class ChatWorkspaceModel {
     }
 
     func isCurrentUser(_ message: ChatMessage) -> Bool {
-        if let explicit = message.isFromCurrentUser { return explicit }
+        if message.isFromCurrentUser == true { return true }
         if message.clientRequestID != nil { return true }
-        return currentUserID.map { $0 == message.senderID } ?? false
+        if currentUserID == message.senderID { return true }
+        if let currentAccountName {
+            let senderName = message.senderDisplayName
+                ?? users.first(where: { $0.id == message.senderID })?.displayName
+            if Self.normalizedIdentityName(senderName) == currentAccountName {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func normalizedIdentityName(_ value: String?) -> String? {
+        let normalized = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized?.isEmpty == false ? normalized : nil
     }
 
     func memberSummary(for conversation: ChatConversation) -> String {
@@ -77,6 +103,18 @@ final class ChatWorkspaceModel {
                 || features.contains(.videoAttachment)
                 || features.contains(.fileAttachment)
         )
+    }
+
+    var canDeleteOwnMessages: Bool {
+        canUseMessaging && availability.supportedFeatures.contains(.deleteOwnMessage)
+    }
+
+    var canCloseConversations: Bool {
+        canUseMessaging && availability.supportedFeatures.contains(.closeConversation)
+    }
+
+    func canDelete(_ message: ChatMessage) -> Bool {
+        canDeleteOwnMessages && isCurrentUser(message)
     }
 
     func loadIfNeeded() async {
@@ -219,6 +257,104 @@ final class ChatWorkspaceModel {
         }
     }
 
+    @discardableResult
+    func deleteMessages(ids: Set<String>) async -> Int {
+        guard canDeleteOwnMessages, !isPerformingAction, !ids.isEmpty,
+              let conversationID = selectedConversationID else { return 0 }
+        let targets = messages.filter { ids.contains($0.id) }
+        guard targets.count == ids.count, targets.allSatisfy(canDelete) else {
+            statusIsError = true
+            statusMessage = "只能删除自己发送的消息。"
+            return 0
+        }
+
+        isPerformingAction = true
+        statusMessage = nil
+        statusIsError = false
+        var deletedCount = 0
+        var deletedIDs: Set<String> = []
+        var lastError: Error?
+        for message in targets {
+            do {
+                try await repository.deleteMessage(
+                    conversationID: conversationID,
+                    messageID: message.id,
+                    clientRequestID: UUID()
+                )
+                deletedCount += 1
+                deletedIDs.insert(message.id)
+            } catch {
+                lastError = error
+            }
+        }
+        // Repository 已经完成服务端回读校验，直接同步本地列表，避免再次刷新失败
+        // 覆盖“删除成功”的结果，也减少一次不必要的历史消息请求。
+        if selectedConversationID == conversationID, !deletedIDs.isEmpty {
+            messages.removeAll { deletedIDs.contains($0.id) }
+        }
+        isPerformingAction = false
+        if let lastError {
+            showBatchFailure(
+                completedCount: deletedCount,
+                failedCount: targets.count - deletedCount,
+                noun: "条消息",
+                lastError: lastError
+            )
+        } else {
+            statusMessage = deletedCount == 1 ? "消息已删除。" : "已删除 \(deletedCount) 条消息。"
+            statusIsError = false
+        }
+        return deletedCount
+    }
+
+    @discardableResult
+    func closeConversations(ids: Set<String>) async -> Int {
+        guard canCloseConversations, !isPerformingAction, !ids.isEmpty else { return 0 }
+        let targets = conversations.filter { ids.contains($0.id) }
+        guard targets.count == ids.count else { return 0 }
+
+        isPerformingAction = true
+        statusMessage = nil
+        statusIsError = false
+        var closedCount = 0
+        var closedIDs: Set<String> = []
+        var lastError: Error?
+        for conversation in targets {
+            do {
+                try await repository.closeConversation(
+                    conversationID: conversation.id,
+                    clientRequestID: UUID()
+                )
+                closedCount += 1
+                closedIDs.insert(conversation.id)
+            } catch {
+                lastError = error
+            }
+        }
+        // 关闭接口内部已经复查会话列表。这里直接更新本地状态，避免额外的全量刷新
+        // 将已经成功的关闭操作错误显示成失败。
+        if !closedIDs.isEmpty {
+            conversations.removeAll { closedIDs.contains($0.id) }
+            if let selectedConversationID, closedIDs.contains(selectedConversationID) {
+                self.selectedConversationID = nil
+                messages = []
+            }
+        }
+        isPerformingAction = false
+        if let lastError {
+            showBatchFailure(
+                completedCount: closedCount,
+                failedCount: targets.count - closedCount,
+                noun: "个会话",
+                lastError: lastError
+            )
+        } else {
+            statusMessage = closedCount == 1 ? "会话已删除，消息已进入群晖 Chat 归档。" : "已删除 \(closedCount) 个会话，消息已进入群晖 Chat 归档。"
+            statusIsError = false
+        }
+        return closedCount
+    }
+
     func clearStatus() {
         statusMessage = nil
         statusIsError = false
@@ -239,6 +375,29 @@ final class ChatWorkspaceModel {
             statusMessage = description
         } else {
             statusMessage = "消息暂时没有完成，请稍后重试。"
+        }
+    }
+
+    private func showBatchFailure(
+        completedCount: Int,
+        failedCount: Int,
+        noun: String,
+        lastError: Error
+    ) {
+        statusIsError = true
+        let detail: String
+        if let appError = lastError as? AppError {
+            detail = appError.safeUserMessage
+        } else if let localizedError = lastError as? LocalizedError,
+                  let description = localizedError.errorDescription {
+            detail = description
+        } else {
+            detail = "请刷新后重试。"
+        }
+        if completedCount > 0 {
+            statusMessage = "已处理 \(completedCount) \(noun)，另有 \(failedCount) \(noun)未完成。\(detail)"
+        } else {
+            statusMessage = detail
         }
     }
 

@@ -12,6 +12,8 @@ public enum ChatFeature: String, Codable, CaseIterable, Hashable, Sendable {
     case reminder
     case poll
     case encryptedConversation
+    case deleteOwnMessage
+    case closeConversation
 }
 
 public enum ChatAvailabilityStatus: String, Codable, Sendable {
@@ -417,6 +419,15 @@ public protocol ChatRepository: Sendable {
     ) async throws -> ChatConversation
     func createGroup(_ draft: ChatGroupDraft) async throws -> ChatConversation
     func sendMessage(_ draft: ChatMessageDraft) async throws -> ChatMessage
+    func deleteMessage(
+        conversationID: String,
+        messageID: String,
+        clientRequestID: UUID
+    ) async throws
+    func closeConversation(
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws
     func setReminder(
         messageID: String,
         remindAt: Date,

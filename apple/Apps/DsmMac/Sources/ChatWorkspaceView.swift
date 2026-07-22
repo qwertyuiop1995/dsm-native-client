@@ -1,3 +1,4 @@
+import AppKit
 import DsmCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -5,13 +6,25 @@ import UniformTypeIdentifiers
 struct ChatWorkspaceView: View {
     @Bindable var model: ChatWorkspaceModel
     @State private var presentsNewConversation = false
+    @State private var selectedConversationIDs: Set<String> = []
+    @State private var pendingConversationDeletion: Set<String> = []
+    @State private var presentsConversationDeletionConfirmation = false
 
     var body: some View {
-        HSplitView {
-            conversationColumn
-                .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
-            conversationDetail
-                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 0) {
+            if model.canUseMessaging, let statusMessage = model.statusMessage {
+                ChatActionStatusBanner(
+                    message: statusMessage,
+                    isError: model.statusIsError,
+                    onDismiss: model.clearStatus
+                )
+            }
+            HSplitView {
+                conversationColumn
+                    .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
+                conversationDetail
+                    .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task {
@@ -19,14 +32,6 @@ struct ChatWorkspaceView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    presentsNewConversation = true
-                } label: {
-                    Label("新建聊天", systemImage: "square.and.pencil")
-                }
-                .disabled(!model.canCreateDirectConversation && !model.canCreateGroupConversation)
-                .help(newConversationHelp)
-
                 Button {
                     Task { await model.reload() }
                 } label: {
@@ -39,6 +44,27 @@ struct ChatWorkspaceView: View {
         .sheet(isPresented: $presentsNewConversation) {
             NewChatSheet(model: model)
         }
+        .alert(
+            pendingConversationDeletion.count == 1 ? "删除这个会话？" : "删除这 \(pendingConversationDeletion.count) 个会话？",
+            isPresented: $presentsConversationDeletionConfirmation
+        ) {
+            Button("取消", role: .cancel) {}
+            Button("删除会话", role: .destructive) {
+                let ids = pendingConversationDeletion
+                pendingConversationDeletion = []
+                Task {
+                    _ = await model.closeConversations(ids: ids)
+                    selectedConversationIDs.subtract(ids)
+                }
+            }
+            .disabled(model.isPerformingAction)
+        } message: {
+            Text("会话会从群晖 Chat 中关闭，消息将进入归档。此操作不能在岚仓中撤销。")
+        }
+        .onChange(of: model.selectedConversationID) { _, selectedID in
+            guard selectedConversationIDs.count <= 1 else { return }
+            selectedConversationIDs = selectedID.map { [$0] } ?? []
+        }
     }
 
     private var newConversationHelp: String {
@@ -50,9 +76,20 @@ struct ChatWorkspaceView: View {
 
     private var conversationColumn: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 8) {
                 Text("会话")
                     .font(.headline)
+                Button {
+                    presentsNewConversation = true
+                } label: {
+                    Label("新建聊天", systemImage: "plus")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.borderless)
+                .disabled(!model.canCreateDirectConversation && !model.canCreateGroupConversation)
+                .help(newConversationHelp)
+                .accessibilityLabel("新建聊天")
                 Spacer()
                 if model.isLoading {
                     ProgressView()
@@ -92,21 +129,62 @@ struct ChatWorkspaceView: View {
                             currentUserID: model.currentUserID
                         )
                             .tag(conversation.id)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    requestConversationDeletion(from: conversation.id)
+                                } label: {
+                                    Label(conversationDeletionTitle(for: conversation.id), systemImage: "trash")
+                                }
+                                .disabled(!model.canCloseConversations || model.isPerformingAction)
+                            }
                     }
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
+                .onDeleteCommand {
+                    requestConversationDeletion(ids: selectedConversationIDs)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private var conversationSelection: Binding<String?> {
+    private var conversationSelection: Binding<Set<String>> {
         Binding(
-            get: { model.selectedConversationID },
-            set: { id in Task { await model.selectConversation(id: id) } }
+            get: { selectedConversationIDs },
+            set: { ids in
+                selectedConversationIDs = ids
+                let selectedID: String?
+                if let current = model.selectedConversationID, ids.contains(current) {
+                    selectedID = current
+                } else {
+                    selectedID = ids.first
+                }
+                Task { await model.selectConversation(id: selectedID) }
+            }
         )
+    }
+
+    private func conversationDeletionTargets(from conversationID: String) -> Set<String> {
+        selectedConversationIDs.contains(conversationID) && selectedConversationIDs.count > 1
+            ? selectedConversationIDs
+            : [conversationID]
+    }
+
+    private func conversationDeletionTitle(for conversationID: String) -> String {
+        let count = conversationDeletionTargets(from: conversationID).count
+        return count == 1 ? "删除会话" : "删除 \(count) 个会话"
+    }
+
+    private func requestConversationDeletion(from conversationID: String) {
+        requestConversationDeletion(ids: conversationDeletionTargets(from: conversationID))
+    }
+
+    private func requestConversationDeletion(ids: Set<String>) {
+        guard model.canCloseConversations, !model.isPerformingAction, !ids.isEmpty else { return }
+        pendingConversationDeletion = ids
+        presentsConversationDeletionConfirmation = true
     }
 
     @ViewBuilder
@@ -122,6 +200,34 @@ struct ChatWorkspaceView: View {
         } else {
             ChatUnavailableDetail(status: model.availability.status)
         }
+    }
+}
+
+private struct ChatActionStatusBanner: View {
+    let message: String
+    let isError: Bool
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button(action: onDismiss) {
+                Label("关闭提示", systemImage: "xmark")
+                    .labelStyle(.iconOnly)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("关闭提示")
+        }
+        .foregroundStyle(isError ? Color.red : Color.secondary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(isError ? Color.red.opacity(0.08) : Color.accentColor.opacity(0.08))
     }
 }
 
@@ -251,6 +357,10 @@ private struct ChatConversationView: View {
     @State private var draftText = ""
     @State private var attachmentURLs: [URL] = []
     @State private var presentsFileImporter = false
+    @State private var selectedMessageIDs: Set<String> = []
+    @State private var pendingMessageDeletion: Set<String> = []
+    @State private var presentsMessageDeletionConfirmation = false
+    @FocusState private var isComposerFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -261,11 +371,7 @@ private struct ChatConversationView: View {
                 ProgressView("正在载入消息…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.messages.isEmpty {
-                ContentUnavailableView(
-                    "还没有消息",
-                    systemImage: "bubble.left",
-                    description: Text("发送第一条消息，开始这段聊天。")
-                )
+                emptyConversationState
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -279,9 +385,36 @@ private struct ChatConversationView: View {
                                     message: message,
                                     users: model.users,
                                     isCurrentUser: model.isCurrentUser(message),
-                                    showsSender: conversation.kind == .group
+                                    showsSender: conversation.kind == .group,
+                                    isSelected: selectedMessageIDs.contains(message.id)
                                 )
                                     .id(message.id)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        selectMessage(message)
+                                    }
+                                    .contextMenu {
+                                        if model.canDelete(message) {
+                                            Button {
+                                                toggleMessageSelection(message.id)
+                                            } label: {
+                                                Label(
+                                                    selectedMessageIDs.contains(message.id) ? "取消选择" : "选择此消息",
+                                                    systemImage: selectedMessageIDs.contains(message.id) ? "checkmark.circle.fill" : "circle"
+                                                )
+                                            }
+                                            Divider()
+                                            Button(role: .destructive) {
+                                                requestMessageDeletion(from: message.id)
+                                            } label: {
+                                                Label(messageDeletionTitle(for: message.id), systemImage: "trash")
+                                            }
+                                            .disabled(model.isPerformingAction)
+                                        } else {
+                                            Button("只能删除自己发送的消息") {}
+                                                .disabled(true)
+                                        }
+                                    }
                             }
                         }
                         .padding(.horizontal, 24)
@@ -296,20 +429,11 @@ private struct ChatConversationView: View {
                 }
             }
 
-            if let statusMessage = model.statusMessage, model.statusIsError {
-                Label(statusMessage, systemImage: "exclamationmark.circle.fill")
-                    .font(.callout)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.red.opacity(0.08))
-                    .accessibilityElement(children: .combine)
-            }
-
             Divider()
             composer
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor))
         .fileImporter(
             isPresented: $presentsFileImporter,
             allowedContentTypes: [.item],
@@ -318,6 +442,26 @@ private struct ChatConversationView: View {
             if case .success(let urls) = result {
                 attachmentURLs = urls
             }
+        }
+        .alert(
+            pendingMessageDeletion.count == 1 ? "删除这条消息？" : "删除这 \(pendingMessageDeletion.count) 条消息？",
+            isPresented: $presentsMessageDeletionConfirmation
+        ) {
+            Button("取消", role: .cancel) {}
+            Button("删除消息", role: .destructive) {
+                let ids = pendingMessageDeletion
+                pendingMessageDeletion = []
+                Task {
+                    _ = await model.deleteMessages(ids: ids)
+                    selectedMessageIDs.subtract(ids)
+                }
+            }
+            .disabled(model.isPerformingAction)
+        } message: {
+            Text("消息会从群晖 Chat 中删除，无法撤销。管理员可能只允许删除最近发送的消息。")
+        }
+        .onChange(of: conversation.id) { _, _ in
+            selectedMessageIDs = []
         }
     }
 
@@ -343,6 +487,61 @@ private struct ChatConversationView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    private var emptyConversationState: some View {
+        ZStack {
+            Color(nsColor: .textBackgroundColor)
+
+            VStack(spacing: 14) {
+                Image(systemName: conversation.kind == .group
+                    ? "person.2.fill"
+                    : "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(.tint)
+                    .frame(width: 64, height: 64)
+                    .background(Color.accentColor.opacity(0.10), in: Circle())
+                    .accessibilityHidden(true)
+
+                VStack(spacing: 6) {
+                    Text(emptyConversationTitle)
+                        .font(.title3.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                    Text("这里还没有消息。发送第一条消息，开始这段聊天。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if model.canSendText {
+                    Button {
+                        isComposerFocused = true
+                    } label: {
+                        Label("发送第一条消息", systemImage: "square.and.pencil")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .disabled(model.isPerformingAction)
+                    .accessibilityHint("将焦点移到下方的消息输入框")
+                }
+            }
+            .frame(maxWidth: 380)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 28)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .layoutPriority(1)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var emptyConversationTitle: String {
+        switch conversation.kind {
+        case .direct:
+            "开始和 \(conversation.title) 聊天"
+        case .group:
+            "开始在“\(conversation.title)”中聊天"
+        }
     }
 
     private var composer: some View {
@@ -374,6 +573,7 @@ private struct ChatConversationView: View {
                 TextField("输入消息", text: $draftText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
+                    .focused($isComposerFocused)
                     .disabled(!model.canSendText || model.isPerformingAction)
                     .onSubmit(send)
 
@@ -421,6 +621,44 @@ private struct ChatConversationView: View {
             inSameDayAs: model.messages[index].sentAt
         )
     }
+
+    private func selectMessage(_ message: ChatMessage) {
+        guard model.canDelete(message), !model.isPerformingAction else { return }
+        if NSEvent.modifierFlags.contains(.command) {
+            toggleMessageSelection(message.id)
+        } else {
+            selectedMessageIDs = [message.id]
+        }
+    }
+
+    private func toggleMessageSelection(_ messageID: String) {
+        if selectedMessageIDs.contains(messageID) {
+            selectedMessageIDs.remove(messageID)
+        } else {
+            selectedMessageIDs.insert(messageID)
+        }
+    }
+
+    private func messageDeletionTargets(from messageID: String) -> Set<String> {
+        selectedMessageIDs.contains(messageID) && selectedMessageIDs.count > 1
+            ? selectedMessageIDs
+            : [messageID]
+    }
+
+    private func messageDeletionTitle(for messageID: String) -> String {
+        let count = messageDeletionTargets(from: messageID).count
+        return count == 1 ? "删除消息" : "删除 \(count) 条消息"
+    }
+
+    private func requestMessageDeletion(from messageID: String) {
+        let ids = messageDeletionTargets(from: messageID)
+        let selectedMessages = model.messages.filter { ids.contains($0.id) }
+        guard selectedMessages.count == ids.count,
+              selectedMessages.allSatisfy(model.canDelete),
+              !model.isPerformingAction else { return }
+        pendingMessageDeletion = ids
+        presentsMessageDeletionConfirmation = true
+    }
 }
 
 private struct ChatMessageRow: View {
@@ -428,6 +666,7 @@ private struct ChatMessageRow: View {
     let users: [ChatUser]
     let isCurrentUser: Bool
     let showsSender: Bool
+    let isSelected: Bool
 
     private var senderName: String {
         if isCurrentUser { return "你" }
@@ -503,8 +742,20 @@ private struct ChatMessageRow: View {
             if !isCurrentUser { Spacer(minLength: 64) }
         }
         .frame(maxWidth: .infinity, alignment: isCurrentUser ? .trailing : .leading)
+        .padding(3)
+        .background(
+            isSelected ? Color.accentColor.opacity(0.10) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+        .overlay {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.accentColor, lineWidth: 1)
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(senderName)，\(Self.fullDateTimeFormatter.string(from: message.sentAt))")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private static let fullDateTimeFormatter: DateFormatter = {

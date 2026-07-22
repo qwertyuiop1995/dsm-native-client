@@ -123,7 +123,7 @@ enum DsmErrorMapper {
             return apiError(.serverBusy, true, "NAS 暂时繁忙，请稍后重试。", code, requestID)
         case 150:
             return apiError(.networkUnavailable, false, "网络环境发生变化，请重新连接。", code, requestID)
-        case 408:
+        case 404, 408, 900:
             return apiError(.notFound, false, "这个文件或文件夹已不存在。", code, requestID)
         case 1300:
             return apiError(.unknown, true, "无法创建压缩包，请检查可用空间和文件夹权限后重试。", code, requestID)

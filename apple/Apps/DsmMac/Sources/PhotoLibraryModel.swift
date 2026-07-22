@@ -635,15 +635,26 @@ final class PhotoLibraryModel {
                     } else {
                         Task.detached(priority: .utility) { [weak self] in
                             guard let self else { return }
-                            let currentItems = await MainActor.run { self.timelineItems }
-                            let merged = update.items.isEmpty ? currentItems : Self.mergeTimelineItems(
-                                existingItems: currentItems,
+                            let (currentItems, currentTimeline, currentFolderPaths) = await MainActor.run {
+                                (self.items, self.timelineItems, self.timelineFolderItemPaths)
+                            }
+                            let purged = update.removedPaths.isEmpty
+                                ? nil
+                                : Self.purgeDeletedPaths(
+                                    items: currentItems,
+                                    timelineItems: currentTimeline,
+                                    folderItemPaths: currentFolderPaths,
+                                    deletedPaths: update.removedPaths
+                                )
+                            let baseTimeline = purged?.remainingTimelineItems ?? currentTimeline
+                            let merged = update.items.isEmpty ? baseTimeline : Self.mergeTimelineItems(
+                                existingItems: baseTimeline,
                                 newItems: update.items
                             )
                             await MainActor.run { [weak self] in
                                 guard let self, generation == self.timelineGeneration else { return }
-                                if !update.removedPaths.isEmpty {
-                                    self.removeDeletedItems(at: update.removedPaths)
+                                if let purged {
+                                    self.applyPurgedResult(purged)
                                 }
                                 if !update.items.isEmpty {
                                     self.timelineItems = merged
@@ -727,15 +738,26 @@ final class PhotoLibraryModel {
                 } else {
                     Task.detached(priority: .utility) { [weak self] in
                         guard let self else { return }
-                        let currentItems = await MainActor.run { self.timelineItems }
-                        let merged = update.items.isEmpty ? currentItems : Self.mergeTimelineItems(
-                            existingItems: currentItems,
+                        let (currentItems, currentTimeline, currentFolderPaths) = await MainActor.run {
+                            (self.items, self.timelineItems, self.timelineFolderItemPaths)
+                        }
+                        let purged = update.removedPaths.isEmpty
+                            ? nil
+                            : Self.purgeDeletedPaths(
+                                items: currentItems,
+                                timelineItems: currentTimeline,
+                                folderItemPaths: currentFolderPaths,
+                                deletedPaths: update.removedPaths
+                            )
+                        let baseTimeline = purged?.remainingTimelineItems ?? currentTimeline
+                        let merged = update.items.isEmpty ? baseTimeline : Self.mergeTimelineItems(
+                            existingItems: baseTimeline,
                             newItems: update.items
                         )
                         await MainActor.run { [weak self] in
                             guard let self, generation == self.timelineGeneration else { return }
-                            if !update.removedPaths.isEmpty {
-                                self.removeDeletedItems(at: update.removedPaths)
+                            if let purged {
+                                self.applyPurgedResult(purged)
                             }
                             if !update.items.isEmpty {
                                 self.timelineItems = merged
@@ -843,30 +865,88 @@ final class PhotoLibraryModel {
         return merged
     }
 
-    /// 删除任务已由 NAS 确认并复查后，只更新受影响的本地集合，避免重新扫描整个照片空间。
-    func removeDeletedItems(at paths: [String]) {
-        guard !paths.isEmpty else { return }
-        let normalizedPaths = paths.map { $0.hasSuffix("/") ? String($0.dropLast()) : $0 }
-        let isDeleted: (PhotoLibraryItem) -> Bool = { item in
-            normalizedPaths.contains { path in
-                item.path == path || item.path.hasPrefix(path + "/")
+    private struct PurgedPathsResult: Sendable {
+        let remainingItems: [PhotoLibraryItem]
+        let removedItems: [PhotoLibraryItem]
+        let remainingTimelineItems: [PhotoLibraryItem]
+        let removedTimelineItems: [PhotoLibraryItem]
+        let remainingFolderItemPaths: [String: [String]]
+    }
+
+    private static nonisolated func purgeDeletedPaths(
+        items: [PhotoLibraryItem],
+        timelineItems: [PhotoLibraryItem],
+        folderItemPaths: [String: [String]],
+        deletedPaths: [String]
+    ) -> PurgedPathsResult {
+        guard !deletedPaths.isEmpty else {
+            return PurgedPathsResult(
+                remainingItems: items,
+                removedItems: [],
+                remainingTimelineItems: timelineItems,
+                removedTimelineItems: [],
+                remainingFolderItemPaths: folderItemPaths
+            )
+        }
+
+        let exactDeletedSet = Set(deletedPaths.map { $0.hasSuffix("/") ? String($0.dropLast()) : $0 })
+        let deletedPrefixes = exactDeletedSet.map { $0 + "/" }
+
+        @inline(__always)
+        func isPathDeleted(_ path: String) -> Bool {
+            if exactDeletedSet.contains(path) { return true }
+            return deletedPrefixes.contains(where: { path.hasPrefix($0) })
+        }
+
+        var remainingItems: [PhotoLibraryItem] = []
+        var removedItems: [PhotoLibraryItem] = []
+        remainingItems.reserveCapacity(items.count)
+        for item in items {
+            if isPathDeleted(item.path) {
+                removedItems.append(item)
+            } else {
+                remainingItems.append(item)
             }
         }
 
-        let removedFolderItems = items.filter(isDeleted)
-        let removedTimelineItems = timelineItems.filter(isDeleted)
-        items.removeAll(where: isDeleted)
-        timelineItems.removeAll(where: isDeleted)
-
-        for (folderPath, existingPaths) in timelineFolderItemPaths {
-            timelineFolderItemPaths[folderPath] = existingPaths.filter { path in
-                !normalizedPaths.contains { deleted in
-                    path == deleted || path.hasPrefix(deleted + "/")
-                }
+        var remainingTimeline: [PhotoLibraryItem] = []
+        var removedTimeline: [PhotoLibraryItem] = []
+        remainingTimeline.reserveCapacity(timelineItems.count)
+        for item in timelineItems {
+            if isPathDeleted(item.path) {
+                removedTimeline.append(item)
+            } else {
+                remainingTimeline.append(item)
             }
         }
 
-        let removedIDs = Set((removedFolderItems + removedTimelineItems).map(\.id))
+        var remainingFolderItemPaths = [String: [String]]()
+        remainingFolderItemPaths.reserveCapacity(folderItemPaths.count)
+        for (folderPath, existingPaths) in folderItemPaths {
+            if isPathDeleted(folderPath) { continue }
+            let filtered = existingPaths.filter { !isPathDeleted($0) }
+            if !filtered.isEmpty {
+                remainingFolderItemPaths[folderPath] = filtered
+            }
+        }
+
+        return PurgedPathsResult(
+            remainingItems: remainingItems,
+            removedItems: removedItems,
+            remainingTimelineItems: remainingTimeline,
+            removedTimelineItems: removedTimeline,
+            remainingFolderItemPaths: remainingFolderItemPaths
+        )
+    }
+
+    private func applyPurgedResult(_ result: PurgedPathsResult) {
+        items = result.remainingItems
+        timelineItems = result.remainingTimelineItems
+        timelineFolderItemPaths = result.remainingFolderItemPaths
+
+        let removedIDs = Set((result.removedItems + result.removedTimelineItems).map(\.id))
+        guard !removedIDs.isEmpty else { return }
+
         selection.subtract(removedIDs)
         for id in removedIDs {
             thumbnailCache[id] = nil
@@ -874,11 +954,23 @@ final class PhotoLibraryModel {
             unavailableThumbnails.remove(id)
         }
 
-        sourceTotal = max(0, sourceTotal - removedFolderItems.count)
-        nextOffset = max(0, nextOffset - removedFolderItems.count)
+        sourceTotal = max(0, sourceTotal - result.removedItems.count)
+        nextOffset = max(0, nextOffset - result.removedItems.count)
         visibleThumbnailIDs.subtract(removedIDs)
         loadingVisibleThumbnailIDs.subtract(removedIDs)
         restartThumbnailPrefetchIfPossible()
+    }
+
+    /// 删除任务已由 NAS 确认并复查后，只更新受影响的本地集合，避免重新扫描整个照片空间。
+    func removeDeletedItems(at paths: [String]) {
+        guard !paths.isEmpty else { return }
+        let result = Self.purgeDeletedPaths(
+            items: items,
+            timelineItems: timelineItems,
+            folderItemPaths: timelineFolderItemPaths,
+            deletedPaths: paths
+        )
+        applyPurgedResult(result)
         saveCacheIfNeeded()
     }
 

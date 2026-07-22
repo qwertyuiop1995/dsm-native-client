@@ -3,6 +3,25 @@ import DsmCore
 import DsmNetwork
 import Foundation
 import Observation
+import SwiftUI
+
+struct ToastMessage: Identifiable, Sendable {
+    enum Style: Sendable {
+        case success, error, info
+    }
+    let id = UUID()
+    let text: String
+    let icon: String
+    let style: Style
+
+    var iconColor: SwiftUI.Color {
+        switch style {
+        case .success: return .green
+        case .error: return .red
+        case .info: return .accentColor
+        }
+    }
+}
 
 enum WorkspaceSection: Hashable, Identifiable {
     case files(String)
@@ -333,7 +352,25 @@ final class WorkspaceModel {
     var isMovingItemsByDrag = false
     var archivePasswordRequest: ArchivePasswordRequest?
     var isCheckingArchivePassword = false
+    var activeToast: ToastMessage?
     private var dragMoveUndo: DragMoveUndo?
+    @ObservationIgnored private var toastDismissTask: Task<Void, Never>?
+
+    func showToast(_ text: String, icon: String = "checkmark.circle.fill", style: ToastMessage.Style = .success) {
+        toastDismissTask?.cancel()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            activeToast = ToastMessage(text: text, icon: icon, style: style)
+        }
+        toastDismissTask = Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    self.activeToast = nil
+                }
+            }
+        }
+    }
 
     @ObservationIgnored private let repository: any FileRepository
     @ObservationIgnored private let transferNotifier: any TransferNotifying
@@ -2173,6 +2210,7 @@ final class WorkspaceModel {
                 finishTransfer(taskID)
                 statusIsError = false
                 statusMessage = "删除完成。是否可恢复取决于共享文件夹的回收站设置。"
+                showToast(targets.count == 1 ? "已成功删除 1 个项目" : "已成功删除 \(targets.count) 个项目", icon: "trash.fill")
             } catch is CancellationError {
                 setTransferState(taskID, .cancelled)
             } catch {
@@ -2192,15 +2230,24 @@ final class WorkspaceModel {
         for path in paths {
             do {
                 let existingItems = try await repository.getInfo(paths: [path])
-                guard existingItems.allSatisfy({ $0.path != path }) else {
+                guard !existingItems.contains(where: { $0.path == path }) else {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: false,
                         safeUserMessage: "删除任务结束，但部分项目仍然存在。"
                     )
                 }
-            } catch let error as AppError where error.category == .notFound {
-                // 找不到目标正是删除成功后的预期结果。
+            } catch let error as AppError {
+                switch error.category {
+                case .notFound, .invalidResponse, .permissionDenied:
+                    // 目标已不在 NAS 结果中或由于被删除导致不可访问，符合删除成功预期。
+                    continue
+                case .partialFailure:
+                    throw error
+                default:
+                    throw error
+                }
+            } catch {
                 continue
             }
         }

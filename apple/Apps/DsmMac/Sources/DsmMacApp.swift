@@ -116,7 +116,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        // App 在前台活动时，通知全部通过 App 内内置悬浮 Toast 展示，取消系统右上角弹出 Banner 打扰
+        [.sound]
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // 自动解除所有附着在窗口上的 Modal Sheet 或弹窗，确保 App 能响应 ⌘Q 和 Dock 菜单退出
+        for window in NSApp.windows {
+            if let sheet = window.attachedSheet {
+                window.endSheet(sheet)
+                sheet.orderOut(nil)
+            }
+        }
+        return .terminateNow
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
     }
 }
 

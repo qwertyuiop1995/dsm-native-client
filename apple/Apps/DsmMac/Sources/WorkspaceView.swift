@@ -302,17 +302,28 @@ struct WorkspaceView: View {
                 }
             }
         }
-        .alert(deleteAlertTitle, isPresented: deleteAlertPresented) {
-            Button("取消", role: .cancel) {
-                deleteTargets = []
+        .sheet(isPresented: deleteAlertPresented) {
+            ModernDeleteConfirmationDialog(
+                targets: deleteTargets,
+                profileName: model.profile.displayName,
+                currentPath: model.currentPath,
+                onConfirm: {
+                    let targets = deleteTargets
+                    deleteTargets = []
+                    model.deleteItems(targets)
+                },
+                onCancel: {
+                    deleteTargets = []
+                }
+            )
+        }
+        .overlay(alignment: .bottom) {
+            if let toast = model.activeToast {
+                InAppToastOverlayView(toast: toast)
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(999)
             }
-            Button(deleteTargets.contains(where: \.isRecyclePath) ? "永久删除" : "删除", role: .destructive) {
-                let targets = deleteTargets
-                deleteTargets = []
-                model.deleteItems(targets)
-            }
-        } message: {
-            Text(deleteAlertMessage)
         }
         .alert("恢复到原位置？", isPresented: restoreAlertPresented) {
             Button("取消", role: .cancel) {
@@ -573,29 +584,6 @@ struct WorkspaceView: View {
             get: { restoreTarget != nil },
             set: { if !$0 { restoreTarget = nil } }
         )
-    }
-
-    private var deleteAlertTitle: String {
-        if deleteTargets.contains(where: \.isRecyclePath) {
-            return deleteTargets.count == 1 ? "永久删除这个项目？" : "永久删除 \(deleteTargets.count) 个项目？"
-        }
-        return deleteTargets.count == 1 ? "删除这个项目？" : "删除 \(deleteTargets.count) 个项目？"
-    }
-
-    private var deleteAlertMessage: String {
-        if deleteTargets.contains(where: \.isRecyclePath) {
-            return "项目位于 #recycle 中，再次删除通常不可恢复。NAS：\(model.profile.displayName)。"
-        }
-        let locationDescription: String
-        if model.section == .photos {
-            let parentPaths = Set(deleteTargets.map { ($0.path as NSString).deletingLastPathComponent })
-            locationDescription = parentPaths.count == 1
-                ? "所在文件夹：\(parentPaths.first ?? model.photoLibrary.currentPath)"
-                : "所在位置：多个照片文件夹"
-        } else {
-            locationDescription = "目录：\(model.currentPath)"
-        }
-        return "NAS：\(model.profile.displayName)\n\(locationDescription)\n删除后能否恢复取决于共享文件夹的回收站设置，文件可能被永久删除。"
     }
 
     private func presentUploadPanel() {
@@ -4156,10 +4144,11 @@ struct FilePropertiesView: View {
                         SettingsRow(label: "权限码", value: item.permissions?.posixMode != nil ? String(format: "%o", item.permissions!.posixMode!) : "—")
                     }
                 }
-                .padding(20)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
             }
         }
-        .frame(width: 420, height: 500)
+        .frame(width: 520, height: 540)
         .task(id: item.id) {
             guard item.isDirectory else { return }
             isCalculatingFolderSize = true
@@ -4339,5 +4328,131 @@ class RightClickNSView: NSView {
     override func rightMouseDown(with event: NSEvent) {
         action()
         super.rightMouseDown(with: event)
+    }
+}
+
+// MARK: - 全新现代卡片式删除确认弹窗
+struct ModernDeleteConfirmationDialog: View {
+    let targets: [FileItem]
+    let profileName: String
+    let currentPath: String
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    private var isPermanent: Bool {
+        targets.contains(where: \.isRecyclePath)
+    }
+
+    var body: some View {
+        VStack(spacing: 18) {
+            // 顶部警示图标 Badge
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.12))
+                    .frame(width: 52, height: 52)
+                Image(systemName: "trash.fill")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(Color.red)
+            }
+            .padding(.top, 4)
+
+            // 标题与副标题
+            VStack(spacing: 4) {
+                Text(isPermanent ? "确定要永久删除吗？" : (targets.count == 1 ? "确定要删除这个项目吗？" : "确定要删除这 \(targets.count) 个项目吗？"))
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(isPermanent ? "项目位于回收站，删除后将无法恢复。" : "项目将被移至 NAS 回收站或被删除。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            // 中间待删除文件预览卡片
+            VStack(alignment: .leading, spacing: 8) {
+                if targets.count == 1, let item = targets.first {
+                    HStack(spacing: 10) {
+                        FileIcon(item: item)
+                            .font(.system(size: 22))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.name)
+                                .font(.callout.weight(.semibold))
+                                .lineLimit(1)
+                            Text(item.path)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        Image(systemName: "doc.on.doc.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("已选择 \(targets.count) 个文件或文件夹")
+                                .font(.callout.weight(.semibold))
+                            Text("NAS 账号: \(profileName)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+
+            // 底部操作按钮
+            HStack(spacing: 12) {
+                Button(action: onCancel) {
+                    Text("取消")
+                        .font(.callout.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.bordered)
+                .keyboardShortcut(.escape, modifiers: [])
+
+                Button(action: onConfirm) {
+                    Text(isPermanent ? "永久删除" : "确认删除")
+                        .font(.callout.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(Color.red, in: RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 350)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
+    }
+}
+
+// MARK: - App 灵动悬浮 Toast 组件
+struct InAppToastOverlayView: View {
+    let toast: ToastMessage
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: toast.icon)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(toast.iconColor)
+            Text(toast.text)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(.quaternary.opacity(0.8), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
     }
 }

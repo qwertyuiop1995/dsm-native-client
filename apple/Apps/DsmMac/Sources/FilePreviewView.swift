@@ -391,6 +391,7 @@ struct FileDetailView: View {
     @State private var isLoadingMetadata = false
     @State private var decodedPreview: DecodedImage?
     @State private var previewDecodingFailed = false
+    @State private var showFullMetadataPopover = false
 
     var body: some View {
         Group {
@@ -540,31 +541,27 @@ struct FileDetailView: View {
 
     private func detail(for item: FileItem) -> some View {
         VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
+            // 单行极简 Header：完美集成图标、文件名、LIVE 标记与收藏按钮
+            HStack(spacing: 8) {
                 FileIcon(item: item)
-                    .font(.system(size: 30))
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(item.name)
-                            .font(.title3.weight(.semibold))
-                            .lineLimit(2)
-                        if let videoPath = livePhotoVideoPath(for: item) {
-                            LivePhotoPreviewBadgeButton(
-                                model: model,
-                                item: item,
-                                videoPath: videoPath,
-                                player: $livePhotoPlayer,
-                                resourceLoaderDelegate: $livePhotoResourceLoaderDelegate
-                            )
-                        }
-                    }
-                    Text(item.path)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
+                    .font(.system(size: 16))
+                
+                Text(item.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .textSelection(.enabled)
+                    .help(item.path)
+                
+                if let videoPath = livePhotoVideoPath(for: item) {
+                    LivePhotoPreviewBadgeButton(
+                        model: model,
+                        item: item,
+                        videoPath: videoPath,
+                        player: $livePhotoPlayer,
+                        resourceLoaderDelegate: $livePhotoResourceLoaderDelegate
+                    )
                 }
+                
                 Spacer()
 
                 if item.isRecyclePath {
@@ -572,21 +569,26 @@ struct FileDetailView: View {
                         onRestore(item)
                     } label: {
                         Label("恢复", systemImage: "arrow.uturn.backward.circle")
+                            .font(.caption)
                     }
+                    .buttonStyle(.borderless)
                     .help("将这个项目恢复到原来的位置")
                 } else if !item.isDirectory {
                     Button {
                         model.toggleFavorite(item)
                     } label: {
-                        Label(
-                            isFavorite ? "取消收藏" : "收藏",
-                            systemImage: isFavorite ? "star.fill" : "star"
-                        )
+                        Image(systemName: isFavorite ? "star.fill" : "star")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(isFavorite ? Color.yellow : Color.secondary)
+                            .padding(4)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .help(isFavorite ? "从收藏中移除" : "添加到收藏")
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
 
             Divider()
 
@@ -598,8 +600,6 @@ struct FileDetailView: View {
                 if isLoadingMetadata || metadata != nil {
                     Divider()
                     metadataPanel(for: item)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
                 }
             }
 
@@ -809,10 +809,96 @@ struct FileDetailView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
         } else if let metadata {
+            HStack(spacing: 12) {
+                // 左侧：曝光四要素参数芯片 (EXIF Exposure Chips)
+                HStack(spacing: 6) {
+                    if let aperture = metadata.aperture, !aperture.isEmpty {
+                        exifChip(icon: "camera.aperture", text: "f/\(aperture)")
+                    }
+                    if let shutter = metadata.shutterSpeed, !shutter.isEmpty {
+                        exifChip(icon: "timer", text: shutter)
+                    }
+                    if let iso = metadata.iso, !iso.isEmpty {
+                        exifChip(icon: "gauge.with.dots.needle.bottom.50percent", text: "ISO \(iso)")
+                    }
+                    if let focal = metadata.focalLength, !focal.isEmpty {
+                        exifChip(icon: "scope", text: "\(focal)mm")
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                // 右侧：尺寸、相机模型与展开详情按钮
+                HStack(spacing: 10) {
+                    if let width = metadata.width, let height = metadata.height {
+                        Label("\(width) × \(height)", systemImage: "aspectratio")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    } else if let sizeBytes = item.sizeBytes {
+                        Text(ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file))
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let modelName = metadata.cameraModel ?? metadata.cameraMake {
+                        Label(modelName, systemImage: "camera")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Button {
+                        showFullMetadataPopover.toggle()
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(showFullMetadataPopover ? Color.accentColor : Color.secondary)
+                            .padding(4)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("查看完整元数据与位置信息")
+                    .popover(isPresented: $showFullMetadataPopover, arrowEdge: .top) {
+                        fullMetadataPopoverContent(for: item, metadata: metadata)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func exifChip(icon: String, text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(.quaternary.opacity(0.6), in: Capsule())
+    }
+
+    @ViewBuilder
+    private func fullMetadataPopoverContent(for item: FileItem, metadata: PhotoMetadata) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("详细信息", systemImage: "info.circle.fill")
+                    .font(.headline)
+                Spacer()
+            }
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 8) {
                 if let width = metadata.width, let height = metadata.height {
-                    metadataRow(label: "尺寸", value: "\(width) × \(height)")
+                    metadataRow(label: "图像尺寸", value: "\(width) × \(height)")
                 }
                 if let creationDate = metadata.creationDate {
                     metadataRow(
@@ -825,34 +911,43 @@ struct FileDetailView: View {
                         value: Self.metadataDateFormatter.string(from: creationDate)
                     )
                 }
+                if let sizeBytes = item.sizeBytes {
+                    metadataRow(
+                        label: "文件大小",
+                        value: ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
+                    )
+                }
                 if let make = metadata.cameraMake, let model = metadata.cameraModel {
-                    metadataRow(label: "相机", value: "\(make) \(model)")
+                    metadataRow(label: "相机设备", value: "\(make) \(model)")
                 } else if let model = metadata.cameraModel {
-                    metadataRow(label: "相机", value: model)
+                    metadataRow(label: "相机设备", value: model)
                 } else if let make = metadata.cameraMake {
-                    metadataRow(label: "相机", value: make)
+                    metadataRow(label: "相机设备", value: make)
                 }
                 if let lens = metadata.lens {
-                    metadataRow(label: "镜头", value: lens)
+                    metadataRow(label: "镜头型号", value: lens)
                 }
                 if let iso = metadata.iso, !iso.isEmpty {
-                    metadataRow(label: "ISO", value: iso)
+                    metadataRow(label: "ISO 感光度", value: iso)
                 }
                 if let aperture = metadata.aperture, !aperture.isEmpty {
-                    metadataRow(label: "光圈", value: "f/\(aperture)")
+                    metadataRow(label: "光圈数值", value: "f/\(aperture)")
                 }
                 if let shutter = metadata.shutterSpeed, !shutter.isEmpty {
-                    metadataRow(label: "快门", value: shutter)
+                    metadataRow(label: "快门速度", value: shutter)
                 }
                 if let focal = metadata.focalLength, !focal.isEmpty {
-                    metadataRow(label: "焦距", value: "\(focal) mm")
+                    metadataRow(label: "焦距长度", value: "\(focal) mm")
                 }
                 if let location = metadata.locationText, !location.isEmpty {
-                    metadataRow(label: "位置", value: location)
+                    metadataRow(label: "地理位置", value: location)
                 }
+                metadataRow(label: "文件路径", value: item.path)
             }
             .font(.callout)
         }
+        .padding(16)
+        .frame(width: 340)
     }
 
     private func metadataRow(label: String, value: String) -> some View {
@@ -861,7 +956,8 @@ struct FileDetailView: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 64, alignment: .trailing)
             Text(value)
-                .lineLimit(1)
+                .lineLimit(2)
+                .textSelection(.enabled)
             Spacer()
         }
     }

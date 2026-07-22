@@ -64,6 +64,9 @@ public actor DsmChatRepository: ChatRepository {
         if hasCapability(DsmAPIName.chatPostReminder) {
             features.insert(.reminder)
         }
+        if supportsAttachmentUpload {
+            features.formUnion([.imageAttachment, .videoAttachment, .fileAttachment])
+        }
         return ChatAvailability(status: .available, supportedFeatures: features)
     }
 
@@ -227,10 +230,22 @@ public actor DsmChatRepository: ChatRepository {
         }
     }
 
-    public func sendMessage(_ draft: ChatMessageDraft) async throws -> ChatMessage {
+    public func sendMessage(
+        _ draft: ChatMessageDraft,
+        progress: @escaping FileTransferProgress
+    ) async throws -> ChatMessage {
         if let completed = completedMessages[draft.clientRequestID] { return completed }
-        guard draft.localAttachmentURLs.isEmpty else {
-            throw unsupported("附件发送正在接入中，请先发送文字消息。")
+        guard draft.localAttachmentURLs.count <= 1 else {
+            throw unsupported("请一次发送一个附件。当前文件发送完成后，可以继续选择下一个文件。")
+        }
+        if let localURL = draft.localAttachmentURLs.first {
+            let uploaded = try await uploadAttachment(
+                localURL: localURL,
+                draft: draft,
+                progress: progress
+            )
+            completedMessages[draft.clientRequestID] = uploaded
+            return uploaded
         }
         guard let text = draft.text else { throw ChatContractError.emptyMessage }
         let payload = try await call(
@@ -273,6 +288,173 @@ public actor DsmChatRepository: ChatRepository {
         )
         completedMessages[draft.clientRequestID] = result
         return result
+    }
+
+    /// 使用 Chat Server 2.4.1-22111 官方网页客户端当前采用的内部上传契约。
+    /// `SYNO.Chat.Post/create` v5 与 multipart 的 `file` 字段均不是群晖公开 API，
+    /// 因此仅在运行时能力范围明确包含 v5 时启用，并保持关闭型兼容策略。
+    private func uploadAttachment(
+        localURL: URL,
+        draft: ChatMessageDraft,
+        progress: @escaping FileTransferProgress
+    ) async throws -> ChatMessage {
+        guard supportsAttachmentUpload else {
+            throw unsupported("这台 NAS 当前不能发送附件。请更新 Chat Server 后重试。")
+        }
+        guard localURL.isFileURL else {
+            throw AppError(
+                category: .permissionDenied,
+                isRetryable: false,
+                safeUserMessage: "只能发送保存在这台 Mac 上的文件。"
+            )
+        }
+        let securityScoped = localURL.startAccessingSecurityScopedResource()
+        defer {
+            if securityScoped { localURL.stopAccessingSecurityScopedResource() }
+        }
+        let values: URLResourceValues
+        do {
+            values = try localURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        } catch {
+            throw AppError(
+                category: .permissionDenied,
+                isRetryable: false,
+                safeUserMessage: "无法读取所选文件。请重新选择文件，并确认岚仓有访问权限。"
+            )
+        }
+        guard values.isRegularFile == true else {
+            throw AppError(
+                category: .permissionDenied,
+                isRetryable: false,
+                safeUserMessage: "请选择一个文件，不要选择文件夹。"
+            )
+        }
+
+        let capability = try requireCapability(DsmAPIName.chatPost)
+        let boundary = "LanStash-Chat-\(UUID().uuidString)"
+        let fields = [
+            "api": capability.name,
+            "version": "5",
+            "method": "create",
+            "channel_id": draft.conversationID,
+            "type": "file",
+            "message": draft.text ?? "",
+            "is_thread": "false",
+            "_sid": credential.sid,
+            "SynoToken": credential.synoToken ?? "",
+            "synotoken": credential.synoToken ?? ""
+        ]
+        let bodyURL: URL
+        do {
+            bodyURL = try createChatMultipartBody(
+                localURL: localURL,
+                boundary: boundary,
+                fields: fields
+            )
+        } catch let error as AppError {
+            throw error
+        } catch {
+            throw AppError(
+                category: .localStorageFull,
+                isRetryable: false,
+                safeUserMessage: "准备附件时空间不足。请释放这台 Mac 的存储空间后重试。"
+            )
+        }
+        defer { try? FileManager.default.removeItem(at: bodyURL) }
+
+        guard let binaryTransport = transport as? any DsmBinaryHTTPTransport else {
+            throw unsupported("当前连接方式不能发送附件，请重新连接后重试。")
+        }
+        var uploadURL = apiURL(path: capability.path)
+        if var components = URLComponents(url: uploadURL, resolvingAgainstBaseURL: false) {
+            let queryItems = [
+                URLQueryItem(name: "api", value: capability.name),
+                URLQueryItem(name: "version", value: "5"),
+                URLQueryItem(name: "method", value: "create")
+            ]
+            components.queryItems = queryItems
+            uploadURL = components.url ?? uploadURL
+        }
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let bodySize = try? bodyURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+            request.setValue(String(bodySize), forHTTPHeaderField: "Content-Length")
+        }
+        if let cookie = credential.cookieHeaderValue {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        if let token = credential.synoToken, !token.isEmpty {
+            request.setValue(token, forHTTPHeaderField: "X-SYNO-TOKEN")
+        }
+
+        let response: DsmHTTPResponse
+        do {
+            response = try await binaryTransport.upload(request, from: bodyURL, progress: progress)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as DsmCertificateTrustError {
+            throw error
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch let error as URLError {
+            throw DsmErrorMapper.map(.transport(code: error.errorCode, requestID: UUID()))
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            throw mapChatError(.httpStatus(code: response.statusCode, requestID: UUID()))
+        }
+        let envelope: ChatUploadEnvelope
+        do {
+            envelope = try JSONDecoder().decode(ChatUploadEnvelope.self, from: response.data)
+        } catch {
+            throw invalidChatResponse()
+        }
+        if let code = envelope.error?.code {
+            throw mapChatError(.api(code: code, requestID: UUID()))
+        }
+        guard envelope.success else { throw invalidChatResponse() }
+
+        let fallbackAttachment = makeLocalAttachment(
+            localURL: localURL,
+            fileSize: values.fileSize.map(Int64.init)
+        )
+        var parsed = envelope.data.flatMap {
+            makeMessage(from: $0, fallbackConversationID: draft.conversationID)
+        }
+        if parsed == nil,
+           let page = try? await listMessages(
+               conversationID: draft.conversationID,
+               before: nil,
+               limit: 50
+           ) {
+            parsed = page.messages.first {
+                $0.text == draft.text
+                    && $0.attachments.contains(where: { $0.fileName == localURL.lastPathComponent })
+                    && isOwnedByCurrentUser($0)
+                    && abs($0.sentAt.timeIntervalSinceNow) <= 180
+            }
+        }
+        guard let parsed else {
+            throw AppError(
+                category: .partialFailure,
+                isRetryable: false,
+                safeUserMessage: "NAS 已接收附件，但暂时无法确认发送结果。请刷新会话确认后，再决定是否重试。"
+            )
+        }
+        return ChatMessage(
+            id: parsed.id,
+            clientRequestID: draft.clientRequestID,
+            conversationID: parsed.conversationID,
+            senderID: parsed.senderID,
+            senderDisplayName: parsed.senderDisplayName,
+            isFromCurrentUser: true,
+            sentAt: parsed.sentAt,
+            text: parsed.text ?? draft.text,
+            attachments: parsed.attachments.isEmpty ? [fallbackAttachment] : parsed.attachments,
+            deliveryState: .sent,
+            encryptionState: parsed.encryptionState
+        )
     }
 
     public func deleteMessage(
@@ -508,6 +690,7 @@ public actor DsmChatRepository: ChatRepository {
         let isCurrentUser = object.firstBool(for: ["is_my_post", "is_mine", "is_current_user"])
             ?? creator?.firstBool(for: ["is_login", "is_current", "is_current_user", "is_self", "is_me"])
             ?? cachedCurrentUserID.map { $0 == senderID }
+        let attachments = makeAttachments(from: object, messageID: id)
         return ChatMessage(
             id: id,
             conversationID: conversationID,
@@ -516,9 +699,87 @@ public actor DsmChatRepository: ChatRepository {
             isFromCurrentUser: isCurrentUser,
             sentAt: Self.date(from: object.firstDouble(for: ["create_at", "created_at", "timestamp"])) ?? Date(),
             text: object.firstString(for: ["message", "text", "content"]),
+            attachments: attachments,
             encryptionState: (object.firstBool(for: ["encrypted", "is_encrypted"]) ?? false)
                 ? .locked : .notEncrypted
         )
+    }
+
+    private func makeAttachments(
+        from object: [String: ChatJSON],
+        messageID: String
+    ) -> [ChatAttachment] {
+        var values = object.array(for: "files")
+        if values.isEmpty { values = object.array(for: "attachments") }
+        if values.isEmpty, let file = object["file_props"] {
+            if let encoded = file.stringValue,
+               let data = encoded.data(using: .utf8),
+               let decoded = try? JSONDecoder().decode(ChatJSON.self, from: data) {
+                values = [decoded]
+            } else {
+                values = [file]
+            }
+        }
+        if values.isEmpty,
+           let type = object.firstString(for: ["type", "post_type"])?.lowercased(),
+           type == "file" || type == "image" || type == "video" {
+            values = [.object(object)]
+        }
+        return values.enumerated().compactMap { index, value in
+            let fileObject = value.objectValue ?? [:]
+            let name = fileObject.firstNonEmptyString(
+                for: ["name", "file_name", "filename", "title"]
+            ) ?? object.firstNonEmptyString(for: ["file_name", "filename"])
+            guard let name else { return nil }
+            let mediaType = fileObject.firstNonEmptyString(
+                for: ["content_type", "mime_type", "media_type"]
+            )
+            let extensionName = fileObject.firstNonEmptyString(for: ["type", "extension"])
+                ?? URL(fileURLWithPath: name).pathExtension
+            let kind = Self.attachmentKind(fileName: name, mediaType: mediaType, extensionName: extensionName)
+            return ChatAttachment(
+                id: fileObject.firstString(for: ["file_id", "id", "uuid"])
+                    ?? "\(messageID)-attachment-\(index)",
+                kind: kind,
+                fileName: name,
+                mediaType: mediaType,
+                sizeBytes: fileObject.firstDouble(for: ["size", "file_size", "bytes"]).map(Int64.init),
+                durationMilliseconds: fileObject.firstDouble(for: ["duration", "duration_ms"]).map(Int64.init),
+                thumbnailAvailable: fileObject.firstBool(for: ["has_thumbnail", "thumbnail_available"])
+            )
+        }
+    }
+
+    private func makeLocalAttachment(localURL: URL, fileSize: Int64?) -> ChatAttachment {
+        let name = localURL.lastPathComponent
+        return ChatAttachment(
+            id: "local-file-\(UUID().uuidString)",
+            kind: Self.attachmentKind(
+                fileName: name,
+                mediaType: nil,
+                extensionName: localURL.pathExtension
+            ),
+            fileName: name,
+            sizeBytes: fileSize,
+            thumbnailAvailable: false
+        )
+    }
+
+    private static func attachmentKind(
+        fileName: String,
+        mediaType: String?,
+        extensionName: String?
+    ) -> ChatAttachmentKind {
+        let media = mediaType?.lowercased() ?? ""
+        let ext = (extensionName?.isEmpty == false ? extensionName : URL(fileURLWithPath: fileName).pathExtension)?
+            .lowercased() ?? ""
+        if media.hasPrefix("image/") || ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff"].contains(ext) {
+            return .image
+        }
+        if media.hasPrefix("video/") || ["mov", "mp4", "m4v", "avi", "mkv", "3gp", "webm"].contains(ext) {
+            return .video
+        }
+        return .file
     }
 
     private static func date(from raw: Double?) -> Date? {
@@ -690,6 +951,69 @@ public actor DsmChatRepository: ChatRepository {
         capabilities[name]?.selectedVersion != nil
     }
 
+    private var supportsAttachmentUpload: Bool {
+        guard let capability = capabilities[DsmAPIName.chatPost] else { return false }
+        return capability.minVersion <= 5 && capability.maxVersion >= 5
+    }
+
+    private func apiURL(path: String) -> URL {
+        var url = baseURL.appendingPathComponent("webapi", isDirectory: true)
+        for segment in path.split(separator: "/") {
+            url.appendPathComponent(String(segment), isDirectory: false)
+        }
+        return url
+    }
+
+    private func createChatMultipartBody(
+        localURL: URL,
+        boundary: String,
+        fields: [String: String]
+    ) throws -> URL {
+        let bodyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LanStashChatUpload-\(UUID().uuidString).multipart")
+        guard FileManager.default.createFile(atPath: bodyURL.path, contents: nil) else {
+            throw AppError(
+                category: .localStorageFull,
+                isRetryable: false,
+                safeUserMessage: "无法准备附件，请检查这台 Mac 的可用空间。"
+            )
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bodyURL.path)
+        do {
+            let output = try FileHandle(forWritingTo: bodyURL)
+            defer { try? output.close() }
+            func write(_ string: String) throws {
+                guard let data = string.data(using: .utf8) else {
+                    throw DsmRequestError.parameterEncodingFailed
+                }
+                try output.write(contentsOf: data)
+            }
+            for (name, value) in fields.sorted(by: { $0.key < $1.key }) where !value.isEmpty {
+                try write("--\(boundary)\r\n")
+                try write("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
+                try write("\(value)\r\n")
+            }
+            let safeFilename = localURL.lastPathComponent
+                .replacingOccurrences(of: "\r", with: "")
+                .replacingOccurrences(of: "\n", with: "")
+                .replacingOccurrences(of: "\"", with: "'")
+            try write("--\(boundary)\r\n")
+            try write("Content-Disposition: form-data; name=\"file\"; filename=\"\(safeFilename)\"\r\n")
+            try write("Content-Type: application/octet-stream\r\n\r\n")
+            let input = try FileHandle(forReadingFrom: localURL)
+            defer { try? input.close() }
+            while let chunk = try input.read(upToCount: 1_048_576), !chunk.isEmpty {
+                try Task.checkCancellation()
+                try output.write(contentsOf: chunk)
+            }
+            try write("\r\n--\(boundary)--\r\n")
+            return bodyURL
+        } catch {
+            try? FileManager.default.removeItem(at: bodyURL)
+            throw error
+        }
+    }
+
     private func requireCapability(_ name: String) throws -> ApiCapability {
         guard let capability = capabilities[name], capability.selectedVersion != nil else {
             throw unsupported("这台 NAS 没有启用所需的消息功能，请检查 Chat Server 和当前用户的应用权限。")
@@ -789,6 +1113,16 @@ private indirect enum ChatJSON: Decodable, Sendable {
     func array(for key: String) -> [ChatJSON] {
         objectValue?.array(for: key) ?? []
     }
+}
+
+private struct ChatUploadEnvelope: Decodable, Sendable {
+    let success: Bool
+    let data: ChatJSON?
+    let error: ChatUploadError?
+}
+
+private struct ChatUploadError: Decodable, Sendable {
+    let code: Int
 }
 
 private extension Dictionary where Key == String, Value == ChatJSON {

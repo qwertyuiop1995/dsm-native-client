@@ -12,7 +12,7 @@ struct ChatWorkspaceView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.canUseMessaging, let statusMessage = model.statusMessage {
+            if model.canUseMessaging, model.statusIsError, let statusMessage = model.statusMessage {
                 ChatActionStatusBanner(
                     message: statusMessage,
                     isError: model.statusIsError,
@@ -27,6 +27,19 @@ struct ChatWorkspaceView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .bottom) {
+            if let toast = model.activeToast {
+                InAppToastOverlayView(toast: toast)
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(999)
+                    .onTapGesture {
+                        model.dismissToast()
+                    }
+                    .accessibilityHint("点按可关闭提示")
+            }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.82), value: model.activeToast?.id)
         .task {
             await model.loadIfNeeded()
         }
@@ -354,12 +367,12 @@ private struct ChatUnavailableDetail: View {
 private struct ChatConversationView: View {
     @Bindable var model: ChatWorkspaceModel
     let conversation: ChatConversation
-    @State private var draftText = ""
     @State private var attachmentURLs: [URL] = []
     @State private var presentsFileImporter = false
     @State private var selectedMessageIDs: Set<String> = []
     @State private var pendingMessageDeletion: Set<String> = []
     @State private var presentsMessageDeletionConfirmation = false
+    @State private var scrollToLatestRequest = 0
     @FocusState private var isComposerFocused: Bool
 
     var body: some View {
@@ -376,6 +389,26 @@ private struct ChatConversationView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 8) {
+                            if model.hasMoreMessagesBefore {
+                                Button {
+                                    Task {
+                                        if let anchorID = await model.loadEarlierMessages() {
+                                            proxy.scrollTo(anchorID, anchor: .top)
+                                        }
+                                    }
+                                } label: {
+                                    if model.isLoadingEarlierMessages {
+                                        ProgressView("正在载入更早消息…")
+                                            .controlSize(.small)
+                                    } else {
+                                        Label("载入更早消息", systemImage: "arrow.up.circle")
+                                    }
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(model.isLoadingEarlierMessages)
+                                .padding(.vertical, 6)
+                            }
+
                             ForEach(Array(model.messages.enumerated()), id: \.element.id) { index, message in
                                 if shouldShowDateSeparator(at: index) {
                                     ChatDateSeparator(date: message.sentAt)
@@ -386,7 +419,11 @@ private struct ChatConversationView: View {
                                     users: model.users,
                                     isCurrentUser: model.isCurrentUser(message),
                                     showsSender: conversation.kind == .group,
-                                    isSelected: selectedMessageIDs.contains(message.id)
+                                    isSelected: selectedMessageIDs.contains(message.id),
+                                    failureMessage: model.sendFailureMessage(for: message.id),
+                                    uploadProgress: model.uploadProgress(for: message.id),
+                                    onCancel: { model.cancelMessageSend(id: message.id) },
+                                    onRetry: { Task { await model.retryMessage(id: message.id) } }
                                 )
                                     .id(message.id)
                                     .contentShape(Rectangle())
@@ -394,7 +431,25 @@ private struct ChatConversationView: View {
                                         selectMessage(message)
                                     }
                                     .contextMenu {
-                                        if model.canDelete(message) {
+                                        if message.deliveryState == .failed {
+                                            Button {
+                                                Task { await model.retryMessage(id: message.id) }
+                                            } label: {
+                                                Label("重新发送", systemImage: "arrow.clockwise")
+                                            }
+                                            .disabled(model.isPerformingAction)
+                                            Button(role: .destructive) {
+                                                model.removeFailedMessage(id: message.id)
+                                            } label: {
+                                                Label("移除未发送消息", systemImage: "trash")
+                                            }
+                                        } else if message.deliveryState == .sending {
+                                            Button(role: .destructive) {
+                                                model.cancelMessageSend(id: message.id)
+                                            } label: {
+                                                Label("取消发送", systemImage: "xmark.circle")
+                                            }
+                                        } else if model.canDelete(message) {
                                             Button {
                                                 toggleMessageSelection(message.id)
                                             } label: {
@@ -422,9 +477,22 @@ private struct ChatConversationView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .background(Color(nsColor: .textBackgroundColor))
-                    .onChange(of: model.messages.count) { _, _ in
+                    .task(id: conversation.id) {
+                        await Task.yield()
+                        if let lastID = model.messages.last?.id {
+                            proxy.scrollTo(lastID, anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: model.messages.last?.id) { _, lastID in
+                        guard let lastID,
+                              let lastMessage = model.messages.last,
+                              model.isCurrentUser(lastMessage) else { return }
+                        proxy.scrollTo(lastID, anchor: .bottom)
+                    }
+                    .onChange(of: scrollToLatestRequest) { _, _ in
                         guard let lastID = model.messages.last?.id else { return }
                         proxy.scrollTo(lastID, anchor: .bottom)
+                        model.clearNewMessageIndicator()
                     }
                 }
             }
@@ -437,10 +505,10 @@ private struct ChatConversationView: View {
         .fileImporter(
             isPresented: $presentsFileImporter,
             allowedContentTypes: [.item],
-            allowsMultipleSelection: true
+            allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result {
-                attachmentURLs = urls
+                attachmentURLs = Array(urls.prefix(1))
             }
         }
         .alert(
@@ -463,6 +531,13 @@ private struct ChatConversationView: View {
         .onChange(of: conversation.id) { _, _ in
             selectedMessageIDs = []
         }
+        .task(id: conversation.id) {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled else { break }
+                await model.refreshCurrentConversation()
+            }
+        }
     }
 
     private var conversationHeader: some View {
@@ -479,6 +554,15 @@ private struct ChatConversationView: View {
                     .lineLimit(1)
             }
             Spacer()
+            if model.newMessageCount > 0 {
+                Button {
+                    scrollToLatestRequest += 1
+                } label: {
+                    Label("\(model.newMessageCount) 条新消息", systemImage: "arrow.down.circle.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("滚动到最新消息")
+            }
             if conversation.isEncrypted {
                 Label("已加密", systemImage: "lock.fill")
                     .font(.caption)
@@ -548,7 +632,7 @@ private struct ChatConversationView: View {
         VStack(alignment: .leading, spacing: 8) {
             if !attachmentURLs.isEmpty {
                 HStack {
-                    Label("已选择 \(attachmentURLs.count) 个附件", systemImage: "paperclip")
+                    Label(attachmentURLs.first?.lastPathComponent ?? "已选择附件", systemImage: "paperclip")
                         .font(.caption)
                     Spacer()
                     Button("移除附件") {
@@ -560,17 +644,35 @@ private struct ChatConversationView: View {
 
             HStack(alignment: .bottom, spacing: 8) {
                 Button {
-                    presentsFileImporter = true
+                    if model.canSendAttachments {
+                        presentsFileImporter = true
+                    } else {
+                        model.showAttachmentUnavailable()
+                    }
                 } label: {
                     Label("添加附件", systemImage: "paperclip")
                         .labelStyle(.iconOnly)
                         .frame(width: 28, height: 28)
                 }
-                .disabled(!model.canSendAttachments || model.isPerformingAction)
+                .disabled(!model.canUseMessaging || model.isPerformingAction)
                 .help(model.canSendAttachments ? "添加图片、视频或文件" : "这台 NAS 尚未开放附件发送")
                 .accessibilityLabel("添加附件")
 
-                TextField("输入消息", text: $draftText, axis: .vertical)
+                Button {
+                    isComposerFocused = true
+                    DispatchQueue.main.async {
+                        NSApp.orderFrontCharacterPalette(nil)
+                    }
+                } label: {
+                    Label("插入表情", systemImage: "face.smiling")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 28, height: 28)
+                }
+                .disabled(!model.canSendText || model.isPerformingAction)
+                .help("打开系统表情与符号")
+                .accessibilityLabel("插入表情")
+
+                TextField("输入消息", text: draftText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
                     .focused($isComposerFocused)
@@ -598,20 +700,26 @@ private struct ChatConversationView: View {
 
     private var canSend: Bool {
         !model.isPerformingAction
-            && ((model.canSendText && !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            && ((model.canSendText && !model.draftText(for: conversation.id).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 || (model.canSendAttachments && !attachmentURLs.isEmpty))
     }
 
     private func send() {
         guard canSend else { return }
-        let text = draftText
+        let text = model.draftText(for: conversation.id)
         let urls = attachmentURLs
         Task {
             if await model.send(text: text, attachmentURLs: urls) {
-                draftText = ""
                 attachmentURLs = []
             }
         }
+    }
+
+    private var draftText: Binding<String> {
+        Binding(
+            get: { model.draftText(for: conversation.id) },
+            set: { model.updateDraft($0, for: conversation.id) }
+        )
     }
 
     private func shouldShowDateSeparator(at index: Int) -> Bool {
@@ -667,6 +775,10 @@ private struct ChatMessageRow: View {
     let isCurrentUser: Bool
     let showsSender: Bool
     let isSelected: Bool
+    let failureMessage: String?
+    let uploadProgress: Double?
+    let onCancel: () -> Void
+    let onRetry: () -> Void
 
     private var senderName: String {
         if isCurrentUser { return "你" }
@@ -737,6 +849,47 @@ private struct ChatMessageRow: View {
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                 )
                 .help(Self.fullDateTimeFormatter.string(from: message.sentAt))
+
+                if message.deliveryState == .sending {
+                    VStack(alignment: .trailing, spacing: 5) {
+                        if let uploadProgress {
+                            ProgressView(value: uploadProgress)
+                                .progressViewStyle(.linear)
+                                .frame(width: 140)
+                                .accessibilityLabel("附件上传进度")
+                                .accessibilityValue("\(Int((uploadProgress * 100).rounded()))%")
+                        }
+                        HStack(spacing: 7) {
+                            if uploadProgress == nil {
+                                ProgressView()
+                                    .controlSize(.mini)
+                            }
+                            Text(uploadProgress.map { "正在上传 \(Int(($0 * 100).rounded()))%" } ?? "正在发送")
+                            Button("取消", action: onCancel)
+                                .buttonStyle(.link)
+                                .font(.caption)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .combine)
+                } else if message.deliveryState == .failed {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Label("发送失败", systemImage: "exclamationmark.circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
+                        if let failureMessage {
+                            Text(failureMessage)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                                .lineLimit(2)
+                        }
+                        Button("重新发送", action: onRetry)
+                            .buttonStyle(.link)
+                            .font(.caption)
+                    }
+                }
             }
 
             if !isCurrentUser { Spacer(minLength: 64) }
@@ -754,8 +907,16 @@ private struct ChatMessageRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(senderName)，\(Self.fullDateTimeFormatter.string(from: message.sentAt))")
+        .accessibilityLabel("\(senderName)，\(Self.fullDateTimeFormatter.string(from: message.sentAt))，\(deliveryAccessibilityText)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var deliveryAccessibilityText: String {
+        switch message.deliveryState {
+        case .sending: "正在发送"
+        case .sent: "已发送"
+        case .failed: "发送失败"
+        }
     }
 
     private static let fullDateTimeFormatter: DateFormatter = {

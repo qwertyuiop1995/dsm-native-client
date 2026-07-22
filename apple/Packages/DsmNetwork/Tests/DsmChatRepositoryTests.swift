@@ -16,7 +16,9 @@ final class DsmChatRepositoryTests: XCTestCase {
         XCTAssertTrue(availability.supportedFeatures.contains(.reminder))
         XCTAssertTrue(availability.supportedFeatures.contains(.deleteOwnMessage))
         XCTAssertTrue(availability.supportedFeatures.contains(.closeConversation))
-        XCTAssertFalse(availability.supportedFeatures.contains(.fileAttachment))
+        XCTAssertTrue(availability.supportedFeatures.contains(.imageAttachment))
+        XCTAssertTrue(availability.supportedFeatures.contains(.videoAttachment))
+        XCTAssertTrue(availability.supportedFeatures.contains(.fileAttachment))
     }
 
     func test解析用户与会话并兼容数字和字符串标识() async throws {
@@ -163,6 +165,51 @@ final class DsmChatRepositoryTests: XCTestCase {
         XCTAssertEqual(first.clientRequestID, requestID)
     }
 
+    func test附件使用已验证的ChatPostV5多段上传且报告进度() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"post_id":"9010","channel_id":"27","creator_id":"1","create_at":1774166400000,"message":"测试附件","type":"file","file_props":{"file_id":"f-1","name":"sample.png","size":7,"type":"png"}}}"#)
+        ])
+        let repository = try makeRepository(transport: transport)
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DsmChatRepositoryTests-\(UUID().uuidString)-sample.png")
+        try Data("PNGDATA".utf8).write(to: fileURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let draft = try ChatMessageDraft(
+            conversationID: "27",
+            text: "测试附件",
+            localAttachmentURLs: [fileURL]
+        )
+        let progressRecorder = ChatProgressRecorder()
+
+        let message = try await repository.sendMessage(draft) { completed, _ in
+            progressRecorder.append(completed)
+        }
+
+        XCTAssertEqual(message.attachments.first?.fileName, "sample.png")
+        XCTAssertEqual(message.attachments.first?.kind, .image)
+        XCTAssertEqual(message.clientRequestID, draft.clientRequestID)
+        XCTAssertFalse(progressRecorder.values().isEmpty)
+        let recordedRequests = await transport.recordedRequests()
+        let request = try XCTUnwrap(recordedRequests.first)
+        let query = Dictionary(uniqueKeysWithValues: (URLComponents(
+            url: try XCTUnwrap(request.url),
+            resolvingAgainstBaseURL: false
+        )?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(query["api"], DsmAPIName.chatPost)
+        XCTAssertEqual(query["version"], "5")
+        XCTAssertEqual(query["method"], "create")
+        XCTAssertNil(query["_sid"])
+        XCTAssertNil(query["SynoToken"])
+        XCTAssertTrue(request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("multipart/form-data") == true)
+        let recordedBodies = await transport.recordedUploadBodies()
+        let body = try XCTUnwrap(recordedBodies.first)
+        let bodyText = String(decoding: body, as: UTF8.self)
+        XCTAssertTrue(bodyText.contains("name=\"channel_id\""))
+        XCTAssertTrue(bodyText.contains("name=\"type\""))
+        XCTAssertTrue(bodyText.contains("filename=\"\(fileURL.lastPathComponent)\""))
+        XCTAssertTrue(bodyText.contains("PNGDATA"))
+    }
+
     func test删除自己的消息并复查结果且重复请求只执行一次() async throws {
         let ownPost = #"{"success":true,"data":{"posts":[{"post_id":"9001","channel_id":"27","creator_id":"1","creator_name":"testaccount","create_at":1774166400000,"message":"待删除"}]}}"#
         let transport = MockHTTPTransport(responses: [
@@ -296,5 +343,22 @@ final class DsmChatRepositoryTests: XCTestCase {
         return Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map {
             ($0.name, $0.value ?? "")
         })
+    }
+}
+
+private final class ChatProgressRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedValues: [Int64] = []
+
+    func append(_ value: Int64) {
+        lock.lock()
+        recordedValues.append(value)
+        lock.unlock()
+    }
+
+    func values() -> [Int64] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedValues
     }
 }

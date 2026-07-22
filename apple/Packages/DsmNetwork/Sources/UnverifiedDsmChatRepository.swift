@@ -37,7 +37,10 @@ public actor UnverifiedDsmChatRepository: ChatRepository {
         throw unavailableError()
     }
 
-    public func sendMessage(_ draft: ChatMessageDraft) async throws -> ChatMessage {
+    public func sendMessage(
+        _ draft: ChatMessageDraft,
+        progress: @escaping FileTransferProgress
+    ) async throws -> ChatMessage {
         throw unavailableError()
     }
 

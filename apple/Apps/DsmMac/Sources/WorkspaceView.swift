@@ -4482,5 +4482,7 @@ struct InAppToastOverlayView: View {
                 .strokeBorder(.quaternary.opacity(0.8), lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(toast.text)
     }
 }

@@ -33,6 +33,8 @@ public enum DsmAPIName {
     public static let chatUserAvatar = "SYNO.Chat.User.Avatar"
     /// Synology Chat 消息内部接口。
     public static let chatPost = "SYNO.Chat.Post"
+    /// Synology Chat 附件读取内部接口；当前只登记能力，不在界面暴露协议细节。
+    public static let chatPostFile = "SYNO.Chat.Post.File"
     /// Synology Chat 消息提醒内部接口。
     public static let chatPostReminder = "SYNO.Chat.Post.Reminder"
 }
@@ -87,6 +89,7 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.chatUser,
         DsmAPIName.chatUserAvatar,
         DsmAPIName.chatPost,
+        DsmAPIName.chatPostFile,
         DsmAPIName.chatPostReminder
     ]
 
@@ -197,6 +200,7 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.chatUser: 1...3,
         DsmAPIName.chatUserAvatar: 1...1,
         DsmAPIName.chatPost: 1...8,
+        DsmAPIName.chatPostFile: 1...2,
         DsmAPIName.chatPostReminder: 1...8
     ]
 }

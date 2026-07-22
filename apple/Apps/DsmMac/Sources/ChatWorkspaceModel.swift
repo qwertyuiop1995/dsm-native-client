@@ -12,13 +12,26 @@ final class ChatWorkspaceModel {
     private(set) var selectedConversationID: String?
     private(set) var isLoading = false
     private(set) var isLoadingMessages = false
+    private(set) var isLoadingEarlierMessages = false
+    private(set) var isRefreshingMessages = false
+    private(set) var hasMoreMessagesBefore = false
+    private(set) var newMessageCount = 0
     private(set) var isPerformingAction = false
     private(set) var statusMessage: String?
     private(set) var statusIsError = false
+    private(set) var activeToast: ToastMessage?
+    private(set) var uploadProgressByMessageID: [String: Double] = [:]
 
     @ObservationIgnored private let repository: any ChatRepository
     @ObservationIgnored private let currentAccountName: String?
     @ObservationIgnored private var hasLoaded = false
+    @ObservationIgnored private var previousMessageCursor: String?
+    @ObservationIgnored private var toastDismissTask: Task<Void, Never>?
+    @ObservationIgnored private var sendTasksByMessageID: [String: Task<ChatMessage, Error>] = [:]
+    private var draftsByConversationID: [String: String] = [:]
+    private var failedMessageErrorsByID: [String: String] = [:]
+    private var localOutgoingMessagesByConversationID: [String: [ChatMessage]] = [:]
+    private var draftsByLocalMessageID: [String: ChatMessageDraft] = [:]
 
     init(
         repository: any ChatRepository,
@@ -114,7 +127,27 @@ final class ChatWorkspaceModel {
     }
 
     func canDelete(_ message: ChatMessage) -> Bool {
-        canDeleteOwnMessages && isCurrentUser(message)
+        canDeleteOwnMessages && message.deliveryState == .sent && isCurrentUser(message)
+    }
+
+    func draftText(for conversationID: String) -> String {
+        draftsByConversationID[conversationID] ?? ""
+    }
+
+    func updateDraft(_ text: String, for conversationID: String) {
+        if text.isEmpty {
+            draftsByConversationID[conversationID] = nil
+        } else {
+            draftsByConversationID[conversationID] = text
+        }
+    }
+
+    func sendFailureMessage(for messageID: String) -> String? {
+        failedMessageErrorsByID[messageID]
+    }
+
+    func uploadProgress(for messageID: String) -> Double? {
+        uploadProgressByMessageID[messageID]
     }
 
     func loadIfNeeded() async {
@@ -170,6 +203,9 @@ final class ChatWorkspaceModel {
         guard let id else {
             selectedConversationID = nil
             messages = []
+            previousMessageCursor = nil
+            hasMoreMessagesBefore = false
+            newMessageCount = 0
             return
         }
         guard conversations.contains(where: { $0.id == id }) else { return }
@@ -185,12 +221,79 @@ final class ChatWorkspaceModel {
                 limit: 50
             )
             guard selectedConversationID == id else { return }
-            messages = page.messages.sorted { $0.sentAt < $1.sentAt }
+            messages = Self.mergedMessages(
+                page.messages,
+                localOutgoingMessagesByConversationID[id] ?? []
+            )
+            previousMessageCursor = page.previousCursor
+            hasMoreMessagesBefore = page.hasMoreBefore
+            newMessageCount = 0
         } catch {
             guard selectedConversationID == id else { return }
             messages = []
+            previousMessageCursor = nil
+            hasMoreMessagesBefore = false
+            newMessageCount = 0
             show(error)
         }
+    }
+
+    /// 读取更早的消息并插入列表顶部。返回分页前的首条消息 ID，供界面保持滚动位置。
+    func loadEarlierMessages() async -> String? {
+        guard canUseMessaging, !isLoadingEarlierMessages, hasMoreMessagesBefore,
+              let conversationID = selectedConversationID,
+              let cursor = previousMessageCursor else { return nil }
+        let anchorID = messages.first?.id
+        isLoadingEarlierMessages = true
+        defer { isLoadingEarlierMessages = false }
+        do {
+            let page = try await repository.listMessages(
+                conversationID: conversationID,
+                before: cursor,
+                limit: 50
+            )
+            guard selectedConversationID == conversationID else { return nil }
+            messages = Self.mergedMessages(page.messages, messages)
+            previousMessageCursor = page.previousCursor
+            hasMoreMessagesBefore = page.hasMoreBefore
+            return anchorID
+        } catch {
+            guard selectedConversationID == conversationID else { return nil }
+            show(error)
+            return nil
+        }
+    }
+
+    /// 前台轻量刷新当前会话，只合并最新消息，不清空历史和本地发送状态。
+    func refreshCurrentConversation() async {
+        guard canUseMessaging, !isRefreshingMessages, !isLoadingMessages,
+              let conversationID = selectedConversationID else { return }
+        isRefreshingMessages = true
+        defer { isRefreshingMessages = false }
+        do {
+            let page = try await repository.listMessages(
+                conversationID: conversationID,
+                before: nil,
+                limit: 50
+            )
+            guard selectedConversationID == conversationID else { return }
+            let existingIDs = Set(messages.map(\.id))
+            let added = page.messages.filter { !existingIDs.contains($0.id) }
+            let localMessages = messages.filter { $0.deliveryState != .sent }
+            messages = Self.mergedMessages(messages.filter { $0.deliveryState == .sent }, page.messages)
+            messages = Self.mergedMessages(messages, localMessages)
+            newMessageCount += added.filter { !isCurrentUser($0) }.count
+            if previousMessageCursor == nil {
+                previousMessageCursor = page.previousCursor
+                hasMoreMessagesBefore = page.hasMoreBefore
+            }
+        } catch {
+            // 定时刷新失败不打断阅读；用户主动刷新时仍会获得完整错误提示。
+        }
+    }
+
+    func clearNewMessageIndicator() {
+        newMessageCount = 0
     }
 
     func openDirectConversation(userID: String) async -> Bool {
@@ -234,27 +337,134 @@ final class ChatWorkspaceModel {
     func send(text: String?, attachmentURLs: [URL] = []) async -> Bool {
         guard let selectedConversationID, !isPerformingAction else { return false }
         guard canSendText || (!attachmentURLs.isEmpty && canSendAttachments) else { return false }
-        isPerformingAction = true
-        defer { isPerformingAction = false }
+        let draft: ChatMessageDraft
         do {
-            let draft = try ChatMessageDraft(
+            draft = try ChatMessageDraft(
                 conversationID: selectedConversationID,
                 text: text,
                 localAttachmentURLs: attachmentURLs
             )
-            let message = try await repository.sendMessage(draft)
-            guard self.selectedConversationID == selectedConversationID else { return true }
-            if let index = messages.firstIndex(where: { $0.id == message.id }) {
-                messages[index] = message
-            } else {
-                messages.append(message)
-            }
-            messages.sort { $0.sentAt < $1.sentAt }
-            return true
         } catch {
             show(error)
             return false
         }
+
+        let localMessage = ChatMessage(
+            id: "local-\(draft.clientRequestID.uuidString)",
+            clientRequestID: draft.clientRequestID,
+            conversationID: selectedConversationID,
+            senderID: currentUserID ?? "current",
+            senderDisplayName: currentAccountName,
+            isFromCurrentUser: true,
+            sentAt: Date(),
+            text: draft.text,
+            attachments: draft.localAttachmentURLs.map(Self.localAttachment),
+            deliveryState: .sending
+        )
+        messages.append(localMessage)
+        messages.sort { $0.sentAt < $1.sentAt }
+        localOutgoingMessagesByConversationID[selectedConversationID, default: []].append(localMessage)
+        draftsByLocalMessageID[localMessage.id] = draft
+        draftsByConversationID[selectedConversationID] = nil
+        isPerformingAction = true
+        defer {
+            isPerformingAction = false
+            sendTasksByMessageID[localMessage.id] = nil
+        }
+        let sendTask = Task {
+            try await repository.sendMessage(draft) { [weak self] completed, total in
+                guard let total, total > 0 else { return }
+                Task { @MainActor [weak self] in
+                    self?.uploadProgressByMessageID[localMessage.id] = min(
+                        max(Double(completed) / Double(total), 0),
+                        1
+                    )
+                }
+            }
+        }
+        sendTasksByMessageID[localMessage.id] = sendTask
+        do {
+            let message = try await sendTask.value
+            replaceLocalMessage(localID: localMessage.id, with: message)
+            return true
+        } catch is CancellationError {
+            removeLocalMessage(id: localMessage.id, conversationID: selectedConversationID)
+            showToast("已取消发送。")
+            return false
+        } catch {
+            markMessageFailed(localMessage, error: error)
+            return false
+        }
+    }
+
+    func retryMessage(id: String) async {
+        guard !isPerformingAction,
+              let message = messages.first(where: { $0.id == id }),
+              message.deliveryState == .failed,
+              let clientRequestID = message.clientRequestID else { return }
+        let draft: ChatMessageDraft
+        if let preservedDraft = draftsByLocalMessageID[id] {
+            draft = preservedDraft
+        } else {
+            do {
+                draft = try ChatMessageDraft(
+                    clientRequestID: clientRequestID,
+                    conversationID: message.conversationID,
+                    text: message.text
+                )
+            } catch {
+                show(error)
+                return
+            }
+        }
+        isPerformingAction = true
+        defer { isPerformingAction = false }
+        // 网络中断时原请求可能已经被 NAS 接收。重试前先回读近期消息，
+        // 找到同一账号、相同正文且时间接近的消息时直接确认，避免重复发送。
+        if let page = try? await repository.listMessages(
+            conversationID: message.conversationID,
+            before: nil,
+            limit: 50
+        ), let confirmed = matchingServerMessage(for: message, in: page.messages) {
+            replaceLocalMessage(localID: id, with: confirmed)
+            return
+        }
+        replaceDeliveryState(for: id, with: .sending)
+        failedMessageErrorsByID[id] = nil
+        let sendTask = Task {
+            try await repository.sendMessage(draft) { [weak self] completed, total in
+                guard let total, total > 0 else { return }
+                Task { @MainActor [weak self] in
+                    self?.uploadProgressByMessageID[id] = min(max(Double(completed) / Double(total), 0), 1)
+                }
+            }
+        }
+        sendTasksByMessageID[id] = sendTask
+        defer { sendTasksByMessageID[id] = nil }
+        do {
+            let sent = try await sendTask.value
+            replaceLocalMessage(localID: id, with: sent)
+        } catch is CancellationError {
+            removeLocalMessage(id: id, conversationID: message.conversationID)
+            showToast("已取消发送。")
+        } catch {
+            guard let current = messages.first(where: { $0.id == id }) else { return }
+            markMessageFailed(current, error: error)
+        }
+    }
+
+    func removeFailedMessage(id: String) {
+        guard let message = messages.first(where: { $0.id == id }),
+              message.deliveryState == .failed else { return }
+        messages.removeAll { $0.id == id }
+        localOutgoingMessagesByConversationID[message.conversationID]?.removeAll { $0.id == id }
+        failedMessageErrorsByID[id] = nil
+        draftsByLocalMessageID[id] = nil
+        uploadProgressByMessageID[id] = nil
+    }
+
+    func cancelMessageSend(id: String) {
+        sendTasksByMessageID[id]?.cancel()
     }
 
     @discardableResult
@@ -301,8 +511,12 @@ final class ChatWorkspaceModel {
                 lastError: lastError
             )
         } else {
-            statusMessage = deletedCount == 1 ? "消息已删除。" : "已删除 \(deletedCount) 条消息。"
+            statusMessage = nil
             statusIsError = false
+            showToast(
+                deletedCount == 1 ? "消息已删除" : "已删除 \(deletedCount) 条消息",
+                icon: "trash.fill"
+            )
         }
         return deletedCount
     }
@@ -335,6 +549,10 @@ final class ChatWorkspaceModel {
         // 将已经成功的关闭操作错误显示成失败。
         if !closedIDs.isEmpty {
             conversations.removeAll { closedIDs.contains($0.id) }
+            for id in closedIDs {
+                draftsByConversationID[id] = nil
+                localOutgoingMessagesByConversationID[id] = nil
+            }
             if let selectedConversationID, closedIDs.contains(selectedConversationID) {
                 self.selectedConversationID = nil
                 messages = []
@@ -349,15 +567,159 @@ final class ChatWorkspaceModel {
                 lastError: lastError
             )
         } else {
-            statusMessage = closedCount == 1 ? "会话已删除，消息已进入群晖 Chat 归档。" : "已删除 \(closedCount) 个会话，消息已进入群晖 Chat 归档。"
+            statusMessage = nil
             statusIsError = false
+            showToast(
+                closedCount == 1 ? "会话已删除并进入归档" : "已删除 \(closedCount) 个会话并进入归档",
+                icon: "archivebox.fill"
+            )
         }
         return closedCount
+    }
+
+    func showToast(
+        _ text: String,
+        icon: String = "checkmark.circle.fill",
+        style: ToastMessage.Style = .success
+    ) {
+        toastDismissTask?.cancel()
+        activeToast = ToastMessage(text: text, icon: icon, style: style)
+        toastDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.activeToast = nil
+        }
+    }
+
+    func showAttachmentUnavailable() {
+        showToast(
+            "这台 NAS 尚未开放附件发送",
+            icon: "paperclip",
+            style: .info
+        )
+    }
+
+    func dismissToast() {
+        toastDismissTask?.cancel()
+        activeToast = nil
     }
 
     func clearStatus() {
         statusMessage = nil
         statusIsError = false
+    }
+
+    private func replaceLocalMessage(localID: String, with message: ChatMessage) {
+        localOutgoingMessagesByConversationID[message.conversationID]?.removeAll { $0.id == localID }
+        failedMessageErrorsByID[localID] = nil
+        draftsByLocalMessageID[localID] = nil
+        uploadProgressByMessageID[localID] = nil
+        guard selectedConversationID == message.conversationID else { return }
+        if let index = messages.firstIndex(where: { $0.id == localID }) {
+            messages[index] = message
+        } else if !messages.contains(where: { $0.id == message.id }) {
+            messages.append(message)
+        }
+        messages.sort(by: Self.messageSort)
+    }
+
+    private func removeLocalMessage(id: String, conversationID: String) {
+        localOutgoingMessagesByConversationID[conversationID]?.removeAll { $0.id == id }
+        if selectedConversationID == conversationID {
+            messages.removeAll { $0.id == id }
+        }
+        failedMessageErrorsByID[id] = nil
+        draftsByLocalMessageID[id] = nil
+        uploadProgressByMessageID[id] = nil
+    }
+
+    private func markMessageFailed(_ message: ChatMessage, error: Error) {
+        guard selectedConversationID == message.conversationID else { return }
+        replaceDeliveryState(for: message.id, with: .failed)
+        failedMessageErrorsByID[message.id] = Self.safeMessage(for: error)
+    }
+
+    private func replaceDeliveryState(for id: String, with state: ChatMessageDeliveryState) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        let message = messages[index]
+        messages[index] = ChatMessage(
+            id: message.id,
+            clientRequestID: message.clientRequestID,
+            conversationID: message.conversationID,
+            senderID: message.senderID,
+            senderDisplayName: message.senderDisplayName,
+            isFromCurrentUser: message.isFromCurrentUser,
+            sentAt: message.sentAt,
+            text: message.text,
+            attachments: message.attachments,
+            poll: message.poll,
+            deliveryState: state,
+            encryptionState: message.encryptionState
+        )
+        if let localIndex = localOutgoingMessagesByConversationID[message.conversationID]?
+            .firstIndex(where: { $0.id == id }) {
+            localOutgoingMessagesByConversationID[message.conversationID]?[localIndex] = messages[index]
+        }
+    }
+
+    private static func mergedMessages(_ first: [ChatMessage], _ second: [ChatMessage]) -> [ChatMessage] {
+        var messagesByID: [String: ChatMessage] = [:]
+        for message in first { messagesByID[message.id] = message }
+        for message in second { messagesByID[message.id] = message }
+        return messagesByID.values.sorted(by: messageSort)
+    }
+
+    private static func messageSort(_ lhs: ChatMessage, _ rhs: ChatMessage) -> Bool {
+        if lhs.sentAt != rhs.sentAt { return lhs.sentAt < rhs.sentAt }
+        return lhs.id.localizedStandardCompare(rhs.id) == .orderedAscending
+    }
+
+    private static func safeMessage(for error: Error) -> String {
+        if let appError = error as? AppError { return appError.safeUserMessage }
+        if let localizedError = error as? LocalizedError,
+           let description = localizedError.errorDescription {
+            return description
+        }
+        return "消息没有发送，请检查连接后重试。"
+    }
+
+    private func matchingServerMessage(
+        for localMessage: ChatMessage,
+        in serverMessages: [ChatMessage]
+    ) -> ChatMessage? {
+        let localFileNames = localMessage.attachments.map(\.fileName)
+        return serverMessages
+            .filter {
+                $0.conversationID == localMessage.conversationID
+                    && $0.text == localMessage.text
+                    && (localFileNames.isEmpty || $0.attachments.map(\.fileName) == localFileNames)
+                    && isCurrentUser($0)
+                    && abs($0.sentAt.timeIntervalSince(localMessage.sentAt)) <= 180
+            }
+            .min {
+                abs($0.sentAt.timeIntervalSince(localMessage.sentAt))
+                    < abs($1.sentAt.timeIntervalSince(localMessage.sentAt))
+            }
+    }
+
+    private static func localAttachment(from url: URL) -> ChatAttachment {
+        let ext = url.pathExtension.lowercased()
+        let kind: ChatAttachmentKind
+        if ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff"].contains(ext) {
+            kind = .image
+        } else if ["mov", "mp4", "m4v", "avi", "mkv", "3gp", "webm"].contains(ext) {
+            kind = .video
+        } else {
+            kind = .file
+        }
+        let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init)
+        return ChatAttachment(
+            id: "local-attachment-\(UUID().uuidString)",
+            kind: kind,
+            fileName: url.lastPathComponent,
+            sizeBytes: size ?? nil,
+            thumbnailAvailable: false
+        )
     }
 
     private func merge(_ conversation: ChatConversation) {

@@ -418,7 +418,10 @@ public protocol ChatRepository: Sendable {
         clientRequestID: UUID
     ) async throws -> ChatConversation
     func createGroup(_ draft: ChatGroupDraft) async throws -> ChatConversation
-    func sendMessage(_ draft: ChatMessageDraft) async throws -> ChatMessage
+    func sendMessage(
+        _ draft: ChatMessageDraft,
+        progress: @escaping FileTransferProgress
+    ) async throws -> ChatMessage
     func deleteMessage(
         conversationID: String,
         messageID: String,
@@ -434,4 +437,10 @@ public protocol ChatRepository: Sendable {
         clientRequestID: UUID
     ) async throws -> ChatReminder
     func createPoll(_ draft: ChatPollDraft) async throws -> ChatMessage
+}
+
+public extension ChatRepository {
+    func sendMessage(_ draft: ChatMessageDraft) async throws -> ChatMessage {
+        try await sendMessage(draft, progress: { _, _ in })
+    }
 }

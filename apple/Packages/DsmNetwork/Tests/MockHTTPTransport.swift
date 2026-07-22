@@ -5,6 +5,7 @@ import Foundation
 actor MockHTTPTransport: DsmBinaryHTTPTransport {
     private var responses: [DsmHTTPResponse]
     private var requests: [URLRequest] = []
+    private var uploadBodies: [Data] = []
 
     init(responses: [DsmHTTPResponse]) {
         self.responses = responses
@@ -20,6 +21,10 @@ actor MockHTTPTransport: DsmBinaryHTTPTransport {
 
     func recordedRequests() -> [URLRequest] {
         requests
+    }
+
+    func recordedUploadBodies() -> [Data] {
+        uploadBodies
     }
 
     func download(
@@ -40,6 +45,9 @@ actor MockHTTPTransport: DsmBinaryHTTPTransport {
         progress: @escaping FileTransferProgress
     ) async throws -> DsmHTTPResponse {
         let size = Int64((try? bodyFileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        if let body = try? Data(contentsOf: bodyFileURL) {
+            uploadBodies.append(body)
+        }
         progress(0, size)
         let response = try await send(request)
         progress(size, size)

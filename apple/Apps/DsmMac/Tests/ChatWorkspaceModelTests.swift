@@ -57,6 +57,120 @@ final class ChatWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(sentTexts, ["你好 👋"])
     }
 
+    func test向上分页会合并更早消息并保持唯一顺序() async {
+        let active = conversation(id: "conversation-1", title: "测试聊天", activity: Date())
+        let older = [
+            message(id: "message-1", conversationID: active.id, date: Date(timeIntervalSince1970: 1)),
+            message(id: "message-2", conversationID: active.id, date: Date(timeIntervalSince1970: 2))
+        ]
+        let latest = [
+            message(id: "message-3", conversationID: active.id, date: Date(timeIntervalSince1970: 3)),
+            message(id: "message-4", conversationID: active.id, date: Date(timeIntervalSince1970: 4))
+        ]
+        let repository = ChatRepositoryStub(
+            conversations: [active],
+            queuedMessagePagesByConversation: [active.id: [
+                ChatMessagePage(messages: latest, previousCursor: "2", hasMoreBefore: true),
+                ChatMessagePage(messages: older, previousCursor: nil, hasMoreBefore: false)
+            ]]
+        )
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+
+        let anchorID = await model.loadEarlierMessages()
+
+        XCTAssertEqual(anchorID, "message-3")
+        XCTAssertEqual(model.messages.map(\.id), ["message-1", "message-2", "message-3", "message-4"])
+        XCTAssertFalse(model.hasMoreMessagesBefore)
+    }
+
+    func test切换会话会分别保留内存草稿() async {
+        let first = conversation(id: "conversation-1", title: "聊天一", activity: Date())
+        let second = conversation(id: "conversation-2", title: "聊天二", activity: Date())
+        let repository = ChatRepositoryStub(conversations: [first, second])
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+
+        model.updateDraft("第一段草稿", for: first.id)
+        await model.selectConversation(id: second.id)
+        model.updateDraft("第二段草稿", for: second.id)
+
+        XCTAssertEqual(model.draftText(for: first.id), "第一段草稿")
+        XCTAssertEqual(model.draftText(for: second.id), "第二段草稿")
+    }
+
+    func test发送失败显示本地失败消息并可手动重试() async {
+        let active = conversation(id: "conversation-1", title: "测试聊天", activity: Date())
+        let repository = ChatRepositoryStub(conversations: [active], sendFailuresRemaining: 1)
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+        model.updateDraft("需要重试", for: active.id)
+
+        let succeeded = await model.send(text: model.draftText(for: active.id))
+        let failed = model.messages.first
+
+        XCTAssertFalse(succeeded)
+        XCTAssertEqual(failed?.deliveryState, .failed)
+        XCTAssertEqual(model.draftText(for: active.id), "")
+        XCTAssertNotNil(failed.flatMap { model.sendFailureMessage(for: $0.id) })
+
+        await model.retryMessage(id: failed?.id ?? "")
+
+        XCTAssertEqual(model.messages.count, 1)
+        XCTAssertEqual(model.messages.first?.deliveryState, .sent)
+        XCTAssertEqual(model.messages.first?.text, "需要重试")
+    }
+
+    func test附件失败后保留文件并在重试时再次上传() async throws {
+        let active = conversation(id: "conversation-1", title: "测试聊天", activity: Date())
+        let repository = ChatRepositoryStub(conversations: [active], sendFailuresRemaining: 1)
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChatWorkspaceModelTests-\(UUID().uuidString).png")
+        try Data("image".utf8).write(to: fileURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let succeeded = await model.send(text: "图片说明", attachmentURLs: [fileURL])
+        let failedID = try XCTUnwrap(model.messages.first?.id)
+
+        XCTAssertFalse(succeeded)
+        XCTAssertEqual(model.messages.first?.attachments.first?.fileName, fileURL.lastPathComponent)
+        await model.retryMessage(id: failedID)
+
+        XCTAssertEqual(model.messages.first?.deliveryState, .sent)
+        XCTAssertEqual(model.messages.first?.attachments.first?.fileName, fileURL.lastPathComponent)
+        let sentAttachmentNames = await repository.sentAttachmentNames()
+        XCTAssertEqual(sentAttachmentNames, [fileURL.lastPathComponent, fileURL.lastPathComponent])
+    }
+
+    func test前台增量刷新只合并新消息并显示提示() async {
+        let active = conversation(id: "conversation-1", title: "测试聊天", activity: Date())
+        let first = message(id: "message-1", conversationID: active.id, date: Date(timeIntervalSince1970: 1))
+        let second = ChatMessage(
+            id: "message-2",
+            conversationID: active.id,
+            senderID: "other-user",
+            isFromCurrentUser: false,
+            sentAt: Date(timeIntervalSince1970: 2),
+            text: "新消息"
+        )
+        let repository = ChatRepositoryStub(
+            conversations: [active],
+            queuedMessagePagesByConversation: [active.id: [
+                ChatMessagePage(messages: [first], previousCursor: nil, hasMoreBefore: false),
+                ChatMessagePage(messages: [first, second], previousCursor: nil, hasMoreBefore: false)
+            ]]
+        )
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+
+        await model.refreshCurrentConversation()
+
+        XCTAssertEqual(model.messages.map(\.id), ["message-1", "message-2"])
+        XCTAssertEqual(model.newMessageCount, 1)
+    }
+
     func test使用登录账号识别当前用户并将其消息标记为自己() async {
         let repository = ChatRepositoryStub(
             conversations: [conversation(
@@ -140,7 +254,8 @@ final class ChatWorkspaceModelTests: XCTestCase {
 
         XCTAssertEqual(deletedCount, 2)
         XCTAssertTrue(model.messages.isEmpty)
-        XCTAssertEqual(model.statusMessage, "已删除 2 条消息。")
+        XCTAssertNil(model.statusMessage)
+        XCTAssertEqual(model.activeToast?.text, "已删除 2 条消息")
     }
 
     func test不能删除其他成员发送的消息() async {
@@ -183,7 +298,8 @@ final class ChatWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(closedCount, 2)
         XCTAssertTrue(model.conversations.isEmpty)
         XCTAssertNil(model.selectedConversationID)
-        XCTAssertEqual(model.statusMessage, "已删除 2 个会话，消息已进入群晖 Chat 归档。")
+        XCTAssertNil(model.statusMessage)
+        XCTAssertEqual(model.activeToast?.text, "已删除 2 个会话并进入归档")
     }
 
     private func conversation(
@@ -217,12 +333,17 @@ private actor ChatRepositoryStub: ChatRepository {
     private var storedConversations: [ChatConversation]
     private let users: [ChatUser]
     private var messagesByConversation: [String: [ChatMessage]]
+    private var queuedMessagePagesByConversation: [String: [ChatMessagePage]]
+    private var sendFailuresRemaining: Int
     private var recordedSentTexts: [String] = []
+    private var recordedAttachmentNames: [String] = []
 
     init(
         conversations: [ChatConversation],
         users: [ChatUser] = [ChatUser(id: "user-1", displayName: "测试用户")],
         messagesByConversation: [String: [ChatMessage]] = [:],
+        queuedMessagePagesByConversation: [String: [ChatMessagePage]] = [:],
+        sendFailuresRemaining: Int = 0,
         availableFeatures: Set<ChatFeature> = [
             .directConversation,
             .groupConversation,
@@ -238,6 +359,8 @@ private actor ChatRepositoryStub: ChatRepository {
         self.storedConversations = conversations
         self.users = users
         self.messagesByConversation = messagesByConversation
+        self.queuedMessagePagesByConversation = queuedMessagePagesByConversation
+        self.sendFailuresRemaining = sendFailuresRemaining
         self.availableFeatures = availableFeatures
     }
 
@@ -258,7 +381,12 @@ private actor ChatRepositoryStub: ChatRepository {
         before cursor: String?,
         limit: Int
     ) async throws -> ChatMessagePage {
-        ChatMessagePage(
+        if var pages = queuedMessagePagesByConversation[conversationID], !pages.isEmpty {
+            let page = pages.removeFirst()
+            queuedMessagePagesByConversation[conversationID] = pages
+            return page
+        }
+        return ChatMessagePage(
             messages: Array((messagesByConversation[conversationID] ?? []).suffix(limit)),
             previousCursor: nil,
             hasMoreBefore: false
@@ -291,15 +419,41 @@ private actor ChatRepositoryStub: ChatRepository {
         return created
     }
 
-    func sendMessage(_ draft: ChatMessageDraft) async throws -> ChatMessage {
+    func sendMessage(
+        _ draft: ChatMessageDraft,
+        progress: @escaping FileTransferProgress
+    ) async throws -> ChatMessage {
         recordedSentTexts.append(draft.text ?? "")
+        recordedAttachmentNames.append(contentsOf: draft.localAttachmentURLs.map(\.lastPathComponent))
+        if !draft.localAttachmentURLs.isEmpty {
+            progress(1, 2)
+        }
+        if sendFailuresRemaining > 0 {
+            sendFailuresRemaining -= 1
+            throw AppError(
+                category: .networkUnavailable,
+                isRetryable: true,
+                safeUserMessage: "连接中断，请检查网络后重试。"
+            )
+        }
+        let attachments = draft.localAttachmentURLs.map {
+            ChatAttachment(
+                id: "sent-file-\($0.lastPathComponent)",
+                kind: .image,
+                fileName: $0.lastPathComponent
+            )
+        }
+        if !draft.localAttachmentURLs.isEmpty {
+            progress(2, 2)
+        }
         let sent = ChatMessage(
             id: "sent-\(recordedSentTexts.count)",
             clientRequestID: draft.clientRequestID,
             conversationID: draft.conversationID,
             senderID: "current-user",
             sentAt: Date(timeIntervalSince1970: 3_000 + Double(recordedSentTexts.count)),
-            text: draft.text
+            text: draft.text,
+            attachments: attachments
         )
         messagesByConversation[draft.conversationID, default: []].append(sent)
         return sent
@@ -351,5 +505,9 @@ private actor ChatRepositoryStub: ChatRepository {
 
     func sentTexts() -> [String] {
         recordedSentTexts
+    }
+
+    func sentAttachmentNames() -> [String] {
+        recordedAttachmentNames
     }
 }

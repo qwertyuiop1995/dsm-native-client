@@ -567,16 +567,23 @@ final class AppModel {
         workspace = nil
         session = nil
         activeConnectionProfile = nil
-        password = ""
-        rememberPassword = false
-        if let profile {
-            profileStore.setAutoLoginEnabled(false, for: profile.id)
-        }
         autoLoginEnabled = false
         otpCode = ""
         requiresOTP = false
 
-        guard let profile, let discovered, let authenticated else {
+        guard let profile else {
+            password = ""
+            rememberPassword = false
+            statusMessage = "已退出。"
+            return
+        }
+
+        // 主动退出只停用自动登录；已记住的密码保留并重新加载到登录界面，
+        // 避免下次需要重新输入。
+        profileStore.setAutoLoginEnabled(false, for: profile.id)
+        await loadSavedPassword(for: profile)
+
+        guard let discovered, let authenticated else {
             statusMessage = "已退出。"
             return
         }

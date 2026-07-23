@@ -390,6 +390,6 @@ else
 fi
 
 if [[ "$RUN_AFTER_PACKAGE" -eq 1 ]]; then
-    echo "==> 启动刚生成的 $PRODUCT_NAME（新实例）"
+    echo "==> 启动刚生成的 ${PRODUCT_NAME}（新实例）"
     /usr/bin/open -n "$APP_PATH"
 fi

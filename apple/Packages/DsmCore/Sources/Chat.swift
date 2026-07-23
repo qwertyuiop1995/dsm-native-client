@@ -14,12 +14,24 @@ public enum ChatFeature: String, Codable, CaseIterable, Hashable, Sendable {
     case encryptedConversation
     case deleteOwnMessage
     case closeConversation
+    case attachmentDownload
+    case reminderManagement
+    case scheduledMessage
+    case messageForward
+    case groupMembers
+    case pinnedMessages
 }
 
 public enum ChatAvailabilityStatus: String, Codable, Sendable {
     case unavailable
     case requiresValidation
     case available
+}
+
+public enum ChatRealtimeEvent: Equatable, Sendable {
+    case connected
+    case contentChanged
+    case disconnected
 }
 
 public struct ChatAvailability: Codable, Equatable, Sendable {
@@ -208,6 +220,7 @@ public struct ChatMessage: Identifiable, Codable, Hashable, Sendable {
     public let poll: ChatPoll?
     public let deliveryState: ChatMessageDeliveryState
     public let encryptionState: ChatEncryptionState
+    public let pinnedAt: Date?
 
     public init(
         id: String,
@@ -221,7 +234,8 @@ public struct ChatMessage: Identifiable, Codable, Hashable, Sendable {
         attachments: [ChatAttachment] = [],
         poll: ChatPoll? = nil,
         deliveryState: ChatMessageDeliveryState = .sent,
-        encryptionState: ChatEncryptionState = .notEncrypted
+        encryptionState: ChatEncryptionState = .notEncrypted,
+        pinnedAt: Date? = nil
     ) {
         self.id = id
         self.clientRequestID = clientRequestID
@@ -235,6 +249,11 @@ public struct ChatMessage: Identifiable, Codable, Hashable, Sendable {
         self.poll = poll
         self.deliveryState = deliveryState
         self.encryptionState = encryptionState
+        self.pinnedAt = pinnedAt
+    }
+
+    public var isPinned: Bool {
+        pinnedAt != nil
     }
 }
 
@@ -264,6 +283,25 @@ public struct ChatReminder: Identifiable, Codable, Hashable, Sendable {
         self.messageID = messageID
         self.remindAt = remindAt
     }
+}
+
+public struct ChatScheduledMessage: Identifiable, Codable, Hashable, Sendable {
+    public let id: String
+    public let conversationID: String
+    public let text: String
+    public let sendAt: Date
+
+    public init(id: String, conversationID: String, text: String, sendAt: Date) {
+        self.id = id
+        self.conversationID = conversationID
+        self.text = text
+        self.sendAt = sendAt
+    }
+}
+
+public enum ChatAttachmentThumbnailSize: String, Codable, Sendable {
+    case small = "sm"
+    case large = "lg"
 }
 
 public enum ChatContractError: Error, Equatable, Sendable {
@@ -431,16 +469,66 @@ public protocol ChatRepository: Sendable {
         conversationID: String,
         clientRequestID: UUID
     ) async throws
+    func listConversationMembers(conversationID: String) async throws -> [ChatUser]
+    func listPinnedMessages(conversationID: String) async throws -> [ChatMessage]
+    func setMessagePinned(
+        conversationID: String,
+        messageID: String,
+        isPinned: Bool,
+        clientRequestID: UUID
+    ) async throws
+    func forwardMessage(
+        messageID: String,
+        toConversationIDs: [String],
+        clientRequestID: UUID
+    ) async throws
     func setReminder(
         messageID: String,
         remindAt: Date,
         clientRequestID: UUID
     ) async throws -> ChatReminder
+    func listReminders(conversationID: String) async throws -> [ChatReminder]
+    func deleteReminder(
+        messageID: String,
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws
+    func loadAttachmentThumbnail(
+        messageID: String,
+        size: ChatAttachmentThumbnailSize
+    ) async throws -> Data
+    func downloadAttachment(
+        messageID: String,
+        to destinationURL: URL,
+        progress: @escaping FileTransferProgress
+    ) async throws
+    func listScheduledMessages(conversationID: String) async throws -> [ChatScheduledMessage]
+    func createScheduledMessage(
+        conversationID: String,
+        text: String,
+        sendAt: Date,
+        clientRequestID: UUID
+    ) async throws -> ChatScheduledMessage
+    func deleteScheduledMessage(
+        id: String,
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws
     func createPoll(_ draft: ChatPollDraft) async throws -> ChatMessage
+    func realtimeEvents() async -> AsyncStream<ChatRealtimeEvent>
+    func startRealtime() async
+    func stopRealtime() async
 }
 
 public extension ChatRepository {
     func sendMessage(_ draft: ChatMessageDraft) async throws -> ChatMessage {
         try await sendMessage(draft, progress: { _, _ in })
     }
+
+    func realtimeEvents() async -> AsyncStream<ChatRealtimeEvent> {
+        AsyncStream { $0.finish() }
+    }
+
+    func startRealtime() async {}
+    func stopRealtime() async {}
 }

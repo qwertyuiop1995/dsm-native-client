@@ -11,12 +11,18 @@ public actor DsmChatRepository: ChatRepository {
     private let client: DsmAPIClient
     private let baseURL: URL
     private let transport: any DsmHTTPTransport
+    private let realtimeClient: DsmChatRealtimeClient
     private var completedMessages: [UUID: ChatMessage] = [:]
     private var completedDirectConversations: [UUID: ChatConversation] = [:]
     private var completedGroups: [UUID: ChatConversation] = [:]
     private var completedReminders: [UUID: ChatReminder] = [:]
+    private var completedReminderDeletions: Set<UUID> = []
+    private var completedScheduledMessages: [UUID: ChatScheduledMessage] = [:]
+    private var completedScheduledMessageDeletions: Set<UUID> = []
     private var completedMessageDeletions: Set<UUID> = []
     private var completedConversationClosures: Set<UUID> = []
+    private var completedMessageForwards: Set<UUID> = []
+    private var completedPinChanges: Set<UUID> = []
     private var knownUsersByID: [String: ChatUser] = [:]
     private var cachedCurrentUserID: String?
     private let currentAccountName: String?
@@ -39,11 +45,34 @@ public actor DsmChatRepository: ChatRepository {
         self.baseURL = resolvedBaseURL
         self.transport = resolvedTransport
         currentAccountName = Self.normalizedIdentityName(profile.usernameHint)
-        credential = DsmSessionCredential(sid: session.sid, synoToken: session.synoToken)
+        let resolvedCredential = DsmSessionCredential(
+            sid: session.sid,
+            synoToken: session.synoToken
+        )
+        credential = resolvedCredential
         client = DsmAPIClient(
             baseURL: resolvedBaseURL,
             transport: resolvedTransport
         )
+        realtimeClient = DsmChatRealtimeClient(
+            baseURL: resolvedBaseURL,
+            credential: resolvedCredential,
+            expectedHost: profile.host,
+            pinnedCertificateSHA256: profile.pinnedCertificateSHA256,
+            requiresSystemCertificateTrust: DsmQuickConnectResolver.isTrustedRelayHost(profile.host)
+        )
+    }
+
+    public func realtimeEvents() async -> AsyncStream<ChatRealtimeEvent> {
+        await realtimeClient.events()
+    }
+
+    public func startRealtime() async {
+        await realtimeClient.start()
+    }
+
+    public func stopRealtime() async {
+        await realtimeClient.stop()
     }
 
     public func availability() async -> ChatAvailability {
@@ -64,12 +93,25 @@ public actor DsmChatRepository: ChatRepository {
         }
         if hasCapability(DsmAPIName.chatPostReminder) {
             features.insert(.reminder)
+            features.insert(.reminderManagement)
         }
         if hasCapability(DsmAPIName.chatPostVote) {
             features.insert(.poll)
         }
+        if hasCapability(DsmAPIName.chatPostSchedule) {
+            features.insert(.scheduledMessage)
+        }
+        if supportsVersion(DsmAPIName.chatPost, version: 5) {
+            features.formUnion([.messageForward, .pinnedMessages])
+        }
+        if hasCapability(DsmAPIName.chatChannelMember) {
+            features.insert(.groupMembers)
+        }
         if supportsAttachmentUpload {
             features.formUnion([.imageAttachment, .videoAttachment, .fileAttachment])
+        }
+        if hasCapability(DsmAPIName.chatPostFile) {
+            features.insert(.attachmentDownload)
         }
         return ChatAvailability(status: .available, supportedFeatures: features)
     }
@@ -109,6 +151,128 @@ public actor DsmChatRepository: ChatRepository {
         }
     }
 
+    public func listConversationMembers(conversationID: String) async throws -> [ChatUser] {
+        let normalizedID = conversationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedID.isEmpty else { throw ChatContractError.emptyConversationID }
+        let payload = try await call(
+            DsmAPIName.chatChannelMember,
+            method: "get",
+            parameters: ["channel_id": .string(normalizedID)],
+            version: 1
+        )
+        let object = payload.objectValue ?? [:]
+        let memberIDs = object.array(for: "user_ids").compactMap(\.stringValue)
+        guard !memberIDs.isEmpty else { return [] }
+        let missingIDs = memberIDs.filter { knownUsersByID[$0] == nil }
+        if !missingIDs.isEmpty {
+            _ = try await listUsers()
+        }
+        return memberIDs.compactMap { knownUsersByID[$0] }
+    }
+
+    public func listPinnedMessages(conversationID: String) async throws -> [ChatMessage] {
+        let normalizedID = conversationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedID.isEmpty else { throw ChatContractError.emptyConversationID }
+        let payload = try await call(
+            DsmAPIName.chatPost,
+            method: "search",
+            parameters: [
+                "channel_id": .string(normalizedID),
+                "offset": .integer(0),
+                "limit": .integer(100),
+                "has": .stringArray(["pin"]),
+                "sort_by": .string("last_pin_at"),
+                "sort_by_array": .stringArray(["is_sticky", "last_pin_at"])
+            ],
+            version: 5
+        )
+        let values = payload.array(for: "search_results").isEmpty
+            ? payload.array(for: "posts")
+            : payload.array(for: "search_results")
+        return values.compactMap {
+            makeMessage(from: $0, fallbackConversationID: normalizedID)
+        }
+        .filter(\.isPinned)
+        .sorted { ($0.pinnedAt ?? .distantPast) > ($1.pinnedAt ?? .distantPast) }
+    }
+
+    public func setMessagePinned(
+        conversationID: String,
+        messageID: String,
+        isPinned: Bool,
+        clientRequestID: UUID
+    ) async throws {
+        if completedPinChanges.contains(clientRequestID) { return }
+        let normalizedConversationID = conversationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedMessageID = messageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedConversationID.isEmpty else { throw ChatContractError.emptyConversationID }
+        guard !normalizedMessageID.isEmpty else {
+            throw AppError(
+                category: .notFound,
+                isRetryable: false,
+                safeUserMessage: "没有找到这条消息，请刷新后重试。"
+            )
+        }
+        try await callVoid(
+            DsmAPIName.chatPost,
+            method: isPinned ? "pin" : "unpin",
+            parameters: ["post_id": .string(normalizedMessageID)],
+            version: 5
+        )
+        let pinnedMessages = try await listPinnedMessages(conversationID: normalizedConversationID)
+        guard pinnedMessages.contains(where: { $0.id == normalizedMessageID }) == isPinned else {
+            throw AppError(
+                category: .partialFailure,
+                isRetryable: true,
+                safeUserMessage: isPinned
+                    ? "消息暂时没有显示在公告中，请刷新后重试。"
+                    : "消息仍显示在公告中，请刷新后重试。"
+            )
+        }
+        completedPinChanges.insert(clientRequestID)
+    }
+
+    public func forwardMessage(
+        messageID: String,
+        toConversationIDs: [String],
+        clientRequestID: UUID
+    ) async throws {
+        if completedMessageForwards.contains(clientRequestID) { return }
+        let normalizedMessageID = messageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetIDs = Array(Set(toConversationIDs.compactMap { value -> String? in
+            let id = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return id.isEmpty ? nil : id
+        })).sorted()
+        guard !normalizedMessageID.isEmpty else {
+            throw AppError(
+                category: .notFound,
+                isRetryable: false,
+                safeUserMessage: "没有找到要转发的消息，请刷新后重试。"
+            )
+        }
+        guard !targetIDs.isEmpty else { throw ChatContractError.emptyConversationID }
+        let numericTargetIDs = try targetIDs.map { id -> Int in
+            guard let value = Int(id) else {
+                throw AppError(
+                    category: .invalidResponse,
+                    isRetryable: false,
+                    safeUserMessage: "目标会话暂时无法用于转发，请刷新会话列表后重试。"
+                )
+            }
+            return value
+        }
+        try await callVoid(
+            DsmAPIName.chatPost,
+            method: "forward",
+            parameters: [
+                "post_id": .string(normalizedMessageID),
+                "channel_ids": .integerArray(numericTargetIDs)
+            ],
+            version: 5
+        )
+        completedMessageForwards.insert(clientRequestID)
+    }
+
     public func listMessages(
         conversationID: String,
         before cursor: String?,
@@ -125,15 +289,18 @@ public actor DsmChatRepository: ChatRepository {
                 "offset": .integer(offset)
             ]
         )
-        let messages = payload.array(for: "posts").compactMap {
+        let postValues = payload.array(for: "posts")
+        let messages = postValues.compactMap {
             makeMessage(from: $0, fallbackConversationID: conversationID)
         }
         .sorted { $0.sentAt < $1.sentAt }
         let total = payload.objectValue?.firstInt(for: ["total"])
-        let hasMore = total.map { offset + messages.count < $0 } ?? (messages.count == safeLimit)
+        // 游标按服务器原始记录数推进；部分附件操作会附带不可展示的辅助记录。
+        let nextOffset = offset + postValues.count
+        let hasMore = total.map { nextOffset < $0 } ?? (postValues.count == safeLimit)
         return ChatMessagePage(
             messages: messages,
-            previousCursor: hasMore ? String(offset + messages.count) : nil,
+            previousCursor: hasMore ? String(nextOffset) : nil,
             hasMoreBefore: hasMore
         )
     }
@@ -307,7 +474,8 @@ public actor DsmChatRepository: ChatRepository {
             attachments: message.attachments,
             poll: message.poll,
             deliveryState: .sent,
-            encryptionState: message.encryptionState
+            encryptionState: message.encryptionState,
+            pinnedAt: message.pinnedAt
         )
         completedMessages[draft.clientRequestID] = result
         return result
@@ -476,7 +644,8 @@ public actor DsmChatRepository: ChatRepository {
             text: parsed.text ?? draft.text,
             attachments: parsed.attachments.isEmpty ? [fallbackAttachment] : parsed.attachments,
             deliveryState: .sent,
-            encryptionState: parsed.encryptionState
+            encryptionState: parsed.encryptionState,
+            pinnedAt: parsed.pinnedAt
         )
     }
 
@@ -584,6 +753,230 @@ public actor DsmChatRepository: ChatRepository {
         return reminder
     }
 
+    public func listReminders(conversationID: String) async throws -> [ChatReminder] {
+        let normalizedID = conversationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedID.isEmpty else { throw ChatContractError.emptyConversationID }
+        let payload = try await call(
+            DsmAPIName.chatPostReminder,
+            method: "list",
+            parameters: ["channel_id": .string(normalizedID)]
+        )
+        return reminderValues(from: payload).compactMap(makeReminder)
+            .sorted { $0.remindAt < $1.remindAt }
+    }
+
+    public func deleteReminder(
+        messageID: String,
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws {
+        if completedReminderDeletions.contains(clientRequestID) { return }
+        let normalizedID = messageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedID.isEmpty else {
+            throw AppError(
+                category: .notFound,
+                isRetryable: false,
+                safeUserMessage: "没有找到这条提醒，请刷新后重试。"
+            )
+        }
+        // 内部 API：参数来自当前 Chat Server 官方网页客户端静态契约。
+        try await callVoid(
+            DsmAPIName.chatPostReminder,
+            method: "delete",
+            parameters: ["post_id": .string(normalizedID)]
+        )
+        let remaining = try await listReminders(conversationID: conversationID)
+        guard !remaining.contains(where: { $0.messageID == normalizedID }) else {
+            throw AppError(
+                category: .partialFailure,
+                isRetryable: true,
+                safeUserMessage: "提醒仍然存在，请刷新后重试。"
+            )
+        }
+        completedReminderDeletions.insert(clientRequestID)
+    }
+
+    public func loadAttachmentThumbnail(
+        messageID: String,
+        size: ChatAttachmentThumbnailSize
+    ) async throws -> Data {
+        let request = try attachmentRequest(
+            messageID: messageID,
+            method: "thumbnail",
+            parameters: ["type": .string(size.rawValue)],
+            accept: "image/*"
+        )
+        let response = try await sendAttachmentRequest(request)
+        guard !response.data.isEmpty,
+              response.data.count <= 10 * 1_024 * 1_024,
+              Self.isImageResponse(response) else {
+            throw AppError(
+                category: .invalidResponse,
+                isRetryable: true,
+                safeUserMessage: "暂时无法显示附件预览，你仍可以尝试下载原文件。"
+            )
+        }
+        return response.data
+    }
+
+    public func downloadAttachment(
+        messageID: String,
+        to destinationURL: URL,
+        progress: @escaping FileTransferProgress
+    ) async throws {
+        guard destinationURL.isFileURL else {
+            throw AppError(
+                category: .permissionDenied,
+                isRetryable: false,
+                safeUserMessage: "请选择这台 Mac 上的保存位置。"
+            )
+        }
+        let request = try attachmentRequest(
+            messageID: messageID,
+            method: "get",
+            parameters: [:],
+            accept: "application/octet-stream"
+        )
+        guard let binaryTransport = transport as? any DsmBinaryHTTPTransport else {
+            throw unsupported("当前连接方式不能下载聊天附件，请重新连接后重试。")
+        }
+        let stagingURL = destinationURL.deletingLastPathComponent()
+            .appendingPathComponent(".lanstash-chat-\(UUID().uuidString).download")
+        defer { try? FileManager.default.removeItem(at: stagingURL) }
+        let response: DsmHTTPResponse
+        do {
+            response = try await binaryTransport.download(request, to: stagingURL, progress: progress)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as DsmCertificateTrustError {
+            throw error
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch let error as URLError {
+            throw DsmErrorMapper.map(.transport(code: error.errorCode, requestID: UUID()))
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            throw mapChatError(.httpStatus(code: response.statusCode, requestID: UUID()))
+        }
+        if Self.isJSONResponse(response) {
+            throw invalidChatResponse()
+        }
+        do {
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: stagingURL.path)
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                _ = try FileManager.default.replaceItemAt(destinationURL, withItemAt: stagingURL)
+            } else {
+                try FileManager.default.moveItem(at: stagingURL, to: destinationURL)
+            }
+        } catch {
+            throw AppError(
+                category: .permissionDenied,
+                isRetryable: false,
+                safeUserMessage: "附件已经下载，但无法写入所选位置。请换一个文件夹后重试。"
+            )
+        }
+    }
+
+    public func listScheduledMessages(conversationID: String) async throws -> [ChatScheduledMessage] {
+        let normalizedID = conversationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedID.isEmpty else { throw ChatContractError.emptyConversationID }
+        let payload = try await call(
+            DsmAPIName.chatPostSchedule,
+            method: "list",
+            parameters: ["channel_id": .string(normalizedID)]
+        )
+        return scheduledMessageValues(from: payload).compactMap(makeScheduledMessage)
+            .sorted { $0.sendAt < $1.sendAt }
+    }
+
+    public func createScheduledMessage(
+        conversationID: String,
+        text: String,
+        sendAt: Date,
+        clientRequestID: UUID
+    ) async throws -> ChatScheduledMessage {
+        if let completed = completedScheduledMessages[clientRequestID] { return completed }
+        let normalizedConversationID = conversationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedConversationID.isEmpty else { throw ChatContractError.emptyConversationID }
+        guard !normalizedText.isEmpty else { throw ChatContractError.emptyMessage }
+        guard sendAt > Date() else {
+            throw AppError(
+                category: .invalidResponse,
+                isRetryable: false,
+                safeUserMessage: "请选择一个将来的发送时间。"
+            )
+        }
+
+        let existing = try await listScheduledMessages(conversationID: normalizedConversationID).first {
+            $0.conversationID == normalizedConversationID
+                && $0.text == normalizedText
+                && abs($0.sendAt.timeIntervalSince(sendAt)) < 1
+        }
+        if let existing {
+            completedScheduledMessages[clientRequestID] = existing
+            return existing
+        }
+        let payload = try await call(
+            DsmAPIName.chatPostSchedule,
+            method: "create",
+            parameters: [
+                "channel_id": .string(normalizedConversationID),
+                "message": .string(normalizedText),
+                "send_at": .string(String(Int64(sendAt.timeIntervalSince1970 * 1_000)))
+            ]
+        )
+        let parsed: ChatScheduledMessage?
+        if let responseMessage = makeScheduledMessage(from: payload) {
+            parsed = responseMessage
+        } else {
+            parsed = try await listScheduledMessages(conversationID: normalizedConversationID).first {
+                $0.conversationID == normalizedConversationID
+                    && $0.text == normalizedText
+                    && abs($0.sendAt.timeIntervalSince(sendAt)) < 1
+            }
+        }
+        guard let parsed else {
+            throw AppError(
+                category: .partialFailure,
+                isRetryable: false,
+                safeUserMessage: "定时消息可能已经创建，但暂时无法确认。请打开定时消息列表检查后再决定是否重试。"
+            )
+        }
+        completedScheduledMessages[clientRequestID] = parsed
+        return parsed
+    }
+
+    public func deleteScheduledMessage(
+        id: String,
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws {
+        if completedScheduledMessageDeletions.contains(clientRequestID) { return }
+        let normalizedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedID.isEmpty else {
+            throw AppError(
+                category: .notFound,
+                isRetryable: false,
+                safeUserMessage: "没有找到这条定时消息，请刷新后重试。"
+            )
+        }
+        try await callVoid(
+            DsmAPIName.chatPostSchedule,
+            method: "delete",
+            parameters: ["cronjob_id": .string(normalizedID)]
+        )
+        let remaining = try await listScheduledMessages(conversationID: conversationID)
+        guard !remaining.contains(where: { $0.id == normalizedID }) else {
+            throw AppError(
+                category: .partialFailure,
+                isRetryable: true,
+                safeUserMessage: "定时消息仍然存在，请刷新后重试。"
+            )
+        }
+        completedScheduledMessageDeletions.insert(clientRequestID)
+    }
+
     public func createPoll(_ draft: ChatPollDraft) async throws -> ChatMessage {
         if let completed = completedMessages[draft.clientRequestID] { return completed }
         let options = try pollOptionsJSON(for: draft)
@@ -639,7 +1032,8 @@ public actor DsmChatRepository: ChatRepository {
             attachments: parsed.attachments,
             poll: poll,
             deliveryState: .sent,
-            encryptionState: parsed.encryptionState
+            encryptionState: parsed.encryptionState,
+            pinnedAt: parsed.pinnedAt
         )
         completedMessages[draft.clientRequestID] = result
         return result
@@ -661,17 +1055,135 @@ public actor DsmChatRepository: ChatRepository {
         return result
     }
 
+    private func reminderValues(from payload: ChatJSON) -> [ChatJSON] {
+        if let values = payload.arrayValue { return values }
+        guard let object = payload.objectValue else { return [] }
+        for key in ["posts", "reminders", "reminder_list", "items", "list", "results"] {
+            if let values = object[key]?.arrayValue { return values }
+        }
+        if object.firstString(for: ["post_id", "message_id"]) != nil {
+            return [payload]
+        }
+        return []
+    }
+
+    private func scheduledMessageValues(from payload: ChatJSON) -> [ChatJSON] {
+        if let values = payload.arrayValue { return values }
+        guard let object = payload.objectValue else { return [] }
+        for key in ["schedules", "schedule_posts", "scheduled_posts", "cronjobs", "items", "list", "results"] {
+            if let values = object[key]?.arrayValue { return values }
+        }
+        if object.firstString(for: ["cronjob_id", "id"]) != nil { return [payload] }
+        return []
+    }
+
+    private func makeScheduledMessage(from value: ChatJSON) -> ChatScheduledMessage? {
+        guard let object = value.objectValue,
+              let id = object.firstString(for: ["cronjob_id", "schedule_id", "id"]),
+              let conversationID = object.firstString(for: ["channel_id", "conversation_id"]),
+              let text = object.firstNonEmptyString(for: ["message", "text", "content"]),
+              let rawTime = object.firstDouble(for: ["send_at", "scheduled_at", "time"]),
+              let sendAt = Self.date(from: rawTime) else { return nil }
+        return ChatScheduledMessage(
+            id: id,
+            conversationID: conversationID,
+            text: text,
+            sendAt: sendAt
+        )
+    }
+
+    private func makeReminder(from value: ChatJSON) -> ChatReminder? {
+        guard let object = value.objectValue,
+              let messageID = object.firstString(for: ["post_id", "message_id"]) else { return nil }
+        let props = object["props"]?.objectValue
+        guard let rawTime = object.firstDouble(for: ["remind_at", "reminde_at", "reminder_at", "time"])
+                ?? props?.firstDouble(for: ["remind_at", "reminde_at", "reminder_at", "time"]),
+              let remindAt = Self.date(from: rawTime) else { return nil }
+        return ChatReminder(
+            id: object.firstString(for: ["reminder_id", "id"]) ?? messageID,
+            messageID: messageID,
+            remindAt: remindAt
+        )
+    }
+
+    private func attachmentRequest(
+        messageID: String,
+        method: String,
+        parameters: [String: DsmParameterValue],
+        accept: String
+    ) throws -> URLRequest {
+        let normalizedID = messageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedID.isEmpty else {
+            throw AppError(
+                category: .notFound,
+                isRetryable: false,
+                safeUserMessage: "没有找到这个附件，请刷新消息后重试。"
+            )
+        }
+        let capability = try requireCapability(DsmAPIName.chatPostFile)
+        var request = try DsmRequestBuilder.build(
+            baseURL: baseURL,
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: method,
+            requestFormat: capability.requestFormat,
+            parameters: parameters.merging(["post_id": .string(normalizedID)]) { current, _ in current },
+            credential: nil,
+            httpMethod: "GET"
+        )
+        request.setValue(accept, forHTTPHeaderField: "Accept")
+        if let cookie = credential.cookieHeaderValue {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        if let synoToken = credential.synoToken, !synoToken.isEmpty {
+            request.setValue(synoToken, forHTTPHeaderField: "X-SYNO-TOKEN")
+        }
+        return request
+    }
+
+    private func sendAttachmentRequest(_ request: URLRequest) async throws -> DsmHTTPResponse {
+        let response: DsmHTTPResponse
+        do {
+            response = try await transport.send(request)
+        } catch let error as DsmCertificateTrustError {
+            throw error
+        } catch let error as URLError {
+            throw DsmErrorMapper.map(.transport(code: error.errorCode, requestID: UUID()))
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            throw mapChatError(.httpStatus(code: response.statusCode, requestID: UUID()))
+        }
+        guard !Self.isJSONResponse(response) else { throw invalidChatResponse() }
+        return response
+    }
+
+    private static func isImageResponse(_ response: DsmHTTPResponse) -> Bool {
+        let contentType = response.headers.first {
+            $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame
+        }?.value.lowercased()
+        return contentType?.hasPrefix("image/") == true || hasKnownImageSignature(response.data)
+    }
+
+    private static func isJSONResponse(_ response: DsmHTTPResponse) -> Bool {
+        let contentType = response.headers.first {
+            $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame
+        }?.value.lowercased()
+        return contentType?.contains("json") == true
+    }
+
     private func call(
         _ name: String,
         method: String,
-        parameters: [String: DsmParameterValue]
+        parameters: [String: DsmParameterValue],
+        version: Int? = nil
     ) async throws -> ChatJSON {
         let capability = try requireCapability(name)
         do {
             return try await client.call(
                 path: capability.path,
                 api: capability.name,
-                version: try selectedVersion(capability),
+                version: try selectedVersion(capability, requiring: version),
                 method: method,
                 requestFormat: capability.requestFormat,
                 parameters: parameters,
@@ -691,14 +1203,15 @@ public actor DsmChatRepository: ChatRepository {
     private func callVoid(
         _ name: String,
         method: String,
-        parameters: [String: DsmParameterValue]
+        parameters: [String: DsmParameterValue],
+        version: Int? = nil
     ) async throws {
         let capability = try requireCapability(name)
         do {
             try await client.callVoid(
                 path: capability.path,
                 api: capability.name,
-                version: try selectedVersion(capability),
+                version: try selectedVersion(capability, requiring: version),
                 method: method,
                 requestFormat: capability.requestFormat,
                 parameters: parameters,
@@ -787,6 +1300,19 @@ public actor DsmChatRepository: ChatRepository {
             ?? creator?.firstBool(for: ["is_login", "is_current", "is_current_user", "is_self", "is_me"])
             ?? cachedCurrentUserID.map { $0 == senderID }
         let attachments = makeAttachments(from: object, messageID: id)
+        let poll = makePoll(from: object, messageID: id)
+        let text = object.firstString(for: ["message", "text", "content"])
+        let isEncrypted = object.firstBool(for: ["encrypted", "is_encrypted"]) ?? false
+        let rawPinnedAt = object.firstDouble(for: ["last_pin_at", "pinned_at"])
+        let pinnedAt = rawPinnedAt.flatMap { $0 > 0 ? Self.date(from: $0) : nil }
+        let hasVisibleText = text?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
+        // Chat Server 在附件操作后可能返回无正文、无附件的辅助记录。
+        // 这类记录不是实际用户消息，不能生成空头像行。
+        guard hasVisibleText || !attachments.isEmpty || poll != nil || isEncrypted else {
+            return nil
+        }
         return ChatMessage(
             id: id,
             conversationID: conversationID,
@@ -794,11 +1320,70 @@ public actor DsmChatRepository: ChatRepository {
             senderDisplayName: senderName,
             isFromCurrentUser: isCurrentUser,
             sentAt: Self.date(from: object.firstDouble(for: ["create_at", "created_at", "timestamp"])) ?? Date(),
-            text: object.firstString(for: ["message", "text", "content"]),
+            text: text,
             attachments: attachments,
-            encryptionState: (object.firstBool(for: ["encrypted", "is_encrypted"]) ?? false)
-                ? .locked : .notEncrypted
+            poll: poll,
+            encryptionState: isEncrypted ? .locked : .notEncrypted,
+            pinnedAt: pinnedAt
         )
+    }
+
+    private func makePoll(
+        from object: [String: ChatJSON],
+        messageID: String
+    ) -> ChatPoll? {
+        let rawValue = object["vote"] ?? object["poll"] ?? object["vote_info"]
+        let decodedValue: ChatJSON?
+        if let encoded = rawValue?.stringValue,
+           let data = encoded.data(using: .utf8) {
+            decodedValue = try? JSONDecoder().decode(ChatJSON.self, from: data)
+        } else {
+            decodedValue = rawValue
+        }
+        guard let pollObject = decodedValue?.objectValue else { return nil }
+
+        var rawChoices = pollObject.array(for: "choices")
+        if rawChoices.isEmpty { rawChoices = pollObject.array(for: "options") }
+        let choices = rawChoices.enumerated().compactMap { index, value -> ChatPollOption? in
+            if let text = value.stringValue {
+                return ChatPollOption(id: "\(messageID)-choice-\(index)", text: text)
+            }
+            guard let choice = value.objectValue,
+                  let text = choice.firstNonEmptyString(for: ["choice", "text", "name", "title"]) else {
+                return nil
+            }
+            return ChatPollOption(
+                id: choice.firstString(for: ["choice_id", "option_id", "id"])
+                    ?? "\(messageID)-choice-\(index)",
+                text: text,
+                voteCount: choice.firstInt(for: ["vote_count", "count", "votes"]) ?? 0,
+                isSelectedByCurrentUser: choice.firstBool(
+                    for: ["selected", "is_selected", "is_voted", "voted"]
+                ) ?? false
+            )
+        }
+        guard !choices.isEmpty else { return nil }
+
+        let settings = pollSettings(from: pollObject["options"]) ?? pollObject
+        return ChatPoll(
+            id: pollObject.firstString(for: ["vote_id", "poll_id", "id"]) ?? messageID,
+            question: pollObject.firstNonEmptyString(for: ["message", "question", "title"])
+                ?? object.firstNonEmptyString(for: ["message", "text", "content"])
+                ?? "投票",
+            allowsMultipleSelection: settings.firstBool(for: ["multiple", "allow_multiple"]) ?? false,
+            isAnonymous: settings.firstBool(for: ["anonymous", "is_anonymous"]) ?? false,
+            closesAt: Self.date(from: settings.firstDouble(for: ["expire_at", "close_at", "closes_at"])),
+            isClosed: pollObject.firstBool(for: ["closed", "is_closed", "expired"]) ?? false,
+            options: choices
+        )
+    }
+
+    private func pollSettings(from value: ChatJSON?) -> [String: ChatJSON]? {
+        if let object = value?.objectValue { return object }
+        guard let encoded = value?.stringValue,
+              let data = encoded.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(ChatJSON.self, from: data) else { return nil }
+        return decoded.objectValue
     }
 
     private func makeAttachments(
@@ -1047,6 +1632,11 @@ public actor DsmChatRepository: ChatRepository {
         capabilities[name]?.selectedVersion != nil
     }
 
+    private func supportsVersion(_ name: String, version: Int) -> Bool {
+        guard let capability = capabilities[name], capability.selectedVersion != nil else { return false }
+        return capability.minVersion <= version && capability.maxVersion >= version
+    }
+
     private var supportsAttachmentUpload: Bool {
         guard let capability = capabilities[DsmAPIName.chatPost] else { return false }
         return capability.minVersion <= 5 && capability.maxVersion >= 5
@@ -1117,7 +1707,17 @@ public actor DsmChatRepository: ChatRepository {
         return capability
     }
 
-    private func selectedVersion(_ capability: ApiCapability) throws -> Int {
+    private func selectedVersion(
+        _ capability: ApiCapability,
+        requiring requiredVersion: Int? = nil
+    ) throws -> Int {
+        if let requiredVersion {
+            guard capability.minVersion <= requiredVersion,
+                  capability.maxVersion >= requiredVersion else {
+                throw unsupported("这台 NAS 的消息服务版本暂不支持此操作。")
+            }
+            return requiredVersion
+        }
         guard let version = capability.selectedVersion else {
             throw unsupported("这台 NAS 的消息服务版本暂不受支持。")
         }

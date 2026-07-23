@@ -4,6 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ChatWorkspaceView: View {
+    @Environment(\.accessibilityReduceMotion) private var reducesMotion
     @Bindable var model: ChatWorkspaceModel
     @State private var presentsNewConversation = false
     @State private var selectedConversationIDs: Set<String> = []
@@ -32,16 +33,20 @@ struct ChatWorkspaceView: View {
                 InAppToastOverlayView(toast: toast)
                     .padding(.bottom, 24)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .zIndex(999)
+                    .zIndex(10)
                     .onTapGesture {
                         model.dismissToast()
                     }
                     .accessibilityHint("点按可关闭提示")
             }
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.82), value: model.activeToast?.id)
+        .animation(
+            reducesMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82),
+            value: model.activeToast?.id
+        )
         .task {
             await model.loadIfNeeded()
+            await model.refreshForegroundChat()
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -133,16 +138,33 @@ struct ChatWorkspaceView: View {
                     }
                     .disabled(!model.canCreateDirectConversation && !model.canCreateGroupConversation)
                 }
+                .fillsAvailableContentArea()
             } else {
                 List(selection: conversationSelection) {
                     ForEach(model.conversations) { conversation in
                         ConversationRow(
                             conversation: conversation,
                             users: model.users,
-                            currentUserID: model.currentUserID
+                            currentUserID: model.currentUserID,
+                            isPinned: model.isConversationPinned(conversation.id)
                         )
                             .tag(conversation.id)
                             .contextMenu {
+                                Button {
+                                    model.toggleConversationPin(id: conversation.id)
+                                } label: {
+                                    Label(
+                                        model.isConversationPinned(conversation.id)
+                                            ? "取消置顶"
+                                            : "置顶会话",
+                                        systemImage: model.isConversationPinned(conversation.id)
+                                            ? "pin.slash"
+                                            : "pin"
+                                    )
+                                }
+
+                                Divider()
+
                                 Button(role: .destructive) {
                                     requestConversationDeletion(from: conversation.id)
                                 } label: {
@@ -210,6 +232,7 @@ struct ChatWorkspaceView: View {
                 systemImage: "bubble.left",
                 description: Text("从左侧选择已有会话，或新建一段聊天。")
             )
+            .fillsAvailableContentArea()
         } else {
             ChatUnavailableDetail(status: model.availability.status)
         }
@@ -248,6 +271,7 @@ private struct ConversationRow: View {
     let conversation: ChatConversation
     let users: [ChatUser]
     let currentUserID: String?
+    let isPinned: Bool
 
     private var directUser: ChatUser? {
         guard conversation.kind == .direct else { return nil }
@@ -278,6 +302,12 @@ private struct ConversationRow: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .accessibilityLabel("加密会话")
+                    }
+                    if isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("已置顶")
                     }
                     Spacer(minLength: 4)
                     if let lastActivityAt = conversation.lastActivityAt {
@@ -361,6 +391,7 @@ private struct ChatUnavailableDetail: View {
                     : "为了保护账号和消息，在功能准备好以前不会尝试连接这台 NAS 的消息服务。"
             )
         }
+        .fillsAvailableContentArea()
     }
 }
 
@@ -370,10 +401,19 @@ private struct ChatConversationView: View {
     @State private var attachmentURLs: [URL] = []
     @State private var presentsFileImporter = false
     @State private var presentsPollComposer = false
+    @State private var presentsReminderList = false
+    @State private var presentsGroupMembers = false
+    @State private var presentsPinnedMessages = false
+    @State private var reminderMessage: ChatMessage?
+    @State private var presentsScheduledMessageComposer = false
+    @State private var presentsScheduledMessageList = false
     @State private var selectedMessageIDs: Set<String> = []
+    @State private var presentsForwardSheet = false
     @State private var pendingMessageDeletion: Set<String> = []
     @State private var presentsMessageDeletionConfirmation = false
     @State private var scrollToLatestRequest = 0
+    @State private var presentsImagePreview = false
+    @State private var previewedImage: NSImage?
     @FocusState private var isComposerFocused: Bool
 
     var body: some View {
@@ -423,8 +463,28 @@ private struct ChatConversationView: View {
                                     isSelected: selectedMessageIDs.contains(message.id),
                                     failureMessage: model.sendFailureMessage(for: message.id),
                                     uploadProgress: model.uploadProgress(for: message.id),
+                                    downloadProgress: model.attachmentDownloadProgress(for: message.id),
+                                    thumbnailData: model.thumbnailData(for: message.id),
+                                    canDownloadAttachments: model.canDownloadAttachments,
                                     onCancel: { model.cancelMessageSend(id: message.id) },
-                                    onRetry: { Task { await model.retryMessage(id: message.id) } }
+                                    onRetry: { Task { await model.retryMessage(id: message.id) } },
+                                    onCancelDownload: {
+                                        model.cancelAttachmentDownload(messageID: message.id)
+                                    },
+                                    onLoadThumbnail: { attachment in
+                                        Task {
+                                            await model.loadAttachmentThumbnail(
+                                                messageID: message.id,
+                                                attachment: attachment
+                                            )
+                                        }
+                                    },
+                                    onPreviewImage: { attachment in
+                                        presentImagePreview(message: message, attachment: attachment)
+                                    },
+                                    onSaveAttachment: { attachment in
+                                        saveAttachment(message: message, attachment: attachment)
+                                    }
                                 )
                                     .id(message.id)
                                     .contentShape(Rectangle())
@@ -450,25 +510,76 @@ private struct ChatConversationView: View {
                                             } label: {
                                                 Label("取消发送", systemImage: "xmark.circle")
                                             }
-                                        } else if model.canDelete(message) {
-                                            Button {
-                                                toggleMessageSelection(message.id)
-                                            } label: {
-                                                Label(
-                                                    selectedMessageIDs.contains(message.id) ? "取消选择" : "选择此消息",
-                                                    systemImage: selectedMessageIDs.contains(message.id) ? "checkmark.circle.fill" : "circle"
-                                                )
-                                            }
-                                            Divider()
-                                            Button(role: .destructive) {
-                                                requestMessageDeletion(from: message.id)
-                                            } label: {
-                                                Label(messageDeletionTitle(for: message.id), systemImage: "trash")
-                                            }
-                                            .disabled(model.isPerformingAction)
                                         } else {
-                                            Button("只能删除自己发送的消息") {}
-                                                .disabled(true)
+                                            if let attachment = message.attachments.first,
+                                               model.canDownloadAttachments {
+                                                if attachment.kind == .image {
+                                                    Button {
+                                                        presentImagePreview(message: message, attachment: attachment)
+                                                    } label: {
+                                                        Label("预览图片", systemImage: "photo")
+                                                    }
+                                                }
+                                                Button {
+                                                    saveAttachment(message: message, attachment: attachment)
+                                                } label: {
+                                                    Label("将附件另存为…", systemImage: "square.and.arrow.down")
+                                                }
+                                                Divider()
+                                            }
+                                            if model.canManageReminders {
+                                                Button {
+                                                    reminderMessage = message
+                                                } label: {
+                                                    Label(
+                                                        model.reminder(for: message.id) == nil ? "设置提醒…" : "修改提醒…",
+                                                        systemImage: "bell"
+                                                    )
+                                                }
+                                                .disabled(model.isPerformingAction)
+                                            }
+                                            if model.canPin(message) {
+                                                Button {
+                                                    Task {
+                                                        _ = await model.setMessagePinned(
+                                                            message,
+                                                            isPinned: !message.isPinned
+                                                        )
+                                                    }
+                                                } label: {
+                                                    Label(
+                                                        message.isPinned ? "从群公告中移除" : "设为群公告",
+                                                        systemImage: message.isPinned ? "pin.slash" : "pin"
+                                                    )
+                                                }
+                                                .disabled(model.isPerformingAction)
+                                            }
+                                            if model.canForward(message) {
+                                                Divider()
+                                                Button {
+                                                    toggleMessageSelection(message.id)
+                                                } label: {
+                                                    Label(
+                                                        selectedMessageIDs.contains(message.id) ? "取消选择" : "选择此消息",
+                                                        systemImage: selectedMessageIDs.contains(message.id) ? "checkmark.circle.fill" : "circle"
+                                                    )
+                                                }
+                                                Button {
+                                                    presentForwardSheet(from: message.id)
+                                                } label: {
+                                                    Label("转发…", systemImage: "arrowshape.turn.up.right")
+                                                }
+                                                .disabled(model.isPerformingAction)
+                                            }
+                                            if model.canDelete(message) {
+                                                Divider()
+                                                Button(role: .destructive) {
+                                                    requestMessageDeletion(from: message.id)
+                                                } label: {
+                                                    Label(messageDeletionTitle(for: message.id), systemImage: "trash")
+                                                }
+                                                .disabled(model.isPerformingAction)
+                                            }
                                         }
                                     }
                             }
@@ -498,6 +609,9 @@ private struct ChatConversationView: View {
                 }
             }
 
+            if !selectedMessageIDs.isEmpty {
+                selectionBar
+            }
             Divider()
             composer
         }
@@ -514,6 +628,35 @@ private struct ChatConversationView: View {
         }
         .sheet(isPresented: $presentsPollComposer) {
             CreatePollSheet(model: model, conversation: conversation)
+        }
+        .sheet(isPresented: $presentsReminderList) {
+            ReminderListSheet(model: model)
+        }
+        .sheet(isPresented: $presentsGroupMembers) {
+            GroupMembersSheet(model: model, conversation: conversation)
+        }
+        .sheet(isPresented: $presentsPinnedMessages) {
+            PinnedMessagesSheet(model: model, conversation: conversation)
+        }
+        .sheet(isPresented: $presentsScheduledMessageComposer) {
+            ScheduledMessageComposerSheet(model: model, conversation: conversation)
+        }
+        .sheet(isPresented: $presentsScheduledMessageList) {
+            ScheduledMessageListSheet(model: model)
+        }
+        .sheet(item: $reminderMessage) { message in
+            ReminderEditorSheet(model: model, message: message)
+        }
+        .sheet(isPresented: $presentsImagePreview) {
+            ChatImagePreviewSheet(image: previewedImage)
+        }
+        .sheet(isPresented: $presentsForwardSheet) {
+            ForwardMessagesSheet(
+                model: model,
+                messageIDs: selectedMessageIDs
+            ) {
+                selectedMessageIDs = []
+            }
         }
         .alert(
             pendingMessageDeletion.count == 1 ? "删除这条消息？" : "删除这 \(pendingMessageDeletion.count) 条消息？",
@@ -534,14 +677,57 @@ private struct ChatConversationView: View {
         }
         .onChange(of: conversation.id) { _, _ in
             selectedMessageIDs = []
+            presentsForwardSheet = false
+            presentsImagePreview = false
+            previewedImage = nil
         }
-        .task(id: conversation.id) {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
-                guard !Task.isCancelled else { break }
-                await model.refreshCurrentConversation()
+    }
+
+    private var selectionBar: some View {
+        HStack(spacing: 10) {
+            Label(
+                "已选择 \(selectedMessageIDs.count) 条消息",
+                systemImage: "checkmark.circle.fill"
+            )
+            .font(.callout.weight(.medium))
+            .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button {
+                presentsForwardSheet = true
+            } label: {
+                Label("转发", systemImage: "arrowshape.turn.up.right")
             }
+            .buttonStyle(.borderedProminent)
+            .disabled(
+                selectedMessages.count != selectedMessageIDs.count
+                    || !selectedMessages.allSatisfy(model.canForward)
+                    || model.isPerformingAction
+            )
+
+            if selectedMessages.count == selectedMessageIDs.count,
+               selectedMessages.allSatisfy(model.canDelete) {
+                Button(role: .destructive) {
+                    requestMessageDeletion(for: selectedMessageIDs)
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+                .disabled(model.isPerformingAction)
+            }
+
+            Button("取消选择") {
+                selectedMessageIDs = []
+            }
+            .keyboardShortcut(.cancelAction)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(.bar)
+    }
+
+    private var selectedMessages: [ChatMessage] {
+        model.messages.filter { selectedMessageIDs.contains($0.id) }
     }
 
     private var conversationHeader: some View {
@@ -565,7 +751,58 @@ private struct ChatConversationView: View {
                     Label("\(model.newMessageCount) 条新消息", systemImage: "arrow.down.circle.fill")
                 }
                 .buttonStyle(.borderless)
-                .help("滚动到最新消息")
+                    .help("滚动到最新消息")
+            }
+            if conversation.kind == .group, model.canViewGroupMembers {
+                Button {
+                    presentsGroupMembers = true
+                } label: {
+                    Label("群成员", systemImage: "person.2")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.borderless)
+                .help("查看群成员")
+                .accessibilityLabel("查看群成员")
+            }
+            if conversation.kind == .group, model.canManagePinnedMessages {
+                Button {
+                    presentsPinnedMessages = true
+                } label: {
+                    Label("群公告", systemImage: "pin")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.borderless)
+                .help("查看群公告")
+                .accessibilityLabel("查看群公告")
+            }
+            if model.canManageReminders {
+                Button {
+                    presentsReminderList = true
+                } label: {
+                    Label("提醒", systemImage: model.reminders.isEmpty ? "bell" : "bell.badge")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.borderless)
+                .help("查看消息提醒")
+                .accessibilityLabel("查看消息提醒")
+            }
+            if model.canScheduleMessages {
+                Button {
+                    presentsScheduledMessageList = true
+                } label: {
+                    Label(
+                        "定时消息",
+                        systemImage: model.scheduledMessages.isEmpty ? "clock" : "clock.badge"
+                    )
+                    .labelStyle(.iconOnly)
+                    .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.borderless)
+                .help("查看定时消息")
+                .accessibilityLabel("查看定时消息")
             }
             if conversation.isEncrypted {
                 Label("已加密", systemImage: "lock.fill")
@@ -687,6 +924,17 @@ private struct ChatConversationView: View {
                 .help(model.canCreatePoll ? "创建投票" : "这台 NAS 尚未开放投票")
                 .accessibilityLabel("创建投票")
 
+                Button {
+                    presentsScheduledMessageComposer = true
+                } label: {
+                    Label("定时发送", systemImage: "calendar.badge.clock")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 28, height: 28)
+                }
+                .disabled(!model.canScheduleMessages || model.isPerformingAction)
+                .help(model.canScheduleMessages ? "安排定时消息" : "这台 NAS 尚未开放定时消息")
+                .accessibilityLabel("安排定时消息")
+
                 TextField("输入消息", text: draftText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
@@ -746,7 +994,7 @@ private struct ChatConversationView: View {
     }
 
     private func selectMessage(_ message: ChatMessage) {
-        guard model.canDelete(message), !model.isPerformingAction else { return }
+        guard model.canForward(message), !model.isPerformingAction else { return }
         if NSEvent.modifierFlags.contains(.command) {
             toggleMessageSelection(message.id)
         } else {
@@ -763,9 +1011,13 @@ private struct ChatConversationView: View {
     }
 
     private func messageDeletionTargets(from messageID: String) -> Set<String> {
-        selectedMessageIDs.contains(messageID) && selectedMessageIDs.count > 1
-            ? selectedMessageIDs
-            : [messageID]
+        guard selectedMessageIDs.contains(messageID) else { return [messageID] }
+        let deletableIDs = Set(
+            model.messages
+                .filter { selectedMessageIDs.contains($0.id) && model.canDelete($0) }
+                .map(\.id)
+        )
+        return deletableIDs.contains(messageID) ? deletableIDs : [messageID]
     }
 
     private func messageDeletionTitle(for messageID: String) -> String {
@@ -774,7 +1026,10 @@ private struct ChatConversationView: View {
     }
 
     private func requestMessageDeletion(from messageID: String) {
-        let ids = messageDeletionTargets(from: messageID)
+        requestMessageDeletion(for: messageDeletionTargets(from: messageID))
+    }
+
+    private func requestMessageDeletion(for ids: Set<String>) {
         let selectedMessages = model.messages.filter { ids.contains($0.id) }
         guard selectedMessages.count == ids.count,
               selectedMessages.allSatisfy(model.canDelete),
@@ -782,6 +1037,849 @@ private struct ChatConversationView: View {
         pendingMessageDeletion = ids
         presentsMessageDeletionConfirmation = true
     }
+
+    private func presentForwardSheet(from messageID: String) {
+        if !selectedMessageIDs.contains(messageID) {
+            selectedMessageIDs = [messageID]
+        }
+        presentsForwardSheet = true
+    }
+
+    private func presentImagePreview(message: ChatMessage, attachment: ChatAttachment) {
+        guard attachment.kind == .image,
+              model.canDownloadAttachments,
+              !model.isPerformingAction,
+              let image = model.thumbnailData(for: message.id).flatMap(NSImage.init(data:)) else { return }
+        previewedImage = image
+        presentsImagePreview = true
+    }
+
+    private func saveAttachment(message: ChatMessage, attachment: ChatAttachment) {
+        guard model.canDownloadAttachments, !model.isPerformingAction else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = URL(fileURLWithPath: attachment.fileName).lastPathComponent
+        panel.canCreateDirectories = true
+        panel.title = "保存附件"
+        panel.prompt = "保存"
+        panel.begin { response in
+            guard response == .OK, let destination = panel.url else { return }
+            Task {
+                _ = await model.downloadAttachment(
+                    messageID: message.id,
+                    attachment: attachment,
+                    to: destination
+                )
+            }
+        }
+    }
+}
+
+private struct ChatImagePreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let image: NSImage?
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black
+                .ignoresSafeArea()
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(20)
+                    .accessibilityLabel("图片预览")
+            } else {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+                    .accessibilityLabel("正在载入图片")
+            }
+            Button {
+                dismiss()
+            } label: {
+                Label("关闭预览", systemImage: "xmark")
+                    .labelStyle(.iconOnly)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .background(.black.opacity(0.55), in: Circle())
+            .padding(16)
+            .keyboardShortcut(.cancelAction)
+            .help("关闭预览")
+        }
+        .frame(minWidth: 720, idealWidth: 960, minHeight: 520, idealHeight: 720)
+    }
+}
+
+private struct ForwardMessagesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var model: ChatWorkspaceModel
+    let messageIDs: Set<String>
+    let onComplete: () -> Void
+    @State private var selectedConversationIDs: Set<String> = []
+    @State private var selectedUserIDs: Set<String> = []
+    @State private var searchText = ""
+    @State private var forwardErrorMessage: String?
+
+    private var conversationCandidates: [ChatConversation] {
+        model.conversations.filter { conversation in
+            guard conversation.id != model.selectedConversationID else { return false }
+            let query = normalizedSearchText
+            return query.isEmpty
+                || conversation.title.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var contactCandidates: [ChatUser] {
+        let existingDirectUserIDs = Set(
+            model.conversations
+                .filter { $0.kind == .direct }
+                .flatMap(\.memberIDs)
+        )
+        return model.users.filter { user in
+            guard user.isCurrentUser != true,
+                  user.id != model.currentUserID,
+                  !user.isDisabled,
+                  !existingDirectUserIDs.contains(user.id) else {
+                return false
+            }
+            return normalizedSearchText.isEmpty
+                || user.displayName.localizedCaseInsensitiveContains(normalizedSearchText)
+                || user.id.localizedCaseInsensitiveContains(normalizedSearchText)
+        }
+    }
+
+    private var normalizedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var selectedTargetCount: Int {
+        selectedConversationIDs.count + selectedUserIDs.count
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("转发消息")
+                        .font(.title2.bold())
+                    Text("将 \(messageIDs.count) 条消息发送到其他会话或联系人")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("取消") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(20)
+
+            Divider()
+
+            TextField("搜索会话或联系人", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+
+            if conversationCandidates.isEmpty, contactCandidates.isEmpty {
+                ContentUnavailableView(
+                    normalizedSearchText.isEmpty ? "没有可用的转发目标" : "没有找到转发目标",
+                    systemImage: normalizedSearchText.isEmpty ? "person.2.slash" : "magnifyingglass",
+                    description: Text(normalizedSearchText.isEmpty ? "当前没有其他会话或可联系的用户。" : "请尝试其他关键词。")
+                )
+                .fillsAvailableContentArea()
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        if !conversationCandidates.isEmpty {
+                            recipientSectionTitle("已有会话")
+                            ForEach(conversationCandidates) { conversation in
+                                recipientButton(
+                                    title: conversation.title,
+                                    subtitle: model.memberSummary(for: conversation),
+                                    systemImage: conversation.kind == .group
+                                        ? "person.2.fill"
+                                        : "person.crop.circle.fill",
+                                    isSelected: selectedConversationIDs.contains(conversation.id)
+                                ) {
+                                    toggleConversationSelection(conversation.id)
+                                }
+                            }
+                        }
+
+                        if !contactCandidates.isEmpty {
+                            recipientSectionTitle("联系人")
+                                .padding(.top, conversationCandidates.isEmpty ? 0 : 10)
+                            ForEach(contactCandidates) { user in
+                                recipientButton(
+                                    title: user.displayName,
+                                    subtitle: "尚未开始聊天",
+                                    systemImage: "person.crop.circle.badge.plus",
+                                    isSelected: selectedUserIDs.contains(user.id)
+                                ) {
+                                    toggleUserSelection(user.id)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                }
+            }
+
+            if let forwardErrorMessage {
+                Label(forwardErrorMessage, systemImage: "exclamationmark.circle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+            }
+
+            Divider()
+
+            HStack {
+                Text(selectedTargetCount == 0
+                    ? "请选择至少一个目标"
+                    : "已选择 \(selectedTargetCount) 个目标")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("取消") { dismiss() }
+                Button {
+                    Task {
+                        forwardErrorMessage = nil
+                        let succeeded = await model.forwardMessages(
+                            ids: messageIDs,
+                            to: selectedConversationIDs,
+                            newDirectUserIDs: selectedUserIDs
+                        )
+                        if succeeded {
+                            onComplete()
+                            dismiss()
+                        } else {
+                            forwardErrorMessage = model.statusMessage
+                                ?? "消息没有转发完成，请稍后重试。"
+                        }
+                    }
+                } label: {
+                    if model.isPerformingAction {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("转发", systemImage: "arrowshape.turn.up.right")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedTargetCount == 0 || model.isPerformingAction)
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+        }
+        .frame(minWidth: 480, idealWidth: 520, minHeight: 480, idealHeight: 600)
+    }
+
+    private func recipientSectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func recipientButton(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.title3)
+                    .foregroundStyle(.tint)
+                    .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+            .background(
+                isSelected ? Color.accentColor.opacity(0.10) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title)，\(subtitle)，\(isSelected ? "已选择" : "未选择")")
+        .accessibilityValue(isSelected ? "已选择" : "未选择")
+    }
+
+    private func toggleConversationSelection(_ id: String) {
+        if selectedConversationIDs.contains(id) {
+            selectedConversationIDs.remove(id)
+        } else {
+            selectedConversationIDs.insert(id)
+        }
+    }
+
+    private func toggleUserSelection(_ id: String) {
+        if selectedUserIDs.contains(id) {
+            selectedUserIDs.remove(id)
+        } else {
+            selectedUserIDs.insert(id)
+        }
+    }
+}
+
+private struct GroupMembersSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var model: ChatWorkspaceModel
+    let conversation: ChatConversation
+
+    var body: some View {
+        VStack(spacing: 0) {
+            sheetHeader(
+                title: "群成员",
+                subtitle: "\(conversation.title) · \(model.conversationMembers.count) 位成员"
+            )
+            Divider()
+
+            if model.isLoadingConversationMembers {
+                ProgressView("正在载入群成员…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = model.conversationMemberLoadError {
+                retryState(
+                    title: "无法载入群成员",
+                    message: error,
+                    systemImage: "person.2.slash"
+                ) {
+                    Task { await model.loadConversationMembers() }
+                }
+            } else if model.conversationMembers.isEmpty {
+                ContentUnavailableView(
+                    "没有可显示的成员",
+                    systemImage: "person.2",
+                    description: Text("群成员信息可能受当前账号权限限制。")
+                )
+                .fillsAvailableContentArea()
+            } else {
+                List(model.conversationMembers) { member in
+                    HStack(spacing: 12) {
+                        ChatAvatar(name: member.displayName, imageData: member.avatarData, size: 32)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(member.displayName)
+                                .font(.body.weight(.medium))
+                            if member.isCurrentUser == true {
+                                Text("你")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if member.isDisabled {
+                            Text("已停用")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .frame(minWidth: 460, minHeight: 420)
+        .task { await model.loadConversationMembers() }
+    }
+
+    private func sheetHeader(title: String, subtitle: String) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.title2.bold())
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("完成") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+        }
+        .padding(16)
+    }
+
+    private func retryState(
+        title: String,
+        message: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        ContentUnavailableView {
+            Label(title, systemImage: systemImage)
+        } description: {
+            Text(message)
+        } actions: {
+            Button("重试", action: action)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct PinnedMessagesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var model: ChatWorkspaceModel
+    let conversation: ChatConversation
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("群公告")
+                        .font(.title2.bold())
+                    Text(conversation.title)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("完成") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(16)
+            Divider()
+
+            if model.isLoadingPinnedMessages {
+                ProgressView("正在载入群公告…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = model.pinnedMessageLoadError {
+                ContentUnavailableView {
+                    Label("无法载入群公告", systemImage: "pin.slash")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("重试") {
+                        Task { await model.loadPinnedMessages() }
+                    }
+                }
+                .fillsAvailableContentArea()
+            } else if model.pinnedMessages.isEmpty {
+                ContentUnavailableView(
+                    "还没有群公告",
+                    systemImage: "pin",
+                    description: Text("在消息上点按右键并选择“设为群公告”。")
+                )
+                .fillsAvailableContentArea()
+            } else {
+                List(model.pinnedMessages) { message in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "pin.fill")
+                            .foregroundStyle(.tint)
+                            .frame(width: 24)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(messageSummary(message))
+                                .lineLimit(3)
+                            HStack(spacing: 6) {
+                                Text(message.senderDisplayName ?? model.displayName(for: message.senderID) ?? "群成员")
+                                if let pinnedAt = message.pinnedAt {
+                                    Text("·")
+                                    Text(Self.formatter.string(from: pinnedAt))
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            Task {
+                                _ = await model.setMessagePinned(message, isPinned: false)
+                            }
+                        } label: {
+                            Label("从群公告中移除", systemImage: "pin.slash")
+                                .labelStyle(.iconOnly)
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("从群公告中移除")
+                        .accessibilityLabel("从群公告中移除")
+                        .disabled(model.isPerformingAction)
+                    }
+                    .padding(.vertical, 5)
+                }
+            }
+        }
+        .frame(minWidth: 520, minHeight: 420)
+        .task { await model.loadPinnedMessages() }
+    }
+
+    private func messageSummary(_ message: ChatMessage) -> String {
+        if let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !text.isEmpty {
+            return text
+        }
+        if let attachment = message.attachments.first {
+            return "附件：\(attachment.fileName)"
+        }
+        return "一条群消息"
+    }
+
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
+
+private struct ScheduledMessageComposerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var model: ChatWorkspaceModel
+    let conversation: ChatConversation
+    @State private var text = ""
+    @State private var sendAt = Date().addingTimeInterval(3_600)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("定时发送")
+                        .font(.title2.bold())
+                    Text("发送到“\(conversation.title)”")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("取消") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+
+            TextField("消息内容", text: $text, axis: .vertical)
+                .lineLimit(3...8)
+                .textFieldStyle(.roundedBorder)
+
+            DatePicker(
+                "发送时间",
+                selection: $sendAt,
+                in: Date()...,
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .datePickerStyle(.field)
+
+            Text("消息会由群晖 Chat 在设定时间发送。关闭岚仓不会取消这项安排。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button {
+                    Task {
+                        if await model.createScheduledMessage(text: text, sendAt: sendAt) {
+                            dismiss()
+                        }
+                    }
+                } label: {
+                    if model.isPerformingAction {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("安排发送")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || sendAt <= Date()
+                        || model.isPerformingAction
+                )
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 460, minHeight: 300)
+    }
+}
+
+private struct ScheduledMessageListSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var model: ChatWorkspaceModel
+    @State private var pendingDeletion: ChatScheduledMessage?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("定时消息")
+                    .font(.title2.bold())
+                Spacer()
+                Button("完成") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(16)
+            Divider()
+
+            if model.isLoadingScheduledMessages {
+                ProgressView("正在载入定时消息…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = model.scheduledMessageLoadError {
+                ContentUnavailableView {
+                    Label("无法载入定时消息", systemImage: "clock.badge.exclamationmark")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("重试") {
+                        Task { await model.loadScheduledMessages() }
+                    }
+                }
+                .fillsAvailableContentArea()
+            } else if model.scheduledMessages.isEmpty {
+                ContentUnavailableView(
+                    "没有定时消息",
+                    systemImage: "clock",
+                    description: Text("在消息输入区选择时钟按钮，可以安排以后发送。")
+                )
+                .fillsAvailableContentArea()
+            } else {
+                List(model.scheduledMessages) { scheduled in
+                    HStack(spacing: 12) {
+                        Image(systemName: "clock.badge.checkmark")
+                            .foregroundStyle(.tint)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(scheduled.text)
+                                .lineLimit(2)
+                            Text(Self.formatter.string(from: scheduled.sendAt))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            pendingDeletion = scheduled
+                        } label: {
+                            Label("取消定时发送", systemImage: "xmark.circle")
+                                .labelStyle(.iconOnly)
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("取消定时发送")
+                        .accessibilityLabel("取消定时发送")
+                        .disabled(model.isPerformingAction)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .frame(minWidth: 520, minHeight: 360)
+        .task { await model.loadScheduledMessages() }
+        .alert("取消这条定时消息？", isPresented: Binding(
+            get: { pendingDeletion != nil },
+            set: { if !$0 { pendingDeletion = nil } }
+        )) {
+            Button("保留安排", role: .cancel) { pendingDeletion = nil }
+            Button("取消发送", role: .destructive) {
+                guard let scheduled = pendingDeletion else { return }
+                pendingDeletion = nil
+                Task { _ = await model.deleteScheduledMessage(id: scheduled.id) }
+            }
+        } message: {
+            Text("取消后这条消息不会按原计划发送。此操作不能撤销。")
+        }
+    }
+
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
+
+private struct ReminderEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var model: ChatWorkspaceModel
+    let message: ChatMessage
+    @State private var remindAt = Date().addingTimeInterval(3_600)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(model.reminder(for: message.id) == nil ? "设置提醒" : "修改提醒")
+                        .font(.title2.bold())
+                    Text(message.text?.isEmpty == false ? message.text! : "附件消息")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Button("取消") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+
+            DatePicker(
+                "提醒时间",
+                selection: $remindAt,
+                in: Date()...,
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .datePickerStyle(.field)
+
+            Text("到达设定时间后，群晖 Chat 会按账号的通知设置提醒你。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                if model.reminder(for: message.id) != nil {
+                    Button("取消现有提醒", role: .destructive) {
+                        Task {
+                            if await model.deleteReminder(messageID: message.id) {
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(model.isPerformingAction)
+                }
+                Spacer()
+                Button {
+                    Task {
+                        if await model.setReminder(messageID: message.id, remindAt: remindAt) {
+                            dismiss()
+                        }
+                    }
+                } label: {
+                    if model.isPerformingAction {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("保存提醒")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(remindAt <= Date() || model.isPerformingAction)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 420, minHeight: 220)
+        .onAppear {
+            if let existing = model.reminder(for: message.id) {
+                remindAt = max(existing.remindAt, Date().addingTimeInterval(60))
+            }
+        }
+    }
+}
+
+private struct ReminderListSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var model: ChatWorkspaceModel
+    @State private var pendingDeletion: ChatReminder?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("消息提醒")
+                    .font(.title2.bold())
+                Spacer()
+                Button("完成") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(16)
+            Divider()
+
+            if model.isLoadingReminders {
+                ProgressView("正在载入提醒…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = model.reminderLoadError {
+                ContentUnavailableView {
+                    Label("无法载入消息提醒", systemImage: "bell.slash")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("重试") {
+                        Task { await model.loadReminders() }
+                    }
+                }
+                .fillsAvailableContentArea()
+            } else if model.reminders.isEmpty {
+                ContentUnavailableView(
+                    "没有消息提醒",
+                    systemImage: "bell.slash",
+                    description: Text("在消息上点按右键，可以为它设置提醒。")
+                )
+                .fillsAvailableContentArea()
+            } else {
+                List(model.reminders) { reminder in
+                    HStack(spacing: 12) {
+                        Image(systemName: "bell.fill")
+                            .foregroundStyle(.tint)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(messageSummary(for: reminder))
+                                .lineLimit(2)
+                            Text(Self.formatter.string(from: reminder.remindAt))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            pendingDeletion = reminder
+                        } label: {
+                            Label("取消提醒", systemImage: "bell.slash")
+                                .labelStyle(.iconOnly)
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("取消提醒")
+                        .accessibilityLabel("取消提醒")
+                        .disabled(model.isPerformingAction)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .frame(minWidth: 500, minHeight: 360)
+        .task { await model.loadReminders() }
+        .alert("取消这条提醒？", isPresented: Binding(
+            get: { pendingDeletion != nil },
+            set: { if !$0 { pendingDeletion = nil } }
+        )) {
+            Button("保留提醒", role: .cancel) { pendingDeletion = nil }
+            Button("取消提醒", role: .destructive) {
+                guard let reminder = pendingDeletion else { return }
+                pendingDeletion = nil
+                Task { _ = await model.deleteReminder(messageID: reminder.messageID) }
+            }
+        } message: {
+            Text("取消后将不再收到这条消息的提醒。你之后仍可重新设置。")
+        }
+    }
+
+    private func messageSummary(for reminder: ChatReminder) -> String {
+        guard let message = model.messages.first(where: { $0.id == reminder.messageID }) else {
+            return "一条聊天消息"
+        }
+        return message.text?.isEmpty == false
+            ? message.text!
+            : message.attachments.first?.fileName ?? "一条聊天消息"
+    }
+
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
 }
 
 private struct CreatePollSheet: View {
@@ -897,8 +1995,15 @@ private struct ChatMessageRow: View {
     let isSelected: Bool
     let failureMessage: String?
     let uploadProgress: Double?
+    let downloadProgress: Double?
+    let thumbnailData: Data?
+    let canDownloadAttachments: Bool
     let onCancel: () -> Void
     let onRetry: () -> Void
+    let onCancelDownload: () -> Void
+    let onLoadThumbnail: (ChatAttachment) -> Void
+    let onPreviewImage: (ChatAttachment) -> Void
+    let onSaveAttachment: (ChatAttachment) -> Void
 
     private var senderName: String {
         if isCurrentUser { return "你" }
@@ -908,127 +2013,235 @@ private struct ChatMessageRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            if isCurrentUser { Spacer(minLength: 64) }
+        HStack(alignment: .top, spacing: 10) {
+            if isCurrentUser { Spacer(minLength: 72) }
 
-            if !isCurrentUser {
-                ChatAvatar(
-                    name: senderName,
-                    imageData: users.first(where: { $0.id == message.senderID })?.avatarData
-                )
+            VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 6) {
+                metadata
+                messageBubble
+                deliveryStatus
             }
+            .frame(maxWidth: 560, alignment: isCurrentUser ? .trailing : .leading)
 
-            VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 4) {
-                if showsSender || message.senderID == "unknown" {
-                    Text(senderName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 7) {
-                    if let text = message.text {
-                        Text(text)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    ForEach(message.attachments) { attachment in
-                        Label(attachment.fileName, systemImage: attachmentIcon(attachment.kind))
-                            .font(.callout)
-                            .padding(8)
-                            .background(.background.opacity(0.7), in: RoundedRectangle(cornerRadius: 8))
-                    }
-
-                    if let poll = message.poll {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(poll.question)
-                                .font(.headline)
-                            ForEach(poll.options) { option in
-                                Label("\(option.text)（\(option.voteCount) 票）", systemImage: option.isSelectedByCurrentUser ? "checkmark.circle.fill" : "circle")
-                                    .font(.callout)
-                            }
-                        }
-                    }
-
-                    HStack(spacing: 4) {
-                        Text(Self.fullDateTimeFormatter.string(from: message.sentAt))
-                            .monospacedDigit()
-                        if message.encryptionState == .unlocked {
-                            Image(systemName: "lock.fill")
-                                .accessibilityLabel("加密消息")
-                        }
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(isCurrentUser ? .white.opacity(0.82) : .secondary)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .foregroundStyle(isCurrentUser ? Color.white : Color.primary)
-                .background(
-                    isCurrentUser ? Color.accentColor : Color(nsColor: .controlBackgroundColor),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                )
-                .help(Self.fullDateTimeFormatter.string(from: message.sentAt))
-
-                if message.deliveryState == .sending {
-                    VStack(alignment: .trailing, spacing: 5) {
-                        if let uploadProgress {
-                            ProgressView(value: uploadProgress)
-                                .progressViewStyle(.linear)
-                                .frame(width: 140)
-                                .accessibilityLabel("附件上传进度")
-                                .accessibilityValue("\(Int((uploadProgress * 100).rounded()))%")
-                        }
-                        HStack(spacing: 7) {
-                            if uploadProgress == nil {
-                                ProgressView()
-                                    .controlSize(.mini)
-                            }
-                            Text(uploadProgress.map { "正在上传 \(Int(($0 * 100).rounded()))%" } ?? "正在发送")
-                            Button("取消", action: onCancel)
-                                .buttonStyle(.link)
-                                .font(.caption)
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityElement(children: .combine)
-                } else if message.deliveryState == .failed {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Label("发送失败", systemImage: "exclamationmark.circle.fill")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.red)
-                        if let failureMessage {
-                            Text(failureMessage)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.trailing)
-                                .lineLimit(2)
-                        }
-                        Button("重新发送", action: onRetry)
-                            .buttonStyle(.link)
-                            .font(.caption)
-                    }
-                }
-            }
-
-            if !isCurrentUser { Spacer(minLength: 64) }
+            if !isCurrentUser { Spacer(minLength: 72) }
         }
         .frame(maxWidth: .infinity, alignment: isCurrentUser ? .trailing : .leading)
-        .padding(3)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
         .background(
-            isSelected ? Color.accentColor.opacity(0.10) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            isSelected ? Color.accentColor.opacity(0.09) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
-        .overlay {
+        .overlay(alignment: isCurrentUser ? .topLeading : .topTrailing) {
             if isSelected {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.accentColor, lineWidth: 1)
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.tint)
+                    .background(Color(nsColor: .textBackgroundColor), in: Circle())
+                    .padding(8)
+                    .accessibilityHidden(true)
             }
         }
-        .accessibilityElement(children: .combine)
+        .overlay {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.65), lineWidth: 1)
+            }
+        }
+        .accessibilityElement(children: message.attachments.isEmpty ? .combine : .contain)
         .accessibilityLabel("\(senderName)，\(Self.fullDateTimeFormatter.string(from: message.sentAt))，\(deliveryAccessibilityText)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var metadata: some View {
+        HStack(spacing: 7) {
+            if !isCurrentUser {
+                senderAvatar
+                if showsSender || message.senderID == "unknown" {
+                    Text(senderName)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                }
+            }
+
+            HStack(spacing: 4) {
+                Text(Self.fullDateTimeFormatter.string(from: message.sentAt))
+                    .monospacedDigit()
+                if message.encryptionState == .unlocked {
+                    Image(systemName: "lock.fill")
+                        .accessibilityLabel("加密消息")
+                }
+                if message.isPinned {
+                    Image(systemName: "pin.fill")
+                        .accessibilityLabel("群公告")
+                }
+            }
+
+            if isCurrentUser {
+                Text("你")
+                    .fontWeight(.semibold)
+                senderAvatar
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private var senderAvatar: some View {
+        ChatAvatar(
+            name: senderName,
+            imageData: users.first(where: {
+                isCurrentUser ? $0.isCurrentUser == true : $0.id == message.senderID
+            })?.avatarData,
+            size: 24
+        )
+    }
+
+    private var messageBubble: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let text = message.text {
+                Text(text)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(message.attachments) { attachment in
+                attachmentCard(attachment)
+            }
+
+            if let poll = message.poll {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(poll.question)
+                        .font(.headline)
+                    ForEach(poll.options) { option in
+                        Label(
+                            "\(option.text)（\(option.voteCount) 票）",
+                            systemImage: option.isSelectedByCurrentUser ? "checkmark.circle.fill" : "circle"
+                        )
+                        .font(.callout)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .foregroundStyle(isCurrentUser ? Color.white : Color.primary)
+        .background(
+            isCurrentUser ? Color.accentColor : Color(nsColor: .controlBackgroundColor),
+            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+        )
+        .overlay {
+            if !isCurrentUser {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
+            }
+        }
+        .help(Self.fullDateTimeFormatter.string(from: message.sentAt))
+    }
+
+    private func attachmentCard(_ attachment: ChatAttachment) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if canDownloadAttachments,
+               attachment.kind == .image,
+               let thumbnailData,
+               let image = NSImage(data: thumbnailData) {
+                Button {
+                    onPreviewImage(attachment)
+                } label: {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 300, maxHeight: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help("预览“\(attachment.fileName)”")
+                .accessibilityLabel("预览图片 \(attachment.fileName)")
+            }
+            HStack(spacing: 8) {
+                Label(attachment.fileName, systemImage: attachmentIcon(attachment.kind))
+                    .font(.callout)
+                    .lineLimit(2)
+                if canDownloadAttachments {
+                    Spacer(minLength: 8)
+                    Button {
+                        onSaveAttachment(attachment)
+                    } label: {
+                        Label("保存附件", systemImage: "square.and.arrow.down")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("将附件另存为")
+                    .accessibilityLabel("将附件另存为")
+                }
+            }
+            if let downloadProgress {
+                HStack(spacing: 8) {
+                    ProgressView(value: downloadProgress)
+                        .progressViewStyle(.linear)
+                        .accessibilityLabel("附件下载进度")
+                        .accessibilityValue("\(Int((downloadProgress * 100).rounded()))%")
+                    Button("取消", action: onCancelDownload)
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+            }
+        }
+        .frame(maxWidth: 380)
+        .padding(9)
+        .background(
+            isCurrentUser ? Color.white.opacity(0.16) : Color(nsColor: .windowBackgroundColor),
+            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+        )
+        .task(id: message.id) {
+            if canDownloadAttachments, attachment.kind == .image, thumbnailData == nil {
+                onLoadThumbnail(attachment)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var deliveryStatus: some View {
+        if message.deliveryState == .sending {
+            VStack(alignment: .trailing, spacing: 5) {
+                if let uploadProgress {
+                    ProgressView(value: uploadProgress)
+                        .progressViewStyle(.linear)
+                        .frame(width: 140)
+                        .accessibilityLabel("附件上传进度")
+                        .accessibilityValue("\(Int((uploadProgress * 100).rounded()))%")
+                }
+                HStack(spacing: 7) {
+                    if uploadProgress == nil {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
+                    Text(uploadProgress.map { "正在上传 \(Int(($0 * 100).rounded()))%" } ?? "正在发送")
+                    Button("取消", action: onCancel)
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+        } else if message.deliveryState == .failed {
+            VStack(alignment: .trailing, spacing: 4) {
+                Label("发送失败", systemImage: "exclamationmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.red)
+                if let failureMessage {
+                    Text(failureMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(2)
+                }
+                Button("重新发送", action: onRetry)
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
+        }
     }
 
     private var deliveryAccessibilityText: String {
@@ -1059,6 +2272,7 @@ private struct ChatMessageRow: View {
 private struct ChatAvatar: View {
     let name: String
     var imageData: Data? = nil
+    var size: CGFloat = 30
 
     var body: some View {
         Group {
@@ -1070,12 +2284,12 @@ private struct ChatAvatar: View {
                 ZStack {
                     Circle().fill(Color.accentColor.opacity(0.14))
                     Text(String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased())
-                        .font(.caption.weight(.semibold))
+                        .font(.system(size: max(10, size * 0.4), weight: .semibold))
                         .foregroundStyle(.tint)
                 }
             }
         }
-        .frame(width: 30, height: 30)
+        .frame(width: size, height: size)
         .clipShape(Circle())
         .accessibilityHidden(true)
     }

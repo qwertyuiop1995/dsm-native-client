@@ -20,6 +20,12 @@ final class DsmChatRepositoryTests: XCTestCase {
         XCTAssertTrue(availability.supportedFeatures.contains(.imageAttachment))
         XCTAssertTrue(availability.supportedFeatures.contains(.videoAttachment))
         XCTAssertTrue(availability.supportedFeatures.contains(.fileAttachment))
+        XCTAssertTrue(availability.supportedFeatures.contains(.attachmentDownload))
+        XCTAssertTrue(availability.supportedFeatures.contains(.reminderManagement))
+        XCTAssertTrue(availability.supportedFeatures.contains(.scheduledMessage))
+        XCTAssertTrue(availability.supportedFeatures.contains(.messageForward))
+        XCTAssertTrue(availability.supportedFeatures.contains(.groupMembers))
+        XCTAssertTrue(availability.supportedFeatures.contains(.pinnedMessages))
     }
 
     func test解析用户与会话并兼容数字和字符串标识() async throws {
@@ -145,6 +151,24 @@ final class DsmChatRepositoryTests: XCTestCase {
         XCTAssertNil(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.query)
     }
 
+    func test附件辅助空记录不会显示且分页仍按服务器记录推进() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"posts":[{"post_id":"aux-1","channel_id":"27","creator_id":"system","create_at":1774166400000,"message":""},{"post_id":"file-1","channel_id":"27","creator_id":"1","create_at":1774166401000,"type":"file","file_props":{"file_id":"f-1","name":"sample.jpg","size":7,"type":"jpg"}}],"total":3}}"#)
+        ])
+        let repository = try makeRepository(transport: transport)
+
+        let page = try await repository.listMessages(
+            conversationID: "27",
+            before: nil,
+            limit: 2
+        )
+
+        XCTAssertEqual(page.messages.map(\.id), ["file-1"])
+        XCTAssertEqual(page.messages.first?.attachments.first?.fileName, "sample.jpg")
+        XCTAssertEqual(page.previousCursor, "2")
+        XCTAssertTrue(page.hasMoreBefore)
+    }
+
     func test相同请求标识只发送一次文字消息() async throws {
         let transport = MockHTTPTransport(responses: [
             response(#"{"success":true,"data":{"post_id":"9002","channel_id":"27","creator_id":"1","create_at":"1774166400000","message":"你好"}}"#)
@@ -225,6 +249,225 @@ final class DsmChatRepositoryTests: XCTestCase {
         XCTAssertEqual(fields["method"], "create")
         XCTAssertEqual(fields["choices"], #"["公园","博物馆"]"#)
         XCTAssertEqual(fields["options"], #"{"add_option":false,"anonymous":false,"multiple":true}"#)
+    }
+
+    func test历史消息解析投票选项和当前用户选择() async throws {
+        let repository = try makeRepository(transport: MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"posts":[{"post_id":"9100","channel_id":"27","creator_id":"1","create_at":1774166400000,"message":"周末去哪？","vote":{"vote_id":"vote-1","choices":[{"choice_id":"c1","text":"公园","vote_count":2,"selected":true},{"choice_id":"c2","text":"博物馆","vote_count":1}],"options":"{\"multiple\":false,\"anonymous\":true}"}}]}}"#)
+        ]))
+
+        let page = try await repository.listMessages(conversationID: "27", before: nil, limit: 20)
+
+        let poll = try XCTUnwrap(page.messages.first?.poll)
+        XCTAssertEqual(poll.id, "vote-1")
+        XCTAssertTrue(poll.isAnonymous)
+        XCTAssertFalse(poll.allowsMultipleSelection)
+        XCTAssertEqual(poll.options.map(\.voteCount), [2, 1])
+        XCTAssertEqual(poll.options.first?.isSelectedByCurrentUser, true)
+    }
+
+    func test读取和取消提醒后复查结果() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"posts":[{"post_id":"9001","props":{"reminde_at":1774166400000}}]}}"#),
+            response(#"{"success":true}"#),
+            response(#"{"success":true,"data":{"reminders":[]}}"#)
+        ])
+        let repository = try makeRepository(transport: transport)
+
+        let reminders = try await repository.listReminders(conversationID: "12")
+        try await repository.deleteReminder(
+            messageID: "9001",
+            conversationID: "12",
+            clientRequestID: UUID()
+        )
+
+        XCTAssertEqual(reminders.first?.messageID, "9001")
+        let requests = await transport.recordedRequests()
+        let listFields = try decodeForm(requests[0].httpBody)
+        XCTAssertEqual(listFields["method"], "list")
+        XCTAssertEqual(listFields["channel_id"], "12")
+        let deleteFields = try decodeForm(requests[1].httpBody)
+        XCTAssertEqual(deleteFields["method"], "delete")
+        XCTAssertEqual(deleteFields["post_id"], "9001")
+        XCTAssertEqual(try decodeForm(requests[2].httpBody)["method"], "list")
+    }
+
+    func test官方服务端转发使用PostForward且不下载附件() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true}"#)
+        ])
+        let repository = try makeRepository(transport: transport)
+
+        try await repository.forwardMessage(
+            messageID: "9001",
+            toConversationIDs: ["27", "42"],
+            clientRequestID: UUID()
+        )
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 1)
+        let fields = try decodeForm(requests[0].httpBody)
+        XCTAssertEqual(fields["api"], DsmAPIName.chatPost)
+        XCTAssertEqual(fields["version"], "5")
+        XCTAssertEqual(fields["method"], "forward")
+        XCTAssertEqual(fields["post_id"], "9001")
+        XCTAssertEqual(fields["channel_ids"], #"[27,42]"#)
+    }
+
+    func test读取群成员并使用用户目录补齐名称() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"user_ids":[1,2],"broken_user_ids":[]}}"#),
+            response(#"{"success":true,"data":{"users":[{"user_id":1,"nickname":"林青"},{"user_id":2,"nickname":"周明"}]}}"#)
+        ])
+        let repository = try makeRepository(transport: transport)
+
+        let members = try await repository.listConversationMembers(conversationID: "42")
+
+        XCTAssertEqual(members.map(\.displayName), ["林青", "周明"])
+        let requests = await transport.recordedRequests()
+        let fields = try decodeForm(requests[0].httpBody)
+        XCTAssertEqual(fields["api"], DsmAPIName.chatChannelMember)
+        XCTAssertEqual(fields["version"], "1")
+        XCTAssertEqual(fields["method"], "get")
+        XCTAssertEqual(fields["channel_id"], "42")
+    }
+
+    func test设置群公告使用PostPin并复查公告列表() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true}"#),
+            response(#"{"success":true,"data":{"search_results":[{"post_id":"9001","channel_id":"42","creator_id":"1","message":"重要通知","create_at":1774166400000,"last_pin_at":1774166500000}]}}"#)
+        ])
+        let repository = try makeRepository(transport: transport)
+
+        try await repository.setMessagePinned(
+            conversationID: "42",
+            messageID: "9001",
+            isPinned: true,
+            clientRequestID: UUID()
+        )
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+        let pinFields = try decodeForm(requests[0].httpBody)
+        XCTAssertEqual(pinFields["api"], DsmAPIName.chatPost)
+        XCTAssertEqual(pinFields["version"], "5")
+        XCTAssertEqual(pinFields["method"], "pin")
+        XCTAssertEqual(pinFields["post_id"], "9001")
+        let searchFields = try decodeForm(requests[1].httpBody)
+        XCTAssertEqual(searchFields["method"], "search")
+        XCTAssertEqual(searchFields["has"], #"["pin"]"#)
+    }
+
+    func test附件缩略图使用请求头认证且凭据不进入URL() async throws {
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: png, statusCode: 200, headers: ["content-type": "image/png"])
+        ])
+        let repository = try makeRepository(transport: transport)
+
+        let data = try await repository.loadAttachmentThumbnail(messageID: "9001", size: .small)
+
+        XCTAssertEqual(data, png)
+        let requests = await transport.recordedRequests()
+        let request = try XCTUnwrap(requests.first)
+        let query = Dictionary(uniqueKeysWithValues: (URLComponents(
+            url: try XCTUnwrap(request.url),
+            resolvingAgainstBaseURL: false
+        )?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(query["method"], "thumbnail")
+        XCTAssertEqual(query["post_id"], "9001")
+        XCTAssertEqual(query["type"], "sm")
+        XCTAssertNil(query["_sid"])
+        XCTAssertNil(query["SynoToken"])
+        XCTAssertNotNil(request.value(forHTTPHeaderField: "Cookie"))
+        XCTAssertNotNil(request.value(forHTTPHeaderField: "X-SYNO-TOKEN"))
+    }
+
+    func test下载附件写入目标并报告进度() async throws {
+        let fileData = Data("SANITIZED_ATTACHMENT".utf8)
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(data: fileData, statusCode: 200, headers: ["content-type": "application/octet-stream"])
+        ])
+        let repository = try makeRepository(transport: transport)
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DsmChatRepositoryTests-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let progressRecorder = ChatProgressRecorder()
+
+        try await repository.downloadAttachment(messageID: "9001", to: destination) { completed, _ in
+            progressRecorder.append(completed)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: destination), fileData)
+        XCTAssertEqual(progressRecorder.values().last, Int64(fileData.count))
+    }
+
+    func test附件错误响应不会覆盖已有文件() async throws {
+        let original = Data("ORIGINAL".utf8)
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(
+                data: Data(#"{"success":false,"error":{"code":119}}"#.utf8),
+                statusCode: 200,
+                headers: ["content-type": "application/json"]
+            )
+        ])
+        let repository = try makeRepository(transport: transport)
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DsmChatRepositoryTests-existing-\(UUID().uuidString).txt")
+        try original.write(to: destination, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: destination) }
+
+        do {
+            try await repository.downloadAttachment(
+                messageID: "9001",
+                to: destination,
+                progress: { _, _ in }
+            )
+            XCTFail("错误响应不应被保存为附件")
+        } catch {
+            XCTAssertEqual(try Data(contentsOf: destination), original)
+        }
+    }
+
+    func test创建和取消定时消息使用确认契约并复查() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"schedules":[]}}"#),
+            response(#"{"success":true,"data":{"cronjob_id":"job-1","channel_id":"27","message":"稍后见","send_at":1800000000000}}"#),
+            response(#"{"success":true}"#),
+            response(#"{"success":true,"data":{"schedules":[]}}"#)
+        ])
+        let repository = try makeRepository(transport: transport)
+        let sendAt = Date(timeIntervalSince1970: 1_800_000_000)
+
+        let scheduled = try await repository.createScheduledMessage(
+            conversationID: "27",
+            text: "稍后见",
+            sendAt: sendAt,
+            clientRequestID: UUID()
+        )
+        try await repository.deleteScheduledMessage(
+            id: scheduled.id,
+            conversationID: "27",
+            clientRequestID: UUID()
+        )
+
+        XCTAssertEqual(scheduled.id, "job-1")
+        let requests = await transport.recordedRequests()
+        let initialListFields = try decodeForm(requests[0].httpBody)
+        XCTAssertEqual(initialListFields["method"], "list")
+        XCTAssertEqual(initialListFields["channel_id"], "27")
+        let createFields = try decodeForm(requests[1].httpBody)
+        XCTAssertEqual(createFields["api"], DsmAPIName.chatPostSchedule)
+        XCTAssertEqual(createFields["method"], "create")
+        XCTAssertEqual(createFields["channel_id"], "27")
+        XCTAssertEqual(createFields["message"], "稍后见")
+        XCTAssertEqual(createFields["send_at"], "1800000000000")
+        let deleteFields = try decodeForm(requests[2].httpBody)
+        XCTAssertEqual(deleteFields["method"], "delete")
+        XCTAssertEqual(deleteFields["cronjob_id"], "job-1")
+        let verificationFields = try decodeForm(requests[3].httpBody)
+        XCTAssertEqual(verificationFields["method"], "list")
+        XCTAssertEqual(verificationFields["channel_id"], "27")
     }
 
     func test附件使用已验证的ChatPostV5多段上传且报告进度() async throws {
@@ -361,10 +604,13 @@ final class DsmChatRepositoryTests: XCTestCase {
             DsmAPIName.chatChannel: 5,
             DsmAPIName.chatChannelNamed: 1,
             DsmAPIName.chatChannelAnonymous: 2,
+            DsmAPIName.chatChannelMember: 1,
             DsmAPIName.chatUser: 3,
             DsmAPIName.chatPost: 8,
+            DsmAPIName.chatPostFile: 2,
             DsmAPIName.chatPostReminder: 1,
-            DsmAPIName.chatPostVote: 1
+            DsmAPIName.chatPostVote: 1,
+            DsmAPIName.chatPostSchedule: 1
         ]
         if includesAvatarCapability {
             names[DsmAPIName.chatUserAvatar] = 1

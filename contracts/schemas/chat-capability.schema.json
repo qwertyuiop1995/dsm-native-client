@@ -28,7 +28,13 @@
           "poll",
           "encryptedConversation",
           "deleteOwnMessage",
-          "closeConversation"
+          "closeConversation",
+          "attachmentDownload",
+          "reminderManagement",
+          "scheduledMessage",
+          "messageForward",
+          "groupMembers",
+          "pinnedMessages"
         ]
       }
     }

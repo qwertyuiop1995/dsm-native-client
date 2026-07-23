@@ -70,17 +70,22 @@ struct PhotoFolderDestinationPicker: View {
             .padding(.vertical, 10)
 
             if pickerModel.isLoading && pickerModel.displayedItems.isEmpty {
-                Spacer()
                 ProgressView("正在载入文件夹…")
-                Spacer()
+                    .fillsAvailableContentArea()
             } else if let errorMessage = pickerModel.errorMessage {
-                Spacer()
                 ContentUnavailableView(
                     "无法读取文件夹",
                     systemImage: "exclamationmark.triangle",
                     description: Text(errorMessage)
                 )
-                Spacer()
+                .fillsAvailableContentArea()
+            } else if availableFolders.isEmpty {
+                ContentUnavailableView(
+                    "这里没有子文件夹",
+                    systemImage: "folder",
+                    description: Text("可以选择当前文件夹，或返回上一级继续查找。")
+                )
+                .fillsAvailableContentArea()
             } else {
                 folderList
             }
@@ -105,8 +110,12 @@ struct PhotoFolderDestinationPicker: View {
         .task { await setupPicker() }
     }
 
+    private var availableFolders: [PhotoLibraryItem] {
+        pickerModel.displayedItems.filter(\.isFolder)
+    }
+
     private var folderList: some View {
-        List(pickerModel.displayedItems.filter(\.isFolder)) { folder in
+        List(availableFolders) { folder in
             Button {
                 Task { await pickerModel.open(folder) }
             } label: {

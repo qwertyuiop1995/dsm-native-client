@@ -481,7 +481,7 @@ struct FileDetailView: View {
                     )
                 }
             }
-            .frame(maxHeight: .infinity)
+            .fillsAvailableContentArea()
         }
     }
 

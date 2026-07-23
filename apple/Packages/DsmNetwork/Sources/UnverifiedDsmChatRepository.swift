@@ -59,11 +59,84 @@ public actor UnverifiedDsmChatRepository: ChatRepository {
         throw unavailableError()
     }
 
+    public func listConversationMembers(conversationID: String) async throws -> [ChatUser] {
+        throw unavailableError()
+    }
+
+    public func listPinnedMessages(conversationID: String) async throws -> [ChatMessage] {
+        throw unavailableError()
+    }
+
+    public func setMessagePinned(
+        conversationID: String,
+        messageID: String,
+        isPinned: Bool,
+        clientRequestID: UUID
+    ) async throws {
+        throw unavailableError()
+    }
+
+    public func forwardMessage(
+        messageID: String,
+        toConversationIDs: [String],
+        clientRequestID: UUID
+    ) async throws {
+        throw unavailableError()
+    }
+
     public func setReminder(
         messageID: String,
         remindAt: Date,
         clientRequestID: UUID
     ) async throws -> ChatReminder {
+        throw unavailableError()
+    }
+
+    public func listReminders(conversationID: String) async throws -> [ChatReminder] {
+        throw unavailableError()
+    }
+
+    public func deleteReminder(
+        messageID: String,
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws {
+        throw unavailableError()
+    }
+
+    public func loadAttachmentThumbnail(
+        messageID: String,
+        size: ChatAttachmentThumbnailSize
+    ) async throws -> Data {
+        throw unavailableError()
+    }
+
+    public func downloadAttachment(
+        messageID: String,
+        to destinationURL: URL,
+        progress: @escaping FileTransferProgress
+    ) async throws {
+        throw unavailableError()
+    }
+
+    public func listScheduledMessages(conversationID: String) async throws -> [ChatScheduledMessage] {
+        throw unavailableError()
+    }
+
+    public func createScheduledMessage(
+        conversationID: String,
+        text: String,
+        sendAt: Date,
+        clientRequestID: UUID
+    ) async throws -> ChatScheduledMessage {
+        throw unavailableError()
+    }
+
+    public func deleteScheduledMessage(
+        id: String,
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws {
         throw unavailableError()
     }
 

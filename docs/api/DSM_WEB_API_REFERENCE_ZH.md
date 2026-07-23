@@ -45,7 +45,7 @@
 
 - DSM `7.2.1-69057 Update 12`；Virtual Machine Manager `2.6.5-12202`；Container Manager `24.0.2-1535`；Chat Server `2.4.1-22111`。
 - 使用无凭据的 `SYNO.API.Info query=all` 确认 API 名称、路径、版本范围与请求格式；使用已登录网页只核对菜单、字段和官方前端静态契约。
-- 未读取或保存 Cookie、SID、SynoToken、DID、浏览器存储、真实主机地址、账号、消息、虚拟机名称、容器名称或文件路径。
+- 未导出或保存 Cookie、SID、SynoToken、DID、浏览器存储、真实主机地址、账号、消息、虚拟机名称、容器名称或文件路径；仓库只保留脱敏后的接口契约。
 - 未执行删除、断开连接、网络修改、虚拟机电源控制、容器控制、消息发送等写操作。
 
 本文把证据分成四级：`能力可发现`、`官方界面可见`、`官方前端静态契约确认`、`行为验证通过`。前三者都不能替代最后一级。
@@ -792,11 +792,16 @@ force_complete=false
 | `SYNO.Chat.Channel.Named` | v1 `create`, `join`, `invite` | 私人群聊 |
 | `SYNO.Chat.Post` | v5 `create` | 文字或 multipart `file` 附件 |
 | `SYNO.Chat.Post.File` | v2 `get`, `thumbnail` | `get(post_id)`；`thumbnail(post_id,type)` |
-| `SYNO.Chat.Post.Reminder` | v1 `set`, `list`, `delete`, `get` | `set(post_id,remind_at)`；`delete(post_id)` |
-| `SYNO.Chat.Post.Schedule` | v1 `create`, `set`, `list`, `delete` | `channel_id`, `message`, `send_at`；修改时使用 `cronjob_id` |
+| `SYNO.Chat.Post.Reminder` | v1 `set`, `list`, `delete`, `get` | `set(post_id,remind_at)`；`list(channel_id)`；`delete(post_id)` |
+| `SYNO.Chat.Post.Schedule` | v1 `create`, `set`, `list`, `delete` | `list(channel_id)`；创建使用 `channel_id`, `message`, `send_at`；修改/删除使用 `cronjob_id` |
+| `SYNO.Chat.Channel.Member` | v1 `get` | `channel_id`；返回 `user_ids` 与 `broken_user_ids` |
+| `SYNO.Chat.Post` 消息转发 | v5 `forward` | `post_id`, `channel_ids`；由 NAS 直接转发原消息及附件 |
+| `SYNO.Chat.Post` 群公告 | v5 `pin`, `unpin`, `search` | 写入使用 `post_id`；公告列表使用 `channel_id`, `has=["pin"]`, `sort_by=last_pin_at` |
 | `SYNO.Chat.Post.Vote` | v1 `create`, `close`, `delete`, `set`, `get_choices`, `vote`, `create_option` | 创建时使用 `channel_id`, `message`, `choices`, `options`；`options` 含 `multiple`, `anonymous`, `add_option` 和可选 `expire_at` |
 
-官方网页客户端的实时同步使用当前源站下的 Socket.IO 路径 `sc/socket.io`，初始化后取得连接标识，处理消息创建/更新/删除、频道加入/关闭、输入状态和用户更新等事件。认证字段属于秘密，不得写入本文、日志或 URL 遥测。岚仓当前仍使用前台轻量刷新；在完成断线重连、事件去重、会话撤销和后台策略前不直接切换实时通道。
+官方网页客户端的实时同步使用当前源站下的 Socket.IO 路径 `sc/socket.io`，初始化后取得连接标识，处理消息创建/更新/删除、频道加入/关闭、输入状态和用户更新等事件。认证字段属于秘密，不得写入本文、日志或 URL 遥测。岚仓 macOS 端已接入同源 WebSocket、Engine.IO 4/3 协商、心跳响应和指数退避重连；内部事件只触发会话与消息 API 回读，不解析或记录事件正文。连接未建立时每 5 秒同步，连接建立后每 30 秒校准一次，真实 DSM 与 Chat Server 版本兼容性仍需实机验证。
+
+群晖官方帮助确认频道和会话支持 Star，并会显示在官方客户端的 Starred 区域，但当前公开 WebAPI 文档没有提供对应写入契约。岚仓目前只做按 NAS 配置隔离的本地会话置顶；取得脱敏请求、能力名称、版本、参数和结果复查方式前，不猜测调用内部写接口。
 
 直接会话还存在 `encrypted` 与 `channel_key_encs`，官方前端包含密钥处理代码；这只证明加密能力存在，不足以安全复现密钥生成、恢复、轮换和设备撤销，因此保持关闭。网页端可播放音频附件，但没有确认独立的录音消息创建契约。
 

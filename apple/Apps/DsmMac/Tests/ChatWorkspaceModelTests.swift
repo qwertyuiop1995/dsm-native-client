@@ -6,6 +6,24 @@ import XCTest
 
 @MainActor
 final class ChatWorkspaceModelTests: XCTestCase {
+    func test关闭消息模块后不读取会话且重新开启后可恢复() async {
+        let active = conversation(id: "conversation-1", title: "测试聊天", activity: Date())
+        let repository = ChatRepositoryStub(conversations: [active])
+        let model = ChatWorkspaceModel(repository: repository)
+
+        model.setModuleEnabled(false)
+        await model.loadIfNeeded()
+
+        XCTAssertFalse(model.isModuleEnabled)
+        XCTAssertTrue(model.conversations.isEmpty)
+        XCTAssertFalse(model.canUseMessaging)
+
+        model.setModuleEnabled(true)
+        await model.loadIfNeeded()
+
+        XCTAssertEqual(model.conversations.map(\.id), ["conversation-1"])
+    }
+
     func test未验证服务保持关闭且不展示空会话误导用户() async {
         let model = ChatWorkspaceModel(repository: UnverifiedDsmChatRepository())
 
@@ -73,6 +91,253 @@ final class ChatWorkspaceModelTests: XCTestCase {
         XCTAssertTrue(succeeded)
         XCTAssertEqual(model.messages.last?.poll?.question, "周末去哪？")
         XCTAssertEqual(model.activeToast?.text, "投票已发送")
+    }
+
+    func test设置和取消提醒同步本地列表() async {
+        let active = conversation(id: "conversation-1", title: "测试聊天", activity: Date())
+        let repository = ChatRepositoryStub(conversations: [active])
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+        let remindAt = Date().addingTimeInterval(3_600)
+
+        let created = await model.setReminder(messageID: "message-1", remindAt: remindAt)
+        XCTAssertTrue(created)
+        XCTAssertEqual(model.reminder(for: "message-1")?.remindAt, remindAt)
+        let deleted = await model.deleteReminder(messageID: "message-1")
+        XCTAssertTrue(deleted)
+        XCTAssertNil(model.reminder(for: "message-1"))
+    }
+
+    func test附件缩略图和下载接入模型状态() async throws {
+        let active = conversation(id: "conversation-1", title: "测试聊天", activity: Date())
+        let repository = ChatRepositoryStub(conversations: [active])
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+        let attachment = ChatAttachment(id: "file-1", kind: .image, fileName: "sample.png")
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChatWorkspaceModelTests-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: destination) }
+
+        await model.loadAttachmentThumbnail(messageID: "message-1", attachment: attachment)
+        let downloaded = await model.downloadAttachment(
+            messageID: "message-1",
+            attachment: attachment,
+            to: destination
+        )
+
+        XCTAssertNotNil(model.thumbnailData(for: "message-1"))
+        XCTAssertTrue(downloaded)
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "attachment")
+    }
+
+    func testNAS没有图片缩略图时下载原文件生成本机预览() async throws {
+        let active = conversation(id: "conversation-1", title: "测试聊天", activity: Date())
+        let imageData = try XCTUnwrap(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        ))
+        let repository = ChatRepositoryStub(
+            conversations: [active],
+            attachmentThumbnailShouldFail: true,
+            downloadedAttachmentData: imageData
+        )
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+        let attachment = ChatAttachment(
+            id: "file-heic",
+            kind: .image,
+            fileName: "IMG_3765.HEIC",
+            sizeBytes: Int64(imageData.count),
+            thumbnailAvailable: false
+        )
+
+        await model.loadAttachmentThumbnail(messageID: "message-heic", attachment: attachment)
+
+        XCTAssertNotNil(model.thumbnailData(for: "message-heic"))
+    }
+
+    func test进入会话后立即清除本地未读数字() async {
+        let active = ChatConversation(
+            id: "conversation-1",
+            kind: .direct,
+            title: "测试聊天",
+            memberIDs: ["user-1"],
+            lastMessageSummary: "三条新消息",
+            lastActivityAt: Date(timeIntervalSince1970: 3_000),
+            unreadCount: 3
+        )
+        let repository = ChatRepositoryStub(
+            conversations: [active],
+            messagesByConversation: [active.id: [
+                message(id: "message-1", conversationID: active.id, date: Date(timeIntervalSince1970: 3_000))
+            ]]
+        )
+        let model = ChatWorkspaceModel(repository: repository)
+
+        await model.loadIfNeeded()
+
+        XCTAssertEqual(model.selectedConversationID, active.id)
+        XCTAssertEqual(model.conversations.first?.unreadCount, 0)
+    }
+
+    func test读完切换会话后前台刷新不会恢复旧未读数字() async {
+        let readConversation = ChatConversation(
+            id: "conversation-read",
+            kind: .direct,
+            title: "已读聊天",
+            memberIDs: ["user-1"],
+            lastMessageSummary: "三条新消息",
+            lastActivityAt: Date(timeIntervalSince1970: 3_000),
+            unreadCount: 3
+        )
+        let otherConversation = conversation(
+            id: "conversation-other",
+            title: "其他聊天",
+            activity: Date(timeIntervalSince1970: 2_000)
+        )
+        let repository = ChatRepositoryStub(
+            conversations: [readConversation, otherConversation],
+            messagesByConversation: [
+                readConversation.id: [
+                    message(id: "message-read", conversationID: readConversation.id, date: Date(timeIntervalSince1970: 3_000))
+                ]
+            ]
+        )
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+        await model.selectConversation(id: otherConversation.id)
+
+        await model.refreshForegroundChat()
+
+        XCTAssertEqual(
+            model.conversations.first(where: { $0.id == readConversation.id })?.unreadCount,
+            0
+        )
+    }
+
+    func test离开消息页面后工作区同步仍更新未读数且不会自动标记已读() async {
+        let unreadConversation = ChatConversation(
+            id: "conversation-unread",
+            kind: .direct,
+            title: "未读聊天",
+            memberIDs: ["user-1"],
+            lastMessageSummary: "新消息",
+            lastActivityAt: Date(timeIntervalSince1970: 4_000),
+            unreadCount: 4
+        )
+        let repository = ChatRepositoryStub(conversations: [unreadConversation])
+        let model = ChatWorkspaceModel(repository: repository)
+
+        await model.syncWorkspaceChat(isChatVisible: false)
+
+        XCTAssertEqual(model.availability.status, .available)
+        XCTAssertNil(model.selectedConversationID)
+        XCTAssertTrue(model.messages.isEmpty)
+        XCTAssertEqual(model.totalUnreadCount, 4)
+        XCTAssertEqual(model.conversations.first?.unreadCount, 4)
+    }
+
+    func test本地置顶按NAS保存并在重新打开后保持排序() async throws {
+        let suiteName = "ChatWorkspaceModelTests-Pins-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let profileID = UUID()
+        let recent = conversation(
+            id: "conversation-recent",
+            title: "最近会话",
+            activity: Date(timeIntervalSince1970: 3_000)
+        )
+        let older = conversation(
+            id: "conversation-older",
+            title: "较早会话",
+            activity: Date(timeIntervalSince1970: 1_000)
+        )
+        let repository = ChatRepositoryStub(conversations: [recent, older])
+        let firstModel = ChatWorkspaceModel(
+            repository: repository,
+            profileID: profileID,
+            defaults: defaults
+        )
+        await firstModel.loadIfNeeded()
+
+        firstModel.toggleConversationPin(id: older.id)
+
+        XCTAssertEqual(firstModel.conversations.map(\.id), [older.id, recent.id])
+        XCTAssertTrue(firstModel.isConversationPinned(older.id))
+        XCTAssertEqual(firstModel.activeToast?.text, "已置顶会话")
+
+        let reopenedModel = ChatWorkspaceModel(
+            repository: repository,
+            profileID: profileID,
+            defaults: defaults
+        )
+        await reopenedModel.loadIfNeeded()
+
+        XCTAssertEqual(reopenedModel.conversations.map(\.id), [older.id, recent.id])
+        XCTAssertTrue(reopenedModel.isConversationPinned(older.id))
+
+        let otherProfileModel = ChatWorkspaceModel(
+            repository: repository,
+            profileID: UUID(),
+            defaults: defaults
+        )
+        await otherProfileModel.loadIfNeeded()
+        XCTAssertEqual(otherProfileModel.conversations.map(\.id), [recent.id, older.id])
+        XCTAssertFalse(otherProfileModel.isConversationPinned(older.id))
+
+        reopenedModel.toggleConversationPin(id: older.id)
+        XCTAssertEqual(reopenedModel.conversations.map(\.id), [recent.id, older.id])
+        XCTAssertEqual(reopenedModel.activeToast?.text, "已取消置顶")
+    }
+
+    func test实时事件会刷新工作区未读数并切换定时校准间隔() async throws {
+        let initial = ChatConversation(
+            id: "conversation-realtime",
+            kind: .direct,
+            title: "实时聊天",
+            memberIDs: ["user-1"],
+            unreadCount: 0
+        )
+        let updated = ChatConversation(
+            id: initial.id,
+            kind: .direct,
+            title: initial.title,
+            memberIDs: initial.memberIDs,
+            lastMessageSummary: "刚收到的新消息",
+            lastActivityAt: Date(timeIntervalSince1970: 5_000),
+            unreadCount: 3
+        )
+        let repository = ChatRepositoryStub(conversations: [initial])
+        let model = ChatWorkspaceModel(repository: repository)
+
+        await model.syncWorkspaceChat(isChatVisible: false)
+        await repository.replaceConversations([updated])
+        await repository.emitRealtime(.connected)
+        await repository.emitRealtime(.contentChanged)
+        try await Task.sleep(for: .milliseconds(350))
+
+        XCTAssertTrue(model.isRealtimeConnected)
+        XCTAssertEqual(model.workspaceSyncIntervalSeconds, 30)
+        XCTAssertEqual(model.totalUnreadCount, 3)
+        await model.stopRealtime()
+        XCTAssertFalse(model.isRealtimeConnected)
+        XCTAssertEqual(model.workspaceSyncIntervalSeconds, 5)
+    }
+
+    func test创建和取消定时消息同步本地列表() async {
+        let active = conversation(id: "conversation-1", title: "测试聊天", activity: Date())
+        let repository = ChatRepositoryStub(conversations: [active])
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+        let sendAt = Date().addingTimeInterval(7_200)
+
+        let created = await model.createScheduledMessage(text: "稍后见", sendAt: sendAt)
+        let scheduledID = model.scheduledMessages.first?.id
+
+        XCTAssertTrue(created)
+        XCTAssertEqual(model.scheduledMessages.first?.text, "稍后见")
+        let deleted = await model.deleteScheduledMessage(id: scheduledID ?? "")
+        XCTAssertTrue(deleted)
+        XCTAssertTrue(model.scheduledMessages.isEmpty)
     }
 
     func test向上分页会合并更早消息并保持唯一顺序() async {
@@ -304,17 +569,118 @@ final class ChatWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(model.statusMessage, "只能删除自己发送的消息。")
     }
 
+    func test可以将收发双方的文字和附件消息转发到其他会话() async {
+        let source = conversation(
+            id: "conversation-source",
+            title: "来源会话",
+            activity: Date(timeIntervalSince1970: 2_000)
+        )
+        let target = conversation(
+            id: "conversation-target",
+            title: "目标会话",
+            activity: Date(timeIntervalSince1970: 1_000)
+        )
+        let incoming = ChatMessage(
+            id: "message-incoming",
+            conversationID: source.id,
+            senderID: "other-user",
+            isFromCurrentUser: false,
+            sentAt: Date(timeIntervalSince1970: 1_000),
+            text: "对方的消息"
+        )
+        let outgoingAttachment = ChatMessage(
+            id: "message-attachment",
+            conversationID: source.id,
+            senderID: "current-user",
+            isFromCurrentUser: true,
+            sentAt: Date(timeIntervalSince1970: 1_100),
+            text: "附件说明",
+            attachments: [
+                ChatAttachment(id: "attachment-1", kind: .image, fileName: "示例图片.jpg")
+            ]
+        )
+        let repository = ChatRepositoryStub(
+            conversations: [target, source],
+            messagesByConversation: [source.id: [incoming, outgoingAttachment]]
+        )
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+
+        XCTAssertTrue(model.canForward(incoming))
+        XCTAssertTrue(model.canForward(outgoingAttachment))
+
+        let succeeded = await model.forwardMessages(
+            ids: [incoming.id, outgoingAttachment.id],
+            to: [target.id]
+        )
+        let forwardedMessageIDs = await repository.forwardedMessageIDs()
+        let forwardedTargets = await repository.forwardedTargetConversationIDs()
+
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(forwardedMessageIDs, [incoming.id, outgoingAttachment.id])
+        XCTAssertEqual(forwardedTargets, [[target.id], [target.id]])
+        XCTAssertEqual(model.activeToast?.text, "2 条消息已转发到 1 个会话")
+    }
+
+    func test可以先建立单聊再向没有聊天记录的联系人转发() async {
+        let source = conversation(
+            id: "conversation-source",
+            title: "来源会话",
+            activity: Date(timeIntervalSince1970: 2_000)
+        )
+        let message = ChatMessage(
+            id: "message-1",
+            conversationID: source.id,
+            senderID: "other-user",
+            isFromCurrentUser: false,
+            sentAt: Date(timeIntervalSince1970: 1_000),
+            text: "需要转发的消息"
+        )
+        let recipient = ChatUser(
+            id: "recipient",
+            displayName: "新联系人"
+        )
+        let repository = ChatRepositoryStub(
+            conversations: [source],
+            users: [
+                ChatUser(
+                    id: "current-user",
+                    displayName: "当前用户",
+                    isCurrentUser: true
+                ),
+                recipient
+            ],
+            messagesByConversation: [source.id: [message]]
+        )
+        let model = ChatWorkspaceModel(repository: repository)
+        await model.loadIfNeeded()
+
+        let succeeded = await model.forwardMessages(
+            ids: [message.id],
+            to: [],
+            newDirectUserIDs: [recipient.id]
+        )
+        let forwardedTargets = await repository.forwardedTargetConversationIDs()
+
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(forwardedTargets, [["direct-\(recipient.id)"]])
+        XCTAssertTrue(model.conversations.contains { $0.id == "direct-\(recipient.id)" })
+        XCTAssertEqual(model.activeToast?.text, "消息已转发到 1 个会话")
+    }
+
     func test批量关闭会话后直接同步会话列表() async {
         let first = conversation(id: "conversation-1", title: "聊天一", activity: Date())
         let second = conversation(id: "conversation-2", title: "聊天二", activity: Date())
         let repository = ChatRepositoryStub(conversations: [first, second])
         let model = ChatWorkspaceModel(repository: repository)
         await model.loadIfNeeded()
+        model.toggleConversationPin(id: first.id)
 
         let closedCount = await model.closeConversations(ids: [first.id, second.id])
 
         XCTAssertEqual(closedCount, 2)
         XCTAssertTrue(model.conversations.isEmpty)
+        XCTAssertTrue(model.pinnedConversationIDs.isEmpty)
         XCTAssertNil(model.selectedConversationID)
         XCTAssertNil(model.statusMessage)
         XCTAssertEqual(model.activeToast?.text, "已删除 2 个会话并进入归档")
@@ -355,6 +721,15 @@ private actor ChatRepositoryStub: ChatRepository {
     private var sendFailuresRemaining: Int
     private var recordedSentTexts: [String] = []
     private var recordedAttachmentNames: [String] = []
+    private var recordedConversationIDs: [String] = []
+    private var recordedForwardedMessageIDs: [String] = []
+    private var recordedForwardedTargetIDs: [[String]] = []
+    private var pinnedMessageIDs: Set<String> = []
+    private var storedReminders: [ChatReminder] = []
+    private var storedScheduledMessages: [ChatScheduledMessage] = []
+    private let attachmentThumbnailShouldFail: Bool
+    private let downloadedAttachmentData: Data
+    private var realtimeContinuation: AsyncStream<ChatRealtimeEvent>.Continuation?
 
     init(
         conversations: [ChatConversation],
@@ -362,6 +737,8 @@ private actor ChatRepositoryStub: ChatRepository {
         messagesByConversation: [String: [ChatMessage]] = [:],
         queuedMessagePagesByConversation: [String: [ChatMessagePage]] = [:],
         sendFailuresRemaining: Int = 0,
+        attachmentThumbnailShouldFail: Bool = false,
+        downloadedAttachmentData: Data = Data("attachment".utf8),
         availableFeatures: Set<ChatFeature> = [
             .directConversation,
             .groupConversation,
@@ -370,9 +747,16 @@ private actor ChatRepositoryStub: ChatRepository {
             .imageAttachment,
             .videoAttachment,
             .fileAttachment,
+            .attachmentDownload,
+            .reminder,
+            .reminderManagement,
+            .scheduledMessage,
             .poll,
             .deleteOwnMessage,
-            .closeConversation
+            .closeConversation,
+            .messageForward,
+            .groupMembers,
+            .pinnedMessages
         ]
     ) {
         self.storedConversations = conversations
@@ -380,6 +764,8 @@ private actor ChatRepositoryStub: ChatRepository {
         self.messagesByConversation = messagesByConversation
         self.queuedMessagePagesByConversation = queuedMessagePagesByConversation
         self.sendFailuresRemaining = sendFailuresRemaining
+        self.attachmentThumbnailShouldFail = attachmentThumbnailShouldFail
+        self.downloadedAttachmentData = downloadedAttachmentData
         self.availableFeatures = availableFeatures
     }
 
@@ -444,6 +830,7 @@ private actor ChatRepositoryStub: ChatRepository {
     ) async throws -> ChatMessage {
         recordedSentTexts.append(draft.text ?? "")
         recordedAttachmentNames.append(contentsOf: draft.localAttachmentURLs.map(\.lastPathComponent))
+        recordedConversationIDs.append(draft.conversationID)
         if !draft.localAttachmentURLs.isEmpty {
             progress(1, 2)
         }
@@ -494,12 +881,117 @@ private actor ChatRepositoryStub: ChatRepository {
         messagesByConversation[conversationID] = nil
     }
 
+    func listConversationMembers(conversationID: String) async throws -> [ChatUser] {
+        let memberIDs = storedConversations
+            .first(where: { $0.id == conversationID })?
+            .memberIDs ?? []
+        return users.filter { memberIDs.contains($0.id) }
+    }
+
+    func listPinnedMessages(conversationID: String) async throws -> [ChatMessage] {
+        (messagesByConversation[conversationID] ?? [])
+            .filter { pinnedMessageIDs.contains($0.id) }
+            .map { messageWithPinnedState($0, isPinned: true) }
+    }
+
+    func setMessagePinned(
+        conversationID: String,
+        messageID: String,
+        isPinned: Bool,
+        clientRequestID: UUID
+    ) async throws {
+        if isPinned {
+            pinnedMessageIDs.insert(messageID)
+        } else {
+            pinnedMessageIDs.remove(messageID)
+        }
+    }
+
+    func forwardMessage(
+        messageID: String,
+        toConversationIDs: [String],
+        clientRequestID: UUID
+    ) async throws {
+        recordedForwardedMessageIDs.append(messageID)
+        recordedForwardedTargetIDs.append(toConversationIDs)
+    }
+
     func setReminder(
         messageID: String,
         remindAt: Date,
         clientRequestID: UUID
     ) async throws -> ChatReminder {
-        ChatReminder(id: "reminder-1", messageID: messageID, remindAt: remindAt)
+        let reminder = ChatReminder(id: "reminder-1", messageID: messageID, remindAt: remindAt)
+        storedReminders.removeAll { $0.messageID == messageID }
+        storedReminders.append(reminder)
+        return reminder
+    }
+
+    func listReminders(conversationID: String) async throws -> [ChatReminder] {
+        storedReminders
+    }
+
+    func deleteReminder(
+        messageID: String,
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws {
+        storedReminders.removeAll { $0.messageID == messageID }
+    }
+
+    func loadAttachmentThumbnail(
+        messageID: String,
+        size: ChatAttachmentThumbnailSize
+    ) async throws -> Data {
+        if attachmentThumbnailShouldFail {
+            throw AppError(
+                category: .invalidResponse,
+                isRetryable: true,
+                safeUserMessage: "没有可用缩略图。"
+            )
+        }
+        return Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )!
+    }
+
+    func downloadAttachment(
+        messageID: String,
+        to destinationURL: URL,
+        progress: @escaping FileTransferProgress
+    ) async throws {
+        let data = downloadedAttachmentData
+        progress(0, Int64(data.count))
+        try data.write(to: destinationURL, options: .atomic)
+        progress(Int64(data.count), Int64(data.count))
+    }
+
+    func listScheduledMessages(conversationID: String) async throws -> [ChatScheduledMessage] {
+        storedScheduledMessages.filter { $0.conversationID == conversationID }
+    }
+
+    func createScheduledMessage(
+        conversationID: String,
+        text: String,
+        sendAt: Date,
+        clientRequestID: UUID
+    ) async throws -> ChatScheduledMessage {
+        let scheduled = ChatScheduledMessage(
+            id: "schedule-\(storedScheduledMessages.count + 1)",
+            conversationID: conversationID,
+            text: text,
+            sendAt: sendAt
+        )
+        storedScheduledMessages.append(scheduled)
+        return scheduled
+    }
+
+    func deleteScheduledMessage(
+        id: String,
+        conversationID: String,
+        clientRequestID: UUID
+    ) async throws {
+        storedScheduledMessages.removeAll { $0.id == id }
     }
 
     func createPoll(_ draft: ChatPollDraft) async throws -> ChatMessage {
@@ -522,11 +1014,64 @@ private actor ChatRepositoryStub: ChatRepository {
         )
     }
 
+    func realtimeEvents() async -> AsyncStream<ChatRealtimeEvent> {
+        let pair = AsyncStream<ChatRealtimeEvent>.makeStream(
+            bufferingPolicy: .bufferingNewest(8)
+        )
+        realtimeContinuation = pair.continuation
+        return pair.stream
+    }
+
+    func startRealtime() async {}
+
+    func stopRealtime() async {
+        realtimeContinuation?.finish()
+        realtimeContinuation = nil
+    }
+
+    func emitRealtime(_ event: ChatRealtimeEvent) {
+        realtimeContinuation?.yield(event)
+    }
+
+    func replaceConversations(_ values: [ChatConversation]) {
+        storedConversations = values
+    }
+
     func sentTexts() -> [String] {
         recordedSentTexts
     }
 
     func sentAttachmentNames() -> [String] {
         recordedAttachmentNames
+    }
+
+    func sentConversationIDs() -> [String] {
+        recordedConversationIDs
+    }
+
+    func forwardedMessageIDs() -> [String] {
+        recordedForwardedMessageIDs
+    }
+
+    func forwardedTargetConversationIDs() -> [[String]] {
+        recordedForwardedTargetIDs
+    }
+
+    private func messageWithPinnedState(_ message: ChatMessage, isPinned: Bool) -> ChatMessage {
+        ChatMessage(
+            id: message.id,
+            clientRequestID: message.clientRequestID,
+            conversationID: message.conversationID,
+            senderID: message.senderID,
+            senderDisplayName: message.senderDisplayName,
+            isFromCurrentUser: message.isFromCurrentUser,
+            sentAt: message.sentAt,
+            text: message.text,
+            attachments: message.attachments,
+            poll: message.poll,
+            deliveryState: message.deliveryState,
+            encryptionState: message.encryptionState,
+            pinnedAt: isPinned ? Date(timeIntervalSince1970: 2_000) : nil
+        )
     }
 }

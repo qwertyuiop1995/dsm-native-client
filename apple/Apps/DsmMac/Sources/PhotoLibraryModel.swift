@@ -216,6 +216,7 @@ final class PhotoLibraryModel {
     private(set) var timelineSkippedFolderPaths: [String] = []
     private(set) var timelineRetryMessage: String?
     private(set) var activeProfileID: UUID?
+    private(set) var isModuleEnabled = true
 
     @ObservationIgnored private let repository: any PhotoLibraryRepository
 
@@ -290,6 +291,7 @@ final class PhotoLibraryModel {
     /// 等用户停止操作约 0.25 秒后再统一执行，减少大量数据时的卡顿。
     /// 测试运行时直接同步执行，避免 XCTest 断言时机问题。
     private func scheduleDisplayedItemsUpdate() {
+        guard isModuleEnabled else { return }
         displayedItemsUpdateTask?.cancel()
         if Self.isRunningTests {
             updateDisplayedItems()
@@ -457,11 +459,12 @@ final class PhotoLibraryModel {
     }
 
     func loadIfNeeded() async {
-        guard spaces.isEmpty, !isLoading else { return }
+        guard isModuleEnabled, spaces.isEmpty, !isLoading else { return }
         await reloadSpaces()
     }
 
     func reloadSpaces() async {
+        guard isModuleEnabled else { return }
         navigationGeneration += 1
         let generation = navigationGeneration
         isLoading = true
@@ -474,7 +477,7 @@ final class PhotoLibraryModel {
 
         do {
             let discovered = try await repository.discoverSpaces()
-            guard generation == navigationGeneration else { return }
+            guard isModuleEnabled, generation == navigationGeneration else { return }
             spaces = discovered
             guard let destination = discovered.first(where: { $0.id == selectedSpaceID })
                     ?? discovered.first else {
@@ -498,7 +501,8 @@ final class PhotoLibraryModel {
     }
 
     func selectSpace(_ id: PhotoSpaceKind) async {
-        guard let space = spaces.first(where: { $0.id == id }), selectedSpaceID != id else {
+        guard isModuleEnabled,
+              let space = spaces.first(where: { $0.id == id }), selectedSpaceID != id else {
             return
         }
         saveCacheIfNeeded()
@@ -513,23 +517,24 @@ final class PhotoLibraryModel {
     }
 
     func open(_ item: PhotoLibraryItem) async {
-        guard item.isFolder else { return }
+        guard isModuleEnabled, item.isFolder else { return }
         await loadFolder(item.path, recordingHistory: true)
     }
 
     func goBack() async {
-        guard let previous = history.popLast() else { return }
+        guard isModuleEnabled, let previous = history.popLast() else { return }
         await loadFolder(previous, recordingHistory: false)
     }
 
     func goUp() async {
-        guard canGoUp, let selectedSpace else { return }
+        guard isModuleEnabled, canGoUp, let selectedSpace else { return }
         let parent = URL(fileURLWithPath: currentPath).deletingLastPathComponent().path
         let destination = parent.count < selectedSpace.rootPath.count ? selectedSpace.rootPath : parent
         await loadFolder(destination, recordingHistory: true)
     }
 
     func refreshAll() async {
+        guard isModuleEnabled else { return }
         if spaces.isEmpty {
             await reloadSpaces()
         } else if !currentPath.isEmpty {
@@ -539,6 +544,7 @@ final class PhotoLibraryModel {
     }
 
     func setBrowseMode(_ mode: PhotoBrowseMode) async {
+        guard isModuleEnabled else { return }
         browseMode = mode
         selection.removeAll()
         if mode == .timeline {
@@ -552,7 +558,7 @@ final class PhotoLibraryModel {
     }
 
     func loadTimeline(forceRescan: Bool = false) async {
-        guard let selectedSpace else { return }
+        guard isModuleEnabled, let selectedSpace else { return }
         cancelTimelineScan()
         timelineGeneration += 1
         let generation = timelineGeneration
@@ -707,7 +713,8 @@ final class PhotoLibraryModel {
     }
 
     func retrySkippedTimelineFolders() async {
-        guard let selectedSpace,
+        guard isModuleEnabled,
+              let selectedSpace,
               !timelineSkippedFolderPaths.isEmpty,
               !isLoadingTimeline,
               !isRetryingTimelineFolders else { return }
@@ -794,6 +801,30 @@ final class PhotoLibraryModel {
         isRetryingTimelineFolders = false
     }
 
+    /// 模块关闭后立即终止扫描、预取和后台计算，不保留周期性工作。
+    func setModuleEnabled(_ enabled: Bool) {
+        guard isModuleEnabled != enabled else { return }
+        isModuleEnabled = enabled
+        if !enabled {
+            cancelAllWork()
+        }
+    }
+
+    func cancelAllWork() {
+        navigationGeneration += 1
+        cancelTimelineScan()
+        cancelThumbnailPrefetch()
+        displayedItemsUpdateTask?.cancel()
+        displayedItemsUpdateTask = nil
+        displayedItemsComputationTask?.cancel()
+        displayedItemsComputationTask = nil
+        displayedItemsComputationGeneration += 1
+        visibleThumbnailIDs.removeAll()
+        loadingVisibleThumbnailIDs.removeAll()
+        isLoading = false
+        isLoadingMore = false
+    }
+
     func select(_ item: PhotoLibraryItem, extending: Bool) {
         guard !item.isFolder else { return }
         if extending {
@@ -809,7 +840,7 @@ final class PhotoLibraryModel {
     }
 
     func thumbnailBecameVisible(_ item: PhotoLibraryItem) {
-        guard !item.isFolder else { return }
+        guard isModuleEnabled, !item.isFolder else { return }
         visibleThumbnailIDs.insert(item.id)
         cancelThumbnailPrefetch()
         if thumbnailCache[item.id] == nil, !unavailableThumbnails.contains(item.id) {
@@ -820,12 +851,14 @@ final class PhotoLibraryModel {
     }
 
     func thumbnailBecameHidden(_ item: PhotoLibraryItem) {
+        guard isModuleEnabled else { return }
         visibleThumbnailIDs.remove(item.id)
         loadingVisibleThumbnailIDs.remove(item.id)
         scheduleThumbnailPrefetchDebounced()
     }
 
     func thumbnailRequestDidFinish(for item: PhotoLibraryItem) {
+        guard isModuleEnabled else { return }
         loadingVisibleThumbnailIDs.remove(item.id)
         scheduleThumbnailPrefetchIfPossible()
     }
@@ -1001,7 +1034,8 @@ final class PhotoLibraryModel {
     }
 
     func loadMore() async {
-        guard let selectedSpace, hasMore, !isLoadingMore, !currentPath.isEmpty else { return }
+        guard isModuleEnabled,
+              let selectedSpace, hasMore, !isLoadingMore, !currentPath.isEmpty else { return }
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
@@ -1024,7 +1058,7 @@ final class PhotoLibraryModel {
         for item: PhotoLibraryItem,
         priority: ThumbnailRequestGate.Priority = .high
     ) async -> Data? {
-        guard !item.isFolder else { return nil }
+        guard isModuleEnabled, !item.isFolder else { return nil }
         if let cached = await cachedThumbnailData(for: item) { return cached }
         guard !unavailableThumbnails.contains(item.id) else { return nil }
         guard let requestToken = await thumbnailRequestGate.acquire(priority: priority) else { return nil }
@@ -1043,13 +1077,15 @@ final class PhotoLibraryModel {
         await thumbnailRequestGate.release(requestToken)
 
         if let repositoryData,
+           isModuleEnabled,
            !Task.isCancelled,
            await Self.isDisplayableImageData(repositoryData) {
             cacheThumbnail(repositoryData, for: item)
             return repositoryData
         }
 
-        guard !Task.isCancelled,
+        guard isModuleEnabled,
+              !Task.isCancelled,
               let thumbnailFallback,
               thumbnailFallback.canGenerateThumbnail(for: item) else {
             if repositoryError?.isRetryable == false {
@@ -1063,7 +1099,8 @@ final class PhotoLibraryModel {
         let fallbackData = await thumbnailFallback.thumbnailData(for: item)
         await fallbackThumbnailRequestGate.release(fallbackToken)
 
-        guard !Task.isCancelled,
+        guard isModuleEnabled,
+              !Task.isCancelled,
               let fallbackData,
               await Self.isDisplayableImageData(fallbackData) else {
             // HEIC/MOV 的本机生成可能因文件大小或临时连接失败，保留后续重试机会。
@@ -1140,6 +1177,7 @@ final class PhotoLibraryModel {
     }
 
     private func scheduleThumbnailPrefetchDebounced() {
+        guard isModuleEnabled else { return }
         prefetchScheduleTask?.cancel()
         prefetchScheduleTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
@@ -1149,7 +1187,8 @@ final class PhotoLibraryModel {
     }
 
     private func scheduleThumbnailPrefetchIfPossible() {
-        guard thumbnailPrefetchTask == nil,
+        guard isModuleEnabled,
+              thumbnailPrefetchTask == nil,
               !visibleThumbnailIDs.isEmpty,
               loadingVisibleThumbnailIDs.isEmpty,
               !orderedMediaItems.isEmpty else { return }
@@ -1203,7 +1242,7 @@ final class PhotoLibraryModel {
     }
 
     private func loadFolder(_ path: String, recordingHistory: Bool) async {
-        guard let selectedSpace else { return }
+        guard isModuleEnabled, let selectedSpace else { return }
         let previousPath = currentPath
         navigationGeneration += 1
         let generation = navigationGeneration
@@ -1212,7 +1251,7 @@ final class PhotoLibraryModel {
 
         do {
             let result = try await fetchVisiblePage(in: selectedSpace, path: path, offset: 0)
-            guard generation == navigationGeneration else { return }
+            guard isModuleEnabled, generation == navigationGeneration else { return }
             if recordingHistory, !previousPath.isEmpty, previousPath != path {
                 history.append(previousPath)
             }

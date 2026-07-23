@@ -5,6 +5,34 @@ import XCTest
 
 @MainActor
 final class PhotoLibraryModelTests: XCTestCase {
+    func test关闭照片模块后不发现空间且重新开启后可恢复() async {
+        let repository = PhotoLibraryRepositoryStub(
+            spaces: [.personal],
+            pages: [
+                0: PhotoLibraryPage(
+                    folderPath: "/home/Photos",
+                    items: [],
+                    offset: 0,
+                    nextOffset: 0,
+                    sourceTotal: 0,
+                    hasMore: false
+                )
+            ]
+        )
+        let model = PhotoLibraryModel(repository: repository)
+
+        model.setModuleEnabled(false)
+        await model.loadIfNeeded()
+
+        XCTAssertFalse(model.isModuleEnabled)
+        XCTAssertTrue(model.spaces.isEmpty)
+
+        model.setModuleEnabled(true)
+        await model.loadIfNeeded()
+
+        XCTAssertEqual(model.spaces.map(\.id), [.personal])
+    }
+
     func test首次载入发现空间并显示照片项目() async throws {
         let item = try XCTUnwrap(photoItem(name: "海边.jpg", path: "/home/Photos/海边.jpg"))
         let repository = PhotoLibraryRepositoryStub(

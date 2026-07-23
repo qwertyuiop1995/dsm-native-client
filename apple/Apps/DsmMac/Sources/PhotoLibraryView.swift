@@ -49,6 +49,7 @@ struct PhotoLibraryView: View {
             }
             content
         }
+        .fillsAvailableContentArea(alignment: .topLeading)
         .task { await model.loadIfNeeded() }
         .sheet(item: $moveTarget) { item in
             PhotoFolderDestinationPicker(

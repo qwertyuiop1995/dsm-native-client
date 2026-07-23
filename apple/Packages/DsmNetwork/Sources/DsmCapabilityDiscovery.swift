@@ -27,6 +27,8 @@ public enum DsmAPIName {
     public static let chatChannelNamed = "SYNO.Chat.Channel.Named"
     /// Synology Chat 匿名会话内部接口；用于首次创建一对一会话。
     public static let chatChannelAnonymous = "SYNO.Chat.Channel.Anonymous"
+    /// Synology Chat 会话成员内部接口；用于读取当前账号可见的群成员。
+    public static let chatChannelMember = "SYNO.Chat.Channel.Member"
     /// Synology Chat 用户目录内部接口。
     public static let chatUser = "SYNO.Chat.User"
     /// Synology Chat 用户头像内部接口；仅用于读取当前账号可见的头像。
@@ -39,6 +41,8 @@ public enum DsmAPIName {
     public static let chatPostReminder = "SYNO.Chat.Post.Reminder"
     /// Synology Chat 投票内部接口。
     public static let chatPostVote = "SYNO.Chat.Post.Vote"
+    /// Synology Chat 定时消息内部接口。
+    public static let chatPostSchedule = "SYNO.Chat.Post.Schedule"
 }
 
 private struct CapabilityPayload: Decodable, Sendable {
@@ -88,12 +92,14 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.chatChannel,
         DsmAPIName.chatChannelNamed,
         DsmAPIName.chatChannelAnonymous,
+        DsmAPIName.chatChannelMember,
         DsmAPIName.chatUser,
         DsmAPIName.chatUserAvatar,
         DsmAPIName.chatPost,
         DsmAPIName.chatPostFile,
         DsmAPIName.chatPostReminder,
-        DsmAPIName.chatPostVote
+        DsmAPIName.chatPostVote,
+        DsmAPIName.chatPostSchedule
     ]
 
     private let client: DsmAPIClient
@@ -200,11 +206,13 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.chatChannel: 1...5,
         DsmAPIName.chatChannelNamed: 1...1,
         DsmAPIName.chatChannelAnonymous: 1...2,
+        DsmAPIName.chatChannelMember: 1...1,
         DsmAPIName.chatUser: 1...3,
         DsmAPIName.chatUserAvatar: 1...1,
         DsmAPIName.chatPost: 1...8,
         DsmAPIName.chatPostFile: 1...2,
         DsmAPIName.chatPostReminder: 1...1,
-        DsmAPIName.chatPostVote: 1...1
+        DsmAPIName.chatPostVote: 1...1,
+        DsmAPIName.chatPostSchedule: 1...1
     ]
 }

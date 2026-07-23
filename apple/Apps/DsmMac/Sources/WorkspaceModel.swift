@@ -49,6 +49,15 @@ enum WorkspaceSection: Hashable, Identifiable {
         case .settings: "settings"
         }
     }
+
+    var belongsToFileModule: Bool {
+        switch self {
+        case .files, .recycle, .favorites, .recent, .remoteLocations, .sharedLinks, .transfers:
+            true
+        case .photos, .chat, .settings:
+            false
+        }
+    }
 }
 
 enum FilePreviewState {
@@ -356,6 +365,41 @@ final class WorkspaceModel {
     var archivePasswordRequest: ArchivePasswordRequest?
     var isCheckingArchivePassword = false
     var activeToast: ToastMessage?
+
+    // 按 NAS profile 保存的模块开关；切换其他 NAS 时各用各的值。
+    var isFileModuleEnabled: Bool = true {
+        didSet {
+            Self.saveModuleEnabled(isFileModuleEnabled, for: profile.id, module: "FileStation")
+            guard oldValue != isFileModuleEnabled else { return }
+            if !isFileModuleEnabled {
+                suspendFileModule()
+                if section?.belongsToFileModule == true {
+                    section = .settings
+                }
+            }
+        }
+    }
+    var isPhotosModuleEnabled: Bool = true {
+        didSet {
+            Self.saveModuleEnabled(isPhotosModuleEnabled, for: profile.id, module: "Photos")
+            guard oldValue != isPhotosModuleEnabled else { return }
+            photoLibrary.setModuleEnabled(isPhotosModuleEnabled)
+            if !isPhotosModuleEnabled, section == .photos {
+                section = .settings
+            }
+        }
+    }
+    var isChatModuleEnabled: Bool = true {
+        didSet {
+            Self.saveModuleEnabled(isChatModuleEnabled, for: profile.id, module: "Chat")
+            guard oldValue != isChatModuleEnabled else { return }
+            chat.setModuleEnabled(isChatModuleEnabled)
+            if !isChatModuleEnabled, section == .chat {
+                section = .settings
+            }
+        }
+    }
+
     private var dragMoveUndo: DragMoveUndo?
     @ObservationIgnored private var toastDismissTask: Task<Void, Never>?
 
@@ -395,6 +439,26 @@ final class WorkspaceModel {
     @ObservationIgnored private var dragMoveUndoExpirationTask: Task<Void, Never>?
     @ObservationIgnored private var previewContextItems: [FileItem]?
 
+    // 读取按 NAS 保存的模块开关；不存在时回退到旧全局 key，保持老用户已有选择。
+    private static func moduleEnabledKey(for profileID: UUID, module: String) -> String {
+        "LanStash_Module_\(module)_\(profileID.uuidString)"
+    }
+
+    private static func loadModuleEnabled(for profileID: UUID, module: String, legacyKey: String) -> Bool {
+        let key = moduleEnabledKey(for: profileID, module: module)
+        if UserDefaults.standard.object(forKey: key) != nil {
+            return UserDefaults.standard.bool(forKey: key)
+        }
+        if UserDefaults.standard.object(forKey: legacyKey) != nil {
+            return UserDefaults.standard.bool(forKey: legacyKey)
+        }
+        return true
+    }
+
+    private static func saveModuleEnabled(_ value: Bool, for profileID: UUID, module: String) {
+        UserDefaults.standard.set(value, forKey: moduleEnabledKey(for: profileID, module: module))
+    }
+
     init(
         profile: NasProfile,
         repository: any FileRepository,
@@ -413,8 +477,12 @@ final class WorkspaceModel {
         )
         self.chat = ChatWorkspaceModel(
             repository: chatRepository,
-            currentAccountName: profile.usernameHint
+            currentAccountName: profile.usernameHint,
+            profileID: profile.id
         )
+        self.isFileModuleEnabled = Self.loadModuleEnabled(for: profile.id, module: "FileStation", legacyKey: "LanStash_Module_FileStation")
+        self.isPhotosModuleEnabled = Self.loadModuleEnabled(for: profile.id, module: "Photos", legacyKey: "LanStash_Module_Photos")
+        self.isChatModuleEnabled = Self.loadModuleEnabled(for: profile.id, module: "Chat", legacyKey: "LanStash_Module_Chat")
         if let data = UserDefaults.standard.data(forKey: "LanStash_RecentLocations_\(profile.id.uuidString)"),
            let saved = try? JSONDecoder().decode([FavoriteLocation].self, from: data) {
             recentLocations = saved
@@ -441,6 +509,8 @@ final class WorkspaceModel {
            let savedRestartable = try? JSONDecoder().decode([UUID: RestartableTransfer].self, from: data) {
             self.restartableTransfers = savedRestartable
         }
+        photoLibrary.setModuleEnabled(isPhotosModuleEnabled)
+        chat.setModuleEnabled(isChatModuleEnabled)
     }
 
     private func saveTransfers() {
@@ -540,14 +610,37 @@ final class WorkspaceModel {
         }.count
     }
 
+    /// 只启动已启用的首个模块；所有功能都关闭时停留在设置页。
+    func startEnabledModules() async {
+        if isFileModuleEnabled {
+            await load()
+            guard isFileModuleEnabled else { return }
+            section = .files("/")
+            await navigate(to: "/", recordingHistory: false)
+            return
+        }
+        if isPhotosModuleEnabled {
+            section = .photos
+            await photoLibrary.loadIfNeeded()
+            return
+        }
+        if isChatModuleEnabled {
+            section = .chat
+            await chat.loadIfNeeded()
+            return
+        }
+        section = .settings
+    }
+
     func load() async {
-        guard shares.isEmpty else {
+        guard isFileModuleEnabled, shares.isEmpty else {
             return
         }
         isLoading = true
         statusMessage = nil
         do {
             let page = try await repository.listShares(offset: 0, limit: 200)
+            guard isFileModuleEnabled else { return }
             shares = page.items
             isLoading = false
             if let first = shares.first {
@@ -557,9 +650,13 @@ final class WorkspaceModel {
                 items = []
                 statusMessage = "当前用户没有可访问的共享文件夹。"
             }
+            guard isFileModuleEnabled else { return }
             await loadRemoteLocations()
+            guard isFileModuleEnabled else { return }
             await discoverRecycleRoots()
+            guard isFileModuleEnabled else { return }
             await loadFavorites()
+            guard isFileModuleEnabled else { return }
             await loadStorageSpace()
         } catch {
             isLoading = false
@@ -573,20 +670,30 @@ final class WorkspaceModel {
         }
         switch newSection {
         case .files(let path), .recycle(let path):
+            guard isFileModuleEnabled else { return }
+            if shares.isEmpty {
+                await load()
+                guard isFileModuleEnabled else { return }
+            }
             if path != currentPath {
                 history.removeAll()
                 await navigate(to: path, recordingHistory: false)
             }
         case .photos:
+            guard isPhotosModuleEnabled else { return }
             await photoLibrary.loadIfNeeded()
         case .chat:
+            guard isChatModuleEnabled else { return }
             await chat.loadIfNeeded()
-        case .favorites, .recent, .remoteLocations, .sharedLinks, .transfers, .settings:
+        case .favorites, .recent, .remoteLocations, .sharedLinks, .transfers:
+            guard isFileModuleEnabled else { return }
+        case .settings:
             break
         }
     }
 
     func navigate(to path: String, recordingHistory: Bool = true) async {
+        guard isFileModuleEnabled else { return }
         previewContextItems = nil
         let previousPath = currentPath
         navigationGeneration += 1
@@ -621,7 +728,7 @@ final class WorkspaceModel {
 
         do {
             let page = try await repository.listFolder(path: path, offset: 0, limit: 500)
-            guard generation == navigationGeneration else {
+            guard isFileModuleEnabled, generation == navigationGeneration else {
                 return
             }
             if recordingHistory, !previousPath.isEmpty, previousPath != path {
@@ -651,7 +758,8 @@ final class WorkspaceModel {
     func updateSearch() {
         searchTask?.cancel()
         recursiveSearchResults = []
-        guard searchScope == .subfolders,
+        guard isFileModuleEnabled,
+              searchScope == .subfolders,
               !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !currentPath.isEmpty else {
             isSearching = false
@@ -718,7 +826,7 @@ final class WorkspaceModel {
     }
 
     func loadStorageSpace() async {
-        guard !isLoadingStorageSpace else { return }
+        guard isFileModuleEnabled, !isLoadingStorageSpace else { return }
         isLoadingStorageSpace = true
         defer { isLoadingStorageSpace = false }
         do {
@@ -730,6 +838,7 @@ final class WorkspaceModel {
     }
 
     private func loadRemoteLocations() async {
+        guard isFileModuleEnabled else { return }
         do {
             remoteLocations = try await repository.listRemoteMounts(offset: 0, limit: 500).items
         } catch {
@@ -742,7 +851,7 @@ final class WorkspaceModel {
     }
 
     func createRemoteMount(_ configuration: RemoteMountConfiguration) async -> Bool {
-        guard !isManagingRemoteMount else { return false }
+        guard isFileModuleEnabled, !isManagingRemoteMount else { return false }
         isManagingRemoteMount = true
         defer { isManagingRemoteMount = false }
         do {
@@ -822,6 +931,7 @@ final class WorkspaceModel {
     }
 
     func loadFavorites() async {
+        guard isFileModuleEnabled else { return }
         do {
             favorites = try await repository.listFavorites()
         } catch {
@@ -835,8 +945,9 @@ final class WorkspaceModel {
     }
 
     func toggleFavorite(path: String, name: String) {
+        guard isFileModuleEnabled else { return }
         Task { [weak self] in
-            guard let self else { return }
+            guard let self, isFileModuleEnabled else { return }
             do {
                 if favorites.contains(where: { $0.path == path }) {
                     try await repository.removeFavorite(path: path)
@@ -853,6 +964,7 @@ final class WorkspaceModel {
     }
 
     func loadShareLinks() async {
+        guard isFileModuleEnabled else { return }
         isLoadingShareLinks = true
         defer { isLoadingShareLinks = false }
         do {
@@ -864,7 +976,7 @@ final class WorkspaceModel {
     }
 
     func createShareLink(paths: [String], password: String?, expiresAt: String?) async -> FileShareLink? {
-        guard !paths.isEmpty else { return nil }
+        guard isFileModuleEnabled, !paths.isEmpty else { return nil }
         do {
             let link = try await repository.createShareLink(paths: paths, password: password, expiresAt: expiresAt)
             shareLinks.removeAll { $0.id == link.id }
@@ -879,6 +991,7 @@ final class WorkspaceModel {
     }
 
     func deleteShareLinks(ids: [String]) async {
+        guard isFileModuleEnabled else { return }
         do {
             try await repository.deleteShareLinks(ids: ids)
             let wanted = Set(ids)
@@ -889,7 +1002,7 @@ final class WorkspaceModel {
     }
 
     func loadMore() async {
-        guard hasMore, !isLoadingMore, !currentPath.isEmpty else {
+        guard isFileModuleEnabled, hasMore, !isLoadingMore, !currentPath.isEmpty else {
             return
         }
         isLoadingMore = true
@@ -911,7 +1024,7 @@ final class WorkspaceModel {
     }
 
     func refresh() async {
-        guard !currentPath.isEmpty else {
+        guard isFileModuleEnabled, !currentPath.isEmpty else {
             return
         }
         if currentPath == "/" {
@@ -943,6 +1056,7 @@ final class WorkspaceModel {
     }
 
     func open(_ item: FileItem) async {
+        guard isFileModuleEnabled else { return }
         if item.isDirectory {
             await navigate(to: item.path)
         } else {
@@ -957,6 +1071,7 @@ final class WorkspaceModel {
     }
 
     func thumbnailData(for item: FileItem) async -> Data? {
+        guard isFileModuleEnabled else { return nil }
         let kind = PreviewKind.classify(item)
         guard kind == .image || kind == .video else { return nil }
         if let cached = thumbnailCache[item.id] { return cached }
@@ -981,6 +1096,7 @@ final class WorkspaceModel {
     }
 
     func metadata(for item: FileItem) async -> PhotoMetadata? {
+        guard isFileModuleEnabled else { return nil }
         let kind = PreviewKind.classify(item)
         guard kind == .image || kind == .video else { return nil }
         let extractor = PhotoMetadataExtractor(files: repository)
@@ -1066,6 +1182,7 @@ final class WorkspaceModel {
     }
 
     func preparePreview() {
+        guard isFileModuleEnabled else { return }
         previewTask?.cancel()
         clearPreviewFile()
         guard let item = selectedItem else {
@@ -1215,6 +1332,7 @@ final class WorkspaceModel {
         to localURL: URL,
         folderMode: FolderDownloadMode = .archive
     ) {
+        guard isFileModuleEnabled else { return }
         let downloadsDirectoryAsArchive = item.isDirectory && folderMode == .archive
         let taskID = addTransfer(
             kind: .download,
@@ -1235,7 +1353,7 @@ final class WorkspaceModel {
     }
 
     func enqueueBatchDownload(_ selectedItems: [FileItem], to localURL: URL) {
-        guard !selectedItems.isEmpty else { return }
+        guard isFileModuleEnabled, !selectedItems.isEmpty else { return }
         if selectedItems.count == 1, let item = selectedItems.first {
             enqueueDownload(item, to: localURL, folderMode: item.isDirectory ? .archive : .directory)
             return
@@ -1438,11 +1556,12 @@ final class WorkspaceModel {
     }
 
     func enqueueUploads(_ urls: [URL], overwrite: Bool = false) {
+        guard isFileModuleEnabled else { return }
         enqueueUploads(urls, to: currentPath, overwrite: overwrite)
     }
 
     func enqueueUploads(_ urls: [URL], to folderPath: String, overwrite: Bool = false) {
-        guard !folderPath.isEmpty else {
+        guard isFileModuleEnabled, !folderPath.isEmpty else {
             return
         }
         for url in urls {
@@ -1674,7 +1793,7 @@ final class WorkspaceModel {
         moveSource: Bool,
         overwrite: Bool = false
     ) {
-        guard !targets.isEmpty else { return }
+        guard isFileModuleEnabled, !targets.isEmpty else { return }
         let taskID = addTransfer(
             kind: moveSource ? .move : .copy,
             displayName: targets.count == 1 ? targets[0].name : "\(targets.count) 个项目",
@@ -1737,7 +1856,9 @@ final class WorkspaceModel {
         level: ArchiveCompressionLevel,
         password: String?
     ) {
-        guard !targets.isEmpty, let archiveName = validatedNewItemName(rawArchiveName) else { return }
+        guard isFileModuleEnabled,
+              !targets.isEmpty,
+              let archiveName = validatedNewItemName(rawArchiveName) else { return }
         let expectedExtension = format == .zip ? "zip" : "7z"
         let filename = (archiveName as NSString).pathExtension.lowercased() == expectedExtension
             ? archiveName
@@ -2180,7 +2301,7 @@ final class WorkspaceModel {
     }
 
     func deleteItems(_ targets: [FileItem]) {
-        guard !targets.isEmpty else {
+        guard isFileModuleEnabled, !targets.isEmpty else {
             return
         }
         let displayName = targets.count == 1 ? targets[0].name : "\(targets.count) 个项目"
@@ -2264,6 +2385,7 @@ final class WorkspaceModel {
     }
 
     func restoreToOriginalLocation(_ item: FileItem) {
+        guard isFileModuleEnabled else { return }
         guard allowsVerifiedRestore else {
             statusIsError = true
             statusMessage = "当前 NAS 尚未确认支持恢复到原位置，请先下载文件。"
@@ -2355,7 +2477,8 @@ final class WorkspaceModel {
     }
 
     func resumeTransfer(_ taskID: UUID) {
-        guard let transfer = restartableTransfers[taskID],
+        guard isFileModuleEnabled,
+              let transfer = restartableTransfers[taskID],
               transfers.first(where: { $0.id == taskID })?.state == .paused else {
             return
         }
@@ -2363,7 +2486,8 @@ final class WorkspaceModel {
     }
 
     func retryTransfer(_ taskID: UUID) {
-        guard let transfer = restartableTransfers[taskID],
+        guard isFileModuleEnabled,
+              let transfer = restartableTransfers[taskID],
               let state = transfers.first(where: { $0.id == taskID })?.state,
               state == .failed || state == .cancelled else {
             return
@@ -2436,10 +2560,45 @@ final class WorkspaceModel {
     }
 
     func cancelAllWork() {
+        suspendFileModule()
+        photoLibrary.cancelAllWork()
+        chat.cancelAllWork()
+    }
+
+    private func suspendFileModule() {
+        navigationGeneration += 1
         previewTask?.cancel()
+        previewTask = nil
+        searchTask?.cancel()
+        searchTask = nil
+        dragMoveUndoExpirationTask?.cancel()
+        dragMoveUndoExpirationTask = nil
+        dragMoveUndo = nil
+        toastDismissTask?.cancel()
+        toastDismissTask = nil
+        activeToast = nil
         runningTasks.values.forEach { $0.cancel() }
-        runningTasks.removeAll()
-        clearPreviewFile()
+
+        for index in transfers.indices {
+            switch transfers[index].state {
+            case .queued, .running, .cancelling:
+                transfers[index].state = restartableTransfers[transfers[index].id] == nil
+                    ? .cancelled
+                    : .paused
+                transfers[index].bytesPerSecond = nil
+                transfers[index].estimatedSecondsRemaining = nil
+            case .paused, .succeeded, .failed, .cancelled:
+                break
+            }
+        }
+        progressEstimators.removeAll()
+        isLoading = false
+        isRefreshing = false
+        isLoadingMore = false
+        isSearching = false
+        isMovingItemsByDrag = false
+        clearPreview()
+        saveTransfers()
     }
 
     private func discoverRecycleRoots() async {
@@ -2637,7 +2796,9 @@ final class WorkspaceModel {
             totalUnits: totalUnits
         )
         transfers.insert(task, at: 0)
-        transferNotifier.prepareAuthorization()
+        if isFileModuleEnabled {
+            transferNotifier.prepareAuthorization()
+        }
         saveTransfers()
         return task.id
     }
@@ -2691,7 +2852,9 @@ final class WorkspaceModel {
         transfers[index].estimatedSecondsRemaining = nil
         progressEstimators[taskID] = nil
         saveTransfers()
-        transferNotifier.notify(task: transfers[index], profileName: profile.displayName)
+        if isFileModuleEnabled {
+            transferNotifier.notify(task: transfers[index], profileName: profile.displayName)
+        }
     }
 
     private func failTransfer(_ taskID: UUID, error: Error) {
@@ -2704,7 +2867,9 @@ final class WorkspaceModel {
         transfers[index].estimatedSecondsRemaining = nil
         progressEstimators[taskID] = nil
         saveTransfers()
-        transferNotifier.notify(task: transfers[index], profileName: profile.displayName)
+        if isFileModuleEnabled {
+            transferNotifier.notify(task: transfers[index], profileName: profile.displayName)
+        }
         show(error)
     }
 

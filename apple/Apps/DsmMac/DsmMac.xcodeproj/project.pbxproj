@@ -11,6 +11,7 @@
 		15984B33D2FC6DC271096E4A /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D43383FD609AFA6A0605CEA /* WorkspaceView.swift */; };
 		3F7B3902FFF181AEC9D25BEE /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 55636F64951E9DD6841A1586 /* InfoPlist.strings */; };
 		3FCADE45FE1B6CE377E360BA /* DsmMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */; };
+		536B0BAE1CD6B7B21679A2F2 /* AppContentLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2D931C6E84BBAA6D14DC1C /* AppContentLayout.swift */; };
 		4440F05E83E5ED0F48DAC304 /* DsmNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = 6A578FB6D5B34A59438162B6 /* DsmNetwork */; };
 		46CE97C3D80547D7061224F2 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE9DB7D94AFC947DE39DF8D1 /* LoginView.swift */; };
 		4991FA2CB347811AEB834677 /* PhotoLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F424D8AB691E25447A263E5 /* PhotoLibraryModel.swift */; };
@@ -33,6 +34,7 @@
 		27CC848C4E842FE9081B6B85 /* PhotoLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryView.swift; sourceTree = "<group>"; };
 		3D43383FD609AFA6A0605CEA /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
 		46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DsmMacApp.swift; sourceTree = "<group>"; };
+		AA2D931C6E84BBAA6D14DC1C /* AppContentLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppContentLayout.swift; sourceTree = "<group>"; };
 		4D54FCCE59BEF04898E541CE /* LoginViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModel.swift; sourceTree = "<group>"; };
 		4E1F96609F0323DC19D30EC7 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		73A190EAB72D1587728A072E /* LanStash.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LanStash.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -90,6 +92,7 @@
 				FE2A90B20C76F1C8B23067D1 /* ChatWorkspaceModel.swift */,
 				EF1EB3904279ABE52505A57B /* ChatWorkspaceView.swift */,
 				46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */,
+				AA2D931C6E84BBAA6D14DC1C /* AppContentLayout.swift */,
 				852694B5E54505BB153EF98A /* FilePreviewView.swift */,
 				DE9DB7D94AFC947DE39DF8D1 /* LoginView.swift */,
 				4D54FCCE59BEF04898E541CE /* LoginViewModel.swift */,
@@ -194,6 +197,7 @@
 				59C06DE7124461270B9173C6 /* ChatWorkspaceModel.swift in Sources */,
 				6E494C113B6C2491904BC781 /* ChatWorkspaceView.swift in Sources */,
 				3FCADE45FE1B6CE377E360BA /* DsmMacApp.swift in Sources */,
+				536B0BAE1CD6B7B21679A2F2 /* AppContentLayout.swift in Sources */,
 				C3AFE337248691D6883C0CE7 /* FilePreviewView.swift in Sources */,
 				46CE97C3D80547D7061224F2 /* LoginView.swift in Sources */,
 				F06931669E2EB893B31BBBE0 /* LoginViewModel.swift in Sources */,

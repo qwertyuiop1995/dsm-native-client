@@ -6,6 +6,7 @@ public enum DsmParameterValue: Equatable, Sendable {
     case integer(Int)
     case boolean(Bool)
     case stringArray([String])
+    case integerArray([Int])
 
     fileprivate func encoded(for requestFormat: DsmRequestFormat) throws -> String {
         switch (requestFormat, self) {
@@ -17,6 +18,8 @@ public enum DsmParameterValue: Equatable, Sendable {
             return value ? "true" : "false"
         case (.form, .stringArray(let value)):
             return try Self.jsonString(value)
+        case (.form, .integerArray(let value)):
+            return try Self.jsonString(value)
         case (.json, .string(let value)):
             return try Self.jsonString(value)
         case (.json, .integer(let value)):
@@ -24,6 +27,8 @@ public enum DsmParameterValue: Equatable, Sendable {
         case (.json, .boolean(let value)):
             return try Self.jsonString(value)
         case (.json, .stringArray(let value)):
+            return try Self.jsonString(value)
+        case (.json, .integerArray(let value)):
             return try Self.jsonString(value)
         }
     }

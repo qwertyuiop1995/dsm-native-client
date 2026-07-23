@@ -1,5 +1,7 @@
+import AppKit
 import DsmCore
 import Foundation
+import ImageIO
 import Observation
 
 @MainActor
@@ -14,6 +16,7 @@ final class ChatWorkspaceModel {
     private(set) var isLoadingMessages = false
     private(set) var isLoadingEarlierMessages = false
     private(set) var isRefreshingMessages = false
+    private(set) var isRefreshingConversations = false
     private(set) var hasMoreMessagesBefore = false
     private(set) var newMessageCount = 0
     private(set) var isPerformingAction = false
@@ -21,13 +24,41 @@ final class ChatWorkspaceModel {
     private(set) var statusIsError = false
     private(set) var activeToast: ToastMessage?
     private(set) var uploadProgressByMessageID: [String: Double] = [:]
+    private(set) var attachmentDownloadProgressByMessageID: [String: Double] = [:]
+    private(set) var attachmentThumbnailsByMessageID: [String: Data] = [:]
+    private(set) var loadingAttachmentThumbnailIDs: Set<String> = []
+    private(set) var reminders: [ChatReminder] = []
+    private(set) var isLoadingReminders = false
+    private(set) var scheduledMessages: [ChatScheduledMessage] = []
+    private(set) var isLoadingScheduledMessages = false
+    private(set) var reminderLoadError: String?
+    private(set) var scheduledMessageLoadError: String?
+    private(set) var conversationMembers: [ChatUser] = []
+    private(set) var isLoadingConversationMembers = false
+    private(set) var conversationMemberLoadError: String?
+    private(set) var pinnedMessages: [ChatMessage] = []
+    private(set) var isLoadingPinnedMessages = false
+    private(set) var pinnedMessageLoadError: String?
+    private(set) var isRealtimeConnected = false
+    private(set) var pinnedConversationIDs: [String] = []
+    private(set) var isModuleEnabled = true
 
     @ObservationIgnored private let repository: any ChatRepository
     @ObservationIgnored private let currentAccountName: String?
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let pinStorageKey: String?
     @ObservationIgnored private var hasLoaded = false
     @ObservationIgnored private var previousMessageCursor: String?
     @ObservationIgnored private var toastDismissTask: Task<Void, Never>?
     @ObservationIgnored private var sendTasksByMessageID: [String: Task<ChatMessage, Error>] = [:]
+    @ObservationIgnored private var attachmentDownloadTasksByMessageID: [String: Task<Void, Error>] = [:]
+    @ObservationIgnored private var locallyReadThroughActivityByConversationID: [String: Date] = [:]
+    @ObservationIgnored private var isChatVisible = false
+    @ObservationIgnored private var realtimeEventTask: Task<Void, Never>?
+    @ObservationIgnored private var realtimeRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var realtimeStopTask: Task<Void, Never>?
+    @ObservationIgnored private let attachmentPreviewDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LanStashChatPreview-\(UUID().uuidString)", isDirectory: true)
     private var draftsByConversationID: [String: String] = [:]
     private var failedMessageErrorsByID: [String: String] = [:]
     private var localOutgoingMessagesByConversationID: [String: [ChatMessage]] = [:]
@@ -35,15 +66,63 @@ final class ChatWorkspaceModel {
 
     init(
         repository: any ChatRepository,
-        currentAccountName: String? = nil
+        currentAccountName: String? = nil,
+        profileID: UUID? = nil,
+        defaults: UserDefaults = .standard
     ) {
         self.repository = repository
         self.currentAccountName = Self.normalizedIdentityName(currentAccountName)
+        self.defaults = defaults
+        let storageKey = profileID.map {
+            "LanStash_ChatPinnedConversations_\($0.uuidString)"
+        }
+        pinStorageKey = storageKey
+        if let storageKey,
+           let savedIDs = defaults.stringArray(forKey: storageKey) {
+            var seen = Set<String>()
+            pinnedConversationIDs = savedIDs.prefix(500).compactMap { value in
+                let id = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty, seen.insert(id).inserted else { return nil }
+                return id
+            }
+        }
+    }
+
+    deinit {
+        realtimeEventTask?.cancel()
+        realtimeRefreshTask?.cancel()
+        realtimeStopTask?.cancel()
+        try? FileManager.default.removeItem(at: attachmentPreviewDirectory)
     }
 
     var selectedConversation: ChatConversation? {
         guard let selectedConversationID else { return nil }
         return conversations.first { $0.id == selectedConversationID }
+    }
+
+    var totalUnreadCount: Int {
+        conversations.reduce(0) { $0 + $1.unreadCount }
+    }
+
+    var workspaceSyncIntervalSeconds: Int {
+        isRealtimeConnected ? 30 : 5
+    }
+
+    func isConversationPinned(_ id: String) -> Bool {
+        pinnedConversationIDs.contains(id)
+    }
+
+    func toggleConversationPin(id: String) {
+        guard conversations.contains(where: { $0.id == id }) else { return }
+        if let index = pinnedConversationIDs.firstIndex(of: id) {
+            pinnedConversationIDs.remove(at: index)
+            showToast("已取消置顶", icon: "pin.slash")
+        } else {
+            pinnedConversationIDs.insert(id, at: 0)
+            showToast("已置顶会话", icon: "pin.fill")
+        }
+        persistPinnedConversations()
+        conversations = sortedConversations(conversations)
     }
 
     var currentUserID: String? {
@@ -94,7 +173,7 @@ final class ChatWorkspaceModel {
     }
 
     var canUseMessaging: Bool {
-        availability.status == .available
+        isModuleEnabled && availability.status == .available
     }
 
     var canCreateDirectConversation: Bool {
@@ -118,8 +197,32 @@ final class ChatWorkspaceModel {
         )
     }
 
+    var canDownloadAttachments: Bool {
+        canUseMessaging && availability.supportedFeatures.contains(.attachmentDownload)
+    }
+
+    var canManageReminders: Bool {
+        canUseMessaging && availability.supportedFeatures.contains(.reminderManagement)
+    }
+
+    var canScheduleMessages: Bool {
+        canUseMessaging && availability.supportedFeatures.contains(.scheduledMessage)
+    }
+
     var canCreatePoll: Bool {
         canUseMessaging && availability.supportedFeatures.contains(.poll)
+    }
+
+    var canForwardMessages: Bool {
+        canUseMessaging && availability.supportedFeatures.contains(.messageForward)
+    }
+
+    var canViewGroupMembers: Bool {
+        canUseMessaging && availability.supportedFeatures.contains(.groupMembers)
+    }
+
+    var canManagePinnedMessages: Bool {
+        canUseMessaging && availability.supportedFeatures.contains(.pinnedMessages)
     }
 
     var canDeleteOwnMessages: Bool {
@@ -132,6 +235,23 @@ final class ChatWorkspaceModel {
 
     func canDelete(_ message: ChatMessage) -> Bool {
         canDeleteOwnMessages && message.deliveryState == .sent && isCurrentUser(message)
+    }
+
+    func canForward(_ message: ChatMessage) -> Bool {
+        guard canForwardMessages,
+              selectedConversation?.isEncrypted == false,
+              message.deliveryState == .sent else {
+            return false
+        }
+        let hasText = message.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        return message.poll == nil && (hasText || !message.attachments.isEmpty)
+    }
+
+    func canPin(_ message: ChatMessage) -> Bool {
+        canManagePinnedMessages
+            && selectedConversation?.kind == .group
+            && selectedConversation?.isEncrypted == false
+            && message.deliveryState == .sent
     }
 
     func draftText(for conversationID: String) -> String {
@@ -154,22 +274,328 @@ final class ChatWorkspaceModel {
         uploadProgressByMessageID[messageID]
     }
 
+    func attachmentDownloadProgress(for messageID: String) -> Double? {
+        attachmentDownloadProgressByMessageID[messageID]
+    }
+
+    func thumbnailData(for messageID: String) -> Data? {
+        attachmentThumbnailsByMessageID[messageID]
+    }
+
+    func reminder(for messageID: String) -> ChatReminder? {
+        reminders.first { $0.messageID == messageID }
+    }
+
+    func loadAttachmentThumbnail(
+        messageID: String,
+        attachment: ChatAttachment
+    ) async {
+        guard canDownloadAttachments,
+              attachmentThumbnailsByMessageID[messageID] == nil,
+              !loadingAttachmentThumbnailIDs.contains(messageID) else { return }
+        loadingAttachmentThumbnailIDs.insert(messageID)
+        defer { loadingAttachmentThumbnailIDs.remove(messageID) }
+        do {
+            let data = try await repository.loadAttachmentThumbnail(
+                messageID: messageID,
+                size: .small
+            )
+            if let displayData = Self.displayThumbnailData(from: data) {
+                attachmentThumbnailsByMessageID[messageID] = displayData
+                return
+            }
+        } catch {
+            // NAS 可能不为 HEIC/HEIF 生成缩略图，下面使用原文件做受限的本机兜底。
+        }
+        await loadLocalAttachmentThumbnailFallback(messageID: messageID, attachment: attachment)
+    }
+
+    func downloadAttachment(
+        messageID: String,
+        attachment: ChatAttachment,
+        to destinationURL: URL,
+        announcesSuccess: Bool = true
+    ) async -> Bool {
+        guard canDownloadAttachments, !isPerformingAction else { return false }
+        isPerformingAction = true
+        attachmentDownloadProgressByMessageID[messageID] = 0
+        defer {
+            isPerformingAction = false
+            attachmentDownloadProgressByMessageID[messageID] = nil
+            attachmentDownloadTasksByMessageID[messageID] = nil
+        }
+        do {
+            let downloadTask = Task {
+                try await repository.downloadAttachment(messageID: messageID, to: destinationURL) {
+                    [weak self] completed, total in
+                    guard let total, total > 0 else { return }
+                    Task { @MainActor [weak self] in
+                        self?.attachmentDownloadProgressByMessageID[messageID] = min(
+                            max(Double(completed) / Double(total), 0),
+                            1
+                        )
+                    }
+                }
+            }
+            attachmentDownloadTasksByMessageID[messageID] = downloadTask
+            try await downloadTask.value
+            if announcesSuccess {
+                showToast("“\(attachment.fileName)”已保存", icon: "arrow.down.circle.fill")
+            }
+            return true
+        } catch is CancellationError {
+            showToast("已取消保存。", icon: "xmark.circle", style: .info)
+            return false
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
+    func cancelAttachmentDownload(messageID: String) {
+        attachmentDownloadTasksByMessageID[messageID]?.cancel()
+    }
+
+    private func loadLocalAttachmentThumbnailFallback(
+        messageID: String,
+        attachment: ChatAttachment
+    ) async {
+        let maximumPreviewBytes: Int64 = 64 * 1_024 * 1_024
+        guard attachment.kind == .image,
+              attachment.sizeBytes.map({ $0 <= maximumPreviewBytes }) ?? true else { return }
+        do {
+            try FileManager.default.createDirectory(
+                at: attachmentPreviewDirectory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            let safeName = URL(fileURLWithPath: attachment.fileName).lastPathComponent
+            let sourceURL = attachmentPreviewDirectory
+                .appendingPathComponent("thumbnail-\(UUID().uuidString)-\(safeName)")
+            defer { try? FileManager.default.removeItem(at: sourceURL) }
+            try await repository.downloadAttachment(messageID: messageID, to: sourceURL) { _, _ in }
+            let fileSize = try FileManager.default.attributesOfItem(atPath: sourceURL.path)[.size] as? NSNumber
+            let downloadedBytes = fileSize?.int64Value ?? 0
+            guard downloadedBytes <= maximumPreviewBytes else { return }
+            let thumbnail = await Task.detached(priority: .utility) { () -> Data? in
+                guard let data = try? Data(contentsOf: sourceURL, options: .mappedIfSafe) else { return nil }
+                return Self.displayThumbnailData(from: data)
+            }.value
+            if let thumbnail {
+                attachmentThumbnailsByMessageID[messageID] = thumbnail
+            }
+        } catch {
+            // 图片预览是辅助内容，兜底失败时仍保留打开和另存为入口。
+        }
+    }
+
+    nonisolated private static func displayThumbnailData(from sourceData: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(sourceData as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 640,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return NSBitmapImageRep(cgImage: image).representation(
+            using: .jpeg,
+            properties: [.compressionFactor: 0.84]
+        )
+    }
+
+    func loadReminders() async {
+        guard canManageReminders, !isLoadingReminders,
+              let conversationID = selectedConversationID else { return }
+        isLoadingReminders = true
+        reminderLoadError = nil
+        defer { isLoadingReminders = false }
+        do {
+            reminders = try await repository.listReminders(conversationID: conversationID)
+        } catch {
+            reminderLoadError = Self.safeMessage(for: error)
+        }
+    }
+
+    func setReminder(messageID: String, remindAt: Date) async -> Bool {
+        guard canManageReminders, !isPerformingAction else { return false }
+        isPerformingAction = true
+        defer { isPerformingAction = false }
+        do {
+            let reminder = try await repository.setReminder(
+                messageID: messageID,
+                remindAt: remindAt,
+                clientRequestID: UUID()
+            )
+            reminders.removeAll { $0.messageID == messageID }
+            reminders.append(reminder)
+            reminders.sort { $0.remindAt < $1.remindAt }
+            showToast("提醒已设置", icon: "bell.fill")
+            return true
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
+    func deleteReminder(messageID: String) async -> Bool {
+        guard canManageReminders, !isPerformingAction,
+              let conversationID = selectedConversationID else { return false }
+        isPerformingAction = true
+        defer { isPerformingAction = false }
+        do {
+            try await repository.deleteReminder(
+                messageID: messageID,
+                conversationID: conversationID,
+                clientRequestID: UUID()
+            )
+            reminders.removeAll { $0.messageID == messageID }
+            showToast("提醒已取消", icon: "bell.slash.fill")
+            return true
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
+    func loadScheduledMessages() async {
+        guard canScheduleMessages, !isLoadingScheduledMessages,
+              let conversationID = selectedConversationID else { return }
+        isLoadingScheduledMessages = true
+        scheduledMessageLoadError = nil
+        defer { isLoadingScheduledMessages = false }
+        do {
+            scheduledMessages = try await repository.listScheduledMessages(conversationID: conversationID)
+        } catch {
+            scheduledMessageLoadError = Self.safeMessage(for: error)
+        }
+    }
+
+    func createScheduledMessage(text: String, sendAt: Date) async -> Bool {
+        guard canScheduleMessages, !isPerformingAction,
+              let conversationID = selectedConversationID else { return false }
+        isPerformingAction = true
+        defer { isPerformingAction = false }
+        do {
+            let scheduled = try await repository.createScheduledMessage(
+                conversationID: conversationID,
+                text: text,
+                sendAt: sendAt,
+                clientRequestID: UUID()
+            )
+            scheduledMessages.removeAll { $0.id == scheduled.id }
+            scheduledMessages.append(scheduled)
+            scheduledMessages.sort { $0.sendAt < $1.sendAt }
+            showToast("定时消息已安排", icon: "clock.badge.checkmark")
+            return true
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
+    func deleteScheduledMessage(id: String) async -> Bool {
+        guard canScheduleMessages, !isPerformingAction,
+              let conversationID = selectedConversationID else { return false }
+        isPerformingAction = true
+        defer { isPerformingAction = false }
+        do {
+            try await repository.deleteScheduledMessage(
+                id: id,
+                conversationID: conversationID,
+                clientRequestID: UUID()
+            )
+            scheduledMessages.removeAll { $0.id == id }
+            showToast("定时消息已取消", icon: "clock.badge.xmark")
+            return true
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
+    func loadConversationMembers() async {
+        guard canViewGroupMembers,
+              selectedConversation?.kind == .group,
+              !isLoadingConversationMembers,
+              let conversationID = selectedConversationID else { return }
+        isLoadingConversationMembers = true
+        conversationMemberLoadError = nil
+        defer { isLoadingConversationMembers = false }
+        do {
+            conversationMembers = try await repository.listConversationMembers(
+                conversationID: conversationID
+            )
+        } catch {
+            conversationMemberLoadError = Self.safeMessage(for: error)
+        }
+    }
+
+    func loadPinnedMessages() async {
+        guard canManagePinnedMessages,
+              selectedConversation?.kind == .group,
+              !isLoadingPinnedMessages,
+              let conversationID = selectedConversationID else { return }
+        isLoadingPinnedMessages = true
+        pinnedMessageLoadError = nil
+        defer { isLoadingPinnedMessages = false }
+        do {
+            pinnedMessages = try await repository.listPinnedMessages(
+                conversationID: conversationID
+            )
+        } catch {
+            pinnedMessageLoadError = Self.safeMessage(for: error)
+        }
+    }
+
+    func setMessagePinned(_ message: ChatMessage, isPinned: Bool) async -> Bool {
+        guard canPin(message), !isPerformingAction,
+              let conversationID = selectedConversationID else { return false }
+        isPerformingAction = true
+        defer { isPerformingAction = false }
+        do {
+            try await repository.setMessagePinned(
+                conversationID: conversationID,
+                messageID: message.id,
+                isPinned: isPinned,
+                clientRequestID: UUID()
+            )
+            await refreshCurrentConversation()
+            pinnedMessages = try await repository.listPinnedMessages(
+                conversationID: conversationID
+            )
+            showToast(
+                isPinned ? "已设为群公告" : "已从群公告中移除",
+                icon: isPinned ? "pin.fill" : "pin.slash"
+            )
+            return true
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
     func loadIfNeeded() async {
-        guard !hasLoaded else { return }
+        guard isModuleEnabled, !hasLoaded else { return }
         await reload()
     }
 
     func reload() async {
-        guard !isLoading else { return }
+        guard isModuleEnabled, !isLoading else { return }
         isLoading = true
         statusMessage = nil
         statusIsError = false
         defer {
             isLoading = false
-            hasLoaded = true
+            if isModuleEnabled {
+                hasLoaded = true
+            }
         }
 
         let discoveredAvailability = await repository.availability()
+        guard isModuleEnabled else { return }
         availability = discoveredAvailability
         guard discoveredAvailability.status == .available else {
             conversations = []
@@ -183,15 +609,18 @@ final class ChatWorkspaceModel {
         do {
             async let loadedConversations = repository.listConversations()
             async let loadedUsers = repository.listUsers()
-            conversations = try await loadedConversations.sorted(by: Self.conversationSort)
-            users = try await loadedUsers
+            let loadedConversationValues = try await loadedConversations
+            let loadedUserValues = try await loadedUsers
+            guard isModuleEnabled else { return }
+            self.conversations = sortedConversations(loadedConversationValues)
+            self.users = loadedUserValues
                 .filter { !$0.isDisabled }
                 .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
 
             if let selectedConversationID,
-               conversations.contains(where: { $0.id == selectedConversationID }) {
+               self.conversations.contains(where: { $0.id == selectedConversationID }) {
                 await selectConversation(id: selectedConversationID)
-            } else if let first = conversations.first {
+            } else if let first = self.conversations.first {
                 await selectConversation(id: first.id)
             } else {
                 selectedConversationID = nil
@@ -204,6 +633,14 @@ final class ChatWorkspaceModel {
 
     func selectConversation(id: String?) async {
         guard canUseMessaging else { return }
+        reminders = []
+        scheduledMessages = []
+        conversationMembers = []
+        pinnedMessages = []
+        reminderLoadError = nil
+        scheduledMessageLoadError = nil
+        conversationMemberLoadError = nil
+        pinnedMessageLoadError = nil
         guard let id else {
             selectedConversationID = nil
             messages = []
@@ -232,6 +669,10 @@ final class ChatWorkspaceModel {
             previousMessageCursor = page.previousCursor
             hasMoreMessagesBefore = page.hasMoreBefore
             newMessageCount = 0
+            markConversationReadLocally(
+                id: id,
+                through: messages.last?.sentAt ?? selectedConversation?.lastActivityAt ?? Date()
+            )
         } catch {
             guard selectedConversationID == id else { return }
             messages = []
@@ -291,9 +732,188 @@ final class ChatWorkspaceModel {
                 previousMessageCursor = page.previousCursor
                 hasMoreMessagesBefore = page.hasMoreBefore
             }
+            markConversationReadLocally(
+                id: conversationID,
+                through: messages.last?.sentAt ?? Date()
+            )
         } catch {
             // 定时刷新失败不打断阅读；用户主动刷新时仍会获得完整错误提示。
         }
+    }
+
+    /// 用户主动进入消息页时立即回读一次，避免等待下一次实时通知或定时校准。
+    func refreshForegroundChat() async {
+        isChatVisible = true
+        await refreshConversationList()
+        await refreshCurrentConversation()
+    }
+
+    /// 工作区级同步在用户查看文件或照片时也持续运行，并为侧边栏更新未读数。
+    func syncWorkspaceChat(isChatVisible: Bool) async {
+        guard isModuleEnabled else {
+            await stopRealtime()
+            return
+        }
+        self.isChatVisible = isChatVisible
+        if availability.status != .available {
+            availability = await repository.availability()
+        }
+        guard isModuleEnabled, availability.status == .available else {
+            await stopRealtime()
+            return
+        }
+        await startRealtimeIfNeeded()
+        await refreshConversationList()
+        if isChatVisible {
+            await refreshCurrentConversation()
+        }
+    }
+
+    func stopRealtime() async {
+        realtimeEventTask?.cancel()
+        realtimeEventTask = nil
+        realtimeRefreshTask?.cancel()
+        realtimeRefreshTask = nil
+        isRealtimeConnected = false
+        let stopTask = scheduleRealtimeStop()
+        await stopTask.value
+    }
+
+    /// 模块关闭后立即断开实时连接，并终止发送、下载和刷新任务。
+    func setModuleEnabled(_ enabled: Bool) {
+        guard isModuleEnabled != enabled else { return }
+        isModuleEnabled = enabled
+        if !enabled {
+            cancelAllWork()
+        }
+    }
+
+    func cancelAllWork() {
+        toastDismissTask?.cancel()
+        toastDismissTask = nil
+        activeToast = nil
+        realtimeEventTask?.cancel()
+        realtimeEventTask = nil
+        realtimeRefreshTask?.cancel()
+        realtimeRefreshTask = nil
+        sendTasksByMessageID.values.forEach { $0.cancel() }
+        sendTasksByMessageID.removeAll()
+        attachmentDownloadTasksByMessageID.values.forEach { $0.cancel() }
+        attachmentDownloadTasksByMessageID.removeAll()
+        attachmentDownloadProgressByMessageID.removeAll()
+        uploadProgressByMessageID.removeAll()
+        loadingAttachmentThumbnailIDs.removeAll()
+        isRealtimeConnected = false
+        isChatVisible = false
+        isLoading = false
+        isLoadingMessages = false
+        isLoadingEarlierMessages = false
+        isRefreshingMessages = false
+        isRefreshingConversations = false
+        isPerformingAction = false
+        isLoadingReminders = false
+        isLoadingScheduledMessages = false
+        isLoadingConversationMembers = false
+        isLoadingPinnedMessages = false
+        _ = scheduleRealtimeStop()
+    }
+
+    private func startRealtimeIfNeeded() async {
+        if let realtimeStopTask {
+            await realtimeStopTask.value
+            self.realtimeStopTask = nil
+        }
+        guard isModuleEnabled, realtimeEventTask == nil else { return }
+        let events = await repository.realtimeEvents()
+        realtimeEventTask = Task { [weak self] in
+            for await event in events {
+                guard !Task.isCancelled else { break }
+                self?.handleRealtimeEvent(event)
+            }
+        }
+        await repository.startRealtime()
+    }
+
+    private func scheduleRealtimeStop() -> Task<Void, Never> {
+        if let realtimeStopTask {
+            return realtimeStopTask
+        }
+        let task = Task { [repository] in
+            await repository.stopRealtime()
+        }
+        realtimeStopTask = task
+        return task
+    }
+
+    private func handleRealtimeEvent(_ event: ChatRealtimeEvent) {
+        guard isModuleEnabled else { return }
+        switch event {
+        case .connected:
+            isRealtimeConnected = true
+        case .disconnected:
+            isRealtimeConnected = false
+        case .contentChanged:
+            realtimeRefreshTask?.cancel()
+            realtimeRefreshTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(for: .milliseconds(200))
+                } catch {
+                    return
+                }
+                guard let self, !Task.isCancelled else { return }
+                await self.refreshConversationList()
+                if self.isChatVisible {
+                    await self.refreshCurrentConversation()
+                }
+            }
+        }
+    }
+
+    private func refreshConversationList() async {
+        guard canUseMessaging, !isRefreshingConversations, !isLoading else { return }
+        isRefreshingConversations = true
+        defer { isRefreshingConversations = false }
+        do {
+            let refreshed = try await repository.listConversations()
+            guard isModuleEnabled else { return }
+            conversations = sortedConversations(
+                refreshed.map(applyingLocalReadState)
+            )
+        } catch {
+            // 前台轻量刷新失败不遮挡当前消息，下一轮自动重试。
+        }
+    }
+
+    private func markConversationReadLocally(id: String, through activity: Date) {
+        let existing = locallyReadThroughActivityByConversationID[id] ?? .distantPast
+        locallyReadThroughActivityByConversationID[id] = max(existing, activity)
+        guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        conversations[index] = conversation(conversations[index], unreadCount: 0)
+    }
+
+    private func applyingLocalReadState(_ value: ChatConversation) -> ChatConversation {
+        if isChatVisible, value.id == selectedConversationID {
+            return conversation(value, unreadCount: 0)
+        }
+        guard let readThrough = locallyReadThroughActivityByConversationID[value.id] else { return value }
+        if let activity = value.lastActivityAt, activity > readThrough {
+            return value
+        }
+        return conversation(value, unreadCount: 0)
+    }
+
+    private func conversation(_ value: ChatConversation, unreadCount: Int) -> ChatConversation {
+        ChatConversation(
+            id: value.id,
+            kind: value.kind,
+            title: value.title,
+            memberIDs: value.memberIDs,
+            memberCount: value.memberCount,
+            lastMessageSummary: value.lastMessageSummary,
+            lastActivityAt: value.lastActivityAt,
+            unreadCount: unreadCount,
+            isEncrypted: value.isEncrypted
+        )
     }
 
     func clearNewMessageIndicator() {
@@ -430,6 +1050,104 @@ final class ChatWorkspaceModel {
             markMessageFailed(localMessage, error: error)
             return false
         }
+    }
+
+    func forwardMessages(
+        ids: Set<String>,
+        to targetConversationIDs: Set<String>,
+        newDirectUserIDs: Set<String> = []
+    ) async -> Bool {
+        guard !isPerformingAction else { return false }
+        let existingTargetIDs = targetConversationIDs
+            .filter { targetID in
+                targetID != selectedConversationID
+                    && conversations.contains(where: { $0.id == targetID })
+            }
+        let directUserIDs = newDirectUserIDs.filter { userID in
+            users.contains {
+                $0.id == userID
+                    && $0.id != currentUserID
+                    && $0.isCurrentUser != true
+                    && !$0.isDisabled
+            }
+        }
+        let sourceMessages = messages
+            .filter { ids.contains($0.id) && canForward($0) }
+            .sorted(by: Self.messageSort)
+        guard (!existingTargetIDs.isEmpty || !directUserIDs.isEmpty),
+              existingTargetIDs.count == targetConversationIDs.count,
+              directUserIDs.count == newDirectUserIDs.count,
+              sourceMessages.count == ids.count else {
+            statusIsError = true
+            statusMessage = "部分转发目标已经不可用，请重新选择后再试。"
+            return false
+        }
+
+        isPerformingAction = true
+        statusMessage = nil
+        statusIsError = false
+        defer { isPerformingAction = false }
+
+        var resolvedTargetIDs = existingTargetIDs
+        do {
+            // 尚未聊天的联系人需要先取得对应的一对一会话，再交给 NAS 直接转发原消息。
+            for userID in directUserIDs.sorted() {
+                let conversation = try await repository.openDirectConversation(
+                    userID: userID,
+                    clientRequestID: UUID()
+                )
+                merge(conversation)
+                if conversation.id != selectedConversationID {
+                    resolvedTargetIDs.insert(conversation.id)
+                }
+            }
+        } catch {
+            show(error)
+            return false
+        }
+        let targetIDs = resolvedTargetIDs.sorted()
+        guard !targetIDs.isEmpty else {
+            statusIsError = true
+            statusMessage = "没有可用的转发目标，请重新选择后再试。"
+            return false
+        }
+
+        var completedCount = 0
+        var failedCount = 0
+        var lastError: Error?
+
+        for message in sourceMessages {
+            do {
+                try await repository.forwardMessage(
+                    messageID: message.id,
+                    toConversationIDs: targetIDs,
+                    clientRequestID: UUID()
+                )
+                completedCount += 1
+            } catch {
+                failedCount += 1
+                lastError = error
+            }
+        }
+
+        await refreshConversationList()
+        if failedCount > 0, let lastError {
+            showBatchFailure(
+                completedCount: completedCount,
+                failedCount: failedCount,
+                noun: "次转发",
+                lastError: lastError
+            )
+            return false
+        }
+
+        showToast(
+            sourceMessages.count == 1
+                ? "消息已转发到 \(targetIDs.count) 个会话"
+                : "\(sourceMessages.count) 条消息已转发到 \(targetIDs.count) 个会话",
+            icon: "arrowshape.turn.up.right.fill"
+        )
+        return true
     }
 
     func retryMessage(id: String) async {
@@ -584,6 +1302,8 @@ final class ChatWorkspaceModel {
         // 将已经成功的关闭操作错误显示成失败。
         if !closedIDs.isEmpty {
             conversations.removeAll { closedIDs.contains($0.id) }
+            pinnedConversationIDs.removeAll { closedIDs.contains($0) }
+            persistPinnedConversations()
             for id in closedIDs {
                 draftsByConversationID[id] = nil
                 localOutgoingMessagesByConversationID[id] = nil
@@ -689,7 +1409,8 @@ final class ChatWorkspaceModel {
             attachments: message.attachments,
             poll: message.poll,
             deliveryState: state,
-            encryptionState: message.encryptionState
+            encryptionState: message.encryptionState,
+            pinnedAt: message.pinnedAt
         )
         if let localIndex = localOutgoingMessagesByConversationID[message.conversationID]?
             .firstIndex(where: { $0.id == id }) {
@@ -715,7 +1436,7 @@ final class ChatWorkspaceModel {
            let description = localizedError.errorDescription {
             return description
         }
-        return "消息没有发送，请检查连接后重试。"
+        return "操作暂时没有完成，请检查连接后重试。"
     }
 
     private func matchingServerMessage(
@@ -760,19 +1481,12 @@ final class ChatWorkspaceModel {
     private func merge(_ conversation: ChatConversation) {
         conversations.removeAll { $0.id == conversation.id }
         conversations.append(conversation)
-        conversations.sort(by: Self.conversationSort)
+        conversations = sortedConversations(conversations)
     }
 
     private func show(_ error: Error) {
         statusIsError = true
-        if let appError = error as? AppError {
-            statusMessage = appError.safeUserMessage
-        } else if let localizedError = error as? LocalizedError,
-                  let description = localizedError.errorDescription {
-            statusMessage = description
-        } else {
-            statusMessage = "消息暂时没有完成，请稍后重试。"
-        }
+        statusMessage = Self.safeMessage(for: error)
     }
 
     private func showBatchFailure(
@@ -809,7 +1523,33 @@ final class ChatWorkspaceModel {
         }
     }
 
-    private static func conversationSort(_ lhs: ChatConversation, _ rhs: ChatConversation) -> Bool {
+    private func persistPinnedConversations() {
+        guard let pinStorageKey else { return }
+        defaults.set(pinnedConversationIDs, forKey: pinStorageKey)
+    }
+
+    private func sortedConversations(_ values: [ChatConversation]) -> [ChatConversation] {
+        let ranks = Dictionary(
+            uniqueKeysWithValues: pinnedConversationIDs.enumerated().map { ($1, $0) }
+        )
+        return values.sorted { lhs, rhs in
+            switch (ranks[lhs.id], ranks[rhs.id]) {
+            case let (left?, right?) where left != right:
+                return left < right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return Self.conversationActivitySort(lhs, rhs)
+            }
+        }
+    }
+
+    private static func conversationActivitySort(
+        _ lhs: ChatConversation,
+        _ rhs: ChatConversation
+    ) -> Bool {
         switch (lhs.lastActivityAt, rhs.lastActivityAt) {
         case let (left?, right?) where left != right:
             left > right

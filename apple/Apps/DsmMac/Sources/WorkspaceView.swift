@@ -69,13 +69,29 @@ struct WorkspaceView: View {
                 .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
         } detail: {
             contentColumn
+                .fillsAvailableContentArea(alignment: .topLeading)
                 .navigationSplitViewColumnWidth(min: 480, ideal: 680)
         }
         .navigationSplitViewStyle(.balanced)
         .task {
-            await model.load()
-            model.section = .files("/")
-            await model.navigate(to: "/", recordingHistory: false)
+            await model.startEnabledModules()
+        }
+        .task(id: "\(model.profile.id.uuidString):\(model.isChatModuleEnabled)") {
+            guard model.isChatModuleEnabled else {
+                await model.chat.stopRealtime()
+                return
+            }
+            while !Task.isCancelled, model.isChatModuleEnabled {
+                await model.chat.syncWorkspaceChat(isChatVisible: model.section == .chat)
+                do {
+                    try await Task.sleep(
+                        for: .seconds(model.chat.workspaceSyncIntervalSeconds)
+                    )
+                } catch {
+                    break
+                }
+            }
+            await model.chat.stopRealtime()
         }
         .onChange(of: model.section) { previousSection, section in
             if isRestoringSectionAfterUnsavedEdit {
@@ -802,9 +818,6 @@ private struct SidebarView: View {
     let onMoveProfiles: (IndexSet, Int) -> Void
     let onLogout: () async -> Void
 
-    @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
-    @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = true
-    @AppStorage("LanStash_Module_Chat") private var isChatModuleEnabled = true
     @State private var isNasListExpanded = true
     @State private var connectingProfileID: UUID? = nil
     @State private var confirmsLogout = false
@@ -870,7 +883,7 @@ private struct SidebarView: View {
                 }
             }
 
-            if isFileModuleEnabled {
+            if model.isFileModuleEnabled {
                 Section("文件管理") {
                     NavigationLink(value: model.currentFileSection) {
                         Label("文件浏览器", systemImage: "folder.fill")
@@ -891,7 +904,7 @@ private struct SidebarView: View {
                 }
             }
 
-            if isPhotosModuleEnabled {
+            if model.isPhotosModuleEnabled {
                 Section("照片管理") {
                     NavigationLink(value: WorkspaceSection.photos) {
                         Label("照片", systemImage: "photo.on.rectangle.angled")
@@ -900,19 +913,22 @@ private struct SidebarView: View {
                 }
             }
 
-            if isChatModuleEnabled {
+            if model.isChatModuleEnabled {
                 Section("沟通") {
                     NavigationLink(value: WorkspaceSection.chat) {
                         Label("消息", systemImage: "bubble.left.and.bubble.right.fill")
                             .foregroundStyle(.indigo)
+                            .badge(model.chat.totalUnreadCount)
                     }
                 }
             }
 
             Section {
-                NavigationLink(value: WorkspaceSection.transfers) {
-                    Label("传输中心", systemImage: "arrow.up.arrow.down.circle")
-                        .badge(model.activeTransferCount)
+                if model.isFileModuleEnabled {
+                    NavigationLink(value: WorkspaceSection.transfers) {
+                        Label("传输中心", systemImage: "arrow.up.arrow.down.circle")
+                            .badge(model.activeTransferCount)
+                    }
                 }
                 NavigationLink(value: WorkspaceSection.settings) {
                     Label("设置", systemImage: "gearshape")
@@ -923,10 +939,12 @@ private struct SidebarView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 Divider()
-                StorageCapacityView(
-                    summary: model.storageSpaceSummary,
-                    isLoading: model.isLoadingStorageSpace
-                )
+                if model.isFileModuleEnabled {
+                    StorageCapacityView(
+                        summary: model.storageSpaceSummary,
+                        isLoading: model.isLoadingStorageSpace
+                    )
+                }
                 Divider()
                 HStack(spacing: 10) {
                     Image(systemName: connectionRoute?.systemImage ?? "network")
@@ -1055,6 +1073,7 @@ private struct LocationCollectionView: View {
                 }
             }
         }
+        .fillsAvailableContentArea()
         .navigationTitle(title)
     }
 }
@@ -1107,6 +1126,7 @@ private struct RecentLocationsView: View {
                 }
             }
         }
+        .fillsAvailableContentArea()
         .navigationTitle("最近访问")
         .alert("清除全部最近访问记录？", isPresented: $confirmsClearAll) {
             Button("取消", role: .cancel) {}
@@ -1174,6 +1194,7 @@ private struct RemoteLocationsView: View {
                 }
             }
         }
+        .fillsAvailableContentArea()
         .navigationTitle("远程位置")
         .toolbar {
             Button {
@@ -1463,6 +1484,7 @@ private struct ShareLinksView: View {
                 }
             }
         }
+        .fillsAvailableContentArea()
         .navigationTitle("分享管理")
         .task { await model.loadShareLinks() }
         .alert("取消这个分享？", isPresented: Binding(
@@ -3037,6 +3059,7 @@ private struct TransferCenterView: View {
                     systemImage: "arrow.up.arrow.down.circle",
                     description: Text("上传、下载和文件操作会显示在这里。")
                 )
+                .fillsAvailableContentArea()
             } else {
                 VStack(spacing: 0) {
                     HStack {
@@ -3109,6 +3132,7 @@ private struct TransferCenterView: View {
                             systemImage: "arrow.up.arrow.down.circle",
                             description: Text("当前过滤条件下没有任务显示，可尝试切换标签。")
                         )
+                        .fillsAvailableContentArea()
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 12) {
@@ -3132,8 +3156,10 @@ private struct TransferCenterView: View {
                         }
                     }
                 }
+                .fillsAvailableContentArea(alignment: .topLeading)
             }
         }
+        .fillsAvailableContentArea(alignment: .topLeading)
         .onAppear {
             if selectedNasID == nil {
                 selectedNasID = model.profile.id
@@ -3695,9 +3721,6 @@ private struct SettingsView: View {
     @State private var renamedNAS = ""
     @State private var renameError: String?
     @AppStorage("LanStash_DownloadChunkSize") private var chunkSizeSetting = 8
-    @AppStorage("LanStash_Module_FileStation") private var isFileModuleEnabled = true
-    @AppStorage("LanStash_Module_Photos") private var isPhotosModuleEnabled = true
-    @AppStorage("LanStash_Module_Chat") private var isChatModuleEnabled = true
     @State private var storage = AppStorageInspector.snapshot()
     @State private var confirmsCacheCleanup = false
     @State private var showsSelectiveCleanupSheet = false
@@ -3745,7 +3768,7 @@ private struct SettingsView: View {
                     iconColor: .blue
                 ) {
                     VStack(alignment: .leading, spacing: 14) {
-                        Toggle(isOn: $isFileModuleEnabled) {
+                        Toggle(isOn: $model.isFileModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("文件管理")
                                     .font(.body.weight(.medium))
@@ -3758,7 +3781,7 @@ private struct SettingsView: View {
                         
                         Divider().opacity(0.3)
                         
-                        Toggle(isOn: $isPhotosModuleEnabled) {
+                        Toggle(isOn: $model.isPhotosModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 6) {
                                     Text("照片管理")
@@ -3773,7 +3796,7 @@ private struct SettingsView: View {
 
                         Divider().opacity(0.3)
 
-                        Toggle(isOn: $isChatModuleEnabled) {
+                        Toggle(isOn: $model.isChatModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("消息")
                                     .font(.body.weight(.medium))

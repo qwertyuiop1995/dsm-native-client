@@ -13,6 +13,7 @@
     "senderDisplayName": { "type": ["string", "null"] },
     "isFromCurrentUser": { "type": ["boolean", "null"] },
     "sentAt": { "type": "string", "format": "date-time" },
+    "pinnedAt": { "type": ["string", "null"], "format": "date-time" },
     "text": { "type": ["string", "null"] },
     "attachments": {
       "type": "array",

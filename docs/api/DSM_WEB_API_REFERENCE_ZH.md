@@ -1,6 +1,6 @@
 # Synology DSM Web API 原生应用开发参考
 
-> 文档版本：1.1.0
+> 文档版本：1.1.1
 > 整理日期：2026-07-23
 > 项目源码基线：`apaipai/dsm_helper` 的 `dev` 分支提交 `8c104e9a783a1acaf366a250e5fcd1d623f14eb2`
 > 该提交日期：2024-06-25；本文不会把更晚的 DSM/套件行为推断为已经验证
@@ -30,9 +30,9 @@
 - 项目集中式接口实现：[`lib/utils/api.dart`](https://gitee.com/apaipai/dsm_helper/blob/dev/lib/utils/api.dart)
 - 项目模型与分模块接口：[`lib/models/Syno`](https://gitee.com/apaipai/dsm_helper/tree/dev/lib/models/Syno)
 
-### 1.2 尚未完成的动态验证
+### 1.2 动态验证范围
 
-本文完成了官方资料与静态源码对照，但没有连接具体 NAS 对所有内部接口逐项执行。正式开发时应补充以下验证矩阵：
+本文已对当前 NAS 设置只读模块执行脱敏的实机响应结构核对，但没有对所有内部接口、权限组合和 DSM 版本逐项执行。正式发布前仍应补充以下验证矩阵：
 
 - DSM 6 与 DSM 7 的具体版本及 build number。
 - 安装的 File Station、Download Station、Container Manager、Synology Photos、VMM 版本。
@@ -44,7 +44,7 @@
 2026-07-23 在一台已登录的测试 NAS 上完成了只读核对。为避免泄漏真实环境，本文只记录版本和能力结论：
 
 - DSM `7.2.1-69057 Update 12`；Virtual Machine Manager `2.6.5-12202`；Container Manager `24.0.2-1535`；Chat Server `2.4.1-22111`。
-- 使用无凭据的 `SYNO.API.Info query=all` 确认 API 名称、路径、版本范围与请求格式；使用已登录网页只核对菜单、字段和官方前端静态契约。
+- 使用无凭据的 `SYNO.API.Info query=all` 确认 API 名称、路径、版本范围与请求格式；通过已登录网页会话只读调用确认了系统利用率、存储、套件、计划任务、账号与群组、系统日志和当前连接的实际响应结构。
 - 未导出或保存 Cookie、SID、SynoToken、DID、浏览器存储、真实主机地址、账号、消息、虚拟机名称、容器名称或文件路径；仓库只保留脱敏后的接口契约。
 - 未执行删除、断开连接、网络修改、虚拟机电源控制、容器控制、消息发送等写操作。
 
@@ -646,7 +646,7 @@ force_complete=false
 | `SYNO.Core.System.Utilization` | `get` | `resource`, `type`；CPU、内存、网络等 | 低 |
 | `SYNO.Core.System.Process` | `list` | 进程列表 | 中 |
 | `SYNO.Core.System.ProcessGroup` | `list`, `service_info` | 服务进程组 | 中 |
-| `SYNO.Core.CurrentConnection` | `list_by_user`, `download`, `kick_connection` | 当前连接、导出与踢出连接 | 高 |
+| `SYNO.Core.CurrentConnection` | `list`, `download`, `kick_connection` | `list` 使用 `start`、`limit`、`sort_by` 和 `sort_direction` 读取当前连接；导出与踢出连接未接入 | 高 |
 | `SYNO.Core.FileHandle` | `kickable_list`, `export`, `delete_db` | 打开的文件、导出与强制断开 | 高 |
 | `SYNO.Core.Service` | `get` | 服务状态 | 低 |
 | `SYNO.Core.Service.PortInfo` | `load` | 服务端口 | 低 |
@@ -662,6 +662,15 @@ force_complete=false
 | `SYNO.Core.SecurityScan.Status` | `rule_get`, `system_get` | 安全扫描状态 | 低 |
 
 连接、进程、文件句柄和日志可能泄漏用户名、IP、共享路径、文件名与服务信息。客户端只应按需展示，默认禁止遥测上报。
+
+当前 macOS 的“NAS 设置”统一接入以下已核对的只读路径；原“服务与监控”入口已经合并，不再单独运行第二套性能采样：
+
+- `System.info` v3：型号、DSM 版本、运行时间、处理器、内存容量和系统温度。
+- `System.Utilization.get` v1：固定发送 `resource=all`、`type=current`；CPU 使用率来自 `user_load + system_load + other_load`，内存来自 `real_usage`，网络使用 `network` 数组中 `device=total` 的 `rx/tx`，磁盘与存储空间速率读取 `disk.total` 和 `space.total`。
+- `CurrentConnection.list` v1：分页读取连接账号、来源、位置、协议、时间和当前连接标记。
+- `SyslogClient.Log.list` v1：分页读取系统日志及信息、警告、错误计数；Log Center 没有记录时不把空结果误判为加载失败。
+
+性能页每 2 秒读取一次当前采样，只在内存中保存最近 120 个点并绘制处理器、内存、网络与存储趋势。用户可暂停更新；离开页面、关闭模块或断开 NAS 后停止读取。刷新期间保留上一次成功结果，不提前显示空状态。原始响应、连接地址和日志正文不写入本地持久化存储。
 
 ### 8.4 存储、硬盘与硬件控制 - 内部
 
@@ -685,6 +694,8 @@ force_complete=false
 
 硬件操作必须使用精确的设备标识并在提交前显示摘要。不要根据数组索引选择硬盘或外接设备。
 
+当前 macOS 直接从 `Storage.load_info` v1 的 `disks`、`storagePools` 和 `volumes` 读取硬盘、S.M.A.R.T. 摘要、温度、存储池、RAID、文件系统与容量。当前 DSM 的 `Smart.get_health_info` 缺少硬盘参数时返回 `114`，`Storage.Volume.list` 返回 `101`，因此客户端不会猜测参数或用失败接口覆盖 `load_info` 已返回的数据。启动 S.M.A.R.T. 测试、修复、擦除和存储配置修改均未接入。
+
 ### 8.5 终端、套件与计划任务 - 内部
 
 | API | 方法 | 主要参数/用途 | 风险 |
@@ -703,6 +714,8 @@ force_complete=false
 
 套件安装 URL、计划任务脚本和任务结果都可能包含秘密。源码中存在直接安装/执行能力，不应在普通功能页静默触发。
 
+当前 macOS 使用 `Package.list` v2 并请求 `status`、`description`、`install_type` 附加字段，展示真实套件名称、版本、状态与说明；使用 `TaskScheduler.list` v3 的 `start/limit` 分页字段展示名称、所有者、类型、启用状态和下次执行时间。当前 DSM 声明任务 API 最高 v4，但 `list` v4 返回 `103`，因此客户端协商到已验证的 v3。启动、停止、安装、卸载、运行任务、启停任务和删除任务均未接入。
+
 ### 8.6 用户、群组、共享与配额 - 内部
 
 | API | 观察到的方法/用途 | 风险 |
@@ -718,6 +731,8 @@ force_complete=false
 | `SYNO.Core.OTP`, `SYNO.Core.OTP.Admin` | OTP 与管理员设置 | 高 |
 | `SYNO.Core.Share` | `list`, `get`, `add`, `set`, `delete`, `get_all_move_task`, `move_status` | 高 |
 | `SYNO.Core.RecycleBin` | `start` | 清理回收站 | 高 |
+
+当前 macOS 使用 `User.list` 与 `Group.list` 展示当前账号有权查看的账号、群组、说明、邮件地址、停用状态和数字标识，并分别保留账号与群组结果，不再共用一个可能被页面切换清空的列表。共享权限和配额接口在当前实机会受账号权限与返回内容限制，因此界面不伪造权限明细；新增、修改、删除、改密、成员调整或权限写入均未接入。
 
 这些接口涉及账号、权限与数据删除。原生客户端应要求重新确认，并只发送用户改变的字段，避免把完整对象回写导致覆盖新设置。
 

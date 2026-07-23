@@ -109,8 +109,9 @@ Chat 兼容记录必须满足：
 
 | 范围 | 当前版本 | 证据 | 本轮结论 | 未验证 |
 | --- | --- | --- | --- | --- |
-| DSM 系统/当前连接 | DSM 7.2.1-69057 Update 12 | 官方网页可见 + `SYNO.API.Info` + DSM 前端静态方法 | 确认系统摘要、资源、连接、文件句柄、网络、QuickConnect 等能力名称；未保存响应数据 | 踢出连接、导出、修改网络和 QuickConnect 设置 |
+| DSM 系统/当前连接 | DSM 7.2.1-69057 Update 12 | 官方网页可见 + `SYNO.API.Info` + 已登录会话只读响应结构核对 | 已确认 `System.info`、`System.Utilization.get(resource=all,type=current)`、`CurrentConnection.list`、`SyslogClient.Log.list` 的真实字段；macOS 已实现实时趋势、暂停、独立开关和不覆盖旧数据的刷新状态；未保存原始响应 | 普通账号权限、长时间采样和多网卡；踢出、导出和修改均未实现 |
+| DSM 存储/套件/任务/账号 | DSM 7.2.1-69057 Update 12 | `SYNO.API.Info` + 已登录会话只读响应结构核对 | 已确认 `Storage.load_info` 的硬盘/池/空间、`Package.list` v2 附加字段、`TaskScheduler.list` v3、`User.list` 与 `Group.list`；macOS 已按类型展示真实字段 | 不同 RAID/SSD/扩展柜、普通账号、空目录和大清单；所有写操作未实现 |
 | Virtual Machine Manager | 2.6.5-12202 | 官方网页可见 + `SYNO.API.Info` + VMM 前端静态方法 | 确认官方 `SYNO.Virtualization.API.*` v1 与内部 Guest/Action/Image/Host/Network/Repo 等当前版本 | 测试环境无虚拟机；创建、删除、电源、迁移、镜像等均未执行 |
 | Container Manager | 24.0.2-1535 | 官方网页可见 + `SYNO.API.Info` + 套件前端静态方法 | 确认容器、镜像、网络、项目、Registry 的当前方法；仅查看列表 | 启停、创建、删除、日志、环境变量、挂载与 Registry 凭据均未读取或执行 |
 
-这里只表示接口发现和只读界面核对，不代表岚仓已实现这些模块，也不代表写操作兼容。
+本表只确认当前记录的发现范围。合并后的 NAS 设置已形成当前 DSM build 的只读响应结构兼容结论，其他 DSM build 与权限组合仍需验证；VMM 和容器仍未实现。任何写操作都不在本表结论内。

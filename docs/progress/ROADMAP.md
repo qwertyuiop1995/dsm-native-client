@@ -123,6 +123,19 @@
 
 Chat 的阶段、接口边界、安全规则和发布门槛参见[Synology Chat 原生聊天功能开发计划](../development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)。
 
+## M12：NAS 设置
+
+状态：macOS 当前 DSM build 的只读字段与页面实现已完成，等待跨版本、权限和长时间运行验收。
+
+- “NAS 设置”是唯一入口，包含总览与性能、存储与硬盘、套件、计划任务、账号与权限、系统日志、当前连接和已安装服务。
+- 原“服务与监控”的页面、功能开关、状态模型和性能轮询已合并或移除；旧开关为开启状态时自动迁移为开启 NAS 设置。
+- 总览与运行状态使用真实 CPU、内存、网络、硬盘和存储空间采样，保留最近 120 个内存采样点并提供趋势图、手动刷新和暂停。
+- 页面分别保存成功结果和加载状态；后台更新期间继续显示旧数据，仅在首次请求完成且结果为空时显示空状态。
+- 模块按 NAS 保存一个开关；关闭后隐藏入口、停止性能与日志/连接轮询且不发起相关请求。
+- 当前只开放读取。用户、群组、套件、任务、连接和硬件的修改操作仍保持关闭。
+- Download Station、Container Manager 和 Virtual Machine Manager 继续作为后续独立模块，不并入本里程碑。
+- iPhone、iPad、Android 与 Windows 按共同只读契约规划原生页面，当前不宣告已实现。
+
 ## 已识别但未排期的能力
 
 按 DSM 套件与风险等级整理，后续逐个按能力发现 + 版本契约测试 + 功能开关方式接入：
@@ -143,13 +156,13 @@ Chat 的阶段、接口边界、安全规则和发布门槛参见[Synology Chat 
 - Container Manager / Docker：`SYNO.Docker.*` 容器、镜像、网络、项目管理
 
 ### 系统与硬件控制
-- 系统信息/利用率/进程/连接/日志：`SYNO.Core.System*`、`SYNO.Core.SyslogClient*`、`SYNO.LogCenter.History`
-- 存储/硬盘/SMART：`SYNO.Storage.*`、`SYNO.Core.Storage.*`
+- 系统信息/利用率、连接和日志第一批只读能力已进入 M12；进程、文件句柄、导出和强制断开仍未实现
+- 存储总览已进入 M12；SMART 详情、测试、修复和存储写操作仍未实现
 - 硬件控制：风扇、LED、蜂鸣器、电源计划、UPS、ZRAM
 - 网络/DDNS/代理/防火墙：`SYNO.Core.Network*`、`SYNO.Core.DDNS.*`、`SYNO.Core.Security.*`
-- 用户/群组/共享/配额：`SYNO.Core.User*`、`SYNO.Core.Group*`、`SYNO.Core.Share*`、`SYNO.Core.Quota*`
-- 套件管理：`SYNO.Core.Package.*` 安装、启停、卸载
-- 计划任务：`SYNO.Core.TaskScheduler`、`SYNO.Core.EventScheduler`
+- 用户/群组只读列表已进入 M12；共享、配额详情和所有修改操作仍未实现
+- 套件只读列表已进入 M12；安装、启停、升级和卸载仍未实现
+- 计划任务只读列表已进入 M12；运行、启停、修改、删除和结果文件仍未实现
 - 终端 SSH/Telnet：`SYNO.Core.Terminal`
 
 ### 其他套件

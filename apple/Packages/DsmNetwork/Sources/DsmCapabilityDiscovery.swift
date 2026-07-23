@@ -43,6 +43,19 @@ public enum DsmAPIName {
     public static let chatPostVote = "SYNO.Chat.Post.Vote"
     /// Synology Chat 定时消息内部接口。
     public static let chatPostSchedule = "SYNO.Chat.Post.Schedule"
+    // 以下均为 DSM 内部只读接口，仅在能力发现明确返回时使用。
+    public static let coreSystem = "SYNO.Core.System"
+    public static let coreSystemUtilization = "SYNO.Core.System.Utilization"
+    public static let storageOverview = "SYNO.Storage.CGI.Storage"
+    public static let storageSmart = "SYNO.Storage.CGI.Smart"
+    public static let storageVolume = "SYNO.Core.Storage.Volume"
+    public static let corePackage = "SYNO.Core.Package"
+    public static let coreTaskScheduler = "SYNO.Core.TaskScheduler"
+    public static let coreUser = "SYNO.Core.User"
+    public static let coreGroup = "SYNO.Core.Group"
+    public static let coreCurrentConnection = "SYNO.Core.CurrentConnection"
+    public static let coreSystemLog = "SYNO.Core.SyslogClient.Log"
+    public static let logCenterHistory = "SYNO.LogCenter.History"
 }
 
 private struct CapabilityPayload: Decodable, Sendable {
@@ -99,7 +112,19 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.chatPostFile,
         DsmAPIName.chatPostReminder,
         DsmAPIName.chatPostVote,
-        DsmAPIName.chatPostSchedule
+        DsmAPIName.chatPostSchedule,
+        DsmAPIName.coreSystem,
+        DsmAPIName.coreSystemUtilization,
+        DsmAPIName.storageOverview,
+        DsmAPIName.storageSmart,
+        DsmAPIName.storageVolume,
+        DsmAPIName.corePackage,
+        DsmAPIName.coreTaskScheduler,
+        DsmAPIName.coreUser,
+        DsmAPIName.coreGroup,
+        DsmAPIName.coreCurrentConnection,
+        DsmAPIName.coreSystemLog,
+        DsmAPIName.logCenterHistory
     ]
 
     private let client: DsmAPIClient
@@ -213,6 +238,19 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.chatPostFile: 1...2,
         DsmAPIName.chatPostReminder: 1...1,
         DsmAPIName.chatPostVote: 1...1,
-        DsmAPIName.chatPostSchedule: 1...1
+        DsmAPIName.chatPostSchedule: 1...1,
+        // 内部接口版本以运行时能力发现为准；这里仅限制已知的兼容区间。
+        DsmAPIName.coreSystem: 1...3,
+        DsmAPIName.coreSystemUtilization: 1...1,
+        DsmAPIName.storageOverview: 1...1,
+        DsmAPIName.storageSmart: 1...1,
+        DsmAPIName.storageVolume: 1...1,
+        DsmAPIName.corePackage: 1...2,
+        DsmAPIName.coreTaskScheduler: 1...3,
+        DsmAPIName.coreUser: 1...1,
+        DsmAPIName.coreGroup: 1...1,
+        DsmAPIName.coreCurrentConnection: 1...1,
+        DsmAPIName.coreSystemLog: 1...1,
+        DsmAPIName.logCenterHistory: 1...1
     ]
 }

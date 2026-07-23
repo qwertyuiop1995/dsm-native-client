@@ -33,6 +33,7 @@ enum WorkspaceSection: Hashable, Identifiable {
     case sharedLinks
     case transfers
     case chat
+    case nasSettings
     case settings
 
     var id: String {
@@ -46,6 +47,7 @@ enum WorkspaceSection: Hashable, Identifiable {
         case .sharedLinks: "shared-links"
         case .transfers: "transfers"
         case .chat: "chat"
+        case .nasSettings: "nas-settings"
         case .settings: "settings"
         }
     }
@@ -54,7 +56,7 @@ enum WorkspaceSection: Hashable, Identifiable {
         switch self {
         case .files, .recycle, .favorites, .recent, .remoteLocations, .sharedLinks, .transfers:
             true
-        case .photos, .chat, .settings:
+        case .photos, .chat, .nasSettings, .settings:
             false
         }
     }
@@ -323,6 +325,7 @@ final class WorkspaceModel {
     let allowsRemoteMountManagement: Bool
     let photoLibrary: PhotoLibraryModel
     let chat: ChatWorkspaceModel
+    let nasSettings: NasSettingsModel
 
     var shares: [FileItem] = []
     var recycleRoots: [FileItem] = []
@@ -399,7 +402,16 @@ final class WorkspaceModel {
             }
         }
     }
-
+    var isNasSettingsModuleEnabled: Bool = false {
+        didSet {
+            Self.saveModuleEnabled(isNasSettingsModuleEnabled, for: profile.id, module: "NASSettings")
+            guard oldValue != isNasSettingsModuleEnabled else { return }
+            nasSettings.setModuleEnabled(isNasSettingsModuleEnabled)
+            if !isNasSettingsModuleEnabled, section == .nasSettings {
+                section = .settings
+            }
+        }
+    }
     private var dragMoveUndo: DragMoveUndo?
     @ObservationIgnored private var toastDismissTask: Task<Void, Never>?
 
@@ -444,7 +456,12 @@ final class WorkspaceModel {
         "LanStash_Module_\(module)_\(profileID.uuidString)"
     }
 
-    private static func loadModuleEnabled(for profileID: UUID, module: String, legacyKey: String) -> Bool {
+    private static func loadModuleEnabled(
+        for profileID: UUID,
+        module: String,
+        legacyKey: String,
+        defaultValue: Bool = true
+    ) -> Bool {
         let key = moduleEnabledKey(for: profileID, module: module)
         if UserDefaults.standard.object(forKey: key) != nil {
             return UserDefaults.standard.bool(forKey: key)
@@ -452,7 +469,7 @@ final class WorkspaceModel {
         if UserDefaults.standard.object(forKey: legacyKey) != nil {
             return UserDefaults.standard.bool(forKey: legacyKey)
         }
-        return true
+        return defaultValue
     }
 
     private static func saveModuleEnabled(_ value: Bool, for profileID: UUID, module: String) {
@@ -463,6 +480,7 @@ final class WorkspaceModel {
         profile: NasProfile,
         repository: any FileRepository,
         chatRepository: any ChatRepository = UnverifiedDsmChatRepository(),
+        nasSettingsRepository: any NasSettingsRepository = UnavailableNasAdministrationRepository(),
         transferNotifier: any TransferNotifying = TransferNotifierFactory.makeDefault()
     ) {
         self.profile = profile
@@ -480,9 +498,26 @@ final class WorkspaceModel {
             currentAccountName: profile.usernameHint,
             profileID: profile.id
         )
+        self.nasSettings = NasSettingsModel(repository: nasSettingsRepository)
         self.isFileModuleEnabled = Self.loadModuleEnabled(for: profile.id, module: "FileStation", legacyKey: "LanStash_Module_FileStation")
         self.isPhotosModuleEnabled = Self.loadModuleEnabled(for: profile.id, module: "Photos", legacyKey: "LanStash_Module_Photos")
         self.isChatModuleEnabled = Self.loadModuleEnabled(for: profile.id, module: "Chat", legacyKey: "LanStash_Module_Chat")
+        self.isNasSettingsModuleEnabled = Self.loadModuleEnabled(
+            for: profile.id,
+            module: "NASSettings",
+            legacyKey: "LanStash_Module_NASSettings",
+            defaultValue: false
+        ) || Self.loadModuleEnabled(
+            for: profile.id,
+            module: "ServicesMonitor",
+            legacyKey: "LanStash_Module_ServicesMonitor",
+            defaultValue: false
+        )
+        Self.saveModuleEnabled(
+            self.isNasSettingsModuleEnabled,
+            for: profile.id,
+            module: "NASSettings"
+        )
         if let data = UserDefaults.standard.data(forKey: "LanStash_RecentLocations_\(profile.id.uuidString)"),
            let saved = try? JSONDecoder().decode([FavoriteLocation].self, from: data) {
             recentLocations = saved
@@ -511,6 +546,7 @@ final class WorkspaceModel {
         }
         photoLibrary.setModuleEnabled(isPhotosModuleEnabled)
         chat.setModuleEnabled(isChatModuleEnabled)
+        nasSettings.setModuleEnabled(isNasSettingsModuleEnabled)
     }
 
     private func saveTransfers() {
@@ -629,6 +665,11 @@ final class WorkspaceModel {
             await chat.loadIfNeeded()
             return
         }
+        if isNasSettingsModuleEnabled {
+            section = .nasSettings
+            await nasSettings.activate()
+            return
+        }
         section = .settings
     }
 
@@ -685,6 +726,9 @@ final class WorkspaceModel {
         case .chat:
             guard isChatModuleEnabled else { return }
             await chat.loadIfNeeded()
+        case .nasSettings:
+            guard isNasSettingsModuleEnabled else { return }
+            await nasSettings.activate()
         case .favorites, .recent, .remoteLocations, .sharedLinks, .transfers:
             guard isFileModuleEnabled else { return }
         case .settings:

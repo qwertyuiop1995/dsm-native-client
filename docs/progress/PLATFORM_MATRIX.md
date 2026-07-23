@@ -45,6 +45,7 @@
 | QuickConnect ID 直连解析 | 已实现并完成公开入口实机探测 | 复用 Apple 共享实现 | 复用 Apple 共享实现 | 计划 | 计划 |
 | Cookie + `_sid` 会话兼容 | 已实现，待完整登录复测 | 复用 Apple 共享实现 | 复用 Apple 共享实现 | 计划 | 计划 |
 | QuickConnect 中继隧道 | 已实现并完成能力发现实机验证 | 复用 Apple 共享实现 | 复用 Apple 共享实现 | 计划 | 计划 |
+| NAS 设置 | 已统一实现系统/性能趋势、存储/硬盘、套件、计划任务、账号/群组、系统日志、当前连接和已安装服务；只保留一个入口、开关和采样任务 | 复用 Apple 契约，UI 计划 | 复用 Apple 契约，UI 计划 | 计划 | 计划 |
 
 功能状态以 [STATUS.md](STATUS.md) 为准，本文件记录平台能力差异和技术选择。
 
@@ -76,8 +77,9 @@
 | Download Station | 未开始 | 计划 | 计划 | 计划 | 计划 |
 | Virtual Machine Manager | 未开始 | 计划 | 计划 | 计划 | 计划 |
 | Container Manager / Docker | 未开始 | 计划 | 计划 | 计划 | 计划 |
-| 系统与硬件监控/控制 | 未开始 | 计划 | 计划 | 计划 | 计划 |
-| 用户/群组/共享/配额管理 | 未开始 | 计划 | 计划 | 计划 | 计划 |
+| 系统与硬件监控/控制 | 系统概况、利用率与存储总览只读页面已实现，控制功能未开始 | 复用 Apple 只读契约，UI 待实现 | 复用 Apple 只读契约，UI 待实现 | 计划 | 计划 |
+| 用户/群组/共享/配额管理 | 用户与群组只读列表已实现；共享、配额和修改未开始 | 复用 Apple 只读契约，UI 待实现 | 复用 Apple 只读契约，UI 待实现 | 计划 | 计划 |
+| 套件、计划任务、日志与连接 | 只读页面已实现，按 NAS 独立开关；写操作未开始 | 复用 Apple 只读契约，UI 待实现 | 复用 Apple 只读契约，UI 待实现 | 计划 | 计划 |
 | Audio Station / Video Station / Note Station | 未开始 | 计划 | 计划 | 计划 | 计划 |
 | Synology Drive / Calendar / Contacts | 未开始 | 计划 | 计划 | 计划 | 计划 |
 | Surveillance Station | 未开始 | 计划 | 计划 | 计划 | 计划 |

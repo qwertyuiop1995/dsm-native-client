@@ -432,6 +432,8 @@ struct WorkspaceView: View {
             return "传输中心"
         case .chat:
             return "消息"
+        case .nasSettings:
+            return "NAS 设置"
         case .settings:
             return "设置"
         default:
@@ -500,6 +502,8 @@ struct WorkspaceView: View {
             TransferCenterView(model: model, connectedWorkspaces: connectedWorkspaces)
         case .chat:
             ChatWorkspaceView(model: model.chat)
+        case .nasSettings:
+            NasSettingsView(model: model.nasSettings)
         case .settings:
             SettingsView(model: model, onRenameNAS: onRenameNAS)
         default:
@@ -924,6 +928,12 @@ private struct SidebarView: View {
             }
 
             Section {
+                if model.isNasSettingsModuleEnabled {
+                    NavigationLink(value: WorkspaceSection.nasSettings) {
+                        Label("NAS 设置", systemImage: "server.rack")
+                            .foregroundStyle(.teal)
+                    }
+                }
                 if model.isFileModuleEnabled {
                     NavigationLink(value: WorkspaceSection.transfers) {
                         Label("传输中心", systemImage: "arrow.up.arrow.down.circle")
@@ -3801,6 +3811,19 @@ private struct SettingsView: View {
                                 Text("消息")
                                     .font(.body.weight(.medium))
                                 Text("在侧边栏显示聊天入口。消息服务接入完成后，可用于一对一聊天、群聊和发送附件。")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+
+                        Divider().opacity(0.3)
+
+                        Toggle(isOn: $model.isNasSettingsModuleEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("NAS 设置")
+                                    .font(.body.weight(.medium))
+                                Text("查看系统性能、存储与硬盘、套件、计划任务、账号、系统日志、当前连接和已安装服务。")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

@@ -41,7 +41,7 @@ private struct DsmVoidEnvelope: Decodable, Sendable {
 }
 
 public struct DsmAPIClient: Sendable {
-    private let baseURL: URL
+    public let baseURL: URL
     private let transport: any DsmHTTPTransport
     private let maximumJSONResponseBytes: Int
 

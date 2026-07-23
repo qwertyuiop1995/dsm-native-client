@@ -56,7 +56,9 @@ struct NasSettingsView: View {
                     connections: model.connections,
                     isPaused: $model.isLiveUpdatesPaused,
                     refresh: { await model.activate(.overview, force: true) },
-                    onNavigateToConnections: { model.selectedPage = .connections }
+                    onNavigateToConnections: { model.selectedPage = .connections },
+                    onPerformPowerAction: { action in try await model.performPowerAction(action) },
+                    onCheckSystemUpdate: { try await model.checkSystemUpdate() }
                 )
             }
         case .storage:
@@ -81,7 +83,11 @@ struct NasSettingsView: View {
                 emptyDescription: "这台 NAS 没有返回可查看的套件。",
                 retry: { await model.activate(.packages, force: true) }
             ) {
-                PackageList(packages: model.packages, title: "已安装套件")
+                PackageList(
+                    packages: model.packages,
+                    title: "已安装套件",
+                    onControlPackage: { id, action in try await model.controlPackage(id: id, action: action) }
+                )
             }
         case .tasks:
             AdministrationPageContainer(
@@ -244,282 +250,7 @@ private struct AdministrationPageContainer<Content: View>: View {
     }
 }
 
-private struct PerformanceDashboard: View {
-    let overview: NasSystemOverview?
-    let history: [NasPerformanceSnapshot]
-    let connections: NasConnectionPage?
-    @Binding var isPaused: Bool
-    let refresh: () async -> Void
-    let onNavigateToConnections: () -> Void
 
-    private var latest: NasPerformanceSnapshot? { history.last }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                dashboardHeader
-
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
-                    MetricCard(title: "处理器", value: percent(latest?.cpuUsage), icon: "cpu", progress: latest?.cpuUsage, tint: .blue)
-                    MetricCard(title: "内存", value: percent(latest?.memoryUsage), icon: "memorychip", progress: latest?.memoryUsage, tint: .purple)
-                    MetricCard(title: "网络接收", value: speed(latest?.networkReceivedBytesPerSecond), icon: "arrow.down", tint: .green)
-                    MetricCard(title: "网络发送", value: speed(latest?.networkSentBytesPerSecond), icon: "arrow.up", tint: .teal)
-                    MetricCard(title: "硬盘读取", value: speed(latest?.diskReadBytesPerSecond), icon: "internaldrive", tint: .orange)
-                    MetricCard(title: "硬盘写入", value: speed(latest?.diskWriteBytesPerSecond), icon: "internaldrive.fill", tint: .indigo)
-                }
-
-                if history.isEmpty {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text("正在读取实时性能数据…")
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 36)
-                } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 14)], spacing: 14) {
-                        PerformanceChartCard(
-                            title: "资源使用率",
-                            subtitle: "处理器与内存",
-                            unit: "%",
-                            chart: percentageChart
-                        )
-                        PerformanceChartCard(
-                            title: "网络速率",
-                            subtitle: "接收与发送",
-                            unit: "每秒",
-                            chart: networkChart
-                        )
-                        PerformanceChartCard(
-                            title: "存储速率",
-                            subtitle: "读取与写入",
-                            unit: "每秒",
-                            chart: storageChart
-                        )
-                        ActiveConnectionsCard(
-                            connections: connections,
-                            onNavigate: onNavigateToConnections
-                        )
-                    }
-                }
-            }
-            .padding(20)
-        }
-    }
-
-    private var dashboardHeader: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(overview?.serverName ?? "NAS")
-                            .font(.title.weight(.bold))
-                            .textSelection(.enabled)
-
-                        if let model = overview?.model {
-                            Text(model)
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.accentColor.opacity(0.12), in: Capsule())
-                                .foregroundStyle(Color.accentColor)
-                        }
-
-                        if let version = overview?.version {
-                            Text(version)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                Spacer()
-
-                HStack(spacing: 8) {
-                    Button {
-                        isPaused.toggle()
-                    } label: {
-                        Label(isPaused ? "继续更新" : "暂停更新", systemImage: isPaused ? "play.fill" : "pause.fill")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help(isPaused ? "继续读取实时数据" : "暂时停止读取实时数据")
-
-                    Button {
-                        Task { await refresh() }
-                    } label: {
-                        Label("刷新", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                }
-            }
-
-            if let overview {
-                HStack(spacing: 16) {
-                    SystemInfoBadge(icon: "cpu", label: "处理器", value: [overview.cpuModel, overview.cpuCoreCount.map { "\($0)核" }].compactMap { $0 }.joined(separator: " · "))
-                    if let memory = overview.memoryBytes {
-                        SystemInfoBadge(icon: "memorychip", label: "内存", value: ByteCountFormatter.string(fromByteCount: memory, countStyle: .memory))
-                    }
-                    if let temperature = overview.temperatureCelsius {
-                        SystemInfoBadge(icon: "thermometer.medium", label: "温度", value: "\(temperature.formatted(.number.precision(.fractionLength(0))))℃")
-                    }
-                    if let uptime = overview.uptimeSeconds {
-                        SystemInfoBadge(icon: "clock", label: "已运行", value: uptimeDescription(uptime))
-                    }
-                }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 12)
-                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-        }
-    }
-
-    private var percentageChart: some View {
-        Chart(history) { point in
-            AreaMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("使用率", point.cpuUsage),
-                series: .value("项目", "处理器")
-            )
-            .foregroundStyle(by: .value("项目", "处理器"))
-            .opacity(0.08)
-            .interpolationMethod(.catmullRom)
-
-            LineMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("使用率", point.cpuUsage),
-                series: .value("项目", "处理器")
-            )
-            .foregroundStyle(by: .value("项目", "处理器"))
-            .interpolationMethod(.catmullRom)
-
-            AreaMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("使用率", point.memoryUsage),
-                series: .value("项目", "内存")
-            )
-            .foregroundStyle(by: .value("项目", "内存"))
-            .opacity(0.08)
-            .interpolationMethod(.catmullRom)
-
-            LineMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("使用率", point.memoryUsage),
-                series: .value("项目", "内存")
-            )
-            .foregroundStyle(by: .value("项目", "内存"))
-            .interpolationMethod(.catmullRom)
-        }
-        .chartYScale(domain: 0...100)
-        .chartYAxis {
-            AxisMarks(position: .leading) {
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4, 4]))
-                AxisValueLabel()
-            }
-        }
-        .chartXAxis {
-            AxisMarks {
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4, 4]))
-                AxisValueLabel(format: .dateTime.hour().minute().second())
-            }
-        }
-        .accessibilityLabel("处理器与内存使用率趋势")
-    }
-
-    private var networkChart: some View {
-        Chart(history) { point in
-            AreaMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("字节每秒", point.networkReceivedBytesPerSecond),
-                series: .value("方向", "接收")
-            )
-            .foregroundStyle(by: .value("方向", "接收"))
-            .opacity(0.08)
-
-            LineMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("字节每秒", point.networkReceivedBytesPerSecond),
-                series: .value("方向", "接收")
-            )
-            .foregroundStyle(by: .value("方向", "接收"))
-
-            AreaMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("字节每秒", point.networkSentBytesPerSecond),
-                series: .value("方向", "发送")
-            )
-            .foregroundStyle(by: .value("方向", "发送"))
-            .opacity(0.08)
-
-            LineMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("字节每秒", point.networkSentBytesPerSecond),
-                series: .value("方向", "发送")
-            )
-            .foregroundStyle(by: .value("方向", "发送"))
-        }
-        .chartYAxis {
-            AxisMarks(position: .leading) {
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4, 4]))
-                AxisValueLabel(format: .byteCount(style: .file))
-            }
-        }
-        .chartXAxis {
-            AxisMarks {
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4, 4]))
-                AxisValueLabel(format: .dateTime.hour().minute().second())
-            }
-        }
-        .accessibilityLabel("网络接收与发送速率趋势")
-    }
-
-    private var storageChart: some View {
-        Chart(history) { point in
-            AreaMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("字节每秒", point.diskReadBytesPerSecond),
-                series: .value("操作", "读取")
-            )
-            .foregroundStyle(by: .value("操作", "读取"))
-            .opacity(0.08)
-
-            LineMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("字节每秒", point.diskReadBytesPerSecond),
-                series: .value("操作", "读取")
-            )
-            .foregroundStyle(by: .value("操作", "读取"))
-
-            AreaMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("字节每秒", point.diskWriteBytesPerSecond),
-                series: .value("操作", "写入")
-            )
-            .foregroundStyle(by: .value("操作", "写入"))
-            .opacity(0.08)
-
-            LineMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("字节每秒", point.diskWriteBytesPerSecond),
-                series: .value("操作", "写入")
-            )
-            .foregroundStyle(by: .value("操作", "写入"))
-        }
-        .chartYAxis {
-            AxisMarks(position: .leading) {
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4, 4]))
-                AxisValueLabel(format: .byteCount(style: .file))
-            }
-        }
-        .chartXAxis {
-            AxisMarks {
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4, 4]))
-                AxisValueLabel(format: .dateTime.hour().minute().second())
-            }
-        }
-        .accessibilityLabel("硬盘读取与写入速率趋势")
-    }
-}
 
 private struct SystemInfoBadge: View {
     let icon: String
@@ -680,7 +411,6 @@ private struct StorageView: View {
         }
     }
 }
-
 private struct CapacityCard: View {
     let title: String
     let subtitle: String
@@ -718,10 +448,325 @@ private struct CapacityCard: View {
     }
 }
 
+private struct PerformanceDashboard: View {
+    let overview: NasSystemOverview?
+    let history: [NasPerformanceSnapshot]
+    let connections: NasConnectionPage?
+    @Binding var isPaused: Bool
+    let refresh: () async -> Void
+    let onNavigateToConnections: () -> Void
+    let onPerformPowerAction: ((NasPowerAction) async throws -> Void)?
+    let onCheckSystemUpdate: (() async throws -> NasSystemUpdateInfo)?
+
+    @State private var showShutdownConfirm = false
+    @State private var showRebootConfirm = false
+    @State private var showUpdateAlert = false
+    @State private var isCheckingUpdate = false
+    @State private var updateInfo: NasSystemUpdateInfo? = nil
+    @State private var actionMessage: String? = nil
+
+    private var latest: NasPerformanceSnapshot? { history.last }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                dashboardHeader
+
+                if let actionMessage {
+                    HStack {
+                        Image(systemName: "info.circle.fill").foregroundStyle(.blue)
+                        Text(actionMessage).font(.caption).foregroundStyle(.primary)
+                        Spacer()
+                        Button("关闭") { self.actionMessage = nil }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                    }
+                    .padding(10)
+                    .background(Color.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                    MetricCard(title: "处理器", value: percent(latest?.cpuUsage), icon: "cpu", progress: latest?.cpuUsage, tint: .blue)
+                    MetricCard(title: "内存", value: percent(latest?.memoryUsage), icon: "memorychip", progress: latest?.memoryUsage, tint: .purple)
+                    MetricCard(title: "网络接收", value: speed(latest?.networkReceivedBytesPerSecond), icon: "arrow.down", tint: .green)
+                    MetricCard(title: "网络发送", value: speed(latest?.networkSentBytesPerSecond), icon: "arrow.up", tint: .teal)
+                    MetricCard(title: "硬盘读取", value: speed(latest?.diskReadBytesPerSecond), icon: "internaldrive", tint: .orange)
+                    MetricCard(title: "硬盘写入", value: speed(latest?.diskWriteBytesPerSecond), icon: "internaldrive.fill", tint: .indigo)
+                }
+
+                if history.isEmpty {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("正在读取实时性能数据…")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 36)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 14)], spacing: 14) {
+                        PerformanceChartCard(
+                            title: "资源使用率",
+                            subtitle: "处理器与内存",
+                            unit: "%",
+                            chart: percentageChart
+                        )
+                        PerformanceChartCard(
+                            title: "网络速率",
+                            subtitle: "接收与发送",
+                            unit: "每秒",
+                            chart: networkChart
+                        )
+                        PerformanceChartCard(
+                            title: "存储速率",
+                            subtitle: "读取与写入",
+                            unit: "每秒",
+                            chart: storageChart
+                        )
+                        ActiveConnectionsCard(
+                            connections: connections,
+                            onNavigate: onNavigateToConnections
+                        )
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .confirmationDialog("确定要关闭这台 NAS 吗？", isPresented: $showShutdownConfirm, titleVisibility: .visible) {
+            Button("确认关机", role: .destructive) {
+                Task {
+                    do {
+                        try await onPerformPowerAction?(.shutdown)
+                        actionMessage = "关机指令已成功发送给 NAS。"
+                    } catch {
+                        actionMessage = "关机指令发送失败: \(error.localizedDescription)"
+                    }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("关机后将中断所有在线服务与文件共享，需人工按下物理按键方可再次开机。")
+        }
+        .confirmationDialog("确定要重启这台 NAS 吗？", isPresented: $showRebootConfirm, titleVisibility: .visible) {
+            Button("确认重启", role: .destructive) {
+                Task {
+                    do {
+                        try await onPerformPowerAction?(.reboot)
+                        actionMessage = "重启指令已发送，网络连接与服务将短暂中断。"
+                    } catch {
+                        actionMessage = "重启指令发送失败: \(error.localizedDescription)"
+                    }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("重启需要数分钟时间，期间网络连接和服务将暂时不可用。")
+        }
+        .alert("系统更新检测", isPresented: $showUpdateAlert) {
+            Button("确定", role: .cancel) {}
+        } message: {
+            if let updateInfo {
+                Text("当前系统版本：\(updateInfo.currentVersion ?? overview?.version ?? "未知")\n\(updateInfo.releaseNotes ?? "当前系统已是最新版本")")
+            } else {
+                Text("已与 NAS 通信，当前系统运行正常且是最新版本。")
+            }
+        }
+    }
+
+    private var dashboardHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(overview?.serverName ?? "NAS")
+                            .font(.title.weight(.bold))
+                            .textSelection(.enabled)
+
+                        if let model = overview?.model {
+                            Text(model)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.accentColor.opacity(0.12), in: Capsule())
+                                .foregroundStyle(Color.accentColor)
+                        }
+
+                        if let version = overview?.version {
+                            Text(version)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Spacer()
+
+                HStack(spacing: 8) {
+                    Button {
+                        Task {
+                            isCheckingUpdate = true
+                            updateInfo = try? await onCheckSystemUpdate?()
+                            isCheckingUpdate = false
+                            showUpdateAlert = true
+                        }
+                    } label: {
+                        if isCheckingUpdate {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("系统更新", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Menu {
+                        Button(role: .destructive) {
+                            showRebootConfirm = true
+                        } label: {
+                            Label("重启 NAS", systemImage: "arrow.clockwise.circle")
+                        }
+
+                        Button(role: .destructive) {
+                            showShutdownConfirm = true
+                        } label: {
+                            Label("关机", systemImage: "power")
+                        }
+                    } label: {
+                        Label("电源操作", systemImage: "power")
+                    }
+                    .menuStyle(.borderedButton)
+                    .controlSize(.small)
+
+                    Button {
+                        isPaused.toggle()
+                    } label: {
+                        Label(isPaused ? "继续更新" : "暂停更新", systemImage: isPaused ? "play.fill" : "pause.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help(isPaused ? "继续读取实时数据" : "暂时停止读取实时数据")
+
+                    Button {
+                        Task { await refresh() }
+                    } label: {
+                        Label("刷新", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+            }
+
+            if let overview {
+                HStack(spacing: 16) {
+                    SystemInfoBadge(icon: "cpu", label: "处理器", value: [overview.cpuModel, overview.cpuCoreCount.map { "\($0)核" }].compactMap { $0 }.joined(separator: " · "))
+                    if let memory = overview.memoryBytes {
+                        SystemInfoBadge(icon: "memorychip", label: "内存", value: ByteCountFormatter.string(fromByteCount: memory, countStyle: .memory))
+                    }
+                    if let temperature = overview.temperatureCelsius {
+                        SystemInfoBadge(icon: "thermometer.medium", label: "温度", value: "\(temperature.formatted(.number.precision(.fractionLength(0))))℃")
+                    }
+                    if let uptime = overview.uptimeSeconds {
+                        SystemInfoBadge(icon: "clock", label: "已运行", value: uptimeDescription(uptime))
+                    }
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+        }
+    }
+
+    private var percentageChart: some View {
+        Chart(history) { point in
+            AreaMark(
+                x: .value("时间", point.recordedAt),
+                y: .value("使用率", point.cpuUsage)
+            )
+            .foregroundStyle(by: .value("指标", "处理器"))
+
+            AreaMark(
+                x: .value("时间", point.recordedAt),
+                y: .value("使用率", point.memoryUsage)
+            )
+            .foregroundStyle(by: .value("指标", "内存"))
+        }
+        .chartYScale(domain: 0...100)
+    }
+
+    private var networkChart: some View {
+        Chart(history) { point in
+            LineMark(
+                x: .value("时间", point.recordedAt),
+                y: .value("速率", Double(point.networkReceivedBytesPerSecond) / 1_024)
+            )
+            .foregroundStyle(by: .value("方向", "接收"))
+
+            LineMark(
+                x: .value("时间", point.recordedAt),
+                y: .value("速率", Double(point.networkSentBytesPerSecond) / 1_024)
+            )
+            .foregroundStyle(by: .value("方向", "发送"))
+        }
+    }
+
+    private var storageChart: some View {
+        Chart(history) { point in
+            LineMark(
+                x: .value("时间", point.recordedAt),
+                y: .value("速率", Double(point.diskReadBytesPerSecond) / 1_024)
+            )
+            .foregroundStyle(by: .value("操作", "读取"))
+
+            LineMark(
+                x: .value("时间", point.recordedAt),
+                y: .value("速率", Double(point.diskWriteBytesPerSecond) / 1_024)
+            )
+            .foregroundStyle(by: .value("操作", "写入"))
+        }
+    }
+}
+
 private struct PackageList: View {
     let packages: [NasPackage]
     let title: String
+    let onControlPackage: ((String, NasPackageAction) async throws -> Void)?
+
+    init(
+        packages: [NasPackage],
+        title: String,
+        onControlPackage: ((String, NasPackageAction) async throws -> Void)? = nil
+    ) {
+        self.packages = packages
+        self.title = title
+        self.onControlPackage = onControlPackage
+    }
+
+    private enum DisplayMode: String, CaseIterable, Identifiable {
+        case grid = "grid"
+        case list = "list"
+
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .grid: return "square.grid.2x2"
+            case .list: return "list.bullet"
+            }
+        }
+        var label: String {
+            switch self {
+            case .grid: return "卡片"
+            case .list: return "列表"
+            }
+        }
+    }
+
     @State private var searchText = ""
+    @State private var packageToUninstall: NasPackage? = nil
+    @State private var actionError: String? = nil
+    @AppStorage("packageDisplayMode") private var displayModeRaw: String = DisplayMode.grid.rawValue
+
+    private var displayMode: DisplayMode {
+        get { DisplayMode(rawValue: displayModeRaw) ?? .grid }
+        set { displayModeRaw = newValue.rawValue }
+    }
 
     private var filtered: [NasPackage] {
         guard !searchText.isEmpty else { return packages }
@@ -732,36 +777,361 @@ private struct PackageList: View {
         }
     }
 
+    private let columns = [
+        GridItem(.adaptive(minimum: 250, maximum: 380), spacing: 14)
+    ]
+
     var body: some View {
-        List(filtered) { package in
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: serviceIcon(package))
-                    .font(.title3)
-                    .foregroundStyle(.tint)
-                    .frame(width: 28)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(package.name).font(.body.weight(.medium))
-                    if let description = package.packageDescription, !description.isEmpty {
-                        Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        VStack(spacing: 0) {
+            if let actionError {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(actionError).font(.caption).foregroundStyle(.primary)
+                    Spacer()
+                    Button("关闭") { self.actionError = nil }
+                        .buttonStyle(.plain)
+                        .font(.caption)
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.12))
+            }
+
+            HStack {
+                Text("共 \(filtered.count) 项")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Picker("视图模式", selection: $displayModeRaw) {
+                    ForEach(DisplayMode.allCases) { mode in
+                        Label(mode.label, systemImage: mode.icon).tag(mode.rawValue)
                     }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 90)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+
+            Divider()
+
+            if filtered.isEmpty {
+                ContentUnavailableView("未找到匹配的套件", systemImage: "shippingbox", description: Text("尝试输入其他关键词搜索"))
+                    .frame(maxHeight: .infinity)
+            } else {
+                switch displayMode {
+                case .grid:
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 14) {
+                            ForEach(filtered) { package in
+                                PackageCard(
+                                    package: package,
+                                    onControl: { action in
+                                        handleAction(package: package, action: action)
+                                    }
+                                )
+                            }
+                        }
+                        .padding(16)
+                    }
+                case .list:
+                    List(filtered) { package in
+                        PackageRow(
+                            package: package,
+                            onControl: { action in
+                                handleAction(package: package, action: action)
+                            }
+                        )
+                    }
+                    .listStyle(.inset)
+                }
+            }
+        }
+        .navigationTitle(title)
+        .searchable(text: $searchText, prompt: "搜索套件名称或说明")
+        .alert("确定要卸载此套件吗？", isPresented: Binding(
+            get: { packageToUninstall != nil },
+            set: { if !$0 { packageToUninstall = nil } }
+        )) {
+            Button("确认卸载", role: .destructive) {
+                if let pkg = packageToUninstall {
+                    Task {
+                        do {
+                            try await onControlPackage?(pkg.id, .uninstall)
+                        } catch {
+                            actionError = "卸载失败: \(error.localizedDescription)"
+                        }
+                    }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            if let pkg = packageToUninstall {
+                Text("将被卸载的套件：\(pkg.name)\n卸载后相关配置和应用数据可能会被清空。")
+            }
+        }
+    }
+
+    private func handleAction(package: NasPackage, action: NasPackageAction) {
+        if action == .uninstall {
+            packageToUninstall = package
+            return
+        }
+        Task {
+            do {
+                try await onControlPackage?(package.id, action)
+            } catch {
+                actionError = "操作失败: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+private struct PackageCard: View {
+    let package: NasPackage
+    let onControl: (NasPackageAction) -> Void
+    @State private var isBusy = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                PackageIconView(package: package)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(package.name)
+                        .font(.body.weight(.semibold))
+                        .lineLimit(1)
                     Text([package.version, package.installType].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
+                Spacer(minLength: 0)
+            }
+
+            if let description = package.packageDescription, !description.isEmpty {
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .topLeading)
+            } else {
                 Spacer()
+                    .frame(height: 32)
+            }
+
+            HStack(alignment: .center) {
                 StatusPill(
-                    text: package.statusDescription ?? package.status ?? "状态未知",
+                    text: package.statusDescription ?? package.status ?? "常规",
                     isWarning: isWarning(package.status)
                 )
+
+                Spacer()
+
+                if isBusy {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    HStack(spacing: 6) {
+                        if package.canUpgrade {
+                            Button {
+                                triggerAction(.upgrade)
+                            } label: {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("更新套件")
+                        }
+
+                        if package.canStop {
+                            Button {
+                                triggerAction(.stop)
+                            } label: {
+                                Label("暂停", systemImage: "pause.fill")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        } else if package.canStart {
+                            Button {
+                                triggerAction(.start)
+                            } label: {
+                                Label("启动", systemImage: "play.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+                    }
+                }
             }
-            .padding(.vertical, 5)
-            .accessibilityElement(children: .combine)
         }
-        .navigationTitle(title)
-        .searchable(text: $searchText, prompt: "搜索名称或说明")
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .contextMenu {
+            if package.canStart {
+                Button { triggerAction(.start) } label: {
+                    Label("启动套件", systemImage: "play.fill")
+                }
+            }
+            if package.canStop {
+                Button { triggerAction(.stop) } label: {
+                    Label("暂停套件", systemImage: "pause.fill")
+                }
+            }
+            if package.canUpgrade {
+                Button { triggerAction(.upgrade) } label: {
+                    Label("更新套件", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            Divider()
+            Button(role: .destructive) { triggerAction(.uninstall) } label: {
+                Label("卸载套件…", systemImage: "trash")
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func triggerAction(_ action: NasPackageAction) {
+        if action != .uninstall {
+            isBusy = true
+        }
+        onControl(action)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            isBusy = false
+        }
     }
 }
+
+private struct PackageRow: View {
+    let package: NasPackage
+    let onControl: (NasPackageAction) -> Void
+    @State private var isBusy = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            PackageIconView(package: package, size: 34)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(package.name).font(.body.weight(.medium))
+                if let description = package.packageDescription, !description.isEmpty {
+                    Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Text([package.version, package.installType].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+
+            StatusPill(
+                text: package.statusDescription ?? package.status ?? "常规",
+                isWarning: isWarning(package.status)
+            )
+
+            if isBusy {
+                ProgressView().controlSize(.small)
+            } else {
+                HStack(spacing: 6) {
+                    if package.canUpgrade {
+                        Button {
+                            triggerAction(.upgrade)
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("更新套件")
+                    }
+
+                    if package.canStop {
+                        Button("暂停") { triggerAction(.stop) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    } else if package.canStart {
+                        Button("启动") { triggerAction(.start) }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .contextMenu {
+            if package.canStart {
+                Button { triggerAction(.start) } label: {
+                    Label("启动套件", systemImage: "play.fill")
+                }
+            }
+            if package.canStop {
+                Button { triggerAction(.stop) } label: {
+                    Label("暂停套件", systemImage: "pause.fill")
+                }
+            }
+            if package.canUpgrade {
+                Button { triggerAction(.upgrade) } label: {
+                    Label("更新套件", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            Divider()
+            Button(role: .destructive) { triggerAction(.uninstall) } label: {
+                Label("卸载套件…", systemImage: "trash")
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func triggerAction(_ action: NasPackageAction) {
+        if action != .uninstall {
+            isBusy = true
+        }
+        onControl(action)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            isBusy = false
+        }
+    }
+}
+
+private struct PackageIconView: View {
+    let package: NasPackage
+    var size: CGFloat = 40
+
+    var body: some View {
+        if let iconURL = package.iconURL {
+            AsyncImage(url: iconURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: size, height: size)
+                        .clipShape(RoundedRectangle(cornerRadius: size > 36 ? 10 : 8, style: .continuous))
+                default:
+                    fallbackIcon
+                }
+            }
+        } else {
+            fallbackIcon
+        }
+    }
+
+    private var fallbackIcon: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size > 36 ? 10 : 8, style: .continuous)
+                .fill(Color.accentColor.opacity(0.12))
+                .frame(width: size, height: size)
+            Image(systemName: serviceIcon(package))
+                .font(size > 36 ? .title3 : .body)
+                .foregroundStyle(Color.accentColor)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 
 private struct ScheduledTaskList: View {
     let tasks: [NasScheduledTask]

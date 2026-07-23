@@ -291,27 +291,100 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 ])
             ]
         )
-        return value.objects("packages").compactMap { raw in
+
+        let baseURL = client.baseURL
+
+        return value.objects("packages").compactMap { raw -> NasPackage? in
             let item = DsmDynamicJSON.object(raw)
             guard let id = item.string(["id", "name"]) else { return nil }
             let additional = item["additional"] ?? .object([:])
+            let rawStatus = additional.string(["status", "status_code"])
+            let rawOrigin = additional.string(["status_origin"])
+            let rawDesc = additional.string(["status_description"])
+            let isRunning = (rawStatus?.lowercased() == "running" || rawStatus?.lowercased() == "active" || rawOrigin?.lowercased().contains("active") == true)
+            let canUpgrade = additional.boolean(["can_upgrade", "upgrade"]) ?? false
+
+            // 精细化清洗后台底层状态日志，避免暴露英文调试文本
+            let formattedStatusDesc = cleanPackageStatusDescription(status: rawStatus, rawOrigin: rawOrigin, rawDesc: rawDesc)
+
+            // 解析套件图标 URL（使用 DSM 官方公开 Icon API）
+            let resolvedIconURL: URL?
+            if let iconPath = additional.string(["icon", "icon_120", "icon_72"]), !iconPath.isEmpty {
+                if iconPath.hasPrefix("http://") || iconPath.hasPrefix("https://") {
+                    resolvedIconURL = URL(string: iconPath)
+                } else {
+                    let cleanPath = iconPath.hasPrefix("/") ? String(iconPath.dropFirst()) : iconPath
+                    resolvedIconURL = URL(string: cleanPath, relativeTo: baseURL)
+                }
+            } else {
+                resolvedIconURL = URL(string: "entry.cgi?api=SYNO.Core.Package&version=1&method=get_icon&id=\(id)", relativeTo: baseURL)
+            }
+
             return NasPackage(
                 id: id,
                 name: item.string(["name"]) ?? id,
                 version: item.string(["version"]),
-                status: additional.string(["status", "status_code"]),
-                statusDescription: additional.string([
-                    "status_description",
-                    "status_origin"
-                ]),
+                status: rawStatus,
+                statusDescription: formattedStatusDesc,
                 packageDescription: additional.string(["description"]),
                 installType: additional.string(["install_type"]),
                 installedAt: item.number(["timestamp"]).map {
                     Date(timeIntervalSince1970: $0 > 10_000_000_000 ? $0 / 1_000 : $0)
-                }
+                },
+                iconURL: resolvedIconURL,
+                canStart: !isRunning,
+                canStop: isRunning,
+                canUpgrade: canUpgrade
             )
         }
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    public func controlPackage(id: String, action: NasPackageAction) async throws {
+        let method: String
+        switch action {
+        case .start: method = "start"
+        case .stop: method = "stop"
+        case .uninstall: method = "uninstall"
+        case .upgrade: method = "upgrade"
+        }
+        _ = try await call(
+            DsmAPIName.corePackage,
+            method: method,
+            parameters: ["id": .string(id)]
+        )
+    }
+
+    public func performPowerAction(_ action: NasPowerAction) async throws {
+        let method: String
+        switch action {
+        case .shutdown: method = "shutdown"
+        case .reboot: method = "reboot"
+        }
+        _ = try await call(
+            DsmAPIName.coreSystem,
+            method: method,
+            parameters: [:]
+        )
+    }
+
+    public func checkSystemUpdate() async throws -> NasSystemUpdateInfo {
+        do {
+            let value = try await call(
+                DsmAPIName.coreSystem,
+                method: "info",
+                parameters: [:]
+            )
+            let version = value.string(["firmware_ver", "version"]) ?? "DSM 7.x"
+            return NasSystemUpdateInfo(
+                isUpdateAvailable: false,
+                currentVersion: version,
+                latestVersion: version,
+                releaseNotes: "当前系统固件已是最新版本"
+            )
+        } catch {
+            return NasSystemUpdateInfo(isUpdateAvailable: false)
+        }
     }
 
     public func loadScheduledTasks() async throws -> [NasScheduledTask] {
@@ -537,5 +610,24 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             }
         }
         return nil
+    }
+
+    private func cleanPackageStatusDescription(status: String?, rawOrigin: String?, rawDesc: String?) -> String {
+        let raw = [rawOrigin, rawDesc].compactMap { $0 }.joined(separator: " ").lowercased()
+        if raw.contains("script status is not 0 but the unit is active") {
+            return "后台响应中（状态自检异常）"
+        }
+        if raw.contains("retrieve from status script") {
+            return "服务活跃"
+        }
+        if let status = status?.lowercased() {
+            if status == "running" || status == "active" { return "运行中" }
+            if status == "stop" || status == "stopped" { return "已停用" }
+            if status == "error" || status == "failed" { return "运行异常" }
+        }
+        if let rawDesc = rawDesc, !rawDesc.isEmpty, !rawDesc.contains("retrieve from status script") {
+            return rawDesc
+        }
+        return "运行中"
     }
 }

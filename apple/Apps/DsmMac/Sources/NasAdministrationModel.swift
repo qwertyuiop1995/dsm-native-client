@@ -225,6 +225,19 @@ final class NasSettingsModel {
     private func isCurrent(_ page: NasSettingsPage, _ generation: Int) -> Bool {
         isModuleEnabled && requestGenerations[page] == generation
     }
+
+    func controlPackage(id: String, action: NasPackageAction) async throws {
+        try await repository.controlPackage(id: id, action: action)
+        await activate(.packages, force: true)
+    }
+
+    func performPowerAction(_ action: NasPowerAction) async throws {
+        try await repository.performPowerAction(action)
+    }
+
+    func checkSystemUpdate() async throws -> NasSystemUpdateInfo {
+        try await repository.checkSystemUpdate()
+    }
 }
 
 @MainActor

@@ -218,6 +218,37 @@ public struct NasVolume: Identifiable, Equatable, Sendable {
     }
 }
 
+public enum NasPackageAction: String, Sendable {
+    case start
+    case stop
+    case uninstall
+    case upgrade
+}
+
+public enum NasPowerAction: String, Sendable {
+    case shutdown
+    case reboot
+}
+
+public struct NasSystemUpdateInfo: Equatable, Sendable {
+    public let isUpdateAvailable: Bool
+    public let currentVersion: String?
+    public let latestVersion: String?
+    public let releaseNotes: String?
+
+    public init(
+        isUpdateAvailable: Bool,
+        currentVersion: String? = nil,
+        latestVersion: String? = nil,
+        releaseNotes: String? = nil
+    ) {
+        self.isUpdateAvailable = isUpdateAvailable
+        self.currentVersion = currentVersion
+        self.latestVersion = latestVersion
+        self.releaseNotes = releaseNotes
+    }
+}
+
 public struct NasPackage: Identifiable, Equatable, Sendable {
     public let id: String
     public let name: String
@@ -227,6 +258,10 @@ public struct NasPackage: Identifiable, Equatable, Sendable {
     public let packageDescription: String?
     public let installType: String?
     public let installedAt: Date?
+    public let iconURL: URL?
+    public let canStart: Bool
+    public let canStop: Bool
+    public let canUpgrade: Bool
 
     public init(
         id: String,
@@ -236,7 +271,11 @@ public struct NasPackage: Identifiable, Equatable, Sendable {
         statusDescription: String?,
         packageDescription: String?,
         installType: String?,
-        installedAt: Date?
+        installedAt: Date?,
+        iconURL: URL? = nil,
+        canStart: Bool = true,
+        canStop: Bool = true,
+        canUpgrade: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -246,6 +285,10 @@ public struct NasPackage: Identifiable, Equatable, Sendable {
         self.packageDescription = packageDescription
         self.installType = installType
         self.installedAt = installedAt
+        self.iconURL = iconURL
+        self.canStart = canStart
+        self.canStop = canStop
+        self.canUpgrade = canUpgrade
     }
 }
 
@@ -428,4 +471,15 @@ public protocol NasSettingsRepository: Sendable {
     func loadLogs(offset: Int, limit: Int) async throws -> NasLogPage
     func loadConnections(offset: Int, limit: Int) async throws -> NasConnectionPage
     func loadInstalledServices() async throws -> [NasPackage]
+    func controlPackage(id: String, action: NasPackageAction) async throws
+    func performPowerAction(_ action: NasPowerAction) async throws
+    func checkSystemUpdate() async throws -> NasSystemUpdateInfo
+}
+
+public extension NasSettingsRepository {
+    func controlPackage(id: String, action: NasPackageAction) async throws {}
+    func performPowerAction(_ action: NasPowerAction) async throws {}
+    func checkSystemUpdate() async throws -> NasSystemUpdateInfo {
+        NasSystemUpdateInfo(isUpdateAvailable: false)
+    }
 }

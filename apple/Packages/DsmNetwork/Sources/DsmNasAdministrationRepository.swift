@@ -307,17 +307,21 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             // 精细化清洗后台底层状态日志，避免暴露英文调试文本
             let formattedStatusDesc = cleanPackageStatusDescription(status: rawStatus, rawOrigin: rawOrigin, rawDesc: rawDesc)
 
-            // 解析套件图标 URL（使用 DSM 官方公开 Icon API）
+            // 解析套件图标 URL（使用 DSM 官方公开 Icon API，并自动挂载认证凭据）
             let resolvedIconURL: URL?
+            let sidParam = "_sid=\(credential.sid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? credential.sid)"
+
             if let iconPath = additional.string(["icon", "icon_120", "icon_72"]), !iconPath.isEmpty {
                 if iconPath.hasPrefix("http://") || iconPath.hasPrefix("https://") {
                     resolvedIconURL = URL(string: iconPath)
                 } else {
                     let cleanPath = iconPath.hasPrefix("/") ? String(iconPath.dropFirst()) : iconPath
-                    resolvedIconURL = URL(string: cleanPath, relativeTo: baseURL)
+                    let delimiter = cleanPath.contains("?") ? "&" : "?"
+                    resolvedIconURL = URL(string: "\(cleanPath)\(delimiter)\(sidParam)", relativeTo: baseURL)
                 }
             } else {
-                resolvedIconURL = URL(string: "entry.cgi?api=SYNO.Core.Package&version=1&method=get_icon&id=\(id)", relativeTo: baseURL)
+                resolvedIconURL = URL(string: "entry.cgi?api=SYNO.Core.Package&version=1&method=get_icon&id=\(id)&\(sidParam)", relativeTo: baseURL)
+                    ?? URL(string: "webapi/entry.cgi?api=SYNO.Core.Package&version=1&method=get_icon&id=\(id)&\(sidParam)", relativeTo: baseURL)
             }
 
             return NasPackage(

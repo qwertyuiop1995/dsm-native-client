@@ -783,19 +783,6 @@ private struct PackageList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let actionError {
-                HStack {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text(actionError).font(.caption).foregroundStyle(.primary)
-                    Spacer()
-                    Button("关闭") { self.actionError = nil }
-                        .buttonStyle(.plain)
-                        .font(.caption)
-                }
-                .padding(10)
-                .background(Color.orange.opacity(0.12))
-            }
-
             HStack {
                 Text("共 \(filtered.count) 项")
                     .font(.caption)
@@ -859,7 +846,7 @@ private struct PackageList: View {
                         do {
                             try await onControlPackage?(pkg.id, .uninstall)
                         } catch {
-                            actionError = "卸载失败: \(error.localizedDescription)"
+                            actionError = "无法卸载套件“\(pkg.name)”：\(error.localizedDescription)"
                         }
                     }
                 }
@@ -868,6 +855,16 @@ private struct PackageList: View {
         } message: {
             if let pkg = packageToUninstall {
                 Text("将被卸载的套件：\(pkg.name)\n卸载后相关配置和应用数据可能会被清空。")
+            }
+        }
+        .alert("套件操作提示", isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button("确定", role: .cancel) {}
+        } message: {
+            if let actionError {
+                Text(actionError)
             }
         }
     }
@@ -881,7 +878,13 @@ private struct PackageList: View {
             do {
                 try await onControlPackage?(package.id, action)
             } catch {
-                actionError = "操作失败: \(error.localizedDescription)"
+                let actionText = action == .stop ? "暂停" : (action == .start ? "启动" : "更新")
+                let rawMsg = error.localizedDescription
+                if rawMsg.contains("暂不支持此功能") || rawMsg.contains("apiUnavailable") {
+                    actionError = "无法\(actionText)套件“\(package.name)”：这台 NAS 限制或禁用了此远程操作。系统核心服务或部分内置套件无法在线停止，建议您登录 DSM Web 界面进行高级管理。"
+                } else {
+                    actionError = "无法\(actionText)套件“\(package.name)”：\(rawMsg)"
+                }
             }
         }
     }
@@ -1110,6 +1113,15 @@ private struct PackageIconView: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: size, height: size)
                         .clipShape(RoundedRectangle(cornerRadius: size > 36 ? 10 : 8, style: .continuous))
+                        .shadow(color: .black.opacity(0.06), radius: 2, x: 0, y: 1)
+                case .empty:
+                    ZStack {
+                        RoundedRectangle(cornerRadius: size > 36 ? 10 : 8, style: .continuous)
+                            .fill(Color.primary.opacity(0.04))
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    .frame(width: size, height: size)
                 default:
                     fallbackIcon
                 }

@@ -676,10 +676,30 @@ private struct PhotoLibraryCell: View {
     }
 }
 
+private struct SkeletonPlaceholderView: View {
+    @State private var isBreathing = false
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 0)
+                .fill(Color.primary.opacity(isBreathing ? 0.09 : 0.03))
+                .animation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true), value: isBreathing)
+            ProgressView()
+                .controlSize(.small)
+                .tint(.secondary)
+        }
+        .onAppear {
+            isBreathing = true
+        }
+    }
+}
+
 private struct PhotoGridThumbnail: View {
     @Bindable var model: PhotoLibraryModel
     let item: PhotoLibraryItem
     @State private var displayedImage: DecodedImage?
+    @State private var isLoading = true
+    @State private var isFailed = false
 
     var body: some View {
         GeometryReader { geo in
@@ -690,11 +710,18 @@ private struct PhotoGridThumbnail: View {
                         .scaledToFill()
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
-                } else {
-                    Image(systemName: item.kind == .video ? "video.fill" : "photo.fill")
-                        .font(.system(size: 32))
-                        .foregroundStyle(.secondary)
+                        .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+                } else if isLoading {
+                    SkeletonPlaceholderView()
                         .frame(width: geo.size.width, height: geo.size.height)
+                } else {
+                    ZStack {
+                        Color.secondary.opacity(0.08)
+                        Image(systemName: item.kind == .video ? "video.fill" : "photo.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
                 }
 
                 if item.kind == .video {
@@ -707,29 +734,49 @@ private struct PhotoGridThumbnail: View {
             }
         }
         .task(priority: .userInitiated) {
+            isLoading = true
+            isFailed = false
             model.thumbnailBecameVisible(item)
+
             if let cached = await model.cachedThumbnailData(for: item) {
                 let decoded = await Task.detached(priority: .userInitiated) {
                     DecodedImage(from: cached)
                 }.value
                 model.thumbnailRequestDidFinish(for: item)
                 guard !Task.isCancelled else { return }
-                displayedImage = decoded
+                isLoading = false
+                if let decoded {
+                    displayedImage = decoded
+                } else {
+                    isFailed = true
+                }
                 return
             }
+
             let loadedData = await model.thumbnailData(for: item)
             model.thumbnailRequestDidFinish(for: item)
-            guard !Task.isCancelled, let loadedData else { return }
-            let decoded = await Task.detached(priority: .userInitiated) {
-                DecodedImage(from: loadedData)
-            }.value
             guard !Task.isCancelled else { return }
-            displayedImage = decoded
+            isLoading = false
+            if let loadedData {
+                let decoded = await Task.detached(priority: .userInitiated) {
+                    DecodedImage(from: loadedData)
+                }.value
+                guard !Task.isCancelled else { return }
+                if let decoded {
+                    displayedImage = decoded
+                } else {
+                    isFailed = true
+                }
+            } else {
+                isFailed = true
+            }
         }
         .onDisappear {
-            // 离屏时取消可见标记，并立即清空 displayedImage，释放像素位图内存
+            // 离屏时取消可见标记，并清空状态
             model.thumbnailBecameHidden(item)
             displayedImage = nil
+            isLoading = true
+            isFailed = false
         }
     }
 }

@@ -49,13 +49,73 @@ public enum DsmAPIName {
     public static let storageOverview = "SYNO.Storage.CGI.Storage"
     public static let storageSmart = "SYNO.Storage.CGI.Smart"
     public static let storageVolume = "SYNO.Core.Storage.Volume"
+    /// DSM 存储管理器内部硬盘检测接口；仅在能力发现明确返回时启用。
+    public static let coreStorageDisk = "SYNO.Core.Storage.Disk"
     public static let corePackage = "SYNO.Core.Package"
+    /// DSM 套件启停内部接口。
+    public static let corePackageControl = "SYNO.Core.Package.Control"
+    /// DSM 套件卸载内部接口。
+    public static let corePackageUninstallation = "SYNO.Core.Package.Uninstallation"
+    /// DSM 已安装套件图标内部接口。
+    public static let corePackageThumb = "SYNO.Core.Package.Thumb"
     public static let coreTaskScheduler = "SYNO.Core.TaskScheduler"
+    /// DSM 计划任务运行结果内部接口。
+    public static let coreEventScheduler = "SYNO.Core.EventScheduler"
+    /// DSM 系统更新检查内部接口；客户端只读取可用更新，不执行下载或安装。
+    public static let coreUpgradeServer = "SYNO.Core.Upgrade.Server"
     public static let coreUser = "SYNO.Core.User"
     public static let coreGroup = "SYNO.Core.Group"
     public static let coreCurrentConnection = "SYNO.Core.CurrentConnection"
     public static let coreSystemLog = "SYNO.Core.SyslogClient.Log"
     public static let logCenterHistory = "SYNO.LogCenter.History"
+    /// DSM 控制面板内部接口：终端服务。
+    public static let coreTerminal = "SYNO.Core.Terminal"
+    /// DSM 控制面板内部接口：SMB 文件服务。
+    public static let coreFileServiceSMB = "SYNO.Core.FileServ.SMB"
+    /// DSM 控制面板内部接口：NFS 文件服务。
+    public static let coreFileServiceNFS = "SYNO.Core.FileServ.NFS"
+    /// DSM 控制面板内部接口：FTP/FTPS 文件服务。
+    public static let coreFileServiceFTP = "SYNO.Core.FileServ.FTP"
+    /// DSM 控制面板内部接口：SFTP 文件服务。
+    public static let coreFileServiceSFTP = "SYNO.Core.FileServ.FTP.SFTP"
+    /// DSM 控制面板内部接口：互联网代理。
+    public static let coreNetworkProxy = "SYNO.Core.Network.Proxy"
+    /// DSM 控制面板内部接口：断电恢复。
+    public static let coreHardwarePowerRecovery = "SYNO.Core.Hardware.PowerRecovery"
+    /// DSM 控制面板内部接口：设备灯光亮度。
+    public static let coreHardwareLEDBrightness = "SYNO.Core.Hardware.Led.Brightness"
+    /// DSM 控制面板内部接口：风扇模式。
+    public static let coreHardwareFanSpeed = "SYNO.Core.Hardware.FanSpeed"
+    /// DSM 控制面板内部接口：设备提示音。
+    public static let coreHardwareBeepControl = "SYNO.Core.Hardware.BeepControl"
+    /// DSM 控制面板内部接口：硬盘休眠与自动关机。
+    public static let coreHardwareHibernation = "SYNO.Core.Hardware.Hibernation"
+    /// DSM 控制面板内部接口：QuickConnect 基础设置。
+    public static let coreQuickConnect = "SYNO.Core.QuickConnect"
+    /// DSM 控制面板内部接口：QuickConnect 路由器自动配置。
+    public static let coreQuickConnectUPnP = "SYNO.Core.QuickConnect.Upnp"
+    /// DSM 控制面板内部接口：登录失败自动封锁。
+    public static let coreSecurityAutoBlock = "SYNO.Core.Security.AutoBlock"
+    /// DSM 控制面板内部接口：局域网设备发现。
+    public static let coreWebDSM = "SYNO.Core.Web.DSM"
+    /// DSM 控制面板内部接口：文件服务发现。
+    public static let coreFileServiceDiscovery = "SYNO.Core.FileServ.ServiceDiscovery"
+    /// DSM 控制面板内部接口：网卡列表。
+    public static let coreNetworkEthernet = "SYNO.Core.Network.Ethernet"
+    /// DSM 控制面板内部接口：按网卡配置拒绝服务攻击防护。
+    public static let coreSecurityDoS = "SYNO.Core.Security.DoS"
+    /// DSM 控制面板内部接口：区域、时区与网络校时。
+    public static let coreRegionNTP = "SYNO.Core.Region.NTP"
+    /// DSM 控制面板内部接口：DDNS 服务提供商与记录。
+    public static let coreDDNSProvider = "SYNO.Core.DDNS.Provider"
+    public static let coreDDNSRecord = "SYNO.Core.DDNS.Record"
+    /// DSM 控制面板内部接口：UPS 安全关机设置。
+    public static let coreExternalDeviceUPS = "SYNO.Core.ExternalDevice.UPS"
+    /// DSM 控制面板内部接口：防火墙启停、端口扫描防护与配置应用。
+    public static let coreSecurityFirewall = "SYNO.Core.Security.Firewall"
+    public static let coreSecurityFirewallConf = "SYNO.Core.Security.Firewall.Conf"
+    public static let coreSecurityFirewallProfileApply =
+        "SYNO.Core.Security.Firewall.Profile.Apply"
 }
 
 private struct CapabilityPayload: Decodable, Sendable {
@@ -118,13 +178,44 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.storageOverview,
         DsmAPIName.storageSmart,
         DsmAPIName.storageVolume,
+        DsmAPIName.coreStorageDisk,
         DsmAPIName.corePackage,
+        DsmAPIName.corePackageControl,
+        DsmAPIName.corePackageUninstallation,
+        DsmAPIName.corePackageThumb,
         DsmAPIName.coreTaskScheduler,
+        DsmAPIName.coreEventScheduler,
+        DsmAPIName.coreUpgradeServer,
         DsmAPIName.coreUser,
         DsmAPIName.coreGroup,
         DsmAPIName.coreCurrentConnection,
         DsmAPIName.coreSystemLog,
-        DsmAPIName.logCenterHistory
+        DsmAPIName.logCenterHistory,
+        DsmAPIName.coreTerminal,
+        DsmAPIName.coreFileServiceSMB,
+        DsmAPIName.coreFileServiceNFS,
+        DsmAPIName.coreFileServiceFTP,
+        DsmAPIName.coreFileServiceSFTP,
+        DsmAPIName.coreNetworkProxy,
+        DsmAPIName.coreHardwarePowerRecovery,
+        DsmAPIName.coreHardwareLEDBrightness,
+        DsmAPIName.coreHardwareFanSpeed,
+        DsmAPIName.coreHardwareBeepControl,
+        DsmAPIName.coreHardwareHibernation,
+        DsmAPIName.coreQuickConnect,
+        DsmAPIName.coreQuickConnectUPnP,
+        DsmAPIName.coreSecurityAutoBlock,
+        DsmAPIName.coreWebDSM,
+        DsmAPIName.coreFileServiceDiscovery,
+        DsmAPIName.coreNetworkEthernet,
+        DsmAPIName.coreSecurityDoS,
+        DsmAPIName.coreRegionNTP,
+        DsmAPIName.coreDDNSProvider,
+        DsmAPIName.coreDDNSRecord,
+        DsmAPIName.coreExternalDeviceUPS,
+        DsmAPIName.coreSecurityFirewall,
+        DsmAPIName.coreSecurityFirewallConf,
+        DsmAPIName.coreSecurityFirewallProfileApply
     ]
 
     private let client: DsmAPIClient
@@ -245,12 +336,43 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.storageOverview: 1...1,
         DsmAPIName.storageSmart: 1...1,
         DsmAPIName.storageVolume: 1...1,
+        DsmAPIName.coreStorageDisk: 1...1,
         DsmAPIName.corePackage: 1...2,
-        DsmAPIName.coreTaskScheduler: 1...3,
+        DsmAPIName.corePackageControl: 1...1,
+        DsmAPIName.corePackageUninstallation: 1...1,
+        DsmAPIName.corePackageThumb: 1...1,
+        DsmAPIName.coreTaskScheduler: 1...4,
+        DsmAPIName.coreEventScheduler: 1...1,
+        DsmAPIName.coreUpgradeServer: 1...4,
         DsmAPIName.coreUser: 1...1,
         DsmAPIName.coreGroup: 1...1,
         DsmAPIName.coreCurrentConnection: 1...1,
         DsmAPIName.coreSystemLog: 1...1,
-        DsmAPIName.logCenterHistory: 1...1
+        DsmAPIName.logCenterHistory: 1...1,
+        DsmAPIName.coreTerminal: 1...3,
+        DsmAPIName.coreFileServiceSMB: 1...3,
+        DsmAPIName.coreFileServiceNFS: 1...3,
+        DsmAPIName.coreFileServiceFTP: 1...1,
+        DsmAPIName.coreFileServiceSFTP: 1...1,
+        DsmAPIName.coreNetworkProxy: 1...1,
+        DsmAPIName.coreHardwarePowerRecovery: 1...1,
+        DsmAPIName.coreHardwareLEDBrightness: 1...1,
+        DsmAPIName.coreHardwareFanSpeed: 1...1,
+        DsmAPIName.coreHardwareBeepControl: 1...1,
+        DsmAPIName.coreHardwareHibernation: 1...1,
+        DsmAPIName.coreQuickConnect: 1...3,
+        DsmAPIName.coreQuickConnectUPnP: 1...1,
+        DsmAPIName.coreSecurityAutoBlock: 1...1,
+        DsmAPIName.coreWebDSM: 1...2,
+        DsmAPIName.coreFileServiceDiscovery: 1...1,
+        DsmAPIName.coreNetworkEthernet: 1...2,
+        DsmAPIName.coreSecurityDoS: 1...2,
+        DsmAPIName.coreRegionNTP: 1...3,
+        DsmAPIName.coreDDNSProvider: 1...1,
+        DsmAPIName.coreDDNSRecord: 1...1,
+        DsmAPIName.coreExternalDeviceUPS: 1...1,
+        DsmAPIName.coreSecurityFirewall: 1...1,
+        DsmAPIName.coreSecurityFirewallConf: 1...1,
+        DsmAPIName.coreSecurityFirewallProfileApply: 1...1
     ]
 }

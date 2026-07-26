@@ -7,6 +7,8 @@ public enum DsmParameterValue: Equatable, Sendable {
     case boolean(Bool)
     case stringArray([String])
     case integerArray([Int])
+    case object([String: DsmJSONValue])
+    case objectArray([[String: DsmJSONValue]])
 
     fileprivate func encoded(for requestFormat: DsmRequestFormat) throws -> String {
         switch (requestFormat, self) {
@@ -20,6 +22,10 @@ public enum DsmParameterValue: Equatable, Sendable {
             return try Self.jsonString(value)
         case (.form, .integerArray(let value)):
             return try Self.jsonString(value)
+        case (.form, .object(let value)):
+            return try Self.jsonString(value)
+        case (.form, .objectArray(let value)):
+            return try Self.jsonString(value)
         case (.json, .string(let value)):
             return try Self.jsonString(value)
         case (.json, .integer(let value)):
@@ -29,6 +35,10 @@ public enum DsmParameterValue: Equatable, Sendable {
         case (.json, .stringArray(let value)):
             return try Self.jsonString(value)
         case (.json, .integerArray(let value)):
+            return try Self.jsonString(value)
+        case (.json, .object(let value)):
+            return try Self.jsonString(value)
+        case (.json, .objectArray(let value)):
             return try Self.jsonString(value)
         }
     }
@@ -45,6 +55,30 @@ public enum DsmParameterValue: Equatable, Sendable {
             )
         }
         return result
+    }
+}
+
+public indirect enum DsmJSONValue: Equatable, Sendable, Encodable {
+    case string(String)
+    case integer(Int)
+    case boolean(Bool)
+    case array([DsmJSONValue])
+    case object([String: DsmJSONValue])
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value):
+            try container.encode(value)
+        case .integer(let value):
+            try container.encode(value)
+        case .boolean(let value):
+            try container.encode(value)
+        case .array(let value):
+            try container.encode(value)
+        case .object(let value):
+            try container.encode(value)
+        }
     }
 }
 

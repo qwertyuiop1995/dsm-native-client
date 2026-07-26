@@ -59,17 +59,114 @@ final class NasAdministrationModelTests: XCTestCase {
         XCTAssertTrue(model.hasLoaded(.connections))
         XCTAssertEqual(model.connections?.connections, [])
     }
+
+    func test暂停套件后刷新并确认最终状态() async throws {
+        let repository = NasAdministrationRepositoryStub(packages: [
+            package(status: "running", canStart: false, canStop: true, canUninstall: true)
+        ])
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.packages)
+
+        try await model.controlPackage(id: "Example", action: .stop)
+
+        XCTAssertEqual(model.packages.first?.status, "stopped")
+        XCTAssertFalse(model.packageOperationIDs.contains("Example"))
+        let requestCount = await repository.packageControlRequestCount()
+        XCTAssertEqual(requestCount, 1)
+    }
+
+    func test系统套件不会提交卸载请求() async {
+        let repository = NasAdministrationRepositoryStub(packages: [
+            package(status: "running", canStart: false, canStop: true, canUninstall: false)
+        ])
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.packages)
+
+        do {
+            try await model.controlPackage(id: "Example", action: .uninstall)
+            XCTFail("系统套件应拒绝卸载")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .permissionDenied)
+        } catch {
+            XCTFail("返回了非统一错误：\(error)")
+        }
+        let requestCount = await repository.packageControlRequestCount()
+        XCTAssertEqual(requestCount, 0)
+    }
+
+    func test启动硬盘检测后保存已确认的运行状态() async throws {
+        let repository = NasAdministrationRepositoryStub()
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.storage)
+
+        try await model.startDiskTest(diskID: "disk1", type: .extended)
+
+        XCTAssertEqual(model.diskTestStatuses["disk1"]?.isRunning, true)
+        XCTAssertEqual(model.diskTestStatuses["disk1"]?.runningType, .extended)
+        XCTAssertFalse(model.diskOperationIDs.contains("disk1"))
+        let requestCount = await repository.diskTestRequestCount()
+        XCTAssertEqual(requestCount, 1)
+    }
+
+    func test停止硬盘检测后保存已确认的停止状态() async throws {
+        let repository = NasAdministrationRepositoryStub()
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.storage)
+        try await model.startDiskTest(diskID: "disk1", type: .quick)
+
+        try await model.stopDiskTest(diskID: "disk1")
+
+        XCTAssertEqual(model.diskTestStatuses["disk1"]?.isRunning, false)
+        XCTAssertFalse(model.diskOperationIDs.contains("disk1"))
+        let requestCount = await repository.diskTestRequestCount()
+        XCTAssertEqual(requestCount, 2)
+    }
+
+    private func package(
+        status: String,
+        canStart: Bool,
+        canStop: Bool,
+        canUninstall: Bool
+    ) -> NasPackage {
+        NasPackage(
+            id: "Example",
+            name: "示例套件",
+            version: "1.0",
+            status: status,
+            statusDescription: nil,
+            packageDescription: nil,
+            installType: canUninstall ? "user" : "system",
+            installedAt: nil,
+            canStart: canStart,
+            canStop: canStop,
+            canUninstall: canUninstall
+        )
+    }
 }
 
 private actor NasAdministrationRepositoryStub: NasSettingsRepository {
     private var systemRequests = 0
+    private var packageControlRequests = 0
+    private var diskTestRequests = 0
+    private var diskTestStatus = NasDiskTestStatus(diskID: "disk1", isRunning: false)
+    private var packages: [NasPackage]
     private let delayNanoseconds: UInt64
 
-    init(delayNanoseconds: UInt64 = 0) {
+    init(
+        delayNanoseconds: UInt64 = 0,
+        packages: [NasPackage] = []
+    ) {
         self.delayNanoseconds = delayNanoseconds
+        self.packages = packages
     }
 
     func systemRequestCount() -> Int { systemRequests }
+    func packageControlRequestCount() -> Int { packageControlRequests }
+    func diskTestRequestCount() -> Int { diskTestRequests }
 
     func loadSystemOverview() async throws -> NasSystemOverview {
         systemRequests += 1
@@ -101,10 +198,53 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
     }
 
     func loadStorage() async throws -> NasStorageSnapshot {
-        NasStorageSnapshot(overallStatus: "normal", disks: [], pools: [], volumes: [])
+        NasStorageSnapshot(
+            overallStatus: "normal",
+            disks: [
+                NasDisk(
+                    id: "disk1",
+                    name: "硬盘 1",
+                    model: "MODEL",
+                    type: "HDD",
+                    totalBytes: 1_000,
+                    status: "normal",
+                    smartStatus: "normal",
+                    temperatureCelsius: 35,
+                    isSSD: false,
+                    usedBy: nil,
+                    supportsSmartTest: true
+                )
+            ],
+            pools: [],
+            volumes: []
+        )
     }
 
-    func loadPackages() async throws -> [NasPackage] { [] }
+    func loadDiskTestStatus(diskID: String) async throws -> NasDiskTestStatus {
+        diskTestStatus
+    }
+
+    func startDiskTest(
+        diskID: String,
+        type: NasDiskTestType
+    ) async throws -> NasDiskTestStatus {
+        diskTestRequests += 1
+        diskTestStatus = NasDiskTestStatus(
+            diskID: diskID,
+            isRunning: true,
+            runningType: type,
+            progressDescription: "已开始"
+        )
+        return diskTestStatus
+    }
+
+    func stopDiskTest(diskID: String) async throws -> NasDiskTestStatus {
+        diskTestRequests += 1
+        diskTestStatus = NasDiskTestStatus(diskID: diskID, isRunning: false)
+        return diskTestStatus
+    }
+
+    func loadPackages() async throws -> [NasPackage] { packages }
     func loadScheduledTasks() async throws -> [NasScheduledTask] { [] }
 
     func loadAccountsAndGroups() async throws -> NasAccountDirectory {
@@ -130,5 +270,32 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
         NasConnectionPage(connections: [], total: 0)
     }
 
-    func loadInstalledServices() async throws -> [NasPackage] { [] }
+
+    func controlPackage(id: String, action: NasPackageAction) async throws {
+        packageControlRequests += 1
+        switch action {
+        case .uninstall:
+            packages.removeAll { $0.id == id }
+        case .start, .stop:
+            guard let index = packages.firstIndex(where: { $0.id == id }) else { return }
+            let package = packages[index]
+            let isStarting = action == .start
+            packages[index] = NasPackage(
+                id: package.id,
+                name: package.name,
+                version: package.version,
+                status: isStarting ? "running" : "stopped",
+                statusDescription: nil,
+                packageDescription: package.packageDescription,
+                installType: package.installType,
+                installedAt: package.installedAt,
+                iconData: package.iconData,
+                canStart: !isStarting,
+                canStop: isStarting,
+                canUninstall: package.canUninstall
+            )
+        case .upgrade:
+            break
+        }
+    }
 }

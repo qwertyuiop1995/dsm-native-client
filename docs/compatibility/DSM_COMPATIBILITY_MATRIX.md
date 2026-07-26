@@ -109,9 +109,9 @@ Chat 兼容记录必须满足：
 
 | 范围 | 当前版本 | 证据 | 本轮结论 | 未验证 |
 | --- | --- | --- | --- | --- |
-| DSM 系统/当前连接 | DSM 7.2.1-69057 Update 12 | 官方网页可见 + `SYNO.API.Info` + 已登录会话只读响应结构核对 | 已确认 `System.info`、`System.Utilization.get(resource=all,type=current)`、`CurrentConnection.list`、`SyslogClient.Log.list` 的真实字段；macOS 已实现实时趋势、暂停、独立开关和不覆盖旧数据的刷新状态；未保存原始响应 | 普通账号权限、长时间采样和多网卡；踢出、导出和修改均未实现 |
-| DSM 存储/套件/任务/账号 | DSM 7.2.1-69057 Update 12 | `SYNO.API.Info` + 已登录会话只读响应结构核对 | 已确认 `Storage.load_info` 的硬盘/池/空间、`Package.list` v2 附加字段、`TaskScheduler.list` v3、`User.list` 与 `Group.list`；macOS 已按类型展示真实字段 | 不同 RAID/SSD/扩展柜、普通账号、空目录和大清单；所有写操作未实现 |
+| DSM 系统/当前连接 | DSM 7.2.1-69057 Update 12 | 官方网页可见 + `SYNO.API.Info` + 已登录会话只读响应结构核对 + DSM 前端静态请求 | 已确认 `System.info`、`System.Utilization.get(resource=all,type=current)`、`Upgrade.Server.check` v3、`CurrentConnection.list/kick_connection` 和 `SyslogClient.Log.list`；macOS 更新检查不再伪造结果，只读取可用版本；连接断开具备确认、防重复和复查 | 普通账号权限、更新服务离线/代理、长时间采样、多网卡和连接消失竞态；断开操作尚未对真实会话执行 |
+| DSM 存储/套件/任务/账号 | DSM 7.2.1-69057 Update 12 | `SYNO.API.Info` + 已登录会话只读响应结构核对 + DSM 前端静态请求 | 已确认 `Storage.Disk.get_smart_test_log/disk_test_log_get/do_smart_test` v1：请求使用 `load_info.disks[].device`，状态取 `testInfo[0]`，历史取 `testLog`，并识别其他检测占用；同时确认 `EventScheduler.result_list/result_get_file` v1、套件管理、任务管理以及用户/群组管理；macOS 已实现硬盘检测启停、真实历史记录、任务运行记录和其他受保护流程 | 不同 RAID/SSD/扩展柜、普通账号、空目录和大清单；硬盘检测及其他写操作仍需用专用测试目标完成权限、忙碌、重复提交、超时与最终状态实机验收 |
 | Virtual Machine Manager | 2.6.5-12202 | 官方网页可见 + `SYNO.API.Info` + VMM 前端静态方法 | 确认官方 `SYNO.Virtualization.API.*` v1 与内部 Guest/Action/Image/Host/Network/Repo 等当前版本 | 测试环境无虚拟机；创建、删除、电源、迁移、镜像等均未执行 |
 | Container Manager | 24.0.2-1535 | 官方网页可见 + `SYNO.API.Info` + 套件前端静态方法 | 确认容器、镜像、网络、项目、Registry 的当前方法；仅查看列表 | 启停、创建、删除、日志、环境变量、挂载与 Registry 凭据均未读取或执行 |
 
-本表只确认当前记录的发现范围。合并后的 NAS 设置已形成当前 DSM build 的只读响应结构兼容结论，其他 DSM build 与权限组合仍需验证；VMM 和容器仍未实现。任何写操作都不在本表结论内。
+本表只确认当前记录的发现范围。合并后的 NAS 设置已形成当前 DSM build 的读取结构兼容结论；文件服务、远程终端、代理、物理网卡、DDNS、区域时间、远程访问、防火墙基础控制和 UPS 已按当前 DSM 前端契约接入客户端保护与写后回读，但尚未在专用测试设备上形成真实写操作兼容结论。共享文件夹复合管理、完整防火墙规则和电源日程仍保持关闭；其他 DSM build 与权限组合仍需验证，VMM 和容器仍未实现。

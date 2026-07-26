@@ -226,11 +226,13 @@ public final class URLSessionTransport: DsmBinaryHTTPTransport, @unchecked Senda
     }
 
     private static func headers(from response: HTTPURLResponse) -> [String: String] {
-        Dictionary(uniqueKeysWithValues: response.allHeaderFields.compactMap { key, value in
+        response.allHeaderFields.reduce(into: [String: String]()) { headers, field in
+            let (key, value) = field
             guard let key = key as? String else {
-                return nil
+                return
             }
-            return (key.lowercased(), String(describing: value))
-        })
+            // HTTP 字段名不区分大小写，统一后若重复则以 URLSession 的最后值为准。
+            headers[key.lowercased()] = String(describing: value)
+        }
     }
 }

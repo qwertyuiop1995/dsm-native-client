@@ -131,26 +131,31 @@ struct WorkspaceView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
-                Button {
-                    navigateBack()
-                } label: {
-                    Label("返回", systemImage: "chevron.backward")
-                }
-                .disabled(!canNavigateBack)
-                .help(isFileSection ? "返回上一个目录（⌘[）" : "返回刚才浏览的文件夹（⌘[）")
-                .keyboardShortcut("[", modifiers: .command)
+                // 固定为单个工具栏项目，避免页面切换时 AppKit 重复插入自动生成的项目标识。
+                HStack(spacing: 6) {
+                    Button {
+                        navigateBack()
+                    } label: {
+                        Label("返回", systemImage: "chevron.backward")
+                    }
+                    .disabled(!canNavigateBack)
+                    .help(isFileSection ? "返回上一个目录（⌘[）" : "返回刚才浏览的文件夹（⌘[）")
+                    .keyboardShortcut("[", modifiers: .command)
 
-                Button {
-                    navigateUp()
-                } label: {
-                    Label("上一级", systemImage: "arrow.up")
+                    Button {
+                        navigateUp()
+                    } label: {
+                        Label("上一级", systemImage: "arrow.up")
+                    }
+                    .disabled(!canNavigateUp)
+                    .help("前往上一级目录")
                 }
-                .disabled(!canNavigateUp)
-                .help("前往上一级目录")
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
-                if isFileSection {
+                // 页面对应的操作会变化，但 AppKit 始终只维护这一个工具栏项目。
+                HStack(spacing: 8) {
+                    if isFileSection {
                     Button {
                         Task { await model.refresh() }
                     } label: {
@@ -309,11 +314,12 @@ struct WorkspaceView: View {
                     } label: {
                         Label("返回文件", systemImage: "folder")
                     }
-                } else if model.section == .settings {
-                    Button {
-                        restoreFileBrowser()
-                    } label: {
-                        Label("返回文件", systemImage: "folder")
+                    } else if model.section == .settings {
+                        Button {
+                            restoreFileBrowser()
+                        } label: {
+                            Label("返回文件", systemImage: "folder")
+                        }
                     }
                 }
             }
@@ -3823,7 +3829,7 @@ private struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("NAS 设置")
                                     .font(.body.weight(.medium))
-                                Text("查看系统性能、存储与硬盘、套件、计划任务、账号、系统日志、当前连接和已安装服务。")
+                                Text("查看系统性能、存储与硬盘、套件、计划任务、账号、系统日志和当前连接。")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

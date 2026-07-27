@@ -1919,6 +1919,7 @@ private struct UnifiedStorageView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .frame(maxWidth: 520)
 
                 Spacer()
@@ -2263,6 +2264,7 @@ private struct StorageAnalysisView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             Spacer()
             Text(snapshot.generatedAt.formatted(date: .abbreviated, time: .shortened))
                 .font(.caption)

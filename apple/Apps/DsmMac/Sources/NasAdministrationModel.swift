@@ -23,6 +23,271 @@ enum NasSettingsPage: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+struct StorageUsagePoint: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let recordedAt: Date
+    let volumeID: String
+    let volumeName: String
+    let usedBytes: Int64
+}
+
+struct StorageAnalysisShare: Identifiable, Equatable, Sendable {
+    var id: String { path }
+    let name: String
+    let path: String
+    let usedBytes: Int64
+    let fileCount: Int
+}
+
+struct StorageAnalysisCategory: Identifiable, Equatable, Sendable {
+    var id: String { name }
+    let name: String
+    let usedBytes: Int64
+    let fileCount: Int
+}
+
+struct StorageAnalysisOwner: Identifiable, Equatable, Sendable {
+    var id: String { name }
+    let name: String
+    let usedBytes: Int64
+    let fileCount: Int
+}
+
+struct StorageDuplicateGroup: Identifiable, Equatable, Sendable {
+    let id: String
+    let sizeBytes: Int64
+    let files: [FileItem]
+
+    var reclaimableBytes: Int64 {
+        Int64(max(files.count - 1, 0)) * sizeBytes
+    }
+}
+
+struct StorageAnalysisSnapshot: Equatable, Sendable {
+    let generatedAt: Date
+    let shares: [StorageAnalysisShare]
+    let categories: [StorageAnalysisCategory]
+    let owners: [StorageAnalysisOwner]
+    let largeFiles: [FileItem]
+    let recentlyModifiedFiles: [FileItem]
+    let leastRecentlyAccessedFiles: [FileItem]
+    let duplicateGroups: [StorageDuplicateGroup]
+    let scannedFileCount: Int
+    let scannedBytes: Int64
+    let duplicateCheckWasLimited: Bool
+    let duplicateCheckUnavailable: Bool
+}
+
+struct StorageAnalysisProgress: Equatable, Sendable {
+    let title: String
+    let completed: Int
+    let total: Int
+
+    var fraction: Double? {
+        guard total > 0 else { return nil }
+        return min(max(Double(completed) / Double(total), 0), 1)
+    }
+}
+
+private actor StorageAnalysisEngine {
+    private struct Usage {
+        var bytes: Int64 = 0
+        var count = 0
+
+        mutating func add(_ bytes: Int64) {
+            self.bytes += max(bytes, 0)
+            count += 1
+        }
+    }
+
+    private let repository: any FileRepository
+    private let maximumDuplicateCandidates = 400
+
+    init(repository: any FileRepository) {
+        self.repository = repository
+    }
+
+    func analyze(
+        progress: @escaping @MainActor @Sendable (StorageAnalysisProgress) -> Void
+    ) async throws -> StorageAnalysisSnapshot {
+        var shares: [FileItem] = []
+        var offset = 0
+        repeat {
+            let page = try await repository.listShares(offset: offset, limit: 200)
+            shares.append(
+                contentsOf: page.items.filter {
+                    guard !$0.isRecyclePath else { return false }
+                    guard let mountType = $0.mountPointType?.lowercased(), !mountType.isEmpty else {
+                        return true
+                    }
+                    return mountType == "normal"
+                }
+            )
+            offset += page.items.count
+            if !page.hasMore || page.items.isEmpty { break }
+        } while true
+
+        var allFiles: [FileItem] = []
+        var shareRows: [StorageAnalysisShare] = []
+        for (index, share) in shares.enumerated() {
+            try Task.checkCancellation()
+            await progress(
+                StorageAnalysisProgress(
+                    title: "正在分析“\(share.name)”",
+                    completed: index,
+                    total: shares.count
+                )
+            )
+            let files = try await repository.search(folderPath: share.path, query: "*")
+                .filter { $0.kind == .file && !$0.isRecyclePath }
+            let usedBytes = files.reduce(Int64(0)) { $0 + max($1.sizeBytes ?? 0, 0) }
+            shareRows.append(
+                StorageAnalysisShare(
+                    name: share.name,
+                    path: share.path,
+                    usedBytes: usedBytes,
+                    fileCount: files.count
+                )
+            )
+            allFiles.append(contentsOf: files)
+        }
+
+        await progress(
+            StorageAnalysisProgress(
+                title: "正在核对重复文件",
+                completed: 0,
+                total: 1
+            )
+        )
+        let duplicateResult = try await duplicateGroups(in: allFiles, progress: progress)
+        try Task.checkCancellation()
+
+        var categories: [String: Usage] = [:]
+        var owners: [String: Usage] = [:]
+        for file in allFiles {
+            let size = max(file.sizeBytes ?? 0, 0)
+            categories[Self.category(for: file), default: Usage()].add(size)
+            owners[file.owner?.isEmpty == false ? file.owner! : "未标明所有者", default: Usage()].add(size)
+        }
+
+        let categoryRows = categories.map {
+            StorageAnalysisCategory(name: $0.key, usedBytes: $0.value.bytes, fileCount: $0.value.count)
+        }
+        .sorted { $0.usedBytes > $1.usedBytes }
+        let ownerRows = owners.map {
+            StorageAnalysisOwner(name: $0.key, usedBytes: $0.value.bytes, fileCount: $0.value.count)
+        }
+        .sorted { $0.usedBytes > $1.usedBytes }
+        let largeFiles = Array(
+            allFiles.sorted { ($0.sizeBytes ?? 0) > ($1.sizeBytes ?? 0) }.prefix(200)
+        )
+        let recentFiles = Array(
+            allFiles
+                .filter { $0.times?.modifiedAt != nil }
+                .sorted { $0.times!.modifiedAt! > $1.times!.modifiedAt! }
+                .prefix(200)
+        )
+        let oldAccessFiles = Array(
+            allFiles
+                .filter { $0.times?.accessedAt != nil }
+                .sorted { $0.times!.accessedAt! < $1.times!.accessedAt! }
+                .prefix(200)
+        )
+
+        await progress(
+            StorageAnalysisProgress(
+                title: "分析完成",
+                completed: 1,
+                total: 1
+            )
+        )
+        return StorageAnalysisSnapshot(
+            generatedAt: Date(),
+            shares: shareRows.sorted { $0.usedBytes > $1.usedBytes },
+            categories: categoryRows,
+            owners: ownerRows,
+            largeFiles: largeFiles,
+            recentlyModifiedFiles: recentFiles,
+            leastRecentlyAccessedFiles: oldAccessFiles,
+            duplicateGroups: duplicateResult.groups,
+            scannedFileCount: allFiles.count,
+            scannedBytes: allFiles.reduce(Int64(0)) { $0 + max($1.sizeBytes ?? 0, 0) },
+            duplicateCheckWasLimited: duplicateResult.wasLimited,
+            duplicateCheckUnavailable: duplicateResult.wasUnavailable
+        )
+    }
+
+    private func duplicateGroups(
+        in files: [FileItem],
+        progress: @escaping @MainActor @Sendable (StorageAnalysisProgress) -> Void
+    ) async throws -> (groups: [StorageDuplicateGroup], wasLimited: Bool, wasUnavailable: Bool) {
+        let sameSizeGroups = Dictionary(
+            grouping: files.filter { ($0.sizeBytes ?? 0) > 0 },
+            by: { $0.sizeBytes! }
+        )
+        .values
+        .filter { $0.count > 1 }
+        .sorted { ($0.first?.sizeBytes ?? 0) > ($1.first?.sizeBytes ?? 0) }
+        let allCandidates = sameSizeGroups.flatMap { $0 }
+        let candidates = Array(allCandidates.prefix(maximumDuplicateCandidates))
+        var checksums: [String: [FileItem]] = [:]
+        var unavailable = false
+
+        for (index, file) in candidates.enumerated() {
+            try Task.checkCancellation()
+            await progress(
+                StorageAnalysisProgress(
+                    title: "正在核对重复文件",
+                    completed: index,
+                    total: candidates.count
+                )
+            )
+            do {
+                let checksum = try await repository.fileMD5(remotePath: file.path)
+                checksums["\(file.sizeBytes ?? 0):\(checksum)", default: []].append(file)
+            } catch let error as AppError where error.category == .apiUnavailable {
+                unavailable = true
+                break
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                continue
+            }
+        }
+
+        let groups = checksums.compactMap { key, files -> StorageDuplicateGroup? in
+            guard files.count > 1 else { return nil }
+            return StorageDuplicateGroup(
+                id: key,
+                sizeBytes: files.first?.sizeBytes ?? 0,
+                files: files.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+            )
+        }
+        .sorted { $0.reclaimableBytes > $1.reclaimableBytes }
+        return (groups, allCandidates.count > candidates.count, unavailable)
+    }
+
+    private static func category(for file: FileItem) -> String {
+        let ext = file.fileExtension?.lowercased() ?? ""
+        if ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp", "raw"].contains(ext) {
+            return "图片"
+        }
+        if ["mp4", "m4v", "mov", "avi", "mkv", "webm", "mpeg", "mpg", "ts", "m2ts"].contains(ext) {
+            return "视频"
+        }
+        if ["mp3", "m4a", "aac", "flac", "wav", "ogg", "ape", "alac"].contains(ext) {
+            return "音频"
+        }
+        if ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf", "pages", "numbers", "key"].contains(ext) {
+            return "文档"
+        }
+        if ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "dmg", "iso"].contains(ext) {
+            return "压缩包与镜像"
+        }
+        return ext.isEmpty ? "无扩展名" : "其他"
+    }
+}
+
 actor UnavailableNasAdministrationRepository: NasSettingsRepository {
     private func unavailable() -> AppError {
         AppError(
@@ -54,6 +319,11 @@ final class NasSettingsModel {
     private(set) var overview: NasSystemOverview?
     private(set) var performanceHistory: [NasPerformanceSnapshot] = []
     private(set) var storage: NasStorageSnapshot?
+    private(set) var storageUsageHistory: [StorageUsagePoint] = []
+    private(set) var storageAnalysis: StorageAnalysisSnapshot?
+    private(set) var storageAnalysisProgress: StorageAnalysisProgress?
+    private(set) var storageAnalysisError: String?
+    private(set) var isAnalyzingStorage = false
     private(set) var fileServices: NasFileServiceSettings?
     private(set) var terminal: NasTerminalSettings?
     private(set) var proxy: NasProxySettings?
@@ -84,11 +354,17 @@ final class NasSettingsModel {
     private var errors: [NasSettingsPage: String] = [:]
 
     @ObservationIgnored private let repository: any NasSettingsRepository
+    @ObservationIgnored private let storageAnalysisEngine: StorageAnalysisEngine?
+    @ObservationIgnored private var storageAnalysisTask: Task<Void, Never>?
     @ObservationIgnored private var requestGenerations: [NasSettingsPage: Int] = [:]
     @ObservationIgnored private var performanceGeneration = 0
 
-    init(repository: any NasSettingsRepository = UnavailableNasAdministrationRepository()) {
+    init(
+        repository: any NasSettingsRepository = UnavailableNasAdministrationRepository(),
+        fileRepository: (any FileRepository)? = nil
+    ) {
         self.repository = repository
+        self.storageAnalysisEngine = fileRepository.map(StorageAnalysisEngine.init(repository:))
     }
 
     func setModuleEnabled(_ enabled: Bool) {
@@ -107,6 +383,11 @@ final class NasSettingsModel {
         ddnsOperationIDs.removeAll()
         networkOperationIDs.removeAll()
         diskTestStatuses.removeAll()
+        storageAnalysisTask?.cancel()
+        storageAnalysisTask = nil
+        isAnalyzingStorage = false
+        storageAnalysisProgress = nil
+        storageAnalysisError = nil
         isSavingServiceSettings = false
         performanceIsLoading = false
         errors.removeAll()
@@ -148,7 +429,7 @@ final class NasSettingsModel {
         case .storage:
             await loadPage(.storage, operation: { [repository] in
                 try await repository.loadStorage()
-            }, apply: { storage = $0 })
+            }, apply: { applyStorage($0) })
         case .fileServices:
             await loadPage(.fileServices, operation: { [repository] in
                 try await repository.loadFileServiceSettings()
@@ -203,6 +484,65 @@ final class NasSettingsModel {
             await loadPage(.connections, operation: { [repository] in
                 try await repository.loadConnections(offset: 0, limit: 300)
             }, apply: { connections = $0 })
+        }
+    }
+
+    func beginStorageAnalysis() {
+        guard isModuleEnabled, !isAnalyzingStorage else { return }
+        guard let storageAnalysisEngine else {
+            storageAnalysisError = "当前连接暂不能分析文件占用，请重新连接后重试。"
+            return
+        }
+        storageAnalysisError = nil
+        isAnalyzingStorage = true
+        storageAnalysisProgress = StorageAnalysisProgress(
+            title: "正在准备分析",
+            completed: 0,
+            total: 0
+        )
+        storageAnalysisTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let snapshot = try await storageAnalysisEngine.analyze { [weak self] progress in
+                    self?.storageAnalysisProgress = progress
+                }
+                guard !Task.isCancelled else { return }
+                storageAnalysis = snapshot
+            } catch is CancellationError {
+                storageAnalysisError = nil
+            } catch let error as AppError {
+                storageAnalysisError = error.safeUserMessage
+            } catch {
+                storageAnalysisError = "分析没有完成，请检查连接后重试。"
+            }
+            isAnalyzingStorage = false
+            storageAnalysisProgress = nil
+            storageAnalysisTask = nil
+        }
+    }
+
+    func cancelStorageAnalysis() {
+        storageAnalysisTask?.cancel()
+        storageAnalysisTask = nil
+        isAnalyzingStorage = false
+        storageAnalysisProgress = nil
+    }
+
+    private func applyStorage(_ snapshot: NasStorageSnapshot) {
+        storage = snapshot
+        let now = Date()
+        let points = snapshot.volumes.compactMap { volume -> StorageUsagePoint? in
+            guard let used = volume.usedBytes else { return nil }
+            return StorageUsagePoint(
+                recordedAt: now,
+                volumeID: volume.id,
+                volumeName: volume.name,
+                usedBytes: used
+            )
+        }
+        storageUsageHistory.append(contentsOf: points)
+        if storageUsageHistory.count > 120 {
+            storageUsageHistory.removeFirst(storageUsageHistory.count - 120)
         }
     }
 

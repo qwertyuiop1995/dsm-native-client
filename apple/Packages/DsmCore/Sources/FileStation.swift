@@ -399,6 +399,8 @@ public protocol FileRepository: PhotoFileServing, Sendable {
     ) async throws
     func listArchiveItems(filePath: String, codepage: String?, password: String?) async throws -> [ArchiveItem]
     func search(folderPath: String, query: String) async throws -> [FileItem]
+    /// 使用 File Station 官方接口计算远程文件校验值。该操作只读，但大文件可能耗时较长。
+    func fileMD5(remotePath: String) async throws -> String
     func listFavorites() async throws -> [FavoriteLocation]
     func addFavorite(path: String, name: String) async throws
     func removeFavorite(path: String) async throws
@@ -426,6 +428,14 @@ public extension FileRepository {
             category: .apiUnavailable,
             isRetryable: false,
             safeUserMessage: "暂时无法识别这个文件的内容。"
+        )
+    }
+
+    func fileMD5(remotePath: String) async throws -> String {
+        throw AppError(
+            category: .apiUnavailable,
+            isRetryable: false,
+            safeUserMessage: "这台 NAS 暂不能校验重复文件。"
         )
     }
 

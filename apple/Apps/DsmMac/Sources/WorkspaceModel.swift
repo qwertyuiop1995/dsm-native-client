@@ -34,6 +34,9 @@ enum WorkspaceSection: Hashable, Identifiable {
     case transfers
     case chat
     case nasSettings
+    case downloadStation
+    case containerManager
+    case virtualMachineManager
     case settings
 
     var id: String {
@@ -48,6 +51,9 @@ enum WorkspaceSection: Hashable, Identifiable {
         case .transfers: "transfers"
         case .chat: "chat"
         case .nasSettings: "nas-settings"
+        case .downloadStation: "download-station"
+        case .containerManager: "container-manager"
+        case .virtualMachineManager: "virtual-machine-manager"
         case .settings: "settings"
         }
     }
@@ -56,7 +62,8 @@ enum WorkspaceSection: Hashable, Identifiable {
         switch self {
         case .files, .recycle, .favorites, .recent, .remoteLocations, .sharedLinks, .transfers:
             true
-        case .photos, .chat, .nasSettings, .settings:
+        case .photos, .chat, .nasSettings, .downloadStation, .containerManager,
+             .virtualMachineManager, .settings:
             false
         }
     }
@@ -326,6 +333,7 @@ final class WorkspaceModel {
     let photoLibrary: PhotoLibraryModel
     let chat: ChatWorkspaceModel
     let nasSettings: NasSettingsModel
+    let serviceManagement: ServiceManagementModel
 
     var shares: [FileItem] = []
     var recycleRoots: [FileItem] = []
@@ -412,6 +420,42 @@ final class WorkspaceModel {
             }
         }
     }
+    var isDownloadStationModuleEnabled: Bool = true {
+        didSet {
+            Self.saveModuleEnabled(
+                isDownloadStationModuleEnabled,
+                for: profile.id,
+                module: "DownloadStation"
+            )
+            if !isDownloadStationModuleEnabled, section == .downloadStation {
+                section = .settings
+            }
+        }
+    }
+    var isContainerManagerModuleEnabled: Bool = true {
+        didSet {
+            Self.saveModuleEnabled(
+                isContainerManagerModuleEnabled,
+                for: profile.id,
+                module: "ContainerManager"
+            )
+            if !isContainerManagerModuleEnabled, section == .containerManager {
+                section = .settings
+            }
+        }
+    }
+    var isVirtualMachineManagerModuleEnabled: Bool = true {
+        didSet {
+            Self.saveModuleEnabled(
+                isVirtualMachineManagerModuleEnabled,
+                for: profile.id,
+                module: "VirtualMachineManager"
+            )
+            if !isVirtualMachineManagerModuleEnabled, section == .virtualMachineManager {
+                section = .settings
+            }
+        }
+    }
     private var dragMoveUndo: DragMoveUndo?
     @ObservationIgnored private var toastDismissTask: Task<Void, Never>?
 
@@ -481,6 +525,8 @@ final class WorkspaceModel {
         repository: any FileRepository,
         chatRepository: any ChatRepository = UnverifiedDsmChatRepository(),
         nasSettingsRepository: any NasSettingsRepository = UnavailableNasAdministrationRepository(),
+        serviceManagementRepository: any ServiceManagementRepository =
+            UnavailableServiceManagementRepository(),
         transferNotifier: any TransferNotifying = TransferNotifierFactory.makeDefault()
     ) {
         self.profile = profile
@@ -498,7 +544,14 @@ final class WorkspaceModel {
             currentAccountName: profile.usernameHint,
             profileID: profile.id
         )
-        self.nasSettings = NasSettingsModel(repository: nasSettingsRepository)
+        self.nasSettings = NasSettingsModel(
+            repository: nasSettingsRepository,
+            fileRepository: repository
+        )
+        self.serviceManagement = ServiceManagementModel(
+            repository: serviceManagementRepository,
+            fileRepository: repository
+        )
         self.isFileModuleEnabled = Self.loadModuleEnabled(for: profile.id, module: "FileStation", legacyKey: "LanStash_Module_FileStation")
         self.isPhotosModuleEnabled = Self.loadModuleEnabled(for: profile.id, module: "Photos", legacyKey: "LanStash_Module_Photos")
         self.isChatModuleEnabled = Self.loadModuleEnabled(for: profile.id, module: "Chat", legacyKey: "LanStash_Module_Chat")
@@ -517,6 +570,21 @@ final class WorkspaceModel {
             self.isNasSettingsModuleEnabled,
             for: profile.id,
             module: "NASSettings"
+        )
+        self.isDownloadStationModuleEnabled = Self.loadModuleEnabled(
+            for: profile.id,
+            module: "DownloadStation",
+            legacyKey: "LanStash_Module_DownloadStation"
+        )
+        self.isContainerManagerModuleEnabled = Self.loadModuleEnabled(
+            for: profile.id,
+            module: "ContainerManager",
+            legacyKey: "LanStash_Module_ContainerManager"
+        )
+        self.isVirtualMachineManagerModuleEnabled = Self.loadModuleEnabled(
+            for: profile.id,
+            module: "VirtualMachineManager",
+            legacyKey: "LanStash_Module_VirtualMachineManager"
         )
         if let data = UserDefaults.standard.data(forKey: "LanStash_RecentLocations_\(profile.id.uuidString)"),
            let saved = try? JSONDecoder().decode([FavoriteLocation].self, from: data) {
@@ -670,6 +738,21 @@ final class WorkspaceModel {
             await nasSettings.activate()
             return
         }
+        if isDownloadStationModuleEnabled {
+            section = .downloadStation
+            await serviceManagement.activate(.downloads)
+            return
+        }
+        if isContainerManagerModuleEnabled {
+            section = .containerManager
+            await serviceManagement.activate(.containers)
+            return
+        }
+        if isVirtualMachineManagerModuleEnabled {
+            section = .virtualMachineManager
+            await serviceManagement.activate(.virtualMachines)
+            return
+        }
         section = .settings
     }
 
@@ -729,6 +812,15 @@ final class WorkspaceModel {
         case .nasSettings:
             guard isNasSettingsModuleEnabled else { return }
             await nasSettings.activate()
+        case .downloadStation:
+            guard isDownloadStationModuleEnabled else { return }
+            await serviceManagement.activate(.downloads)
+        case .containerManager:
+            guard isContainerManagerModuleEnabled else { return }
+            await serviceManagement.activate(.containers)
+        case .virtualMachineManager:
+            guard isVirtualMachineManagerModuleEnabled else { return }
+            await serviceManagement.activate(.virtualMachines)
         case .favorites, .recent, .remoteLocations, .sharedLinks, .transfers:
             guard isFileModuleEnabled else { return }
         case .settings:

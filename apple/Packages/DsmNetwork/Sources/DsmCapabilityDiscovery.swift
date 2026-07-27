@@ -16,6 +16,7 @@ public enum DsmAPIName {
     public static let fileStationCompress = "SYNO.FileStation.Compress"
     public static let fileStationExtract = "SYNO.FileStation.Extract"
     public static let fileStationSearch = "SYNO.FileStation.Search"
+    public static let fileStationMD5 = "SYNO.FileStation.MD5"
     public static let fileStationFavorite = "SYNO.FileStation.Favorite"
     public static let fileStationSharing = "SYNO.FileStation.Sharing"
     public static let fileStationVirtualFolder = "SYNO.FileStation.VirtualFolder"
@@ -43,6 +44,42 @@ public enum DsmAPIName {
     public static let chatPostVote = "SYNO.Chat.Post.Vote"
     /// Synology Chat 定时消息内部接口。
     public static let chatPostSchedule = "SYNO.Chat.Post.Schedule"
+    // Download Station 公开接口。
+    public static let downloadStationInfo = "SYNO.DownloadStation.Info"
+    public static let downloadStationSchedule = "SYNO.DownloadStation.Schedule"
+    public static let downloadStationTask = "SYNO.DownloadStation.Task"
+    public static let downloadStationStatistic = "SYNO.DownloadStation.Statistic"
+    public static let downloadStationRSSSite = "SYNO.DownloadStation.RSS.Site"
+    public static let downloadStationRSSFeed = "SYNO.DownloadStation.RSS.Feed"
+    public static let downloadStationBTSearch = "SYNO.DownloadStation.BTSearch"
+    // Download Station 2 套件内部接口，只在公开接口不可用时降级使用。
+    public static let downloadStation2Task = "SYNO.DownloadStation2.Task"
+    public static let downloadStation2Statistic = "SYNO.DownloadStation2.Task.Statistic"
+    public static let downloadStation2Location = "SYNO.DownloadStation2.Settings.Location"
+    public static let downloadStation2RSSFeed = "SYNO.DownloadStation2.RSS.Feed"
+    // Virtual Machine Manager 公开接口。
+    public static let virtualizationAPIGuest = "SYNO.Virtualization.API.Guest"
+    public static let virtualizationAPIGuestAction = "SYNO.Virtualization.API.Guest.Action"
+    public static let virtualizationAPIGuestImage = "SYNO.Virtualization.API.Guest.Image"
+    public static let virtualizationAPIHost = "SYNO.Virtualization.API.Host"
+    public static let virtualizationAPIStorage = "SYNO.Virtualization.API.Storage"
+    public static let virtualizationAPINetwork = "SYNO.Virtualization.API.Network"
+    // VMM 当前网页使用的内部接口。
+    public static let virtualizationGuest = "SYNO.Virtualization.Guest"
+    public static let virtualizationGuestAction = "SYNO.Virtualization.Guest.Action"
+    public static let virtualizationGuestImage = "SYNO.Virtualization.Guest.Image"
+    public static let virtualizationHost = "SYNO.Virtualization.Host"
+    public static let virtualizationRepo = "SYNO.Virtualization.Repo"
+    public static let virtualizationNetwork = "SYNO.Virtualization.Network"
+    public static let virtualizationProtectionPlan = "SYNO.Virtualization.GuestProtect.Plan"
+    public static let virtualizationLog = "SYNO.Virtualization.Log"
+    // Container Manager 仅有内部接口，必须逐项能力发现。
+    public static let dockerContainer = "SYNO.Docker.Container"
+    public static let dockerImage = "SYNO.Docker.Image"
+    public static let dockerRegistry = "SYNO.Docker.Registry"
+    public static let dockerNetwork = "SYNO.Docker.Network"
+    public static let dockerProject = "SYNO.Docker.Project"
+    public static let dockerLog = "SYNO.Docker.Log"
     // 以下均为 DSM 内部只读接口，仅在能力发现明确返回时使用。
     public static let coreSystem = "SYNO.Core.System"
     public static let coreSystemUtilization = "SYNO.Core.System.Utilization"
@@ -158,6 +195,7 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationCompress,
         DsmAPIName.fileStationExtract,
         DsmAPIName.fileStationSearch,
+        DsmAPIName.fileStationMD5,
         DsmAPIName.fileStationFavorite,
         DsmAPIName.fileStationSharing,
         DsmAPIName.fileStationVirtualFolder,
@@ -173,6 +211,37 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.chatPostReminder,
         DsmAPIName.chatPostVote,
         DsmAPIName.chatPostSchedule,
+        DsmAPIName.downloadStationTask,
+        DsmAPIName.downloadStationInfo,
+        DsmAPIName.downloadStationSchedule,
+        DsmAPIName.downloadStationStatistic,
+        DsmAPIName.downloadStationRSSSite,
+        DsmAPIName.downloadStationRSSFeed,
+        DsmAPIName.downloadStationBTSearch,
+        DsmAPIName.downloadStation2Task,
+        DsmAPIName.downloadStation2Statistic,
+        DsmAPIName.downloadStation2Location,
+        DsmAPIName.downloadStation2RSSFeed,
+        DsmAPIName.virtualizationAPIGuest,
+        DsmAPIName.virtualizationAPIGuestAction,
+        DsmAPIName.virtualizationAPIGuestImage,
+        DsmAPIName.virtualizationAPIHost,
+        DsmAPIName.virtualizationAPIStorage,
+        DsmAPIName.virtualizationAPINetwork,
+        DsmAPIName.virtualizationGuest,
+        DsmAPIName.virtualizationGuestAction,
+        DsmAPIName.virtualizationGuestImage,
+        DsmAPIName.virtualizationHost,
+        DsmAPIName.virtualizationRepo,
+        DsmAPIName.virtualizationNetwork,
+        DsmAPIName.virtualizationProtectionPlan,
+        DsmAPIName.virtualizationLog,
+        DsmAPIName.dockerContainer,
+        DsmAPIName.dockerImage,
+        DsmAPIName.dockerRegistry,
+        DsmAPIName.dockerNetwork,
+        DsmAPIName.dockerProject,
+        DsmAPIName.dockerLog,
         DsmAPIName.coreSystem,
         DsmAPIName.coreSystemUtilization,
         DsmAPIName.storageOverview,
@@ -314,6 +383,7 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationCompress: 3...3,
         DsmAPIName.fileStationExtract: 2...2,
         DsmAPIName.fileStationSearch: 1...2,
+        DsmAPIName.fileStationMD5: 1...2,
         DsmAPIName.fileStationFavorite: 1...2,
         DsmAPIName.fileStationSharing: 1...3,
         DsmAPIName.fileStationVirtualFolder: 1...2,
@@ -330,6 +400,37 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.chatPostReminder: 1...1,
         DsmAPIName.chatPostVote: 1...1,
         DsmAPIName.chatPostSchedule: 1...1,
+        DsmAPIName.downloadStationTask: 1...3,
+        DsmAPIName.downloadStationInfo: 1...2,
+        DsmAPIName.downloadStationSchedule: 1...1,
+        DsmAPIName.downloadStationStatistic: 1...1,
+        DsmAPIName.downloadStationRSSSite: 1...1,
+        DsmAPIName.downloadStationRSSFeed: 1...1,
+        DsmAPIName.downloadStationBTSearch: 1...1,
+        DsmAPIName.downloadStation2Task: 1...2,
+        DsmAPIName.downloadStation2Statistic: 1...1,
+        DsmAPIName.downloadStation2Location: 1...1,
+        DsmAPIName.downloadStation2RSSFeed: 1...1,
+        DsmAPIName.virtualizationAPIGuest: 1...1,
+        DsmAPIName.virtualizationAPIGuestAction: 1...1,
+        DsmAPIName.virtualizationAPIGuestImage: 1...1,
+        DsmAPIName.virtualizationAPIHost: 1...1,
+        DsmAPIName.virtualizationAPIStorage: 1...1,
+        DsmAPIName.virtualizationAPINetwork: 1...1,
+        DsmAPIName.virtualizationGuest: 1...2,
+        DsmAPIName.virtualizationGuestAction: 1...1,
+        DsmAPIName.virtualizationGuestImage: 1...2,
+        DsmAPIName.virtualizationHost: 1...2,
+        DsmAPIName.virtualizationRepo: 1...2,
+        DsmAPIName.virtualizationNetwork: 1...2,
+        DsmAPIName.virtualizationProtectionPlan: 1...2,
+        DsmAPIName.virtualizationLog: 1...1,
+        DsmAPIName.dockerContainer: 1...1,
+        DsmAPIName.dockerImage: 1...1,
+        DsmAPIName.dockerRegistry: 1...1,
+        DsmAPIName.dockerNetwork: 1...1,
+        DsmAPIName.dockerProject: 1...1,
+        DsmAPIName.dockerLog: 1...1,
         // 内部接口版本以运行时能力发现为准；这里仅限制已知的兼容区间。
         DsmAPIName.coreSystem: 1...3,
         DsmAPIName.coreSystemUtilization: 1...1,

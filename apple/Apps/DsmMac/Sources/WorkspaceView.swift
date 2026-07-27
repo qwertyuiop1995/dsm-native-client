@@ -440,6 +440,12 @@ struct WorkspaceView: View {
             return "消息"
         case .nasSettings:
             return "NAS 设置"
+        case .downloadStation:
+            return "下载管理"
+        case .containerManager:
+            return "容器管理"
+        case .virtualMachineManager:
+            return "虚拟机管理"
         case .settings:
             return "设置"
         default:
@@ -510,6 +516,12 @@ struct WorkspaceView: View {
             ChatWorkspaceView(model: model.chat)
         case .nasSettings:
             NasSettingsView(model: model.nasSettings)
+        case .downloadStation:
+            ServiceManagementView(module: .downloads, model: model.serviceManagement)
+        case .containerManager:
+            ServiceManagementView(module: .containers, model: model.serviceManagement)
+        case .virtualMachineManager:
+            ServiceManagementView(module: .virtualMachines, model: model.serviceManagement)
         case .settings:
             SettingsView(model: model, onRenameNAS: onRenameNAS)
         default:
@@ -818,6 +830,31 @@ private final class FloatingPreviewWindowController: NSObject, NSWindowDelegate 
     }
 }
 
+private struct SidebarModuleLabel: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .symbolVariant(.fill)
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 22, height: 20, alignment: .center)
+                .accessibilityHidden(true)
+            Text(title)
+                .lineLimit(1)
+        }
+        .foregroundStyle(
+            isSelected
+                ? Color(nsColor: .alternateSelectedControlTextColor)
+                : tint
+        )
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct SidebarView: View {
     @Bindable var model: WorkspaceModel
     let profiles: [NasProfile]
@@ -828,6 +865,8 @@ private struct SidebarView: View {
     let onMoveProfiles: (IndexSet, Int) -> Void
     let onLogout: () async -> Void
 
+    @AppStorage("sidebar_file_management_expanded") private var isFileManagementExpanded = false
+    @AppStorage("sidebar_package_management_expanded") private var isPackageManagementExpanded = false
     @State private var isNasListExpanded = true
     @State private var connectingProfileID: UUID? = nil
     @State private var confirmsLogout = false
@@ -894,22 +933,53 @@ private struct SidebarView: View {
             }
 
             if model.isFileModuleEnabled {
-                Section("文件管理") {
+                let isFileChildSelected = [
+                    WorkspaceSection.favorites,
+                    .recent,
+                    .remoteLocations,
+                    .sharedLinks
+                ].contains(model.section)
+                let showFileDetails = isFileManagementExpanded || isFileChildSelected
+
+                Section {
                     NavigationLink(value: model.currentFileSection) {
-                        Label("文件浏览器", systemImage: "folder.fill")
-                            .foregroundStyle(.blue)
+                        SidebarModuleLabel(
+                            title: "文件浏览器",
+                            systemImage: "folder",
+                            tint: .blue,
+                            isSelected: model.section == model.currentFileSection
+                        )
                     }
-                    NavigationLink(value: WorkspaceSection.favorites) {
-                        Label("收藏", systemImage: "star.fill")
+
+                    if showFileDetails {
+                        NavigationLink(value: WorkspaceSection.favorites) {
+                            Label("收藏", systemImage: "star.fill")
+                        }
+                        NavigationLink(value: WorkspaceSection.recent) {
+                            Label("最近访问", systemImage: "clock")
+                        }
+                        NavigationLink(value: WorkspaceSection.remoteLocations) {
+                            Label("远程位置", systemImage: "network")
+                        }
+                        NavigationLink(value: WorkspaceSection.sharedLinks) {
+                            Label("分享管理", systemImage: "link")
+                        }
                     }
-                    NavigationLink(value: WorkspaceSection.recent) {
-                        Label("最近访问", systemImage: "clock")
-                    }
-                    NavigationLink(value: WorkspaceSection.remoteLocations) {
-                        Label("远程位置", systemImage: "network")
-                    }
-                    NavigationLink(value: WorkspaceSection.sharedLinks) {
-                        Label("分享管理", systemImage: "link")
+                } header: {
+                    HStack {
+                        Text("文件管理")
+                        Spacer()
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                isFileManagementExpanded.toggle()
+                            }
+                        } label: {
+                            Image(systemName: showFileDetails ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.tertiary)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -917,8 +987,12 @@ private struct SidebarView: View {
             if model.isPhotosModuleEnabled {
                 Section("照片管理") {
                     NavigationLink(value: WorkspaceSection.photos) {
-                        Label("照片", systemImage: "photo.on.rectangle.angled")
-                            .foregroundStyle(.orange)
+                        SidebarModuleLabel(
+                            title: "照片",
+                            systemImage: "photo.on.rectangle.angled",
+                            tint: .orange,
+                            isSelected: model.section == .photos
+                        )
                     }
                 }
             }
@@ -926,9 +1000,68 @@ private struct SidebarView: View {
             if model.isChatModuleEnabled {
                 Section("沟通") {
                     NavigationLink(value: WorkspaceSection.chat) {
-                        Label("消息", systemImage: "bubble.left.and.bubble.right.fill")
-                            .foregroundStyle(.indigo)
-                            .badge(model.chat.totalUnreadCount)
+                        SidebarModuleLabel(
+                            title: "消息",
+                            systemImage: "bubble.left.and.bubble.right",
+                            tint: .indigo,
+                            isSelected: model.section == .chat
+                        )
+                        .badge(model.chat.totalUnreadCount)
+                    }
+                }
+            }
+
+            let enabledPackages: [(section: WorkspaceSection, title: String, icon: String, tint: Color)] = [
+                model.isDownloadStationModuleEnabled ? (WorkspaceSection.downloadStation, "下载管理", "arrow.down.circle", Color.green) : nil,
+                model.isContainerManagerModuleEnabled ? (WorkspaceSection.containerManager, "容器管理", "shippingbox", Color.blue) : nil,
+                model.isVirtualMachineManagerModuleEnabled ? (WorkspaceSection.virtualMachineManager, "虚拟机管理", "desktopcomputer", Color.indigo) : nil
+            ].compactMap { $0 }
+
+            if !enabledPackages.isEmpty {
+                let firstPackage = enabledPackages[0]
+                let remainingPackages = enabledPackages.dropFirst()
+                let isPackageChildSelected = remainingPackages.contains { $0.section == model.section }
+                let showPackageDetails = isPackageManagementExpanded || isPackageChildSelected
+
+                Section {
+                    NavigationLink(value: firstPackage.section) {
+                        SidebarModuleLabel(
+                            title: firstPackage.title,
+                            systemImage: firstPackage.icon,
+                            tint: firstPackage.tint,
+                            isSelected: model.section == firstPackage.section
+                        )
+                    }
+
+                    if enabledPackages.count > 1 && showPackageDetails {
+                        ForEach(Array(remainingPackages), id: \.section) { pkg in
+                            NavigationLink(value: pkg.section) {
+                                SidebarModuleLabel(
+                                    title: pkg.title,
+                                    systemImage: pkg.icon,
+                                    tint: pkg.tint,
+                                    isSelected: model.section == pkg.section
+                                )
+                            }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("套件管理")
+                        if enabledPackages.count > 1 {
+                            Spacer()
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    isPackageManagementExpanded.toggle()
+                                }
+                            } label: {
+                                Image(systemName: showPackageDetails ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.tertiary)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
             }
@@ -936,8 +1069,12 @@ private struct SidebarView: View {
             Section {
                 if model.isNasSettingsModuleEnabled {
                     NavigationLink(value: WorkspaceSection.nasSettings) {
-                        Label("NAS 设置", systemImage: "server.rack")
-                            .foregroundStyle(.teal)
+                        SidebarModuleLabel(
+                            title: "NAS 设置",
+                            systemImage: "server.rack",
+                            tint: .teal,
+                            isSelected: model.section == .nasSettings
+                        )
                     }
                 }
                 if model.isFileModuleEnabled {
@@ -3830,6 +3967,45 @@ private struct SettingsView: View {
                                 Text("NAS 设置")
                                     .font(.body.weight(.medium))
                                 Text("查看系统性能、存储与硬盘、套件、计划任务、账号、系统日志和当前连接。")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+
+                        Divider().opacity(0.3)
+
+                        Toggle(isOn: $model.isDownloadStationModuleEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("下载管理")
+                                    .font(.body.weight(.medium))
+                                Text("添加和管理 NAS 下载任务，查看进度、速度和完成状态。")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+
+                        Divider().opacity(0.3)
+
+                        Toggle(isOn: $model.isContainerManagerModuleEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("容器管理")
+                                    .font(.body.weight(.medium))
+                                Text("查看和控制容器、映像、网络、项目与活动记录。")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+
+                        Divider().opacity(0.3)
+
+                        Toggle(isOn: $model.isVirtualMachineManagerModuleEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("虚拟机管理")
+                                    .font(.body.weight(.medium))
+                                Text("查看虚拟机、主机、存储、网络、映像和保护状态。")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

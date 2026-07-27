@@ -1,6 +1,6 @@
 # 当前开发进度
 
-> 最后更新：2026-07-26
+> 最后更新：2026-07-27
 > 当前里程碑：`macOS 文件客户端实机验收与稳定性收敛`
 
 ## 总体状态
@@ -43,6 +43,7 @@
 | 安全删除 | 已实现确认、权限检查、任务轮询和结果校验 | 完成不同共享目录回收站设置的真实验证 |
 | 回收站恢复 | 已实现候选路径和受兼容开关保护的恢复流程 | 必须按 DSM build 验证后才能标记完成 |
 | NAS 设置 | 已实现单一开关、关闭即停止请求、性能趋势、真实系统更新检查、存储详情、S.M.A.R.T. 检测、套件、任务及运行记录、账号/群组、系统日志、当前连接、文件服务、物理网卡、DDNS、区域时间、防火墙基础控制和 UPS；危险操作具备能力/状态检查、确认、防重复和结果复查 | 使用专用测试目标验证可能断网/改时/停电联动的写操作、普通账号与 QuickConnect；完整共享文件夹复合管理、防火墙规则编辑和电源日程仍需原子流程与专用目标验收 |
+| 统一存储管理（新增组合功能） | 由群晖“存储管理器”与“存储空间分析器”两个官方组件合并而成；macOS 已在一个入口提供容量/健康、卷/存储池/硬盘、共享文件夹、类型、所有者、大文件、文件时间和重复内容分析 | 验证大目录、取消、权限、QuickConnect 和官方 MD5 任务；套件历史报告与计划任务待取得版本化契约 |
 
 ## 已识别但未实现的能力
 
@@ -51,14 +52,13 @@
 ### File Station 扩展
 - `SYNO.FileStation.BackgroundTask` 后台任务汇总
 - `SYNO.FileStation.DirSize` 异步目录大小
-- `SYNO.FileStation.MD5` 异步文件 MD5
 - `SYNO.FileStation.VFS.Connection` / `SYNO.Entry.Request` 批量与 VFS 扩展
 - 照片页回收站恢复直接入口
 
 ### 其他 DSM 套件与功能
-- **Download Station**：`SYNO.DownloadStation.*` 官方接口与 `SYNO.DownloadStation2.*` 内部适配（任务列表、创建、暂停/继续、删除、BT Tracker/Peer、RSS、BT 搜索）
-- **Virtual Machine Manager**：`SYNO.Virtualization.API.*` / `SYNO.Virtualization.*` 虚拟机生命周期、电源控制、镜像管理
-- **Container Manager / Docker**：`SYNO.Docker.*` 容器、镜像、网络、项目管理
+- **Download Station 待补齐**：BT Tracker/Peer、实际 BT 搜索提交、RSS 完整编辑，以及高级 BT、监听目录、NZB 服务器、RSS 与通知设置；任务文件上传和官方基础设置已接入
+- **Virtual Machine Manager 待补齐**：虚拟盘/多网卡高级编辑、迁移、克隆、导入导出、快照恢复、保护计划编辑和异步任务中心；基础创建、常规修改和独立可全屏远程控制台已接入
+- **Container Manager / Docker 待补齐**：完整容器创建/编辑向导、项目 Compose 编辑、私有 Registry 管理、终端、日志流与导入导出；Docker Hub 搜索、标签选择和下载启动已接入
 - **系统与硬件**：系统、存储、套件、计划任务、账号、日志和连接已统一进入 NAS 设置模块；文件服务、SSH/Telnet、互联网代理、物理网卡、DDNS、区域时间、QuickConnect、断电恢复、设备灯光、风扇/提示音/休眠、UPS 与防火墙基础控制已接入真实读写与回读复查；套件安装/升级、存储修复/擦除、进程、电源日程、完整防火墙规则以及共享文件夹的加密/权限/WORM/配额复合管理仍需独立原子流程
 - **Synology Chat**：已建立普通用户聊天契约与独立内部适配器；公开 `SYNO.Chat.External` 不用于普通用户聊天。第一批 `SYNO.Chat.*` 能力已按运行时发现接入，首次单聊、单附件上传/缩略图/保存、图片单击预览、HEIC/HEIF 本机预览兜底、工作区级未读同步、会话本地已读、按 NAS 持久化的本地会话置顶、Socket.IO 实时刷新及轮询降级、提醒设置/列表/取消、纯文字定时消息及无附件投票创建已实现，真实行为待验收；官方云端 Star 写入契约、服务器已读回写、语音、投票参与和加密仍待实现
 - **其他套件**：Audio Station、Video Station、Note Station、Synology Drive、Calendar、Contacts、Surveillance Station、Hyper Backup / Active Backup、Synology Office
@@ -67,11 +67,11 @@
 - iPhone、iPad、Android、Windows 原生客户端工程尚未初始化
 - 系统照片库自动备份、后台上传、释放设备空间、离线任务恢复
 
-状态：Synology Chat 和 NAS 设置已进入实现或验证阶段，其余为`未开始/计划`。接入时必须按 DSM build 和套件版本完成能力发现、契约测试和功能开关保护。
+状态：Download Station、Virtual Machine Manager 与 Container Manager 已进入 macOS 第一阶段实现。任务/资源列表、核心生命周期操作、按 NAS 功能开关和危险操作确认已接入；Download Station 已增加任务文件上传、网址输入与官方基础设置，VMM 已增加分步创建、常规设置修改和独立可全屏 noVNC 远程控制台。BT Tracker/Peer、RSS 完整编辑、高级下载设置、容器完整创建/编辑/终端/日志流、VMM 高级磁盘/网络编辑、迁移和导入导出仍需继续补齐。所有内部接口写操作在专用测试目标验收前保持“已实现、未实机验证”状态。
 
 ## 自动化验证
 
-- Apple 共享包完整测试：共执行 217 项，1 项需要真实环境的可选测试跳过，0 项失败。
+- Apple 共享包完整测试：共执行 233 项，1 项需要真实环境的可选测试跳过，0 项失败。
 - `DsmMac` Debug、无代码签名构建通过。
 - 本地化文件和 Git 差异格式检查通过。
 - 自动化通过不替代真实 NAS 权限、网络、套件版本和回收站行为验证。

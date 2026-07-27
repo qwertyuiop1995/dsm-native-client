@@ -539,6 +539,18 @@ destination=<OPTIONAL_SHARED_FOLDER>
 
 上传 `.torrent` 或 `.nzb` 时应按官方文档使用 multipart 请求。磁力链接、下载 URL、文件名和 tracker 地址都可能包含隐私，不得写入分析日志。
 
+macOS 客户端同时接受 `.txt` 网址清单并作为官方 `file` 字段上传。`destination` 与 `unzip_password` 放在 multipart 正文中，任务文件保持为最后一个正文部分；解压密码不得进入请求地址或日志。
+
+#### 基础设置
+
+```text
+api=SYNO.DownloadStation.Info
+version=1
+method=getconfig|setserverconfig
+```
+
+当前共享契约覆盖默认保存位置、eMule、自动解压，以及 BT、HTTP/FTP、NZB 和 eMule 的速度限制。下载计划通过 `SYNO.DownloadStation.Schedule.getconfig/setconfig` 独立读取和保存。HTTP 与 FTP 在官方接口中共用实际限速配置，客户端以一个“网页与 FTP 下载”字段呈现；所有保存操作完成后必须重新读取并核对结果。
+
 #### 控制任务
 
 ```text

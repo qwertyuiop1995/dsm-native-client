@@ -5,6 +5,39 @@ import XCTest
 @testable import DsmNetwork
 
 final class DsmFileRepositoryTests: XCTestCase {
+    func test使用官方接口计算文件校验值且不在地址暴露路径() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(
+                data: Data(#"{"success":true,"data":{"taskid":"md5-task"}}"#.utf8),
+                statusCode: 200
+            ),
+            DsmHTTPResponse(
+                data: Data(#"{"success":true,"data":{"finished":false}}"#.utf8),
+                statusCode: 200
+            ),
+            DsmHTTPResponse(
+                data: Data(#"{"success":true,"data":{"finished":true,"md5":"6336C5A59AA63DD2042783F88E15410A"}}"#.utf8),
+                statusCode: 200
+            )
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationMD5: capability(DsmAPIName.fileStationMD5, version: 2)
+            ]),
+            transport: transport
+        )
+
+        let checksum = try await repository.fileMD5(remotePath: "/共享/示例.zip")
+
+        XCTAssertEqual(checksum, "6336c5a59aa63dd2042783f88e15410a")
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 3)
+        XCTAssertEqual(requestParameter("method", in: requests[0]), "start")
+        XCTAssertEqual(requestParameter("file_path", in: requests[0]), "/共享/示例.zip")
+        XCTAssertEqual(requestParameter("method", in: requests[1]), "status")
+        XCTAssertFalse(requests.contains { $0.url?.absoluteString.contains("/共享/示例.zip") == true })
+    }
+
     func test解析共享文件夹与附加信息() async throws {
         let response = DsmHTTPResponse(
             data: Data(

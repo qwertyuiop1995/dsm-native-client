@@ -25,6 +25,8 @@ macOS 当前重点：
 - [DSM Web API 参考](docs/api/DSM_WEB_API_REFERENCE_ZH.md)
 - [当前开发与验收计划](docs/development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)
 - [Synology Chat 原生聊天功能开发计划](docs/development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)
+- [DSM 套件管理三端实现计划](docs/development/NATIVE_DSM_SERVICE_MANAGEMENT_PLAN_ZH.md)
+- [“统一存储管理”新功能三端实现计划](docs/development/NATIVE_DSM_STORAGE_MANAGEMENT_PLAN_ZH.md)
 - [第一阶段开发文档归档](docs/archive/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_V1_ARCHIVE_ZH.md)
 - [当前进度](docs/progress/STATUS.md)
 - [产品路线图](docs/progress/ROADMAP.md)
@@ -55,6 +57,8 @@ tools/       契约校验和样本脱敏工具
 ## 构建状态
 
 macOS 参考工程已形成完整的文件客户端源码闭环，包含多 NAS 与 QuickConnect、安全登录、目录浏览与搜索、账号可见空间、收藏和最近访问、SMB/NFS 远程位置管理、缩略图和多格式预览、文本编辑、上传下载、文件夹 ZIP 下载、复制移动、拖拽、压缩解压、分享链接、传输中心、系统通知以及应用存储管理。远程位置、删除和回收站恢复等高影响能力仍受能力发现、确认、结果校验和兼容开关保护。
+
+macOS 新增“统一存储管理”功能：它不是群晖现有的单一官方套件，而是把“存储管理器”的容量、存储池、卷与硬盘健康能力，和“存储空间分析器”的文件占用、类型、大文件、时间、所有者及重复内容分析合并到同一个原生入口。
 
 上述状态表示代码路径和自动化测试已经建立；尚未完成兼容矩阵记录的能力仍需在真实 NAS 上验收。iPhone、iPad、Android 与 Windows 的原生客户端目录继续保留，后续按平台路线图实现。
 

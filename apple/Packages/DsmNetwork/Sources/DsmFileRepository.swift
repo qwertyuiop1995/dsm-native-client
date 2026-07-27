@@ -258,6 +258,11 @@ private struct TaskStartPayload: Decodable, Sendable {
     let taskid: String
 }
 
+private struct FileMD5StatusPayload: Decodable, Sendable {
+    let finished: Bool
+    let md5: String?
+}
+
 private struct ArchiveListPayload: Decodable, Sendable {
     let items: [ArchiveItemPayload]?
 }
@@ -1549,6 +1554,61 @@ public actor DsmFileRepository: FileRepository {
             }
         } catch {
             try? await stopSearch(capability: capability, taskID: start.taskid)
+            throw translate(error)
+        }
+    }
+
+    public func fileMD5(remotePath: String) async throws -> String {
+        let capability = try requireCapability(DsmAPIName.fileStationMD5)
+        let start = try await client.call(
+            path: capability.path,
+            api: capability.name,
+            version: try selectedVersion(capability),
+            method: "start",
+            requestFormat: capability.requestFormat,
+            parameters: ["file_path": .string(remotePath)],
+            credential: credential,
+            as: TaskStartPayload.self
+        )
+
+        do {
+            var delay: UInt64 = 250_000_000
+            while true {
+                try Task.checkCancellation()
+                let status = try await client.call(
+                    path: capability.path,
+                    api: capability.name,
+                    version: try selectedVersion(capability),
+                    method: "status",
+                    requestFormat: capability.requestFormat,
+                    parameters: ["taskid": .string(start.taskid)],
+                    credential: credential,
+                    as: FileMD5StatusPayload.self
+                )
+                if status.finished {
+                    guard let value = status.md5?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !value.isEmpty else {
+                        throw AppError(
+                            category: .invalidResponse,
+                            isRetryable: true,
+                            safeUserMessage: "文件校验没有完成，请稍后重试。"
+                        )
+                    }
+                    return value.lowercased()
+                }
+                try await Task.sleep(nanoseconds: delay)
+                delay = min(delay * 2, 1_000_000_000)
+            }
+        } catch {
+            try? await client.callVoid(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: "stop",
+                requestFormat: capability.requestFormat,
+                parameters: ["taskid": .string(start.taskid)],
+                credential: credential
+            )
             throw translate(error)
         }
     }

@@ -69,10 +69,18 @@ struct NasSettingsView: View {
                 emptyDescription: "这台 NAS 暂未返回存储池、空间或硬盘信息。",
                 retry: { await model.activate(.storage, force: true) }
             ) {
-                StorageView(
+                UnifiedStorageView(
                     snapshot: model.storage,
+                    usageHistory: model.storageUsageHistory,
+                    analysis: model.storageAnalysis,
+                    analysisProgress: model.storageAnalysisProgress,
+                    analysisError: model.storageAnalysisError,
+                    isAnalyzing: model.isAnalyzingStorage,
                     testStatuses: model.diskTestStatuses,
                     busyDiskIDs: model.diskOperationIDs,
+                    refresh: { await model.activate(.storage, force: true) },
+                    beginAnalysis: model.beginStorageAnalysis,
+                    cancelAnalysis: model.cancelStorageAnalysis,
                     loadTestStatus: { diskID in
                         _ = try await model.loadDiskTestStatus(diskID: diskID)
                     },
@@ -359,7 +367,7 @@ struct NasSettingsView: View {
     private func pageLabel(_ page: NasSettingsPage) -> (String, String) {
         switch page {
         case .overview: ("总览与性能", "gauge.with.dots.needle.67percent")
-        case .storage: ("存储与硬盘", "internaldrive")
+        case .storage: ("存储管理", "internaldrive")
         case .fileServices: ("文件服务", "folder.badge.gearshape")
         case .terminal: ("远程连接", "terminal")
         case .network: ("网络与代理", "network")
@@ -1808,9 +1816,10 @@ private struct PerformanceChartCard<ChartContent: View>: View {
                     .padding(.vertical, 2)
                     .background(Color.primary.opacity(0.05), in: Capsule())
             }
-            chart.frame(height: 150)
+            chart.frame(height: 140)
         }
         .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 215, maxHeight: 215, alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.8), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1827,7 +1836,7 @@ private struct MetricCard: View {
     var tint: Color = .blue
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.caption.weight(.bold))
@@ -1842,21 +1851,624 @@ private struct MetricCard: View {
                 .monospacedDigit()
                 .foregroundStyle(.primary)
 
+            Spacer(minLength: 0)
+
             if let progress {
                 ProgressView(value: min(100, max(0, progress)), total: 100)
                     .tint(tint)
                     .controlSize(.small)
                     .accessibilityLabel(title)
                     .accessibilityValue(value)
+            } else {
+                Color.clear.frame(height: 6)
             }
         }
         .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 76, maxHeight: 76, alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.8), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
+    }
+}
+
+private enum UnifiedStorageSection: String, CaseIterable, Identifiable {
+    case overview = "总览"
+    case analysis = "空间分析"
+    case hardware = "存储池与硬盘"
+
+    var id: Self { self }
+}
+
+private enum StorageReportSection: String, CaseIterable, Identifiable {
+    case shares = "共享文件夹"
+    case types = "文件类型"
+    case largeFiles = "大文件"
+    case duplicates = "重复文件"
+    case owners = "所有者"
+    case activity = "文件时间"
+
+    var id: Self { self }
+}
+
+private struct UnifiedStorageView: View {
+    let snapshot: NasStorageSnapshot?
+    let usageHistory: [StorageUsagePoint]
+    let analysis: StorageAnalysisSnapshot?
+    let analysisProgress: StorageAnalysisProgress?
+    let analysisError: String?
+    let isAnalyzing: Bool
+    let testStatuses: [String: NasDiskTestStatus]
+    let busyDiskIDs: Set<String>
+    let refresh: () async -> Void
+    let beginAnalysis: () -> Void
+    let cancelAnalysis: () -> Void
+    let loadTestStatus: (String) async throws -> Void
+    let startTest: (String, NasDiskTestType) async throws -> Void
+    let stopTest: (String) async throws -> Void
+
+    @State private var section: UnifiedStorageSection = .overview
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Picker("存储管理内容", selection: $section) {
+                    ForEach(UnifiedStorageSection.allCases) { item in
+                        Text(item.rawValue).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 520)
+
+                Spacer()
+
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    Label("刷新", systemImage: "arrow.clockwise")
+                }
+                .help("刷新容量和硬盘状态")
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+
+            Divider()
+
+            switch section {
+            case .overview:
+                StorageOverviewDashboard(
+                    snapshot: snapshot,
+                    usageHistory: usageHistory,
+                    analysis: analysis,
+                    showAnalysis: { section = .analysis },
+                    showHardware: { section = .hardware }
+                )
+            case .analysis:
+                StorageAnalysisView(
+                    snapshot: analysis,
+                    progress: analysisProgress,
+                    errorMessage: analysisError,
+                    isAnalyzing: isAnalyzing,
+                    beginAnalysis: beginAnalysis,
+                    cancelAnalysis: cancelAnalysis
+                )
+            case .hardware:
+                StorageView(
+                    snapshot: snapshot,
+                    testStatuses: testStatuses,
+                    busyDiskIDs: busyDiskIDs,
+                    loadTestStatus: loadTestStatus,
+                    startTest: startTest,
+                    stopTest: stopTest
+                )
+            }
+        }
+    }
+}
+
+private struct StorageOverviewDashboard: View {
+    let snapshot: NasStorageSnapshot?
+    let usageHistory: [StorageUsagePoint]
+    let analysis: StorageAnalysisSnapshot?
+    let showAnalysis: () -> Void
+    let showHardware: () -> Void
+
+    private var totalBytes: Int64 {
+        snapshot?.volumes.reduce(Int64(0)) { $0 + max($1.totalBytes ?? 0, 0) } ?? 0
+    }
+
+    private var usedBytes: Int64 {
+        snapshot?.volumes.reduce(Int64(0)) { $0 + max($1.usedBytes ?? 0, 0) } ?? 0
+    }
+
+    private var availableBytes: Int64 {
+        max(totalBytes - usedBytes, 0)
+    }
+
+    private var hasWarning: Bool {
+        isWarning(snapshot?.overallStatus)
+            || (snapshot?.disks.contains { isWarning($0.status) || isWarning($0.smartStatus) } ?? false)
+            || (snapshot?.pools.contains { isWarning($0.status) } ?? false)
+            || (snapshot?.volumes.contains { isWarning($0.status) } ?? false)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Label(
+                    "统一存储管理合并了“存储管理器”和“存储空间分析器”的常用功能。",
+                    systemImage: "square.grid.2x2"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12)], spacing: 12) {
+                    StorageMetricCard(
+                        title: "总容量",
+                        value: byteCount(totalBytes),
+                        detail: "\(snapshot?.volumes.count ?? 0) 个存储空间",
+                        icon: "externaldrive.fill",
+                        tint: .blue
+                    )
+                    StorageMetricCard(
+                        title: "已使用",
+                        value: byteCount(usedBytes),
+                        detail: totalBytes > 0
+                            ? "\((Double(usedBytes) / Double(totalBytes) * 100).formatted(.number.precision(.fractionLength(1))))%"
+                            : "尚无容量数据",
+                        icon: "chart.pie.fill",
+                        tint: .indigo
+                    )
+                    StorageMetricCard(
+                        title: "可用空间",
+                        value: byteCount(availableBytes),
+                        detail: "当前可写容量",
+                        icon: "internaldrive",
+                        tint: .teal
+                    )
+                    StorageMetricCard(
+                        title: "整体状态",
+                        value: hasWarning ? "需要关注" : "良好",
+                        detail: "\(snapshot?.pools.count ?? 0) 个存储池 · \(snapshot?.disks.count ?? 0) 块硬盘",
+                        icon: hasWarning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
+                        tint: hasWarning ? .orange : .green
+                    )
+                }
+
+                if !usageHistory.isEmpty {
+                    GroupBox("容量趋势") {
+                        Chart(usageHistory) { point in
+                            LineMark(
+                                x: .value("时间", point.recordedAt),
+                                y: .value("已使用", point.usedBytes)
+                            )
+                            .foregroundStyle(by: .value("存储空间", point.volumeName))
+                            PointMark(
+                                x: .value("时间", point.recordedAt),
+                                y: .value("已使用", point.usedBytes)
+                            )
+                            .foregroundStyle(by: .value("存储空间", point.volumeName))
+                        }
+                        .chartYAxis {
+                            AxisMarks(format: .byteCount(style: .file))
+                        }
+                        .frame(height: 220)
+                        .padding(.top, 8)
+                        .accessibilityLabel("各存储空间已使用容量趋势")
+                    }
+                }
+
+                HStack(alignment: .top, spacing: 12) {
+                    StorageOverviewActionCard(
+                        title: "空间分析",
+                        description: analysis.map {
+                            "上次分析 \($0.generatedAt.formatted(date: .abbreviated, time: .shortened))，共 \($0.scannedFileCount.formatted()) 个文件。"
+                        } ?? "查看共享文件夹、文件类型、大文件、重复文件和所有者占用。",
+                        icon: "chart.bar.xaxis",
+                        actionTitle: analysis == nil ? "开始查看" : "查看报告",
+                        action: showAnalysis
+                    )
+                    StorageOverviewActionCard(
+                        title: "存储池与硬盘",
+                        description: "查看 RAID、文件系统、硬盘温度、健康状态和 S.M.A.R.T. 检测。",
+                        icon: "internaldrive",
+                        actionTitle: "查看硬件",
+                        action: showHardware
+                    )
+                }
+            }
+            .padding(24)
+        }
+    }
+}
+
+private struct StorageMetricCard: View {
+    let title: String
+    let value: String
+    let detail: String
+    let icon: String
+    let tint: Color
+
+    var body: some View {
+        GroupBox {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundStyle(tint)
+                    .frame(width: 34, height: 34)
+                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(value)
+                        .font(.title3.weight(.semibold))
+                        .monospacedDigit()
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(4)
+        }
+    }
+}
+
+private struct StorageOverviewActionCard: View {
+    let title: String
+    let description: String
+    let icon: String
+    let actionTitle: String
+    let action: () -> Void
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                Label(title, systemImage: icon)
+                    .font(.headline)
+                Text(description)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 42, alignment: .topLeading)
+                Button(actionTitle, action: action)
+            }
+            .padding(4)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct StorageAnalysisView: View {
+    let snapshot: StorageAnalysisSnapshot?
+    let progress: StorageAnalysisProgress?
+    let errorMessage: String?
+    let isAnalyzing: Bool
+    let beginAnalysis: () -> Void
+    let cancelAnalysis: () -> Void
+
+    @State private var reportSection: StorageReportSection = .shares
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("空间分析")
+                            .font(.title2.weight(.semibold))
+                        Text("按当前账号可见的共享文件夹生成报告；分析只读取文件信息，不会修改或删除内容。")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if isAnalyzing {
+                        Button("停止分析", role: .cancel, action: cancelAnalysis)
+                    } else {
+                        Button {
+                            beginAnalysis()
+                        } label: {
+                            Label(snapshot == nil ? "开始分析" : "重新分析", systemImage: "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+
+                if isAnalyzing {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(progress?.title ?? "正在分析")
+                                .font(.headline)
+                            if let fraction = progress?.fraction {
+                                ProgressView(value: fraction)
+                            } else {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            if let progress, progress.total > 0 {
+                                Text("\(min(progress.completed + 1, progress.total)) / \(progress.total)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(4)
+                    }
+                }
+
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                }
+
+                if let snapshot {
+                    analysisContent(snapshot)
+                } else if !isAnalyzing {
+                    ContentUnavailableView {
+                        Label("还没有分析报告", systemImage: "chart.bar.doc.horizontal")
+                    } description: {
+                        Text("开始分析后，可查看共享文件夹占用、文件类型、大文件、重复文件和所有者分布。")
+                    } actions: {
+                        Button("开始分析", action: beginAnalysis)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 320)
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    @ViewBuilder
+    private func analysisContent(_ snapshot: StorageAnalysisSnapshot) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12)], spacing: 12) {
+            StorageMetricCard(
+                title: "已分析文件",
+                value: snapshot.scannedFileCount.formatted(),
+                detail: "本次报告",
+                icon: "doc.on.doc",
+                tint: .blue
+            )
+            StorageMetricCard(
+                title: "文件占用",
+                value: byteCount(snapshot.scannedBytes),
+                detail: "不含套件数据和快照",
+                icon: "chart.pie.fill",
+                tint: .indigo
+            )
+            StorageMetricCard(
+                title: "共享文件夹",
+                value: snapshot.shares.count.formatted(),
+                detail: "当前账号可见",
+                icon: "folder.fill",
+                tint: .teal
+            )
+            StorageMetricCard(
+                title: "可整理重复内容",
+                value: byteCount(snapshot.duplicateGroups.reduce(Int64(0)) { $0 + $1.reclaimableBytes }),
+                detail: "\(snapshot.duplicateGroups.count) 组内容相同的文件",
+                icon: "square.on.square",
+                tint: .orange
+            )
+        }
+
+        HStack {
+            Picker("报告内容", selection: $reportSection) {
+                ForEach(StorageReportSection.allCases) { item in
+                    Text(item.rawValue).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            Spacer()
+            Text(snapshot.generatedAt.formatted(date: .abbreviated, time: .shortened))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        switch reportSection {
+        case .shares:
+            StorageUsageBars(
+                title: "共享文件夹占用",
+                rows: snapshot.shares.map { ($0.name, $0.usedBytes, $0.fileCount) }
+            )
+        case .types:
+            StorageUsageBars(
+                title: "文件类型分布",
+                rows: snapshot.categories.map { ($0.name, $0.usedBytes, $0.fileCount) }
+            )
+        case .largeFiles:
+            StorageFileList(title: "最大的 200 个文件", files: snapshot.largeFiles, dateKind: nil)
+        case .duplicates:
+            StorageDuplicateList(snapshot: snapshot)
+        case .owners:
+            StorageUsageBars(
+                title: "所有者占用",
+                rows: snapshot.owners.map { ($0.name, $0.usedBytes, $0.fileCount) }
+            )
+        case .activity:
+            VStack(alignment: .leading, spacing: 16) {
+                StorageFileList(
+                    title: "最近修改",
+                    files: snapshot.recentlyModifiedFiles,
+                    dateKind: .modified
+                )
+                StorageFileList(
+                    title: "最久未访问",
+                    files: snapshot.leastRecentlyAccessedFiles,
+                    dateKind: .accessed
+                )
+            }
+        }
+    }
+}
+
+private struct StorageUsageBars: View {
+    let title: String
+    let rows: [(name: String, bytes: Int64, count: Int)]
+
+    var body: some View {
+        GroupBox(title) {
+            VStack(alignment: .leading, spacing: 14) {
+                if rows.isEmpty {
+                    Text("没有可显示的数据")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    Chart(Array(rows.prefix(12)), id: \.name) { row in
+                        BarMark(
+                            x: .value("占用", row.bytes),
+                            y: .value("项目", row.name)
+                        )
+                        .foregroundStyle(.blue.gradient)
+                    }
+                    .chartXAxis {
+                        AxisMarks(format: .byteCount(style: .file))
+                    }
+                    .frame(height: max(220, CGFloat(min(rows.count, 12)) * 30))
+                    .accessibilityLabel(title)
+
+                    Divider()
+
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                        HStack {
+                            Text(row.name)
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(row.count.formatted()) 个文件")
+                                .foregroundStyle(.secondary)
+                            Text(byteCount(row.bytes))
+                                .monospacedDigit()
+                                .frame(minWidth: 90, alignment: .trailing)
+                        }
+                        .font(.callout)
+                    }
+                }
+            }
+            .padding(6)
+        }
+    }
+}
+
+private enum StorageFileDateKind {
+    case modified
+    case accessed
+}
+
+private struct StorageFileList: View {
+    let title: String
+    let files: [FileItem]
+    let dateKind: StorageFileDateKind?
+
+    var body: some View {
+        GroupBox(title) {
+            LazyVStack(spacing: 0) {
+                if files.isEmpty {
+                    Text("没有可显示的文件")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    ForEach(files) { file in
+                        HStack(spacing: 10) {
+                            Image(systemName: "doc")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(file.name)
+                                    .lineLimit(1)
+                                Text(file.path)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .textSelection(.enabled)
+                            }
+                            Spacer()
+                            if let date = date(for: file) {
+                                Text(date.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(byteCount(file.sizeBytes))
+                                .font(.callout.monospacedDigit())
+                                .frame(minWidth: 90, alignment: .trailing)
+                        }
+                        .padding(.vertical, 8)
+                        if file.id != files.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+            .padding(6)
+        }
+    }
+
+    private func date(for file: FileItem) -> Date? {
+        switch dateKind {
+        case .modified: file.times?.modifiedAt
+        case .accessed: file.times?.accessedAt
+        case nil: nil
+        }
+    }
+}
+
+private struct StorageDuplicateList: View {
+    let snapshot: StorageAnalysisSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if snapshot.duplicateCheckUnavailable {
+                Label(
+                    "这台 NAS 暂不能校验文件内容；其他分析结果不受影响。",
+                    systemImage: "info.circle"
+                )
+                .foregroundStyle(.secondary)
+            } else if snapshot.duplicateCheckWasLimited {
+                Label(
+                    "为避免长时间占用硬盘，本次优先校验了较大的 400 个候选文件。",
+                    systemImage: "info.circle"
+                )
+                .foregroundStyle(.secondary)
+            }
+
+            if snapshot.duplicateGroups.isEmpty {
+                ContentUnavailableView(
+                    "没有发现重复内容",
+                    systemImage: "checkmark.circle",
+                    description: Text("在本次已校验的文件中，没有发现内容完全相同的文件。")
+                )
+                .frame(maxWidth: .infinity, minHeight: 220)
+            } else {
+                ForEach(snapshot.duplicateGroups) { group in
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("\(group.files.count) 个相同文件")
+                                    .font(.headline)
+                                Spacer()
+                                Text("可整理 \(byteCount(group.reclaimableBytes))")
+                                    .foregroundStyle(.orange)
+                            }
+                            ForEach(group.files) { file in
+                                HStack {
+                                    Text(file.path)
+                                        .lineLimit(1)
+                                        .textSelection(.enabled)
+                                    Spacer()
+                                    Text(byteCount(file.sizeBytes))
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                }
+                                .font(.callout)
+                            }
+                        }
+                        .padding(4)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2639,12 +3251,17 @@ private struct PerformanceDashboard: View {
 
     private var latest: NasPerformanceSnapshot? { history.last }
 
+    private let mainDashboardColumns = [
+        GridItem(.flexible(), spacing: 16),
+        GridItem(.flexible(), spacing: 16)
+    ]
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 dashboardHeader
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 140, maximum: 220), spacing: 12)], spacing: 12) {
                     MetricCard(title: "处理器", value: percent(latest?.cpuUsage), icon: "cpu", progress: latest?.cpuUsage, tint: .blue)
                     MetricCard(title: "内存", value: percent(latest?.memoryUsage), icon: "memorychip", progress: latest?.memoryUsage, tint: .purple)
                     MetricCard(title: "网络接收", value: speed(latest?.networkReceivedBytesPerSecond), icon: "arrow.down", tint: .green)
@@ -2662,7 +3279,7 @@ private struct PerformanceDashboard: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 36)
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 14)], spacing: 14) {
+                    LazyVGrid(columns: mainDashboardColumns, spacing: 16) {
                         PerformanceChartCard(
                             title: "资源使用率",
                             subtitle: "处理器与内存",
@@ -5064,10 +5681,13 @@ private struct ActiveConnectionsCard: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 70)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+
+            Spacer(minLength: 0)
         }
         .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 215, maxHeight: 215, alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.8), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)

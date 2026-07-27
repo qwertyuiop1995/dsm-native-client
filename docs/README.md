@@ -6,6 +6,8 @@
 - [当前开发与验收计划](development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)
 - [照片管理开发计划](development/NATIVE_DSM_PHOTOS_DEVELOPMENT_PLAN_ZH.md)
 - [Synology Chat 原生聊天功能开发计划](development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)
+- [DSM 套件管理三端实现计划](development/NATIVE_DSM_SERVICE_MANAGEMENT_PLAN_ZH.md)
+- [“统一存储管理”新功能三端实现计划](development/NATIVE_DSM_STORAGE_MANAGEMENT_PLAN_ZH.md)
 - [UI UX Pro Max 项目接入说明](development/UI_UX_PRO_MAX_INTEGRATION_ZH.md)
 - [当前开发进度](progress/STATUS.md)
 - [产品路线图](progress/ROADMAP.md)

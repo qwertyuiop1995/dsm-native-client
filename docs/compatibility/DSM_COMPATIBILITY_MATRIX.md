@@ -32,6 +32,19 @@
 | 远程位置创建、修改、删除 | `SYNO.FileStation.Mount` v1 内部实验性 API；`getinfo` 复查 | macOS 已实现、默认由能力发现控制，尚未实机验收 | 必须记录 DSM build；验证管理员/普通账号权限、只读、错误密码、重复提交、修改回滚和断开后远端文件不受影响 |
 | 基础照片空间与时间线 | `SYNO.FileStation.List`、`Thumb` 官方 API | macOS 文件夹扫描已获实机确认；时间线改为目录分页渐进扫描，待完整验收 | 分别验证 `/home/Photos`、`/photo` 权限，1 千/1 万/10 万项目、取消、弱网和深层目录 |
 
+## 统一存储管理（新增组合功能）
+
+> 该功能由群晖“存储管理器”和“存储空间分析器”两个官方组件的能力合并而成，是岚仓 Mac 端新增的统一入口，不应记录成群晖某个单一官方套件已有的功能。
+
+| 能力 | 使用契约 | macOS 状态 | 实机要求 |
+| --- | --- | --- | --- |
+| 容量与健康总览 | `SYNO.Storage.CGI.Storage.load_info` 内部只读接口 | 已与空间分析合并到同一入口；卷、存储池和硬盘详情保留 | 验证多卷、多存储池、SSD、扩展柜、异常状态和字段缺失 |
+| 文件占用报告 | `SYNO.FileStation.List`、`SYNO.FileStation.Search` 官方 API | 已实现当前账号可见共享、文件类型、所有者、大文件及时间维度；用户主动开始并可取消 | 验证大目录、无权限共享、加密未挂载共享、远程挂载、回收站和网络中断 |
+| 重复内容校验 | `SYNO.FileStation.MD5` v2 官方 API | 已实现先按大小筛选、再校验内容；当前每次优先校验较大的 400 个候选文件，取消时停止后台任务 | 验证同名不同内容、不同名相同内容、零字节、大文件、接口缺失和任务取消 |
+| Storage Analyzer 套件历史报告 | 套件内部接口尚未固化 | 当前不读取或修改已有报告配置；已确认官方套件首页包含卷用量、报告配置和历史报告入口 | 取得脱敏契约后验证版本、权限、报告类型、时间线与套件停用；未验证前不得猜测接口 |
+
+存储分析兼容记录不得包含真实共享名、文件路径、文件名、所有者、校验值或报告配置名称。
+
 ## 记录要求
 
 - 每次 DSM 或 File Station 升级后重新执行关键契约测试。
@@ -111,7 +124,8 @@ Chat 兼容记录必须满足：
 | --- | --- | --- | --- | --- |
 | DSM 系统/当前连接 | DSM 7.2.1-69057 Update 12 | 官方网页可见 + `SYNO.API.Info` + 已登录会话只读响应结构核对 + DSM 前端静态请求 | 已确认 `System.info`、`System.Utilization.get(resource=all,type=current)`、`Upgrade.Server.check` v3、`CurrentConnection.list/kick_connection` 和 `SyslogClient.Log.list`；macOS 更新检查不再伪造结果，只读取可用版本；连接断开具备确认、防重复和复查 | 普通账号权限、更新服务离线/代理、长时间采样、多网卡和连接消失竞态；断开操作尚未对真实会话执行 |
 | DSM 存储/套件/任务/账号 | DSM 7.2.1-69057 Update 12 | `SYNO.API.Info` + 已登录会话只读响应结构核对 + DSM 前端静态请求 | 已确认 `Storage.Disk.get_smart_test_log/disk_test_log_get/do_smart_test` v1：请求使用 `load_info.disks[].device`，状态取 `testInfo[0]`，历史取 `testLog`，并识别其他检测占用；同时确认 `EventScheduler.result_list/result_get_file` v1、套件管理、任务管理以及用户/群组管理；macOS 已实现硬盘检测启停、真实历史记录、任务运行记录和其他受保护流程 | 不同 RAID/SSD/扩展柜、普通账号、空目录和大清单；硬盘检测及其他写操作仍需用专用测试目标完成权限、忙碌、重复提交、超时与最终状态实机验收 |
-| Virtual Machine Manager | 2.6.5-12202 | 官方网页可见 + `SYNO.API.Info` + VMM 前端静态方法 | 确认官方 `SYNO.Virtualization.API.*` v1 与内部 Guest/Action/Image/Host/Network/Repo 等当前版本 | 测试环境无虚拟机；创建、删除、电源、迁移、镜像等均未执行 |
-| Container Manager | 24.0.2-1535 | 官方网页可见 + `SYNO.API.Info` + 套件前端静态方法 | 确认容器、镜像、网络、项目、Registry 的当前方法；仅查看列表 | 启停、创建、删除、日志、环境变量、挂载与 Registry 凭据均未读取或执行 |
+| Virtual Machine Manager | 2.6.5-12202 | 官方网页可见 + `SYNO.API.Info` + Synology 官方 VMM API 指南 + 2026-07-27 已登录页面只读导航、创建/修改请求发送前拦截和 noVNC 地址生成逻辑核对 | macOS 已接入官方 `SYNO.Virtualization.API.*` v1 优先和内部 Guest/Action/Image/Host/Network/Repo/Protect/Log 隔离降级；已按官方字段解析虚拟机内存、磁盘、存储、网络和映像；已实现受保护的分步创建、常规设置修改和独立可全屏非持久 WebView 远程控制台；创建使用 `SYNO.Virtualization.Guest.create`，修改使用 `set`，控制台使用 `synovirtualization/ws/{guest_id}`，会话凭据不进入 URL | 创建和修改请求均在发送前终止，未改变现有虚拟机；仍需专用目标验证创建/修改成功、权限不足、资源不足、长任务超时和断线恢复；迁移、克隆、导入导出及映像写操作未实现 |
+| Container Manager | 24.0.2-1535 | 官方网页可见 + `SYNO.API.Info` + 2026-07-27 已登录页面只读导航、脱敏请求结构核对和下载请求发送前拦截 | 已确认 `SYNO.Docker.Container.list` v1 需要 `offset=0`、`limit=-1`、`type=all`；镜像仓库使用 `SYNO.Docker.Registry.search(offset,limit,page_size,q)` 与 `tags(repo)`，下载使用 `SYNO.Docker.Image.pull_start(repository,tag)`；macOS 已实现搜索、结果选择、标签筛选和下载启动，并将映像、网络、项目和活动记录隔离为可降级附属读取 | 下载请求在发送前终止，未对真实 NAS 执行拉取；其他写操作尚未在专用目标执行；环境变量、挂载路径、容器日志正文与 Registry 凭据未读取 |
+| Download Station | 当前安装版本随运行时发现 | 官方公开指南 + 2026-07-27 已登录页面只读导航与脱敏字段核对 | macOS 官方 `SYNO.DownloadStation.*` 优先，当前 NAS 的 `SYNO.DownloadStation2.*` 独立降级；任务、速率、NAS 目录选择、链接/磁力创建、`.torrent`/`.nzb`/网址文本文件上传、基础设置与计划读写、暂停/继续/结束/删除已接入；设置保存后回读核验 | 文件上传和设置写入尚未对真实 NAS 执行；Tracker/Peer 明细、BT 实际搜索提交、RSS 新增/过滤器，以及高级 BT、监听目录、NZB 服务器、RSS 与通知设置仍需契约和专用目标验收 |
 
-本表只确认当前记录的发现范围。合并后的 NAS 设置已形成当前 DSM build 的读取结构兼容结论；文件服务、远程终端、代理、物理网卡、DDNS、区域时间、远程访问、防火墙基础控制和 UPS 已按当前 DSM 前端契约接入客户端保护与写后回读，但尚未在专用测试设备上形成真实写操作兼容结论。共享文件夹复合管理、完整防火墙规则和电源日程仍保持关闭；其他 DSM build 与权限组合仍需验证，VMM 和容器仍未实现。
+本表只确认当前记录的发现范围。合并后的 NAS 设置已形成当前 DSM build 的读取结构兼容结论；文件服务、远程终端、代理、物理网卡、DDNS、区域时间、远程访问、防火墙基础控制和 UPS 已按当前 DSM 前端契约接入客户端保护与写后回读，但尚未在专用测试设备上形成真实写操作兼容结论。共享文件夹复合管理、完整防火墙规则和电源日程仍保持关闭；其他 DSM build、套件版本与权限组合仍需验证。Download Station、VMM 与 Container Manager 已进入 macOS 实现，但内部接口写操作仍以专用目标验收为发布前置条件。

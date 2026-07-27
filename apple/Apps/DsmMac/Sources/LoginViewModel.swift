@@ -807,12 +807,18 @@ final class AppModel {
             capabilities: capabilities,
             session: session
         )
+        let serviceManagementRepository = try DsmServiceManagementRepository(
+            profile: connectionProfile,
+            capabilities: capabilities,
+            session: session
+        )
         activeConnectionProfile = connectionProfile
         let openedWorkspace = WorkspaceModel(
             profile: profile,
             repository: repository,
             chatRepository: chatRepository,
-            nasSettingsRepository: administrationRepository
+            nasSettingsRepository: administrationRepository,
+            serviceManagementRepository: serviceManagementRepository
         )
         workspacesByProfileID[profile.id] = openedWorkspace
         connectionContextsByProfileID[profile.id] = ConnectionContext(

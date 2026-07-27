@@ -5650,7 +5650,7 @@ private struct ActiveConnectionsCard: View {
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(Array(page.connections.prefix(3))) { item in
+                        ForEach(Array(page.connections.prefix(5))) { item in
                             HStack(spacing: 8) {
                                 Image(systemName: item.isCurrentConnection ? "laptopcomputer.and.arrow.down" : "person.fill")
                                     .font(.caption2)
@@ -5674,6 +5674,13 @@ private struct ActiveConnectionsCard: View {
                                         .monospacedDigit()
                                 }
                             }
+                        }
+
+                        if page.connections.count > 5 {
+                            Text("另外包含 \(page.connections.count - 5) 个连接…")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 2)
                         }
                     }
                 }

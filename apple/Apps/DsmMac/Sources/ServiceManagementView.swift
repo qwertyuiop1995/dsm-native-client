@@ -1622,6 +1622,7 @@ private struct VirtualMachineManagerView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .frame(maxWidth: 420)
 
             if isUnavailable(.protection) {
@@ -1654,6 +1655,7 @@ private struct VirtualMachineManagerView: View {
                 Picker("级别", selection: $logLevel) {
                     ForEach(logLevels, id: \.self) { Text($0).tag($0) }
                 }
+                .labelsHidden()
                 .frame(width: 150)
                 TextField("搜索日志", text: $logSearch)
                     .textFieldStyle(.roundedBorder)

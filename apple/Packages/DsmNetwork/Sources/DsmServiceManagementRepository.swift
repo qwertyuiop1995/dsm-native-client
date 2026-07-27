@@ -133,6 +133,21 @@ private struct ServiceVoidEnvelope: Decodable {
     let error: Failure?
 }
 
+private enum SupplementaryServiceResult: Sendable {
+    case available(ServiceJSON)
+    case unavailable
+
+    var value: ServiceJSON? {
+        guard case .available(let value) = self else { return nil }
+        return value
+    }
+
+    var isUnavailable: Bool {
+        if case .unavailable = self { return true }
+        return false
+    }
+}
+
 /// Download Station、VMM 与 Container Manager 的套件适配器。
 /// Container Manager 以及无公开接口时的套件分支均属于 DSM 内部接口。
 public actor DsmServiceManagementRepository: ServiceManagementRepository {
@@ -571,23 +586,45 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
             ? DsmAPIName.virtualizationGuestImage
             : DsmAPIName.virtualizationAPIGuestImage
 
-        async let hostsValue = supplementaryCall(hostAPI, method: "list")
-        async let storagesValue = supplementaryCall(storageAPI, method: "list")
-        async let networksValue = supplementaryCall(networkAPI, method: "list")
-        async let imagesValue = supplementaryCall(imageAPI, method: "list")
-        async let plansValue = supplementaryCall(
+        async let hostsResult = supplementaryCall(hostAPI, methods: ["list"])
+        async let storagesResult = supplementaryCall(storageAPI, methods: ["list"])
+        async let networksResult = supplementaryCall(networkAPI, methods: ["list"])
+        async let imagesResult = supplementaryCall(imageAPI, methods: ["list"])
+        async let plansResult = supplementaryCall(
             DsmAPIName.virtualizationProtectionPlan,
-            method: "list"
+            methods: ["list", "get"]
         )
-        async let eventsValue = supplementaryCall(
+        async let eventsResult = supplementaryCall(
             DsmAPIName.virtualizationLog,
-            method: "list",
-            parameters: ["offset": .integer(0), "limit": .integer(200)]
+            methods: ["list"],
+            parameters: [
+                "offset": .integer(0),
+                "limit": .integer(1_000),
+                "loglevel": .string(""),
+                "filter_content": .string(""),
+                "datefrom": .integer(0),
+                "dateto": .integer(0),
+                "sort_by": .string("time"),
+                "sort_dir": .string("DESC")
+            ]
         )
-        let (hostJSON, storageJSON, networkJSON, imageJSON, planJSON, eventJSON) =
+        let (hostResult, storageResult, networkResult, imageResult, planResult, eventResult) =
             try await (
-                hostsValue, storagesValue, networksValue, imagesValue, plansValue, eventsValue
+                hostsResult, storagesResult, networksResult, imagesResult, plansResult, eventsResult
             )
+        let hostJSON = hostResult.value
+        let storageJSON = storageResult.value
+        let networkJSON = networkResult.value
+        let imageJSON = imageResult.value
+        let planJSON = planResult.value
+        let eventJSON = eventResult.value
+        var unavailableSections: Set<VirtualMachineManagerSection> = []
+        if hostResult.isUnavailable { unavailableSections.insert(.hosts) }
+        if storageResult.isUnavailable { unavailableSections.insert(.storages) }
+        if networkResult.isUnavailable { unavailableSections.insert(.networks) }
+        if imageResult.isUnavailable { unavailableSections.insert(.images) }
+        if planResult.isUnavailable { unavailableSections.insert(.protection) }
+        if eventResult.isUnavailable { unavailableSections.insert(.logs) }
 
         return VirtualMachineManagerSnapshot(
             source: official ? .official : .internalAPI,
@@ -597,11 +634,25 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
             storages: Self.resources(storageJSON, keys: ["repos", "storages", "data", "list"]),
             networks: Self.resources(networkJSON, keys: ["networks", "network", "data", "list"]),
             images: Self.resources(imageJSON, keys: ["images", "image", "data", "list"]),
-            protectionPlans: Self.resources(planJSON, keys: ["plans", "plan", "data", "list"]),
-            events: eventJSON?.objects(for: ["logs", "events", "data", "list"])
+            protectionPlans: Self.resources(
+                planJSON,
+                keys: ["plans", "plan", "protection_plans", "guest_protects", "data", "list"]
+            ),
+            protectionSchedulePolicies: Self.resources(
+                planJSON,
+                keys: ["schedule_policies", "schedules", "schedule_policy"]
+            ),
+            protectionRetentionPolicies: Self.resources(
+                planJSON,
+                keys: ["retention_policies", "retentions", "retention_policy"]
+            ),
+            events: eventJSON?.objects(for: [
+                "logs", "log", "events", "records", "entries", "items", "data", "list"
+            ])
                 .enumerated().map {
                     Self.event(offset: $0.offset, element: $0.element)
-                } ?? []
+                } ?? [],
+            unavailableSections: unavailableSections
         )
     }
 
@@ -892,6 +943,123 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
     }
 
+    /// VMM 网页端网络修改使用的内部接口；公开 API 仅支持读取。
+    public func updateVirtualMachineNetwork(
+        id: String,
+        configuration: VirtualMachineNetworkUpdate
+    ) async throws {
+        guard capabilities[DsmAPIName.virtualizationNetwork]?.selectedVersion != nil else {
+            throw unavailableError()
+        }
+        let id = try validatedName(id, message: "请先选择要修改的网络。")
+        let name = try validatedName(configuration.name, message: "请输入网络名称。")
+        let current = try await loadVirtualMachineManager()
+        guard current.networks.contains(where: { $0.id == id }) else {
+            throw validationError("这个网络已不存在，请刷新后重试。")
+        }
+        guard !current.networks.contains(where: {
+            $0.id != id && $0.name.caseInsensitiveCompare(name) == .orderedSame
+        }) else {
+            throw validationError("已有同名网络，请换一个名称。")
+        }
+
+        try await callVoid(
+            DsmAPIName.virtualizationNetwork,
+            method: "set",
+            parameters: [
+                "network_id": .string(id),
+                "name": .string(name)
+            ]
+        )
+        let updated = try await loadVirtualMachineManager()
+        guard updated.networks.contains(where: { $0.id == id && $0.name == name }) else {
+            throw verificationError("NAS 尚未确认网络设置已保存，请刷新后重试。")
+        }
+    }
+
+    /// VMM 网页端网络删除使用的内部接口；删除前由界面确认，提交后回读校验。
+    public func deleteVirtualMachineNetworks(ids: [String]) async throws {
+        guard capabilities[DsmAPIName.virtualizationNetwork]?.selectedVersion != nil else {
+            throw unavailableError()
+        }
+        let ids = try validatedIDs(ids)
+        let currentIDs = Set(try await loadVirtualMachineManager().networks.map(\.id))
+        guard ids.allSatisfy(currentIDs.contains) else {
+            throw validationError("部分网络已不存在，请刷新后重新选择。")
+        }
+        for id in ids {
+            try await callVoid(
+                DsmAPIName.virtualizationNetwork,
+                method: "delete",
+                parameters: ["network_id": .string(id)]
+            )
+        }
+        let remaining = Set(try await loadVirtualMachineManager().networks.map(\.id))
+        guard ids.allSatisfy({ !remaining.contains($0) }) else {
+            throw verificationError("NAS 尚未确认网络已删除，请刷新后重试。")
+        }
+    }
+
+    /// 映像删除优先使用公开 VMM API；内部分支只在公开能力缺失时启用。
+    public func deleteVirtualMachineImages(ids: [String]) async throws {
+        let ids = try validatedIDs(ids)
+        let api = capabilities[DsmAPIName.virtualizationAPIGuestImage]?.selectedVersion != nil
+            ? DsmAPIName.virtualizationAPIGuestImage
+            : DsmAPIName.virtualizationGuestImage
+        guard capabilities[api]?.selectedVersion != nil else {
+            throw unavailableError()
+        }
+        let currentIDs = Set(try await loadVirtualMachineManager().images.map(\.id))
+        guard ids.allSatisfy(currentIDs.contains) else {
+            throw validationError("部分映像已不存在，请刷新后重新选择。")
+        }
+        for id in ids {
+            if api == DsmAPIName.virtualizationAPIGuestImage {
+                let result = try await call(
+                    api,
+                    method: "delete",
+                    parameters: ["image_id": .string(id)]
+                )
+                if let taskID = result.firstString(["task_id", "task", "id"]) {
+                    try await waitForVirtualizationTask(id: taskID)
+                }
+            } else {
+                try await callVoid(
+                    api,
+                    method: "delete",
+                    parameters: ["image_id": .string(id)]
+                )
+            }
+        }
+        let remaining = Set(try await loadVirtualMachineManager().images.map(\.id))
+        guard ids.allSatisfy({ !remaining.contains($0) }) else {
+            throw verificationError("NAS 尚未确认映像已删除，请刷新后重试。")
+        }
+    }
+
+    private func waitForVirtualizationTask(id: String) async throws {
+        guard capabilities[DsmAPIName.virtualizationAPITaskInfo]?.selectedVersion != nil else {
+            return
+        }
+        for _ in 0..<60 {
+            let value = try await call(
+                DsmAPIName.virtualizationAPITaskInfo,
+                method: "get",
+                parameters: ["task_id": .string(id)]
+            )
+            let status = value.firstString(["status", "state", "task_status"])?
+                .lowercased() ?? ""
+            if ["finished", "completed", "success", "succeeded", "done"].contains(status) {
+                return
+            }
+            if ["failed", "error", "cancelled", "canceled"].contains(status) {
+                throw verificationError("NAS 未能完成映像删除，请刷新后重试。")
+            }
+            try await Task.sleep(for: .seconds(1))
+        }
+        throw verificationError("映像仍在处理中，请稍后刷新查看结果。")
+    }
+
     private func preferredDownloadTaskAPI() -> String {
         capabilities[DsmAPIName.downloadStationTask]?.selectedVersion != nil
             ? DsmAPIName.downloadStationTask
@@ -1023,18 +1191,36 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         method: String,
         parameters: [String: DsmParameterValue] = [:]
     ) async throws -> ServiceJSON? {
-        guard capabilities[name]?.selectedVersion != nil else { return nil }
-        do {
-            return try await call(name, method: method, parameters: parameters)
-        } catch let error as AppError {
-            switch error.category {
-            case .authenticationRequired, .otpRequired, .tlsUntrusted,
-                 .tlsCertificateChanged, .cancelled:
-                throw error
-            default:
-                return nil
+        let result = try await supplementaryCall(
+            name,
+            methods: [method],
+            parameters: parameters
+        )
+        return result.value
+    }
+
+    private func supplementaryCall(
+        _ name: String,
+        methods: [String],
+        parameters: [String: DsmParameterValue] = [:]
+    ) async throws -> SupplementaryServiceResult {
+        guard capabilities[name]?.selectedVersion != nil else { return .unavailable }
+        for method in methods {
+            do {
+                return .available(
+                    try await call(name, method: method, parameters: parameters)
+                )
+            } catch let error as AppError {
+                switch error.category {
+                case .authenticationRequired, .otpRequired, .tlsUntrusted,
+                     .tlsCertificateChanged, .cancelled:
+                    throw error
+                default:
+                    continue
+                }
             }
         }
+        return .unavailable
     }
 
     private func call(
@@ -1123,8 +1309,23 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
     }
 
     private static func date(_ value: ServiceJSON, keys: [String]) -> Date? {
-        guard let seconds = value.firstDouble(keys), seconds > 0 else { return nil }
-        return Date(timeIntervalSince1970: seconds > 10_000_000_000 ? seconds / 1_000 : seconds)
+        if let seconds = value.firstDouble(keys), seconds > 0 {
+            return Date(timeIntervalSince1970: seconds > 10_000_000_000 ? seconds / 1_000 : seconds)
+        }
+        for key in keys {
+            guard let text = value[key]?.stringValue else { continue }
+            if let date = ISO8601DateFormatter().date(from: text) {
+                return date
+            }
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = .current
+            for format in ["yyyy-MM-dd HH:mm:ss", "yyyy/MM/dd HH:mm:ss"] {
+                formatter.dateFormat = format
+                if let date = formatter.date(from: text) { return date }
+            }
+        }
+        return nil
     }
 
     private static func downloadTask(_ object: [String: ServiceJSON]) -> DownloadStationTask? {
@@ -1260,7 +1461,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
             let value = ServiceJSON.object(object)
             guard let name = value.firstString([
                 "name", "host_name", "storage_name", "repo_name",
-                "network_name", "image_name", "id"
+                "network_name", "image_name", "plan_name", "policy_name", "title", "id"
             ]) else {
                 return nil
             }
@@ -1297,14 +1498,19 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         element: [String: ServiceJSON]
     ) -> ServiceEvent {
         let value = ServiceJSON.object(element)
-        let timestamp = date(value, keys: ["time", "timestamp", "date"])
-        let message = value.firstString(["event", "message", "description"]) ?? "—"
+        let timestamp = date(
+            value,
+            keys: ["time", "timestamp", "date", "event_time", "create_time", "created_at"]
+        )
+        let message = value.firstString([
+            "event", "message", "description", "msg", "content", "detail"
+        ]) ?? "—"
         return ServiceEvent(
             id: value.firstString(["id", "log_id"])
                 ?? "\(timestamp?.timeIntervalSince1970 ?? 0)-\(offset)-\(message.hashValue)",
             timestamp: timestamp,
-            level: value.firstString(["level", "severity"]) ?? "信息",
-            user: value.firstString(["user", "username", "owner"]),
+            level: value.firstString(["level", "severity", "type", "priority"]) ?? "信息",
+            user: value.firstString(["user", "username", "owner", "account", "user_name"]),
             message: message
         )
     }

@@ -609,10 +609,12 @@ force_complete=false
 | `SYNO.Virtualization.Guest` | `list`, `get`, `get_basic`, `set`, `delete` v2 | 虚拟机列表、详情与配置 |
 | `SYNO.Virtualization.Guest.Action` | `pwr_ctl`, `reset`, `clone`, `move`, `export`, `check_poweron` v1 | 电源和生命周期动作 |
 | `SYNO.Virtualization.Guest.Image` | `list`, `create`, `delete`, `edit` v2 | 镜像管理 |
-| `SYNO.Virtualization.Network` | `list`, `get` v2 | 虚拟网络 |
+| `SYNO.Virtualization.Network` | `list`, `get` v2；`set`, `delete` 待专用目标验收 | 虚拟网络读取、修改与删除 |
 | `SYNO.Virtualization.Repo` | `list`, `get` v2 | 存储库 |
+| `SYNO.Virtualization.GuestProtect.Plan` | `list` / `get` 兼容读取 | 保护计划、计划策略与保留策略 |
+| `SYNO.Virtualization.Log` | `list` v1；分页外必须提交 `loglevel`、`filter_content`、`datefrom`、`dateto`、`sort_by=time`、`sort_dir=DESC` | VMM 日志 |
 
-上述方法由当前 VMM 官方网页前端静态代码和 `SYNO.API.Info` 交叉确认，但没有执行写操作。它们仍应标记为内部接口，不能用官方 `SYNO.Virtualization.API.*` 文档来推断参数，也不能把“方法存在”写成“生命周期操作已通过”。当前测试环境没有可用于只读核对的虚拟机实例。
+上述读取方法由当前 VMM 官方网页前端静态代码和 `SYNO.API.Info` 交叉确认，但没有执行写操作。网络 `set/delete` 已按网页端具备对应能力接入隔离适配器，具体方法与参数仍必须在专用测试目标拦截核对后才能进入发布兼容范围。它们均应标记为内部接口，不能用官方 `SYNO.Virtualization.API.*` 文档来推断参数，也不能把“方法存在”写成“写操作已通过”。
 
 ## 8. 项目源码中的内部与混合接口目录
 

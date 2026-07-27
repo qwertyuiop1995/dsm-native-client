@@ -357,6 +357,23 @@ public struct VirtualizationResource: Identifiable, Equatable, Sendable {
     }
 }
 
+public struct VirtualMachineNetworkUpdate: Equatable, Sendable {
+    public let name: String
+
+    public init(name: String) {
+        self.name = name
+    }
+}
+
+public enum VirtualMachineManagerSection: String, Hashable, Sendable {
+    case hosts
+    case storages
+    case networks
+    case images
+    case protection
+    case logs
+}
+
 public enum VirtualMachineOperatingSystem: String, CaseIterable, Identifiable, Sendable {
     case windows
     case linux
@@ -459,7 +476,10 @@ public struct VirtualMachineManagerSnapshot: Equatable, Sendable {
     public let networks: [VirtualizationResource]
     public let images: [VirtualizationResource]
     public let protectionPlans: [VirtualizationResource]
+    public let protectionSchedulePolicies: [VirtualizationResource]
+    public let protectionRetentionPolicies: [VirtualizationResource]
     public let events: [ServiceEvent]
+    public let unavailableSections: Set<VirtualMachineManagerSection>
 
     public init(
         source: ServiceContractSource,
@@ -469,7 +489,10 @@ public struct VirtualMachineManagerSnapshot: Equatable, Sendable {
         networks: [VirtualizationResource],
         images: [VirtualizationResource],
         protectionPlans: [VirtualizationResource],
-        events: [ServiceEvent]
+        protectionSchedulePolicies: [VirtualizationResource] = [],
+        protectionRetentionPolicies: [VirtualizationResource] = [],
+        events: [ServiceEvent],
+        unavailableSections: Set<VirtualMachineManagerSection> = []
     ) {
         self.source = source
         self.machines = machines
@@ -478,7 +501,10 @@ public struct VirtualMachineManagerSnapshot: Equatable, Sendable {
         self.networks = networks
         self.images = images
         self.protectionPlans = protectionPlans
+        self.protectionSchedulePolicies = protectionSchedulePolicies
+        self.protectionRetentionPolicies = protectionRetentionPolicies
         self.events = events
+        self.unavailableSections = unavailableSections
     }
 }
 
@@ -519,4 +545,10 @@ public protocol ServiceManagementRepository: Sendable {
     func openVirtualMachineConsole(id: String) async throws -> VirtualMachineConsoleSession
     func controlVirtualMachines(ids: [String], action: VirtualMachinePowerAction) async throws
     func deleteVirtualMachines(ids: [String]) async throws
+    func updateVirtualMachineNetwork(
+        id: String,
+        configuration: VirtualMachineNetworkUpdate
+    ) async throws
+    func deleteVirtualMachineNetworks(ids: [String]) async throws
+    func deleteVirtualMachineImages(ids: [String]) async throws
 }

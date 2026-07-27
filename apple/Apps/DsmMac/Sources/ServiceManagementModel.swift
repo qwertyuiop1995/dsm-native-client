@@ -64,6 +64,14 @@ actor UnavailableServiceManagementRepository: ServiceManagementRepository {
         throw unavailable()
     }
     func deleteVirtualMachines(ids: [String]) async throws { throw unavailable() }
+    func updateVirtualMachineNetwork(
+        id: String,
+        configuration: VirtualMachineNetworkUpdate
+    ) async throws {
+        throw unavailable()
+    }
+    func deleteVirtualMachineNetworks(ids: [String]) async throws { throw unavailable() }
+    func deleteVirtualMachineImages(ids: [String]) async throws { throw unavailable() }
 }
 
 @MainActor
@@ -87,6 +95,8 @@ final class ServiceManagementModel {
     var imageSelection: Set<String> = []
     var networkSelection: Set<String> = []
     var virtualMachineSelection: Set<String> = []
+    var virtualMachineNetworkSelection: Set<String> = []
+    var virtualMachineImageSelection: Set<String> = []
 
     @ObservationIgnored private let repository: any ServiceManagementRepository
     @ObservationIgnored private let fileRepository: (any FileRepository)?
@@ -289,6 +299,36 @@ final class ServiceManagementModel {
         return await perform(module: .virtualMachines, success: "虚拟机已删除。") {
             try await self.repository.deleteVirtualMachines(ids: ids)
         }
+    }
+
+    func updateVirtualMachineNetwork(
+        id: String,
+        configuration: VirtualMachineNetworkUpdate
+    ) async -> Bool {
+        await perform(module: .virtualMachines, success: "网络设置已保存。") {
+            try await self.repository.updateVirtualMachineNetwork(
+                id: id,
+                configuration: configuration
+            )
+        }
+    }
+
+    func deleteVirtualMachineNetworks() async -> Bool {
+        let ids = Array(virtualMachineNetworkSelection)
+        let succeeded = await perform(module: .virtualMachines, success: "网络已删除。") {
+            try await self.repository.deleteVirtualMachineNetworks(ids: ids)
+        }
+        if succeeded { virtualMachineNetworkSelection.removeAll() }
+        return succeeded
+    }
+
+    func deleteVirtualMachineImages() async -> Bool {
+        let ids = Array(virtualMachineImageSelection)
+        let succeeded = await perform(module: .virtualMachines, success: "映像已删除。") {
+            try await self.repository.deleteVirtualMachineImages(ids: ids)
+        }
+        if succeeded { virtualMachineImageSelection.removeAll() }
+        return succeeded
     }
 
     private func perform(

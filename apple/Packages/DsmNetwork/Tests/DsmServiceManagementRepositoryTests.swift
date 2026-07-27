@@ -424,6 +424,174 @@ final class DsmServiceManagementRepositoryTests: XCTestCase {
         XCTAssertFalse(session.url.absoluteString.contains("REDACTED_SESSION"))
     }
 
+    func test虚拟机日志提交网页端必需参数并解析时间用户和内容() async throws {
+        let transport = SequencedServiceRoutingTransport(responses: [
+            DsmAPIName.virtualizationGuest: [
+                response(#"{"success":true,"data":{"guests":[]}}"#)
+            ],
+            DsmAPIName.virtualizationLog: [
+                response(
+                    #"{"success":true,"data":{"logs":[{"log_id":"log-1","time":"2026-07-27 17:12:45","level":"error","user":"tester","event":"虚拟机启动失败"}]}}"#
+                )
+            ]
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.virtualizationGuest,
+                DsmAPIName.virtualizationLog
+            ],
+            transport: transport
+        )
+
+        let snapshot = try await repository.loadVirtualMachineManager()
+
+        XCTAssertEqual(snapshot.events.first?.id, "log-1")
+        XCTAssertEqual(snapshot.events.first?.user, "tester")
+        XCTAssertEqual(snapshot.events.first?.message, "虚拟机启动失败")
+        XCTAssertNotNil(snapshot.events.first?.timestamp)
+        XCTAssertFalse(snapshot.unavailableSections.contains(.logs))
+        let logRequests = await transport.recordedRequests().filter {
+            requestValue("api", in: $0) == DsmAPIName.virtualizationLog
+        }
+        let request = try XCTUnwrap(logRequests.first)
+        XCTAssertEqual(logRequests.count, 1)
+        XCTAssertEqual(requestValue("method", in: request), "list")
+        XCTAssertEqual(requestValue("offset", in: request), "0")
+        XCTAssertEqual(requestValue("limit", in: request), "1000")
+        XCTAssertEqual(requestValue("loglevel", in: request), "")
+        XCTAssertEqual(requestValue("filter_content", in: request), "")
+        XCTAssertEqual(requestValue("datefrom", in: request), "0")
+        XCTAssertEqual(requestValue("dateto", in: request), "0")
+        XCTAssertEqual(requestValue("sort_by", in: request), "time")
+        XCTAssertEqual(requestValue("sort_dir", in: request), "DESC")
+    }
+
+    func test虚拟机保护同时解析计划策略和保留策略() async throws {
+        let transport = ServiceRoutingTransport(responses: [
+            DsmAPIName.virtualizationGuest: response(
+                #"{"success":true,"data":{"guests":[]}}"#
+            ),
+            DsmAPIName.virtualizationProtectionPlan: response(
+                #"{"success":true,"data":{"plans":[{"id":"plan-1","plan_name":"每日保护"}],"schedule_policies":[{"id":"schedule-1","policy_name":"每天"}],"retention_policies":[{"id":"retention-1","policy_name":"保留 7 份"}]}}"#
+            )
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.virtualizationGuest,
+                DsmAPIName.virtualizationProtectionPlan
+            ],
+            transport: transport
+        )
+
+        let snapshot = try await repository.loadVirtualMachineManager()
+
+        XCTAssertEqual(snapshot.protectionPlans.first?.name, "每日保护")
+        XCTAssertEqual(snapshot.protectionSchedulePolicies.first?.name, "每天")
+        XCTAssertEqual(snapshot.protectionRetentionPolicies.first?.name, "保留 7 份")
+        XCTAssertFalse(snapshot.unavailableSections.contains(.protection))
+    }
+
+    func test删除虚拟机映像使用公开接口并回读确认() async throws {
+        let transport = SequencedServiceRoutingTransport(responses: [
+            DsmAPIName.virtualizationGuest: [
+                response(#"{"success":true,"data":{"guests":[]}}"#)
+            ],
+            DsmAPIName.virtualizationAPIGuestImage: [
+                response(
+                    #"{"success":true,"data":{"images":[{"image_id":"image-1","image_name":"安装映像"}]}}"#
+                ),
+                response(#"{"success":true,"data":{"task_id":"task-1"}}"#),
+                response(#"{"success":true,"data":{"images":[]}}"#)
+            ]
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.virtualizationGuest,
+                DsmAPIName.virtualizationAPIGuestImage
+            ],
+            transport: transport
+        )
+
+        try await repository.deleteVirtualMachineImages(ids: ["image-1"])
+
+        let requests = await transport.recordedRequests()
+        let deletion = try XCTUnwrap(requests.first {
+            requestValue("api", in: $0) == DsmAPIName.virtualizationAPIGuestImage
+                && requestValue("method", in: $0) == "delete"
+        })
+        XCTAssertEqual(requestValue("image_id", in: deletion), "image-1")
+    }
+
+    func test修改虚拟机网络使用内部接口并回读确认() async throws {
+        let transport = SequencedServiceRoutingTransport(responses: [
+            DsmAPIName.virtualizationGuest: [
+                response(#"{"success":true,"data":{"guests":[]}}"#)
+            ],
+            DsmAPIName.virtualizationNetwork: [
+                response(
+                    #"{"success":true,"data":{"networks":[{"network_id":"network-1","network_name":"旧名称"}]}}"#
+                ),
+                response(#"{"success":true}"#),
+                response(
+                    #"{"success":true,"data":{"networks":[{"network_id":"network-1","network_name":"新名称"}]}}"#
+                )
+            ]
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.virtualizationGuest,
+                DsmAPIName.virtualizationNetwork
+            ],
+            requestFormatOverrides: [DsmAPIName.virtualizationNetwork: .json],
+            transport: transport
+        )
+
+        try await repository.updateVirtualMachineNetwork(
+            id: "network-1",
+            configuration: VirtualMachineNetworkUpdate(name: "新名称")
+        )
+
+        let requests = await transport.recordedRequests()
+        let update = try XCTUnwrap(requests.first {
+            requestValue("api", in: $0) == DsmAPIName.virtualizationNetwork
+                && requestValue("method", in: $0) == "set"
+        })
+        XCTAssertEqual(requestValue("network_id", in: update), #""network-1""#)
+        XCTAssertEqual(requestValue("name", in: update), #""新名称""#)
+    }
+
+    func test删除虚拟机网络使用内部接口并回读确认() async throws {
+        let transport = SequencedServiceRoutingTransport(responses: [
+            DsmAPIName.virtualizationGuest: [
+                response(#"{"success":true,"data":{"guests":[]}}"#)
+            ],
+            DsmAPIName.virtualizationNetwork: [
+                response(
+                    #"{"success":true,"data":{"networks":[{"network_id":"network-1","network_name":"待删除网络"}]}}"#
+                ),
+                response(#"{"success":true}"#),
+                response(#"{"success":true,"data":{"networks":[]}}"#)
+            ]
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.virtualizationGuest,
+                DsmAPIName.virtualizationNetwork
+            ],
+            requestFormatOverrides: [DsmAPIName.virtualizationNetwork: .json],
+            transport: transport
+        )
+
+        try await repository.deleteVirtualMachineNetworks(ids: ["network-1"])
+
+        let requests = await transport.recordedRequests()
+        let deletion = try XCTUnwrap(requests.first {
+            requestValue("api", in: $0) == DsmAPIName.virtualizationNetwork
+                && requestValue("method", in: $0) == "delete"
+        })
+        XCTAssertEqual(requestValue("network_id", in: deletion), #""network-1""#)
+    }
+
     private func makeRepository(
         apiNames: [String],
         requestFormatOverrides: [String: DsmRequestFormat] = [:],

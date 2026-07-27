@@ -61,6 +61,7 @@ public enum DsmAPIName {
     public static let virtualizationAPIGuest = "SYNO.Virtualization.API.Guest"
     public static let virtualizationAPIGuestAction = "SYNO.Virtualization.API.Guest.Action"
     public static let virtualizationAPIGuestImage = "SYNO.Virtualization.API.Guest.Image"
+    public static let virtualizationAPITaskInfo = "SYNO.Virtualization.API.Task.Info"
     public static let virtualizationAPIHost = "SYNO.Virtualization.API.Host"
     public static let virtualizationAPIStorage = "SYNO.Virtualization.API.Storage"
     public static let virtualizationAPINetwork = "SYNO.Virtualization.API.Network"
@@ -225,6 +226,7 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.virtualizationAPIGuest,
         DsmAPIName.virtualizationAPIGuestAction,
         DsmAPIName.virtualizationAPIGuestImage,
+        DsmAPIName.virtualizationAPITaskInfo,
         DsmAPIName.virtualizationAPIHost,
         DsmAPIName.virtualizationAPIStorage,
         DsmAPIName.virtualizationAPINetwork,
@@ -414,6 +416,7 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.virtualizationAPIGuest: 1...1,
         DsmAPIName.virtualizationAPIGuestAction: 1...1,
         DsmAPIName.virtualizationAPIGuestImage: 1...1,
+        DsmAPIName.virtualizationAPITaskInfo: 1...1,
         DsmAPIName.virtualizationAPIHost: 1...1,
         DsmAPIName.virtualizationAPIStorage: 1...1,
         DsmAPIName.virtualizationAPINetwork: 1...1,

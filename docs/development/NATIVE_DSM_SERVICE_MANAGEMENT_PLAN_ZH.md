@@ -8,7 +8,7 @@ macOS 第一阶段已实现：
 
 - Download Station：任务列表、总速率、NAS 保存目录选择、链接/磁力任务创建、`.torrent`/`.nzb`/网址文本文件上传、基础设置与计划读取保存、暂停、继续、结束、删除。
 - Container Manager：总览、容器、映像、网络、项目、活动记录；Docker Hub 映像搜索、标签选择、映像拉取/删除、容器启停/重启/删除和网络创建/删除。
-- Virtual Machine Manager：虚拟机、主机、存储、网络、映像、保护计划和活动记录；分步创建、常规设置修改、独立可全屏 noVNC 远程控制台、启动、正常关机、重启、强制断电和删除。
+- Virtual Machine Manager：虚拟机、主机、存储、网络、映像、保护计划和日志；分步创建、常规设置修改、独立可全屏 noVNC 远程控制台、启动、正常关机、重启、强制断电和删除。
 
 ## 2. 契约与接口优先级
 
@@ -18,9 +18,11 @@ macOS 第一阶段已实现：
 4. 未知状态必须原样保留，界面不得将未知值误报为失败或成功。
 5. SID、SynoToken、Cookie、DID、下载链接、Tracker、容器环境变量、挂载路径、Registry 凭据、虚拟机控制台凭据和日志正文不得进入分析日志。
 6. 容器主列表固定按当前已验证契约提交 `offset=0`、`limit=-1`、`type=all`；映像、网络、项目和活动记录属于附属读取，单项不可用不得遮蔽已成功读取的容器。
-7. VMM 主列表优先读取官方 `SYNO.Virtualization.API.Guest`；只有官方读取明确不兼容且内部 Guest 能力同时存在时，才允许只读降级。主列表成功后，主机、存储、网络、映像、保护和活动记录单项失败不阻断页面；登录失效、证书变化与取消仍必须立即上报。
+7. VMM 主列表优先读取官方 `SYNO.Virtualization.API.Guest`；只有官方读取明确不兼容且内部 Guest 能力同时存在时，才允许只读降级。主列表成功后，主机、存储、网络、映像、保护和日志单项失败不阻断页面；日志 `list` 必须携带网页端要求的筛选、日期和排序参数。各端必须区分“确实为空”和“读取不可用”，登录失效、证书变化与取消仍必须立即上报。
 8. 镜像仓库使用已验证的内部契约：`SYNO.Docker.Registry.search` 提交 `offset=0`、`limit=50`、`page_size=50` 和 `q`，`tags` 使用 `repo`；下载由 `SYNO.Docker.Image.pull_start` 提交 `repository` 与 `tag`。三端不得退回未验证的 `pull` 方法。
 9. VMM 创建和修改按官方网页客户端已验证的内部 `SYNO.Virtualization.Guest.create/set` 契约实现；控制台使用套件 noVNC 页面与 `synovirtualization/ws/{guest_id}` 通道。会话 Cookie 只注入非持久 WebView，不写入 URL、日志或磁盘。
+10. VMM 映像删除优先使用公开 `SYNO.Virtualization.API.Guest.Image.delete`；网络修改和删除没有公开写接口，只允许在内部 `SYNO.Virtualization.Network` 能力存在、当前 DSM/VMM 版本通过契约验收后开放，并保持确认、防重复提交和写后回读。
+11. Apple、Android 与 Windows 共用 `VirtualMachineManagerSnapshot` 的保护计划、计划策略、保留策略、日志和分区可用性语义；Android/Windows 实现界面时不得把读取失败呈现为空数据。
 10. 下载任务文件使用官方 `SYNO.DownloadStation.Task.create` multipart 契约，文件是正文的最后一个字段；基础设置使用官方 `Info.getconfig/setserverconfig`，计划使用 `Schedule.getconfig/setconfig`，保存后必须回读核验。
 
 ## 3. 写操作安全门槛

@@ -1193,17 +1193,39 @@ private struct VirtualMachineManagerView: View {
             case .networks: "网络"
             case .images: "映像"
             case .protection: "保护"
-            case .events: "活动记录"
+            case .events: "日志"
+            }
+        }
+    }
+
+    enum ProtectionPane: String, CaseIterable, Identifiable {
+        case plans
+        case schedules
+        case retentions
+
+        var id: Self { self }
+        var title: String {
+            switch self {
+            case .plans: "保护计划"
+            case .schedules: "计划策略"
+            case .retentions: "保留策略"
             }
         }
     }
 
     @Bindable var model: ServiceManagementModel
     @State private var pane: Pane = .machines
+    @State private var protectionPane: ProtectionPane = .plans
     @State private var pendingPowerAction: VirtualMachinePowerAction?
     @State private var confirmsDelete = false
+    @State private var confirmsNetworkDelete = false
+    @State private var confirmsImageDelete = false
+    @State private var deletingImage: VirtualizationResource?
     @State private var showsCreation = false
     @State private var editingMachine: VirtualMachine?
+    @State private var editingNetwork: VirtualizationResource?
+    @State private var logSearch = ""
+    @State private var logLevel = "全部"
     @State private var consoleWindowController: VirtualMachineConsoleWindowController?
 
     var body: some View {
@@ -1223,12 +1245,21 @@ private struct VirtualMachineManagerView: View {
 
             switch pane {
             case .machines: machineList
-            case .hosts: resourceList(model.virtualMachines?.hosts ?? [], icon: "server.rack")
-            case .storages: resourceList(model.virtualMachines?.storages ?? [], icon: "internaldrive")
-            case .networks: resourceList(model.virtualMachines?.networks ?? [], icon: "network")
-            case .images: resourceList(model.virtualMachines?.images ?? [], icon: "opticaldisc")
-            case .protection:
-                resourceList(model.virtualMachines?.protectionPlans ?? [], icon: "shield.checkered")
+            case .hosts:
+                resourceList(
+                    model.virtualMachines?.hosts ?? [],
+                    icon: "server.rack",
+                    section: .hosts
+                )
+            case .storages:
+                resourceList(
+                    model.virtualMachines?.storages ?? [],
+                    icon: "internaldrive",
+                    section: .storages
+                )
+            case .networks: networkList
+            case .images: imageList
+            case .protection: protectionView
             case .events: eventList
             }
         }
@@ -1257,6 +1288,40 @@ private struct VirtualMachineManagerView: View {
         } message: {
             Text("虚拟机及其配置会被移除。请先确认重要数据已有备份。")
         }
+        .confirmationDialog("删除所选网络？", isPresented: $confirmsNetworkDelete) {
+            Button("删除网络", role: .destructive) {
+                Task { await model.deleteVirtualMachineNetworks() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("使用中的网络可能无法删除。删除后，连接到该网络的虚拟机可能无法正常通信。")
+        }
+        .confirmationDialog(
+            deletingImage != nil ? "确定要删除映像“\(deletingImage?.name ?? "")”吗？" : "删除所选映像？",
+            isPresented: Binding(
+                get: { confirmsImageDelete || deletingImage != nil },
+                set: { if !$0 { confirmsImageDelete = false; deletingImage = nil } }
+            )
+        ) {
+            Button("删除映像", role: .destructive) {
+                if let image = deletingImage {
+                    model.virtualMachineImageSelection = [image.id]
+                }
+                deletingImage = nil
+                confirmsImageDelete = false
+                Task { await model.deleteVirtualMachineImages() }
+            }
+            Button("取消", role: .cancel) {
+                deletingImage = nil
+                confirmsImageDelete = false
+            }
+        } message: {
+            if let image = deletingImage {
+                Text("映像“\(image.name)”将会从这台 NAS 移除。已使用此映像安装的虚拟机不会被删除。")
+            } else {
+                Text("映像会从这台 NAS 移除。已使用此映像安装的虚拟机不会被删除。")
+            }
+        }
         .sheet(isPresented: $showsCreation) {
             CreateVirtualMachineSheet(
                 snapshot: model.virtualMachines,
@@ -1267,6 +1332,17 @@ private struct VirtualMachineManagerView: View {
             EditVirtualMachineSheet(
                 machine: machine,
                 submit: { await model.updateVirtualMachine(id: machine.id, configuration: $0) }
+            )
+        }
+        .sheet(item: $editingNetwork) { network in
+            EditVirtualMachineNetworkSheet(
+                network: network,
+                submit: {
+                    await model.updateVirtualMachineNetwork(
+                        id: network.id,
+                        configuration: $0
+                    )
+                }
             )
         }
     }
@@ -1380,10 +1456,13 @@ private struct VirtualMachineManagerView: View {
 
     private func resourceList(
         _ resources: [VirtualizationResource],
-        icon: String
+        icon: String,
+        section: VirtualMachineManagerSection? = nil
     ) -> some View {
         Group {
-            if resources.isEmpty, !model.isLoading {
+            if let section, isUnavailable(section) {
+                unavailableState(icon: icon)
+            } else if resources.isEmpty, !model.isLoading {
                 EmptyServiceState(
                     title: "没有可显示的项目",
                     message: "这台 NAS 没有返回当前类别的内容。",
@@ -1411,19 +1490,253 @@ private struct VirtualMachineManagerView: View {
         }
     }
 
-    private var eventList: some View {
-        List(model.virtualMachines?.events ?? []) { event in
-            HStack(alignment: .top) {
-                Text(event.timestamp?.formatted(date: .numeric, time: .standard) ?? "—")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 150, alignment: .leading)
-                Text(event.level).frame(width: 72, alignment: .leading)
-                Text(event.message).textSelection(.enabled)
+    private var networkList: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Button {
+                    editingNetwork = selectedNetwork
+                } label: {
+                    Label("修改", systemImage: "pencil")
+                }
+                .disabled(selectedNetwork == nil || model.isPerformingAction)
+                Button(role: .destructive) {
+                    confirmsNetworkDelete = true
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+                .disabled(
+                    model.virtualMachineNetworkSelection.isEmpty
+                        || model.isPerformingAction
+                )
+                Spacer()
             }
-            .font(.callout)
-            .padding(.vertical, 3)
+
+            if isUnavailable(.networks) {
+                unavailableState(icon: "network")
+            } else {
+                selectableResourceList(
+                    model.virtualMachines?.networks ?? [],
+                    selection: $model.virtualMachineNetworkSelection,
+                    icon: "network",
+                    emptyMessage: "这台 NAS 还没有可管理的虚拟网络。"
+                )
+            }
         }
-        .listStyle(.inset)
+    }
+
+    private var imageList: some View {
+        Group {
+            if isUnavailable(.images) {
+                unavailableState(icon: "opticaldisc")
+            } else {
+                selectableResourceList(
+                    model.virtualMachines?.images ?? [],
+                    selection: $model.virtualMachineImageSelection,
+                    icon: "opticaldisc",
+                    emptyMessage: "这台 NAS 还没有可管理的安装映像。",
+                    onDelete: { resource in
+                        deletingImage = resource
+                        model.virtualMachineImageSelection = [resource.id]
+                        confirmsImageDelete = true
+                    }
+                )
+            }
+        }
+    }
+
+    private func selectableResourceList(
+        _ resources: [VirtualizationResource],
+        selection: Binding<Set<String>>,
+        icon: String,
+        emptyMessage: String,
+        onDelete: ((VirtualizationResource) -> Void)? = nil
+    ) -> some View {
+        Group {
+            if resources.isEmpty, !model.isLoading {
+                EmptyServiceState(
+                    title: "没有可显示的项目",
+                    message: emptyMessage,
+                    icon: icon
+                )
+            } else {
+                List(resources, selection: selection) { resource in
+                    HStack {
+                        Image(systemName: icon)
+                            .foregroundStyle(.indigo)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(resource.name).fontWeight(.medium)
+                            if let detail = resource.detail {
+                                Text(detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if let status = resource.status {
+                            Text(ServiceFormat.status(status))
+                                .foregroundStyle(.secondary)
+                        }
+                        if let onDelete {
+                            Button(role: .destructive) {
+                                onDelete(resource)
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(model.isPerformingAction)
+                            .help("删除此项目")
+                        }
+                    }
+                    .font(.callout)
+                    .padding(.vertical, 4)
+                    .tag(resource.id)
+                    .contextMenu {
+                        if let onDelete {
+                            Button(role: .destructive) {
+                                onDelete(resource)
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                .listStyle(.inset)
+            }
+        }
+    }
+
+    private var selectedNetwork: VirtualizationResource? {
+        guard model.virtualMachineNetworkSelection.count == 1,
+              let id = model.virtualMachineNetworkSelection.first else {
+            return nil
+        }
+        return model.virtualMachines?.networks.first(where: { $0.id == id })
+    }
+
+    private var protectionView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("保护内容", selection: $protectionPane) {
+                ForEach(ProtectionPane.allCases) { item in
+                    Text(item.title).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 420)
+
+            if isUnavailable(.protection) {
+                unavailableState(icon: "shield.checkered")
+            } else {
+                switch protectionPane {
+                case .plans:
+                    resourceList(
+                        model.virtualMachines?.protectionPlans ?? [],
+                        icon: "shield.checkered"
+                    )
+                case .schedules:
+                    resourceList(
+                        model.virtualMachines?.protectionSchedulePolicies ?? [],
+                        icon: "calendar.badge.clock"
+                    )
+                case .retentions:
+                    resourceList(
+                        model.virtualMachines?.protectionRetentionPolicies ?? [],
+                        icon: "clock.arrow.circlepath"
+                    )
+                }
+            }
+        }
+    }
+
+    private var eventList: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Picker("级别", selection: $logLevel) {
+                    ForEach(logLevels, id: \.self) { Text($0).tag($0) }
+                }
+                .frame(width: 150)
+                TextField("搜索日志", text: $logSearch)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 280)
+                Spacer()
+                Text("\(filteredEvents.count) 条")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("共 \(filteredEvents.count) 条日志")
+            }
+
+            if isUnavailable(.logs) {
+                unavailableState(icon: "list.bullet.rectangle")
+            } else if filteredEvents.isEmpty, !model.isLoading {
+                EmptyServiceState(
+                    title: logSearch.isEmpty && logLevel == "全部" ? "还没有日志" : "没有匹配的日志",
+                    message: logSearch.isEmpty && logLevel == "全部"
+                        ? "这台 NAS 暂时没有返回虚拟机管理日志。"
+                        : "请尝试其他关键词或级别。",
+                    icon: "list.bullet.rectangle"
+                )
+            } else {
+                List(filteredEvents) { event in
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(event.timestamp?.formatted(date: .numeric, time: .standard) ?? "—")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 150, alignment: .leading)
+                        Text(event.level)
+                            .foregroundStyle(logColor(event.level))
+                            .frame(width: 72, alignment: .leading)
+                        Text(event.user ?? "—")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 120, alignment: .leading)
+                        Text(event.message)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .font(.callout)
+                    .padding(.vertical, 3)
+                }
+                .listStyle(.inset)
+            }
+        }
+    }
+
+    private var logLevels: [String] {
+        let levels = Set((model.virtualMachines?.events ?? []).map(\.level))
+        return ["全部"] + levels.sorted()
+    }
+
+    private var filteredEvents: [ServiceEvent] {
+        (model.virtualMachines?.events ?? []).filter { event in
+            let matchesLevel = logLevel == "全部" || event.level == logLevel
+            let query = logSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard matchesLevel, !query.isEmpty else { return matchesLevel }
+            return event.message.localizedCaseInsensitiveContains(query)
+                || event.level.localizedCaseInsensitiveContains(query)
+                || event.user?.localizedCaseInsensitiveContains(query) == true
+        }
+    }
+
+    private func logColor(_ level: String) -> Color {
+        let normalized = level.lowercased()
+        if normalized.contains("error") || level.contains("错误") { return .red }
+        if normalized.contains("warn") || level.contains("警告") { return .orange }
+        return .primary
+    }
+
+    private func isUnavailable(_ section: VirtualMachineManagerSection) -> Bool {
+        model.virtualMachines?.unavailableSections.contains(section) == true
+    }
+
+    private func unavailableState(icon: String) -> some View {
+        VStack(spacing: 12) {
+            EmptyServiceState(
+                title: "暂时无法读取",
+                message: "这台 NAS 没有返回当前内容。请刷新；如果仍然失败，请确认账号有虚拟机管理权限。",
+                icon: icon
+            )
+            Button("重新加载") {
+                Task { await model.activate(.virtualMachines, force: true) }
+            }
+            .disabled(model.isLoading)
+        }
     }
 
     private var powerConfirmationTitle: String {
@@ -1450,6 +1763,62 @@ private struct VirtualMachineManagerView: View {
         pendingPowerAction == .powerOff
             ? "强制断电可能导致虚拟机内尚未保存的数据丢失。优先使用“正常关机”。"
             : "请确认虚拟机中的工作已妥善保存。"
+    }
+}
+
+private struct EditVirtualMachineNetworkSheet: View {
+    let network: VirtualizationResource
+    let submit: (VirtualMachineNetworkUpdate) async -> Bool
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var isSaving = false
+
+    init(
+        network: VirtualizationResource,
+        submit: @escaping (VirtualMachineNetworkUpdate) async -> Bool
+    ) {
+        self.network = network
+        self.submit = submit
+        _name = State(initialValue: network.name)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("修改网络")
+                .font(.title2.bold())
+            Form {
+                TextField("名称", text: $name)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Text("修改名称不会改变虚拟机当前的网络连接。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(isSaving ? "正在保存…" : "保存") {
+                    isSaving = true
+                    Task {
+                        let succeeded = await submit(
+                            VirtualMachineNetworkUpdate(
+                                name: name.trimmingCharacters(in: .whitespacesAndNewlines)
+                            )
+                        )
+                        isSaving = false
+                        if succeeded { dismiss() }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(
+                    isSaving
+                        || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
+        .interactiveDismissDisabled(isSaving)
     }
 }
 

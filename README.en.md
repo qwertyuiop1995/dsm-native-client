@@ -134,6 +134,7 @@ Follow [`SECURITY.md`](SECURITY.md) when reporting a vulnerability. Do not attac
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Security baseline](docs/security/SECURITY_BASELINE.md)
 - [DSM Web API reference](docs/api/DSM_WEB_API_REFERENCE_ZH.md)
+- [DSM and package private API discovery process](docs/api/discovery/README.md)
 - [Locale contract](contracts/localization/README.md)
 
 ## Contributing

@@ -3,6 +3,7 @@
 ## 核心文档
 
 - [DSM Web API 参考](api/DSM_WEB_API_REFERENCE_ZH.md)
+- [DSM 与套件私有 API 发现规范](api/discovery/README.md)
 - [当前开发与验收计划](development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)
 - [照片管理开发计划](development/NATIVE_DSM_PHOTOS_DEVELOPMENT_PLAN_ZH.md)
 - [Synology Chat 原生聊天功能开发计划](development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)

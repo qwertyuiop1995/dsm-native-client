@@ -1,0 +1,579 @@
+{
+  "$schema": "../schemas/private-api-compatibility.schema.json",
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-29",
+  "environments": [
+    {
+      "id": "lab-a-dsm-7-2-1-69057-u12-20260729",
+      "deviceAlias": "lab-a",
+      "baselineStatus": "current",
+      "observedAt": "2026-07-29",
+      "dsmVersion": "7.2.1",
+      "dsmBuild": "69057",
+      "dsmUpdate": "12",
+      "packages": [
+        {
+          "id": "file-station",
+          "name": "File Station",
+          "version": "1.4.1-1559"
+        },
+        {
+          "id": "storage-manager",
+          "name": "存储管理器",
+          "version": "1.0.0-0017"
+        },
+        {
+          "id": "storage-analyzer",
+          "name": "存储空间分析器",
+          "version": "2.1.0-0620"
+        },
+        {
+          "id": "download-station",
+          "name": "Download Station",
+          "version": "4.1.2-5012"
+        },
+        {
+          "id": "virtual-machine-manager",
+          "name": "Virtual Machine Manager",
+          "version": "2.6.5-12202"
+        },
+        {
+          "id": "container-manager",
+          "name": "Container Manager",
+          "version": "24.0.2-1535"
+        },
+        {
+          "id": "synology-chat-server",
+          "name": "Synology Chat Server",
+          "version": "2.4.1-22111"
+        },
+        {
+          "id": "synology-photos",
+          "name": "Synology Photos",
+          "version": "1.8.2-10090"
+        }
+      ],
+      "evidenceRefs": [
+        "docs/api/discovery/environments/2026-07-29-lab-a-dsm-69057-u12.md",
+        "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+      ],
+      "notes": "通过已登录 DSM 信息中心和套件中心只读核实版本；未执行更新或其他写操作。"
+    }
+  ],
+  "endpoints": [
+    {
+      "id": "quickconnect-relay-control",
+      "componentId": "dsm-core",
+      "scope": "QuickConnect",
+      "capability": "直连失败后的中继发现与目标身份核对",
+      "classification": "internal",
+      "operation": "read",
+      "risk": "high",
+      "apiNames": [
+        "get_server_info",
+        "request_tunnel"
+      ],
+      "paths": [
+        "Serv.php"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "直连候选全部失败时才尝试；中继或身份核对失败则停止连接。",
+      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "behavior-verified",
+          "status": "enabled",
+          "versionMatrix": {
+            "quickconnect-relay-control": "无数字 API 版本；当前协议行为已记录"
+          },
+          "verifiedAt": "2026-07-23",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "已记录中继建立、身份核对和随后 SYNO.API.Info 探测；不记录控制主机或目标标识。"
+        }
+      ]
+    },
+    {
+      "id": "file-station-remote-mount",
+      "componentId": "file-station",
+      "scope": "File Station",
+      "capability": "SMB/NFS 远程位置创建、重连与断开",
+      "classification": "internal",
+      "operation": "write",
+      "risk": "high",
+      "apiNames": [
+        "SYNO.FileStation.Mount"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "接口缺失、无权限或无法用公开 getinfo 回读时关闭入口。",
+      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "observed",
+          "status": "candidate",
+          "versionMatrix": {
+            "SYNO.FileStation.Mount": "v1；mount_remote / unmount"
+          },
+          "verifiedAt": "2026-07-27",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "内部实验性契约；尚未在专用目标完成写行为验收。"
+        }
+      ]
+    },
+    {
+      "id": "dsm-system-observability",
+      "componentId": "dsm-core",
+      "scope": "DSM",
+      "capability": "系统、性能、连接、日志和更新状态",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "high",
+      "apiNames": [
+        "SYNO.Core.System",
+        "SYNO.Core.System.Utilization",
+        "SYNO.Core.CurrentConnection",
+        "SYNO.Core.SyslogClient.Log",
+        "SYNO.Core.Upgrade.Server",
+        "SYNO.LogCenter.History"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "各只读页面独立降级；连接断开不可用时不影响连接列表。",
+      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "read-verified",
+          "status": "degraded",
+          "versionMatrix": {
+            "SYNO.Core.System": "info v3",
+            "SYNO.Core.System.Utilization": "get v1",
+            "SYNO.Core.CurrentConnection": "list / kick_connection v1；仅 list 已只读核对",
+            "SYNO.Core.SyslogClient.Log": "list v1",
+            "SYNO.Core.Upgrade.Server": "check v3",
+            "SYNO.LogCenter.History": "客户端范围 v1"
+          },
+          "verifiedAt": "2026-07-27",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "连接断开属于写行为，本环境未执行，不能继承只读证据等级。"
+        }
+      ]
+    },
+    {
+      "id": "dsm-storage-hardware",
+      "componentId": "storage-manager",
+      "scope": "DSM 与存储管理器",
+      "capability": "存储、硬盘健康、检测和硬件设置",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "high",
+      "apiNames": [
+        "SYNO.Storage.CGI.Storage",
+        "SYNO.Storage.CGI.Smart",
+        "SYNO.Core.Storage.Volume",
+        "SYNO.Core.Storage.Disk",
+        "SYNO.Core.Hardware.PowerRecovery",
+        "SYNO.Core.Hardware.Led.Brightness",
+        "SYNO.Core.Hardware.FanSpeed",
+        "SYNO.Core.Hardware.BeepControl",
+        "SYNO.Core.Hardware.Hibernation",
+        "SYNO.Core.ExternalDevice.UPS"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "以 Storage.load_info 为主；单项接口失败时保留其他有效数据并关闭对应写入口。",
+      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "read-verified",
+          "status": "degraded",
+          "versionMatrix": {
+            "SYNO.Storage.CGI.Storage": "load_info v1",
+            "SYNO.Storage.CGI.Smart": "get_health_info v1",
+            "SYNO.Core.Storage.Volume": "list v1；当前返回错误 101",
+            "SYNO.Core.Storage.Disk": "v1；读取结构已核对，do_smart_test 未执行",
+            "SYNO.Core.Hardware.*": "当前客户端范围 v1；写行为未验证",
+            "SYNO.Core.ExternalDevice.UPS": "当前客户端范围 v1；写行为未验证"
+          },
+          "verifiedAt": "2026-07-27",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "S.M.A.R.T. 启停、硬件和 UPS 设置没有为发现而执行。"
+        }
+      ]
+    },
+    {
+      "id": "dsm-administration",
+      "componentId": "dsm-core",
+      "scope": "DSM",
+      "capability": "套件、任务、账号、文件服务、网络、DDNS 与安全设置",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "critical",
+      "apiNames": [
+        "SYNO.Core.Package",
+        "SYNO.Core.Package.Control",
+        "SYNO.Core.Package.Uninstallation",
+        "SYNO.Core.Package.Thumb",
+        "SYNO.Core.TaskScheduler",
+        "SYNO.Core.EventScheduler",
+        "SYNO.Core.User",
+        "SYNO.Core.Group",
+        "SYNO.Core.Terminal",
+        "SYNO.Core.FileServ.SMB",
+        "SYNO.Core.FileServ.NFS",
+        "SYNO.Core.FileServ.FTP",
+        "SYNO.Core.FileServ.FTP.SFTP",
+        "SYNO.Core.Network.Proxy",
+        "SYNO.Core.QuickConnect",
+        "SYNO.Core.QuickConnect.Upnp",
+        "SYNO.Core.Security.AutoBlock",
+        "SYNO.Core.Web.DSM",
+        "SYNO.Core.FileServ.ServiceDiscovery",
+        "SYNO.Core.Network.Ethernet",
+        "SYNO.Core.Security.DoS",
+        "SYNO.Core.Region.NTP",
+        "SYNO.Core.DDNS.Provider",
+        "SYNO.Core.DDNS.Record",
+        "SYNO.Core.Security.Firewall",
+        "SYNO.Core.Security.Firewall.Conf",
+        "SYNO.Core.Security.Firewall.Profile.Apply"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "按能力逐项隐藏或只读降级；不得自动尝试管理员权限或批量回写完整配置。",
+      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "observed",
+          "status": "degraded",
+          "versionMatrix": {
+            "SYNO.Core.Package": "v1-v2；当前列表使用 v2",
+            "SYNO.Core.Package.Control / Uninstallation / Thumb": "v1",
+            "SYNO.Core.TaskScheduler": "列表/运行 v3；详情/创建/修改 v4",
+            "SYNO.Core.EventScheduler": "v1",
+            "SYNO.Core.User / Group": "客户端范围 v1",
+            "SYNO.Core.Terminal / FileServ.SMB / FileServ.NFS": "客户端范围 v1-v3",
+            "SYNO.Core.Web.DSM / Network.Ethernet / Security.DoS": "客户端范围 v1-v2",
+            "SYNO.Core.QuickConnect / Region.NTP": "客户端范围 v1-v3",
+            "其余已列 DSM 控制面板 API": "客户端范围 v1"
+          },
+          "verifiedAt": "2026-07-27",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "只读结构和网页请求已有记录；危险写操作未形成当前环境的统一行为验证结论。"
+        }
+      ]
+    },
+    {
+      "id": "download-station2-fallback",
+      "componentId": "download-station",
+      "scope": "Download Station",
+      "capability": "官方接口不足时的任务、统计、位置和 RSS 降级",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "high",
+      "apiNames": [
+        "SYNO.DownloadStation2.Task",
+        "SYNO.DownloadStation2.Task.Statistic",
+        "SYNO.DownloadStation2.Settings.Location",
+        "SYNO.DownloadStation2.RSS.Feed"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "优先官方 SYNO.DownloadStation.*；内部家族缺失时关闭对应增强能力。",
+      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "observed",
+          "status": "degraded",
+          "versionMatrix": {
+            "SYNO.DownloadStation2.Task": "客户端范围 v1-v2",
+            "SYNO.DownloadStation2.Task.Statistic": "客户端范围 v1",
+            "SYNO.DownloadStation2.Settings.Location": "客户端范围 v1",
+            "SYNO.DownloadStation2.RSS.Feed": "客户端范围 v1"
+          },
+          "verifiedAt": "2026-07-27",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "当前组件版本为 4.1.2-5012；文件上传和设置写入尚未在真实目标执行。"
+        }
+      ]
+    },
+    {
+      "id": "vmm-internal",
+      "componentId": "virtual-machine-manager",
+      "scope": "Virtual Machine Manager",
+      "capability": "VMM 网页端读取、日志与隔离写能力",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "critical",
+      "apiNames": [
+        "SYNO.Virtualization.Guest",
+        "SYNO.Virtualization.Guest.Action",
+        "SYNO.Virtualization.Guest.Image",
+        "SYNO.Virtualization.Host",
+        "SYNO.Virtualization.Repo",
+        "SYNO.Virtualization.Network",
+        "SYNO.Virtualization.GuestProtect.Plan",
+        "SYNO.Virtualization.Log"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "优先公开 SYNO.Virtualization.API.* v1；内部读取失败时显示不可用，写能力保持关闭。",
+      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "read-verified",
+          "status": "degraded",
+          "versionMatrix": {
+            "SYNO.Virtualization.Guest / Guest.Image / Host / Repo / Network / GuestProtect.Plan": "客户端范围 v1-v2",
+            "SYNO.Virtualization.Guest.Action": "v1",
+            "SYNO.Virtualization.Log": "list v1"
+          },
+          "verifiedAt": "2026-07-27",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "当前组件版本为 2.6.5-12202；创建、修改、网络写和删除未形成行为验证结论。"
+        }
+      ]
+    },
+    {
+      "id": "container-manager-internal",
+      "componentId": "container-manager",
+      "scope": "Container Manager",
+      "capability": "容器、映像、仓库、网络、项目和日志",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "critical",
+      "apiNames": [
+        "SYNO.Docker.Container",
+        "SYNO.Docker.Image",
+        "SYNO.Docker.Registry",
+        "SYNO.Docker.Network",
+        "SYNO.Docker.Project",
+        "SYNO.Docker.Log"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "读取按能力逐项降级；没有专用目标行为证据时关闭写能力。",
+      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "observed",
+          "status": "degraded",
+          "versionMatrix": {
+            "SYNO.Docker.Container": "list v1",
+            "SYNO.Docker.Image": "客户端范围 v1；pull_start 未发送",
+            "SYNO.Docker.Registry": "search / tags v1",
+            "SYNO.Docker.Network / Project / Log": "客户端范围 v1"
+          },
+          "verifiedAt": "2026-07-27",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "当前组件版本为 24.0.2-1535；镜像拉取请求在发送前终止。"
+        }
+      ]
+    },
+    {
+      "id": "chat-internal",
+      "componentId": "synology-chat-server",
+      "scope": "Synology Chat Server",
+      "capability": "普通用户会话、消息、附件、提醒、投票与定时消息",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "critical",
+      "apiNames": [
+        "SYNO.Chat.Channel",
+        "SYNO.Chat.Channel.Named",
+        "SYNO.Chat.Channel.Anonymous",
+        "SYNO.Chat.Channel.Member",
+        "SYNO.Chat.User",
+        "SYNO.Chat.User.Avatar",
+        "SYNO.Chat.Post",
+        "SYNO.Chat.Post.File",
+        "SYNO.Chat.Post.Reminder",
+        "SYNO.Chat.Post.Vote",
+        "SYNO.Chat.Post.Schedule"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "内部普通用户接口缺失时隐藏聊天能力，不用公开 Bot/Webhook API 替代。",
+      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "observed",
+          "status": "degraded",
+          "versionMatrix": {
+            "SYNO.Chat.Channel": "客户端范围 v1-v5",
+            "SYNO.Chat.Channel.Named": "v1",
+            "SYNO.Chat.Channel.Anonymous": "客户端范围 v1-v2；initiate 当前确认 v2",
+            "SYNO.Chat.Channel.Member": "get v1",
+            "SYNO.Chat.User": "客户端范围 v1-v3",
+            "SYNO.Chat.User.Avatar": "v1",
+            "SYNO.Chat.Post": "客户端范围 v1-v8；create / forward / pin / unpin / search 当前确认 v5",
+            "SYNO.Chat.Post.File": "客户端范围 v1-v2；当前确认 v2",
+            "SYNO.Chat.Post.Reminder / Vote / Schedule": "v1"
+          },
+          "verifiedAt": "2026-07-23",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "当前组件版本为 2.4.1-22111；不同能力的读写证据仍按产品兼容矩阵逐项处理。"
+        }
+      ]
+    },
+    {
+      "id": "chat-realtime",
+      "componentId": "synology-chat-server",
+      "scope": "Synology Chat Server",
+      "capability": "聊天实时事件与轮询降级",
+      "classification": "internal",
+      "operation": "read",
+      "risk": "medium",
+      "apiNames": [
+        "Socket.IO / Engine.IO"
+      ],
+      "paths": [
+        "sc/socket.io"
+      ],
+      "methods": [
+        "WebSocket"
+      ],
+      "fallback": "连接失败时每 5 秒轮询，连接稳定时每 30 秒 API 校准。",
+      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "observed",
+          "status": "degraded",
+          "versionMatrix": {
+            "Engine.IO": "客户端兼容 4 / 3",
+            "Socket.IO path": "sc/socket.io"
+          },
+          "verifiedAt": "2026-07-23",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "当前组件版本为 2.4.1-22111；完整跨版本、睡眠唤醒和中继矩阵待验证。"
+        }
+      ]
+    },
+    {
+      "id": "photos-internal-candidate",
+      "componentId": "synology-photos",
+      "scope": "Synology Photos",
+      "capability": "相册、文件夹、项目、时间线、标签、地理位置和媒体读取候选",
+      "classification": "internal",
+      "operation": "read",
+      "risk": "high",
+      "apiNames": [
+        "SYNO.Foto.Browse.Album",
+        "SYNO.FotoTeam.Browse.Album",
+        "SYNO.Foto.Browse.Folder",
+        "SYNO.FotoTeam.Browse.Folder",
+        "SYNO.Foto.Browse.Item",
+        "SYNO.FotoTeam.Browse.Item",
+        "SYNO.Foto.Browse.Timeline",
+        "SYNO.FotoTeam.Browse.Timeline",
+        "SYNO.Foto.Browse.RecentlyAdded",
+        "SYNO.FotoTeam.Browse.RecentlyAdded",
+        "SYNO.Foto.Browse.GeneralTag",
+        "SYNO.FotoTeam.Browse.GeneralTag",
+        "SYNO.Foto.Browse.Geocoding",
+        "SYNO.FotoTeam.Browse.Geocoding",
+        "SYNO.Foto.Thumbnail",
+        "SYNO.FotoTeam.Thumbnail",
+        "SYNO.Foto.Download",
+        "SYNO.FotoTeam.Download"
+      ],
+      "paths": [
+        "not-recorded-static-candidate"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "增强接口保持关闭，基础照片库使用官方 File Station 能力。",
+      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "static",
+          "status": "disabled",
+          "versionMatrix": {
+            "SYNO.Foto.* / SYNO.FotoTeam.*": "当前未登记 API 版本"
+          },
+          "verifiedAt": "2026-07-29",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "当前组件版本为 1.8.2-10090；没有完成内部 Adapter 契约测试，不得提升证据等级。"
+        }
+      ]
+    }
+  ]
+}

@@ -134,6 +134,7 @@ dotnet build src/LanStash.App/LanStash.App.csproj --configuration Release --runt
 - [总体架构](docs/architecture/ARCHITECTURE.md)
 - [安全基线](docs/security/SECURITY_BASELINE.md)
 - [DSM Web API 参考](docs/api/DSM_WEB_API_REFERENCE_ZH.md)
+- [DSM 与套件私有 API 发现规范](docs/api/discovery/README.md)
 - [语言契约说明](contracts/localization/README.md)
 
 ## 参与开发

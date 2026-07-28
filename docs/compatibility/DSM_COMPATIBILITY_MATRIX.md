@@ -1,10 +1,12 @@
 # DSM 兼容矩阵
 
 > 只记录版本和验证结论，不记录 NAS 地址、序列号、账号或真实共享名。
+>
+> 当前匿名发现基线：[`lab-a-dsm-7-2-1-69057-u12-20260729`](../api/discovery/environments/2026-07-29-lab-a-dsm-69057-u12.md)。
 
 | DSM build | File Station | 证书类型 | 平台 | 登录 | 浏览 | 下载 | 上传 | 删除 | 恢复 | 日期 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 7.2.1-69057 Update 12 | 当前网页套件已加载（版本待记录） | 公共 CA | macOS | 官方网页会话已通过；岚仓待复验 | 官方网页可见；岚仓基础浏览已有反馈 | 未验证 | 未验证 | 未验证 | 未验证 | 2026-07-23 |
+| 7.2.1-69057 Update 12 | File Station 1.4.1-1559 | 公共 CA | macOS | 官方网页会话已通过；岚仓待复验 | 官方网页可见；岚仓基础浏览已有反馈 | 未验证 | 未验证 | 未验证 | 未验证 | 2026-07-29 |
 
 ## 连接方式验证
 
@@ -50,6 +52,7 @@
 
 ## 记录要求
 
+- 私有 API 的环境、端点和升级差异必须按 [`DSM 与套件私有 API 发现规范`](../api/discovery/README.md) 留档，并同步更新机器可读的 [`compatibility.json`](../../contracts/private-api/compatibility.json)。
 - 每次 DSM 或 File Station 升级后重新执行关键契约测试。
 - 证书类型只记录“公共 CA”“自签名”或“私有 CA”，不记录证书正文、主机名或指纹。
 - 内部 API 必须精确记录验证版本。
@@ -62,7 +65,7 @@
 
 | DSM build | Synology Photos 版本 | 平台 | 个人空间 | 共享空间 | 基础照片库 | 时间轴 | 相册 | 人物/主题 | 地点/标签 | 日期 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 待填写 | 待填写 | macOS | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 | - |
+| 7.2.1-69057 Update 12 | 1.8.2-10090 | macOS | 内部接口未验证 | 内部接口未验证 | File Station 基础照片库已实现，待完整实机验收 | 内部接口未验证 | 内部接口未验证 | 未验证 | 未验证 | 2026-07-29 |
 
 照片兼容记录必须满足：
 
@@ -129,6 +132,6 @@ Chat 兼容记录必须满足：
 | DSM 存储/套件/任务/账号 | DSM 7.2.1-69057 Update 12 | `SYNO.API.Info` + 已登录会话只读响应结构核对 + DSM 前端静态请求 | 已确认 `Storage.Disk.get_smart_test_log/disk_test_log_get/do_smart_test` v1：请求使用 `load_info.disks[].device`，状态取 `testInfo[0]`，历史取 `testLog`，并识别其他检测占用；同时确认 `EventScheduler.result_list/result_get_file` v1、套件管理、任务管理以及用户/群组管理；macOS 已实现硬盘检测启停、真实历史记录、任务运行记录和其他受保护流程 | 不同 RAID/SSD/扩展柜、普通账号、空目录和大清单；硬盘检测及其他写操作仍需用专用测试目标完成权限、忙碌、重复提交、超时与最终状态实机验收 |
 | Virtual Machine Manager | 2.6.5-12202 | 官方网页可见 + `SYNO.API.Info` + Synology 官方 VMM API 指南 + 2026-07-27 已登录页面只读导航、创建/修改请求发送前拦截、日志页面与前端读取契约核对和 noVNC 地址生成逻辑核对 | macOS 已接入官方 `SYNO.Virtualization.API.*` v1 优先和内部 Guest/Action/Image/Host/Network/Repo/Protect/Log 隔离降级；日志按网页端 `SYNO.Virtualization.Log.list` v1 提交分页、筛选、日期和排序参数并兼容常见字段；保护拆分保护计划、计划策略和保留策略，并保留读取不可用状态；映像删除优先公开 API，网络修改/删除隔离为内部写能力；已实现受保护的分步创建、常规设置修改和独立可全屏非持久 WebView 远程控制台 | 日志读取已按当前 VMM 2.6.5-12202 网页契约核对；创建和修改请求均在发送前终止，未改变现有虚拟机；映像删除及内部网络修改/删除仍需专用目标核对方法、参数、任务完成、权限不足、资源占用、重复提交和写后最终状态；迁移、克隆、导入导出仍未实现 |
 | Container Manager | 24.0.2-1535 | 官方网页可见 + `SYNO.API.Info` + 2026-07-27 已登录页面只读导航、脱敏请求结构核对和下载请求发送前拦截 | 已确认 `SYNO.Docker.Container.list` v1 需要 `offset=0`、`limit=-1`、`type=all`；镜像仓库使用 `SYNO.Docker.Registry.search(offset,limit,page_size,q)` 与 `tags(repo)`，下载使用 `SYNO.Docker.Image.pull_start(repository,tag)`；macOS 已实现搜索、结果选择、标签筛选和下载启动，并将映像、网络、项目和活动记录隔离为可降级附属读取 | 下载请求在发送前终止，未对真实 NAS 执行拉取；其他写操作尚未在专用目标执行；环境变量、挂载路径、容器日志正文与 Registry 凭据未读取 |
-| Download Station | 当前安装版本随运行时发现 | 官方公开指南 + 2026-07-27 已登录页面只读导航与脱敏字段核对 | macOS 官方 `SYNO.DownloadStation.*` 优先，当前 NAS 的 `SYNO.DownloadStation2.*` 独立降级；任务、速率、NAS 目录选择、链接/磁力创建、`.torrent`/`.nzb`/网址文本文件上传、基础设置与计划读写、暂停/继续/结束/删除已接入；设置保存后回读核验 | 文件上传和设置写入尚未对真实 NAS 执行；Tracker/Peer 明细、BT 实际搜索提交、RSS 新增/过滤器，以及高级 BT、监听目录、NZB 服务器、RSS 与通知设置仍需契约和专用目标验收 |
+| Download Station | 4.1.2-5012 | 官方公开指南 + 2026-07-27 已登录页面只读导航与脱敏字段核对 + 2026-07-29 套件中心版本复核 | macOS 官方 `SYNO.DownloadStation.*` 优先，当前 NAS 的 `SYNO.DownloadStation2.*` 独立降级；任务、速率、NAS 目录选择、链接/磁力创建、`.torrent`/`.nzb`/网址文本文件上传、基础设置与计划读写、暂停/继续/结束/删除已接入；设置保存后回读核验 | 文件上传和设置写入尚未对真实 NAS 执行；Tracker/Peer 明细、BT 实际搜索提交、RSS 新增/过滤器，以及高级 BT、监听目录、NZB 服务器、RSS 与通知设置仍需契约和专用目标验收 |
 
 本表只确认当前记录的发现范围。合并后的 NAS 设置已形成当前 DSM build 的读取结构兼容结论；文件服务、远程终端、代理、物理网卡、DDNS、区域时间、远程访问、防火墙基础控制和 UPS 已按当前 DSM 前端契约接入客户端保护与写后回读，但尚未在专用测试设备上形成真实写操作兼容结论。共享文件夹复合管理、完整防火墙规则和电源日程仍保持关闭；其他 DSM build、套件版本与权限组合仍需验证。Download Station、VMM 与 Container Manager 已进入 macOS 实现，但内部接口写操作仍以专用目标验收为发布前置条件。

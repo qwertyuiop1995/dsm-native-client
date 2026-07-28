@@ -1,0 +1,39 @@
+name: Android Build
+
+on:
+  push:
+    paths:
+      - "android/**"
+      - ".github/workflows/android-build.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - ".github/workflows/android-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 配置 JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: 运行测试并构建
+        working-directory: android
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --stacktrace
+
+      - name: 上传调试包
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanStash-Android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

@@ -1,6 +1,6 @@
 # 岚仓（LanStash）当前开发与验收计划
 
-> 最后更新：2026-07-19
+> 最后更新：2026-07-28
 > 当前里程碑：macOS 文件客户端实机验收与稳定性收敛
 > 目标平台：macOS、iPhone、iPad、Android、Windows
 > 历史规格：[第一阶段开发文档归档](../archive/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_V1_ARCHIVE_ZH.md)
@@ -79,6 +79,10 @@ macOS 端已经形成可构建、可测试的文件客户端实现，主要包�
 
 - iPhone 和 iPad 复用 Apple 共享业务层，单独实现适合触控和小屏的原生界面。
 - Android 使用 Kotlin 与 Jetpack Compose，Windows 使用 C# 与 WinUI 3。
+- iPhone、iPad、Android 与 Windows 已统一接入 QuickConnect ID 解析、可信直连候选探测、安全中继身份核对，以及保存会话恢复时的重新解析；原始 ID 只作为用户配置保存，解析地址只在当前连接期间使用。
+- iPhone、iPad、Android 与 Windows 已统一保留最后使用的 NAS 名称、原始地址和账号；密码默认不保存，仅在用户明确选择后进入平台系统安全存储，自动登录必须以已保存密码为前提。
+- 各端可选 HTTPS 端口均放在默认收起的“高级连接设置”中；留空时继续使用地址内端口或安全的自动选择规则。
+- QuickConnect 地址发现和 `SYNO.API.Info` 能力探测不得携带账号、密码、OTP、SID 或 SynoToken；只有可信候选通过能力发现后才允许登录。
 - 三端后续实现容量与远程位置 UI 时必须沿用“账号可见容量”语义和能力探测边界；不得改用内部存储接口扩权，也不得持久化远程共享密码。
 - 三端共同遵循 `contracts/`、API 错误语义和危险操作规则，不共享跨平台 UI 运行时。
 

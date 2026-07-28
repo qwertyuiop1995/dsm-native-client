@@ -266,7 +266,7 @@ curl --fail --silent --show-error \
 | 参数 | 必需 | 版本 | 说明 |
 | --- | --- | --- | --- |
 | `account` | 是 | 3+ | DSM 用户名 |
-| `passwd` | 是 | 3+ | DSM 密码；只在内存中短暂存在 |
+| `passwd` | 是 | 3+ | DSM 密码；默认只在内存中短暂存在，用户明确选择“记住密码”时才进入平台系统安全存储 |
 | `session` | 否 | 3+ | 会话名，例如 `FileStation`、`DownloadStation` |
 | `format` | 否 | 3+ | `cookie` 或 `sid`；macOS 参考实现使用 `sid` 并保留 Cookie 请求头兼容 |
 | `otp_code` | 否 | 3+ | 双重验证 OTP |
@@ -1223,7 +1223,7 @@ requestId=6F1C apiClass=FileList durationMs=184 http=200 dsmCode=0
 ### 13.3 发布前
 
 - [ ] Release 构建不信任调试代理 CA，不允许明文 HTTP。
-- [ ] 密码只在认证请求期间存在于内存，不落盘。
+- [ ] 密码默认只在认证请求期间存在于内存；只有用户明确选择“记住密码”时才进入平台系统安全存储，且不得写入普通配置或日志。
 - [ ] SID、DID、SynoToken 使用系统安全存储。
 - [ ] 登出和删除 NAS 配置会清理所有秘密与缓存。
 - [ ] 危险写操作都有确认和明确的目标摘要。

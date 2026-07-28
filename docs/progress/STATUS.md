@@ -1,7 +1,7 @@
 # 当前开发进度
 
-> 最后更新：2026-07-27
-> 当前里程碑：`macOS 文件客户端实机验收与稳定性收敛`
+> 最后更新：2026-07-28
+> 当前里程碑：`五种设备形态的原生客户端对齐与分平台验收`
 
 ## 总体状态
 
@@ -9,13 +9,14 @@
 | --- | --- | --- |
 | 单仓库与文档 | 已完成 | 契约、架构、安全、兼容和平台目录已经建立 |
 | API 参考 | 进行中 | 官方与内部 API 已分类；随实机差异继续补充 |
-| Apple 共享工程 | 进行中 | Swift Package、macOS App 和 Apple CI 已建立；iPhone/iPad UI 尚未初始化 |
+| Apple 共享工程 | 进行中 | Swift Package、macOS App、iPhone/iPad 通用 SwiftUI App 和 Apple CI 已建立 |
 | macOS 文件客户端 | 需要验证 | 主要功能已实现并通过自动化测试，正在收集真实 NAS 兼容证据 |
 | 照片管理模块 | 进行中 | 文件夹扫描已获实机确认；macOS 时间线、搜索筛选、预览、详情和基础管理源码已实现，等待完整实机与性能验收 |
 | Synology Chat 模块 | 进行中 | macOS 已接入首次单聊、单附件收发、提醒管理、纯文字定时消息、无附件投票创建和 Socket.IO 实时刷新，等待新构建实机验收；语音、投票参与和加密未完成 |
 | NAS 设置模块 | 需要验证 | 已接入存储、套件、任务、账号、日志、连接、文件服务、远程终端、代理、物理网卡、DDNS、区域时间、远程访问、防火墙基础控制、安全防护、局域网发现、风扇/提示音、休眠节能及 UPS；所有新增写操作均确认、防重复并回读，等待专用测试目标实机验收 |
-| Android 客户端 | 未开始 | 保留原生扩展目录，后续初始化 Kotlin/Jetpack Compose 工程 |
-| Windows 客户端 | 未开始 | 保留原生扩展目录，后续初始化 C#/WinUI 3 solution |
+| iPhone/iPad 客户端 | 已实现，需真机验收 | 已接入 QuickConnect、Keychain 可选记密、冷启动资料恢复和自动登录；5 项移动端测试、Release 构建、iPhone 测试启动及 iPad Release 安装启动通过，仍需分别完成真机完整登录 |
+| Android 客户端 | 已实现，需设备验收 | 已接入 QuickConnect、Keystore 可选记密、冷启动资料恢复和自动登录；19 项单元测试、Release 真机冷启动及不含凭据的真实能力发现通过，待用户完整登录复测 |
+| Windows 客户端 | 已实现，需 Windows 验收 | 已接入 QuickConnect、Credential Locker 可选记密、冷启动资料恢复和自动登录；Domain/Infrastructure 的 .NET 10 Release 编译、14 项测试及真实能力发现通过，完整 WinUI XAML 编译需在 Windows CI/设备完成 |
 
 ## macOS 功能状态
 
@@ -64,15 +65,17 @@
 - **其他套件**：Audio Station、Video Station、Note Station、Synology Drive、Calendar、Contacts、Surveillance Station、Hyper Backup / Active Backup、Synology Office
 
 ### 平台实现
-- iPhone、iPad、Android、Windows 原生客户端工程尚未初始化
-- 系统照片库自动备份、后台上传、释放设备空间、离线任务恢复
+- iPhone、iPad、Android 与 Windows 原生工程已初始化；当前实现覆盖文件、照片列表、消息会话、下载、容器、VMM 和 NAS 设置主入口
+- 完整预览与编辑、系统照片库自动备份、后台上传、释放设备空间、离线任务恢复仍待按平台补齐
 
 状态：Download Station、Virtual Machine Manager 与 Container Manager 已进入 macOS 第一阶段实现。任务/资源列表、核心生命周期操作、按 NAS 功能开关和危险操作确认已接入；Download Station 已增加任务文件上传、网址输入与官方基础设置，VMM 已增加分步创建、常规设置修改和独立可全屏 noVNC 远程控制台。BT Tracker/Peer、RSS 完整编辑、高级下载设置、容器完整创建/编辑/终端/日志流、VMM 高级磁盘/网络编辑、迁移和导入导出仍需继续补齐。所有内部接口写操作在专用测试目标验收前保持“已实现、未实机验证”状态。
 
 ## 自动化验证
 
-- Apple 共享包完整测试：共执行 233 项，1 项需要真实环境的可选测试跳过，0 项失败。
-- `DsmMac` Debug、无代码签名构建通过。
+- Apple 共享包完整测试和 `DsmMac` Debug、无代码签名构建持续验证。
+- `DsmMobile` iPhone/iPad 通用目标已通过 5 项测试（含冷启动资料恢复与自动登录）、无签名 Release 模拟器构建、iPhone 测试启动和 iPad Release 安装启动。
+- Android Debug/Release APK、19 项单元测试、仪器测试编译、Android 14 真机 Release 冷启动和 QuickConnect 真实能力发现已通过。
+- Windows Domain、Infrastructure 和 14 项测试已使用 .NET 10 Release 验证，QuickConnect 真实能力发现通过；WinUI XAML 编译器只能在 Windows 运行，完整 App 仍由 Windows CI/设备验证。
 - 本地化文件和 Git 差异格式检查通过。
 - 自动化通过不替代真实 NAS 权限、网络、套件版本和回收站行为验证。
 

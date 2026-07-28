@@ -1,0 +1,38 @@
+name: Windows Build
+
+on:
+  push:
+    paths:
+      - "windows/**"
+      - ".github/workflows/windows-build.yml"
+  pull_request:
+    paths:
+      - "windows/**"
+      - ".github/workflows/windows-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: windows-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 配置 .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: 恢复依赖
+        working-directory: windows
+        run: dotnet restore LanStash.slnx
+
+      - name: 运行测试
+        working-directory: windows
+        run: dotnet test tests/LanStash.Tests/LanStash.Tests.csproj --configuration Release --no-restore
+
+      - name: 构建 WinUI
+        working-directory: windows
+        run: dotnet build src/LanStash.App/LanStash.App.csproj --configuration Release --runtime win-x64 --no-restore

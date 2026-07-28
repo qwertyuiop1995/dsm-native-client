@@ -536,12 +536,20 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
 
     public func deleteContainerImages(ids: [String]) async throws {
         let ids = try validatedIDs(ids)
+        let currentIDs = Set(try await loadContainerManager().images.map(\.id))
+        guard ids.allSatisfy(currentIDs.contains) else {
+            throw validationError("部分映像已不存在，请刷新后重新选择。")
+        }
         for id in ids {
             try await callVoid(
                 DsmAPIName.dockerImage,
                 method: "delete",
                 parameters: ["id": .string(id)]
             )
+        }
+        let remaining = Set(try await loadContainerManager().images.map(\.id))
+        guard ids.allSatisfy({ !remaining.contains($0) }) else {
+            throw verificationError("NAS 尚未确认映像已删除，请刷新后重试。")
         }
     }
 
@@ -561,12 +569,20 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
 
     public func deleteContainerNetworks(ids: [String]) async throws {
         let ids = try validatedIDs(ids)
+        let currentIDs = Set(try await loadContainerManager().networks.map(\.id))
+        guard ids.allSatisfy(currentIDs.contains) else {
+            throw validationError("部分网络已不存在，请刷新后重新选择。")
+        }
         for id in ids {
             try await callVoid(
                 DsmAPIName.dockerNetwork,
                 method: "remove",
                 parameters: ["id": .string(id)]
             )
+        }
+        let remaining = Set(try await loadContainerManager().networks.map(\.id))
+        guard ids.allSatisfy({ !remaining.contains($0) }) else {
+            throw verificationError("NAS 尚未确认网络已删除，请刷新后重试。")
         }
     }
 

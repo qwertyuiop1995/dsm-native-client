@@ -2,4 +2,6 @@
 <Workspace version="1.0">
    <FileRef location="group:Apps/DsmMac/DsmMac.xcodeproj">
    </FileRef>
+   <FileRef location="group:Apps/DsmMobile/DsmMobile.xcodeproj">
+   </FileRef>
 </Workspace>

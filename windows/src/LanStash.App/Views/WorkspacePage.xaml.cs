@@ -1,0 +1,211 @@
+using LanStash.App.ViewModels;
+using LanStash.Domain;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+
+namespace LanStash.App.Views;
+
+public sealed partial class WorkspacePage : Page
+{
+    private readonly WorkspaceViewModel _viewModel;
+
+    public WorkspacePage(AppViewModel app)
+    {
+        InitializeComponent();
+        _viewModel = new WorkspaceViewModel(app);
+        DataContext = _viewModel;
+        _viewModel.PropertyChanged += (_, _) => UpdateState();
+    }
+
+    public async Task ShowModuleAsync(AppModule module)
+    {
+        SearchBox.Text = string.Empty;
+        await _viewModel.ShowModuleAsync(module);
+        if (_viewModel.Categories.Count > 0)
+        {
+            CategoryList.SelectedIndex = 0;
+        }
+        UpdateState();
+    }
+
+    private async void CategoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (CategoryList.SelectedItem is string category)
+        {
+            _viewModel.SelectedCategory = category;
+            await Task.CompletedTask;
+        }
+    }
+
+    private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args) =>
+        await RunAsync(() => _viewModel.ReloadAsync(args.QueryText));
+
+    private async void Refresh_Click(object sender, RoutedEventArgs e) =>
+        await RunAsync(() => _viewModel.ReloadAsync(SearchBox.Text));
+
+    private async void Up_Click(object sender, RoutedEventArgs e) =>
+        await RunAsync(_viewModel.GoUpAsync);
+
+    private async void ResourceList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        _viewModel.SelectedItem = e.ClickedItem as WorkspaceRow;
+        await RunAsync(_viewModel.OpenSelectedAsync);
+    }
+
+    private async void Create_Click(object sender, RoutedEventArgs e)
+    {
+        var isDownload = _viewModel.Module == AppModule.Downloads;
+        var isNetwork = _viewModel.Module == AppModule.Containers;
+        var input = new TextBox
+        {
+            Header = isDownload ? "下载地址" : isNetwork ? "网络名称" : "文件夹名称",
+            PlaceholderText = isDownload ? "https://…" : string.Empty,
+        };
+        var secondary = new TextBox
+        {
+            Header = isDownload ? "保存位置（可选）" : "网络类型",
+            Text = isNetwork ? "bridge" : string.Empty,
+            Visibility = isDownload || isNetwork ? Visibility.Visible : Visibility.Collapsed,
+        };
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(input);
+        panel.Children.Add(secondary);
+        var dialog = CreateDialog(
+            isDownload ? "新增下载任务" : isNetwork ? "新增网络" : "新建文件夹",
+            panel,
+            "新增");
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary &&
+            !string.IsNullOrWhiteSpace(input.Text))
+        {
+            await RunAsync(() => _viewModel.CreateAsync(input.Text, secondary.Text));
+        }
+    }
+
+    private async void Rename_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedItem is null)
+        {
+            return;
+        }
+        var input = new TextBox
+        {
+            Header = "新名称",
+            Text = _viewModel.SelectedItem.Title,
+            SelectionStart = 0,
+            SelectionLength = _viewModel.SelectedItem.Title.Length,
+        };
+        var dialog = CreateDialog("重命名", input, "保存");
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary &&
+            !string.IsNullOrWhiteSpace(input.Text))
+        {
+            await RunAsync(() => _viewModel.RenameSelectedAsync(input.Text));
+        }
+    }
+
+    private async void Start_Click(object sender, RoutedEventArgs e) =>
+        await RunAsync(() => _viewModel.ControlSelectedAsync(
+            _viewModel.Module == AppModule.Downloads ? "resume" : "start"));
+
+    private async void Stop_Click(object sender, RoutedEventArgs e) =>
+        await RunAsync(() => _viewModel.ControlSelectedAsync(
+            _viewModel.Module == AppModule.Downloads ? "pause" : "stop"));
+
+    private async void Delete_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedItem is null)
+        {
+            return;
+        }
+        var removeData = new CheckBox
+        {
+            Content = "同时删除已经下载的文件",
+            Visibility = _viewModel.Module == AppModule.Downloads
+                ? Visibility.Visible
+                : Visibility.Collapsed,
+        };
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"“{_viewModel.SelectedItem.Title}”删除后无法恢复。",
+            TextWrapping = TextWrapping.Wrap,
+        });
+        panel.Children.Add(removeData);
+        var dialog = CreateDialog("确认删除？", panel, "删除");
+        dialog.DefaultButton = ContentDialogButton.Close;
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            await RunAsync(() => _viewModel.DeleteSelectedAsync(removeData.IsChecked == true));
+        }
+    }
+
+    private ContentDialog CreateDialog(string title, object content, string primaryText) =>
+        new()
+        {
+            XamlRoot = XamlRoot,
+            Title = title,
+            Content = content,
+            PrimaryButtonText = primaryText,
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (DsmException error)
+        {
+            await ShowErrorAsync($"{error.Message} {error.Recovery}");
+        }
+        catch
+        {
+            await ShowErrorAsync("操作没有完成，请刷新后重试。");
+        }
+        UpdateState();
+    }
+
+    private async Task ShowErrorAsync(string message)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "操作没有完成",
+            Content = message,
+            CloseButtonText = "知道了",
+        };
+        await dialog.ShowAsync();
+    }
+
+    private void UpdateState()
+    {
+        if (CreateButton is null)
+        {
+            return;
+        }
+        CreateButton.Visibility = _viewModel.CanCreate ? Visibility.Visible : Visibility.Collapsed;
+        UpButton.Visibility = _viewModel.Module == AppModule.Files &&
+                              !string.IsNullOrWhiteSpace(_viewModel.CurrentPath)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        RenameButton.IsEnabled = _viewModel.CanRename;
+        RenameButton.Visibility = _viewModel.Module is AppModule.Files or AppModule.VirtualMachines
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        StartButton.Visibility = _viewModel.CanControl ? Visibility.Visible : Visibility.Collapsed;
+        StopButton.Visibility = _viewModel.CanControl ? Visibility.Visible : Visibility.Collapsed;
+        DeleteButton.IsEnabled = _viewModel.CanDelete;
+        LoadingIndicator.IsActive = _viewModel.IsLoading;
+        LoadingIndicator.Visibility = _viewModel.IsLoading ? Visibility.Visible : Visibility.Collapsed;
+        EmptyState.Visibility = !_viewModel.IsLoading && _viewModel.HasMessage
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ResourceList.Visibility = _viewModel.IsLoading || _viewModel.HasMessage
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        CategoryList.Visibility = _viewModel.Categories.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+}

@@ -180,9 +180,11 @@ struct LoginView: View {
             VStack(alignment: .leading, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
-                        Image(systemName: "externaldrive.fill.badge.wifi")
-                            .font(.system(size: 34, weight: .semibold))
-                            .foregroundStyle(.blue)
+                        Image("BrandLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 48, height: 48)
+                            .clipShape(.rect(cornerRadius: 12))
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("岚仓")

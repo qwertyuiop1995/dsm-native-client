@@ -6,7 +6,7 @@
 Package.swift                  Apple 共享 Swift Package
 DsmNativeClient.xcworkspace/  Apple 工作区
 Apps/DsmMac/                   macOS 原生应用
-Apps/DsmMobile/                iPhone/iPad 通用原生应用占位目录
+Apps/DsmMobile/                iPhone/iPad 通用 SwiftUI 应用
 Packages/DsmCore/              领域模型、错误和 Repository 协议
 Packages/DsmNetwork/           DSM HTTP、会话和参数编码
 Packages/DsmFileFeature/       浏览、详情和预览
@@ -20,6 +20,7 @@ Packages/DsmTransferFeature/   下载、上传、删除和恢复任务
 - macOS 安装产物：`LanStash.app`；中文系统显示为“岚仓”。
 - 最低系统：macOS 14；共享包同时声明 iOS 17。
 - macOS App 使用 SwiftUI 和 App Sandbox。
+- iPhone/iPad App 使用 SwiftUI 自适应导航、Keychain 和 Apple 共享 Repository。
 - 支持系统信任的 HTTPS 证书，以及核对 SHA-256 指纹后的自签名证书首次信任。
 - 支持使用 IP、域名、QuickConnect ID 连接，也可以粘贴浏览器最终地址；QuickConnect 会优先探测直连候选，失败后建立并校验中继隧道。
 - 已实现共享与目录浏览、当前账号可见空间、SMB/NFS 远程位置管理、图片/文本/PDF 预览、上传、下载、安全删除和传输中心。

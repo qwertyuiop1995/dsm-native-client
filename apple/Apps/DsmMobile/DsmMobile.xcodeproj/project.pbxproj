@@ -1,0 +1,484 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		02B33EDD7AEE3D39F6F56A3B /* MobileRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35538E9B1754A5850399FB5E /* MobileRootView.swift */; };
+		05FC52A091594BF9F8E96B62 /* DsmCore in Frameworks */ = {isa = PBXBuildFile; productRef = 28492EA0CE4CAD3EC3C9163D /* DsmCore */; };
+		0DE9E34E1ED20A280E95275C /* AppIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = C0C941E338B615CF4156D6DF /* AppIcon.png */; };
+		6394B4C4C0B71B453620827D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C7E3C64B837651EFE7D18295 /* Assets.xcassets */; };
+		70E932303769E6811F205B52 /* DsmNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = 014F2C74E046B32D937E73A2 /* DsmNetwork */; };
+		8926A7EDBD39D30074E13FDA /* MobileAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC94602D9044B0204D0418D9 /* MobileAppModel.swift */; };
+		97938D7B0AC80E7384388680 /* KeychainSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9AD25190A561C9AB18A6B09 /* KeychainSessionStore.swift */; };
+		ADEC01498BDB4D86E619729C /* DsmMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98360F050406F1BD9076A89 /* DsmMobileApp.swift */; };
+		C6DBB1F1C2E6E594D09204F3 /* MobileModuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F13179FE2BF0AAE3F3AC76FF /* MobileModuleTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D1A418AC228246B7EEC302A0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D6A8E76CA318D27E9A0868BA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BD40B04E2D905310E229318F;
+			remoteInfo = DsmMobile;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		35538E9B1754A5850399FB5E /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
+		4DD69A0DF2CC3B89B136C95F /* DsmMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = DsmMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0C941E338B615CF4156D6DF /* AppIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = AppIcon.png; sourceTree = "<group>"; };
+		C4724BE81BEF1AF43DBAA783 /* DsmMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = DsmMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C7E3C64B837651EFE7D18295 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		CC94602D9044B0204D0418D9 /* MobileAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileAppModel.swift; sourceTree = "<group>"; };
+		F13179FE2BF0AAE3F3AC76FF /* MobileModuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModuleTests.swift; sourceTree = "<group>"; };
+		F6B036892E44B6793F28E6BE /* apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = apple; path = ../..; sourceTree = SOURCE_ROOT; };
+		F98360F050406F1BD9076A89 /* DsmMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DsmMobileApp.swift; sourceTree = "<group>"; };
+		F9AD25190A561C9AB18A6B09 /* KeychainSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSessionStore.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1E688204B7F0CF9A5B188868 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				05FC52A091594BF9F8E96B62 /* DsmCore in Frameworks */,
+				70E932303769E6811F205B52 /* DsmNetwork in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		332CF9C9DF909E0EF66D2E93 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4DD69A0DF2CC3B89B136C95F /* DsmMobile.app */,
+				C4724BE81BEF1AF43DBAA783 /* DsmMobileTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9561591FED7428BC74049862 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				C0C941E338B615CF4156D6DF /* AppIcon.png */,
+				C7E3C64B837651EFE7D18295 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		B9B57ECEB4A9147BF0C524F5 = {
+			isa = PBXGroup;
+			children = (
+				BBE13091FEC99BFF029BABA3 /* Packages */,
+				9561591FED7428BC74049862 /* Resources */,
+				E5776DC40D44B2AB08F691E9 /* Sources */,
+				BCB103C4A3EB29D84A638C00 /* Tests */,
+				332CF9C9DF909E0EF66D2E93 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		BBE13091FEC99BFF029BABA3 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				F6B036892E44B6793F28E6BE /* apple */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		BCB103C4A3EB29D84A638C00 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				F13179FE2BF0AAE3F3AC76FF /* MobileModuleTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		E5776DC40D44B2AB08F691E9 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				F98360F050406F1BD9076A89 /* DsmMobileApp.swift */,
+				F9AD25190A561C9AB18A6B09 /* KeychainSessionStore.swift */,
+				CC94602D9044B0204D0418D9 /* MobileAppModel.swift */,
+				35538E9B1754A5850399FB5E /* MobileRootView.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		10BED25D17BD589395B495C7 /* DsmMobileTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E42C6D734290141EE0744DB9 /* Build configuration list for PBXNativeTarget "DsmMobileTests" */;
+			buildPhases = (
+				27FF3109590D39E04CDF0869 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4D70232F75C8AC2F22524CE2 /* PBXTargetDependency */,
+			);
+			name = DsmMobileTests;
+			packageProductDependencies = (
+			);
+			productName = DsmMobileTests;
+			productReference = C4724BE81BEF1AF43DBAA783 /* DsmMobileTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		BD40B04E2D905310E229318F /* DsmMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E74A05B64D35CA21A21D65C5 /* Build configuration list for PBXNativeTarget "DsmMobile" */;
+			buildPhases = (
+				14D576D9DE90577180CDA86B /* Sources */,
+				E25A94FD2A68D9210A3F1030 /* Resources */,
+				1E688204B7F0CF9A5B188868 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DsmMobile;
+			packageProductDependencies = (
+				28492EA0CE4CAD3EC3C9163D /* DsmCore */,
+				014F2C74E046B32D937E73A2 /* DsmNetwork */,
+			);
+			productName = DsmMobile;
+			productReference = 4DD69A0DF2CC3B89B136C95F /* DsmMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D6A8E76CA318D27E9A0868BA /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					10BED25D17BD589395B495C7 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					BD40B04E2D905310E229318F = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 308B9B43E707D32AD0AE00AB /* Build configuration list for PBXProject "DsmMobile" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B9B57ECEB4A9147BF0C524F5;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				41FD3D22E5DFF7F9299494FE /* XCLocalSwiftPackageReference "../.." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 332CF9C9DF909E0EF66D2E93 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				BD40B04E2D905310E229318F /* DsmMobile */,
+				10BED25D17BD589395B495C7 /* DsmMobileTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		E25A94FD2A68D9210A3F1030 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0DE9E34E1ED20A280E95275C /* AppIcon.png in Resources */,
+				6394B4C4C0B71B453620827D /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		14D576D9DE90577180CDA86B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ADEC01498BDB4D86E619729C /* DsmMobileApp.swift in Sources */,
+				97938D7B0AC80E7384388680 /* KeychainSessionStore.swift in Sources */,
+				8926A7EDBD39D30074E13FDA /* MobileAppModel.swift in Sources */,
+				02B33EDD7AEE3D39F6F56A3B /* MobileRootView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		27FF3109590D39E04CDF0869 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C6DBB1F1C2E6E594D09204F3 /* MobileModuleTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4D70232F75C8AC2F22524CE2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BD40B04E2D905310E229318F /* DsmMobile */;
+			targetProxy = D1A418AC228246B7EEC302A0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1F173CBB0D72CA722D58FB47 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = SupportingFiles/DsmMobile.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = SupportingFiles/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.qwertyuiop1995.dsmnativeclient.mobile;
+				PRODUCT_NAME = DsmMobile;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		222E26220EFDA43B77218D26 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		2E44F3DC8EB43066783B7B02 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = SupportingFiles/DsmMobile.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = SupportingFiles/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.qwertyuiop1995.dsmnativeclient.mobile;
+				PRODUCT_NAME = DsmMobile;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		47A254CC265DAD8D84876B91 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.qwertyuiop1995.dsmnativeclient.mobile.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DsmMobile.app/DsmMobile";
+			};
+			name = Debug;
+		};
+		8A04D94CE597A8E21E430E6A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		BB6E778B326987097C759331 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.qwertyuiop1995.dsmnativeclient.mobile.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DsmMobile.app/DsmMobile";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		308B9B43E707D32AD0AE00AB /* Build configuration list for PBXProject "DsmMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				222E26220EFDA43B77218D26 /* Debug */,
+				8A04D94CE597A8E21E430E6A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E42C6D734290141EE0744DB9 /* Build configuration list for PBXNativeTarget "DsmMobileTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				47A254CC265DAD8D84876B91 /* Debug */,
+				BB6E778B326987097C759331 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E74A05B64D35CA21A21D65C5 /* Build configuration list for PBXNativeTarget "DsmMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1F173CBB0D72CA722D58FB47 /* Debug */,
+				2E44F3DC8EB43066783B7B02 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		41FD3D22E5DFF7F9299494FE /* XCLocalSwiftPackageReference "../.." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		014F2C74E046B32D937E73A2 /* DsmNetwork */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DsmNetwork;
+		};
+		28492EA0CE4CAD3EC3C9163D /* DsmCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DsmCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = D6A8E76CA318D27E9A0868BA /* Project object */;
+}

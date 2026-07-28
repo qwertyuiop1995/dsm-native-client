@@ -12,6 +12,9 @@
 | --- | --- | --- | --- | --- | --- |
 | QuickConnect ID 直连 | macOS | 已通过 | 已通过 | 待用户复测 | 局域网与公网候选会在提交凭据前逐一探测；不记录 ID、解析地址和证书指纹 |
 | QuickConnect 中继 | macOS | 已通过 | 已通过 | 待用户使用新密码复测 | 已完成真实环境的隧道建立、NAS 身份核对和 `SYNO.API.Info` 探测；`request_tunnel` 属于内部、可降级契约 |
+| QuickConnect ID / 中继 | iPhone、iPad | 共享解析器已通过 | Release 模拟器构建、登录路由、冷启动自动登录测试和两种设备形态启动通过 | 待真机输入密码复测 | 保存资料保留原始 ID；可选密码存入 Keychain，自动登录和会话恢复均重新解析临时连接地址 |
+| QuickConnect ID / 中继 | Android | 已通过真机探测 | 已通过真机 `SYNO.API.Info` 能力发现 | 待用户在修复版输入密码复测 | Release 启动崩溃已修复；可选密码由 Keystore 保护，探测不发送账号、密码或验证码 |
+| QuickConnect ID / 中继 | Windows | 已通过真实服务探测 | .NET Release 测试已通过 `SYNO.API.Info` 能力发现 | 待 Windows 设备输入密码复测 | 可选密码由 Credential Locker 保护；登录和恢复均使用临时解析地址，完整 WinUI 构建须在 Windows 执行 |
 
 ## 文件操作验证
 

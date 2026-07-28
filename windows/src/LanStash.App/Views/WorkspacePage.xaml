@@ -1,0 +1,134 @@
+<Page
+    x:Class="LanStash.App.Views.WorkspacePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:viewModels="using:LanStash.App.ViewModels"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid Padding="28,20,28,28" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="360" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="{Binding Title}" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock
+                    x:Name="PathText"
+                    Margin="0,4,0,0"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{Binding CurrentPath}" />
+            </StackPanel>
+            <AutoSuggestBox
+                x:Name="SearchBox"
+                Grid.Column="1"
+                AutomationProperties.Name="搜索"
+                PlaceholderText="搜索"
+                QueryIcon="Find"
+                QuerySubmitted="SearchBox_QuerySubmitted" />
+        </Grid>
+
+        <ListView
+            x:Name="CategoryList"
+            Grid.Row="1"
+            MaxHeight="48"
+            HorizontalAlignment="Left"
+            ItemsSource="{Binding Categories}"
+            SelectionChanged="CategoryList_SelectionChanged"
+            SelectionMode="Single">
+            <ListView.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <ItemsStackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </ListView.ItemsPanel>
+        </ListView>
+
+        <CommandBar
+            Grid.Row="2"
+            Background="Transparent"
+            DefaultLabelPosition="Right">
+            <AppBarButton x:Name="CreateButton" Click="Create_Click" Icon="Add" Label="新增" />
+            <AppBarButton x:Name="UpButton" Click="Up_Click" Icon="Up" Label="上一级" />
+            <AppBarButton x:Name="RenameButton" Click="Rename_Click" Icon="Rename" Label="重命名" />
+            <AppBarButton x:Name="StartButton" Click="Start_Click" Icon="Play" Label="启动" />
+            <AppBarButton x:Name="StopButton" Click="Stop_Click" Icon="Stop" Label="停止" />
+            <AppBarButton x:Name="DeleteButton" Click="Delete_Click" Icon="Delete" Label="删除" />
+            <AppBarButton Click="Refresh_Click" Icon="Refresh" Label="刷新" />
+        </CommandBar>
+
+        <Grid Grid.Row="3">
+            <ListView
+                x:Name="ResourceList"
+                AutomationProperties.Name="项目"
+                IsItemClickEnabled="True"
+                ItemClick="ResourceList_ItemClick"
+                ItemsSource="{Binding Items}"
+                SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                SelectionMode="Single">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="viewModels:WorkspaceRow">
+                        <Grid MinHeight="64" Padding="8" ColumnSpacing="14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="36" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Glyph="{x:Bind Glyph}" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock FontWeight="SemiBold" Text="{x:Bind Title}" />
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{x:Bind Detail}"
+                                    TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <TextBlock
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind Status}" />
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <StackPanel
+                x:Name="EmptyState"
+                MaxWidth="420"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="10"
+                Visibility="Collapsed">
+                <FontIcon
+                    HorizontalAlignment="Center"
+                    FontSize="38"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Glyph="&#xE9CE;" />
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    FontSize="18"
+                    FontWeight="SemiBold"
+                    Text="{Binding Message}"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+                <Button
+                    HorizontalAlignment="Center"
+                    Click="Refresh_Click"
+                    Content="重新加载" />
+            </StackPanel>
+            <ProgressRing
+                x:Name="LoadingIndicator"
+                Width="36"
+                Height="36"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center" />
+        </Grid>
+    </Grid>
+</Page>

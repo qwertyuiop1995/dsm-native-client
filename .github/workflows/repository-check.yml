@@ -19,6 +19,7 @@ jobs:
         run: |
           set -euo pipefail
           test -f README.md
+          test -f README.en.md
           test -f docs/api/DSM_WEB_API_REFERENCE_ZH.md
           test -f docs/development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md
           test -f docs/progress/STATUS.md
@@ -34,6 +35,9 @@ jobs:
 
       - name: 校验 Codex Skill 引导脚本
         run: python -m unittest discover -s tools/codex/tests -p 'test_*.py'
+
+      - name: 校验双语资源与可见文案硬编码
+        run: python tools/localization/check_localization.py
 
       - name: 禁止敏感文件类型
         shell: bash

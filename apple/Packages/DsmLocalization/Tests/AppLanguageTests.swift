@@ -1,0 +1,68 @@
+import Foundation
+import Observation
+import Testing
+@testable import DsmLocalization
+
+@Test func systemLanguageResolutionUsesEnglishFallback() {
+    #expect(AppLocaleResolver.resolveSystemLanguage("en-GB") == .english)
+    #expect(AppLocaleResolver.resolveSystemLanguage("zh-Hans-CN") == .simplifiedChinese)
+    #expect(AppLocaleResolver.resolveSystemLanguage("zh-CN") == .simplifiedChinese)
+    #expect(AppLocaleResolver.resolveSystemLanguage("zh-SG") == .simplifiedChinese)
+    #expect(AppLocaleResolver.resolveSystemLanguage("zh-Hant-TW") == .english)
+    #expect(AppLocaleResolver.resolveSystemLanguage("ja-JP") == .english)
+    #expect(AppLocaleResolver.resolveSystemLanguage(nil) == .english)
+}
+
+@Test @MainActor func explicitLanguageOverridesSystemAndPersists() {
+    let suite = "AppLanguageTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let store = AppLanguageStore(
+        defaults: defaults,
+        preferredLanguages: { ["ja-JP"] },
+        observesSystemChanges: false
+    )
+    #expect(store.resolvedLanguage == .english)
+    store.selection = .simplifiedChinese
+    #expect(store.resolvedLanguage == .simplifiedChinese)
+    #expect(defaults.string(forKey: AppLanguageStore.preferenceKey) == "zh-Hans")
+}
+
+@Test @MainActor func localizedResourcesContainBothLanguages() {
+    let english = AppLanguageStore(
+        defaults: UserDefaults(suiteName: "L10n.en.\(UUID().uuidString)")!,
+        preferredLanguages: { ["en-US"] },
+        observesSystemChanges: false
+    )
+    let chinese = AppLanguageStore(
+        defaults: UserDefaults(suiteName: "L10n.zh.\(UUID().uuidString)")!,
+        preferredLanguages: { ["zh-CN"] },
+        observesSystemChanges: false
+    )
+    #expect(english.string("settings.language.title") == "Language")
+    #expect(chinese.string("settings.language.title") == "语言")
+}
+
+@Test @MainActor func localizedStringObservationRefreshesImmediately() {
+    let suite = "L10n.observation.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let store = AppLanguageStore(
+        defaults: defaults,
+        preferredLanguages: { ["en-US"] },
+        observesSystemChanges: false
+    )
+    nonisolated(unsafe) var didInvalidate = false
+    let initial = withObservationTracking {
+        store.string("settings.language.title")
+    } onChange: {
+        didInvalidate = true
+    }
+
+    #expect(initial == "Language")
+    store.selection = .simplifiedChinese
+    #expect(didInvalidate)
+    #expect(store.string("settings.language.title") == "语言")
+}

@@ -1,5 +1,6 @@
 import DsmCore
 import Foundation
+import DsmLocalization
 
 /// 只使用 Synology 官方登录和 File Station API 的基础照片库 Adapter。
 public struct FileStationPhotoRepository: PhotoLibraryRepository, Sendable {
@@ -43,7 +44,7 @@ public struct FileStationPhotoRepository: PhotoLibraryRepository, Sendable {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "无法打开这个位置，因为它不在当前照片空间中。"
+                safeUserMessage: L10n.string("shared.5dcc7495647890e0")
             )
         }
 
@@ -67,7 +68,7 @@ public struct FileStationPhotoRepository: PhotoLibraryRepository, Sendable {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "文件夹没有可显示的照片缩略图。"
+                safeUserMessage: L10n.string("shared.7cd208674fa4ddd9")
             )
         }
         return try await files.getThumbnail(path: item.path, size: size)
@@ -84,7 +85,7 @@ public struct FileStationPhotoRepository: PhotoLibraryRepository, Sendable {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "只能读取当前照片空间中的文件夹。"
+                safeUserMessage: L10n.string("shared.7074fa008dad7ab4")
             )
         }
 

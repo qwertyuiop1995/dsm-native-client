@@ -22,8 +22,8 @@ public sealed class DsmApiClient(HttpClient httpClient) : IDsmApiClient
             string.IsNullOrWhiteSpace(uri.Host))
         {
             throw new DsmException(
-                "NAS 地址格式不正确",
-                "请输入有效的 HTTPS 地址后重试。");
+                UserText.Key("WinShared23ac67f1f673dd23"),
+                UserText.Key("WinShareddcac071c2cf16346"));
         }
 
         var builder = new UriBuilder(uri);
@@ -88,7 +88,7 @@ public sealed class DsmApiClient(HttpClient httpClient) : IDsmApiClient
             ["format"] = "sid",
             ["enable_syno_token"] = "yes",
             ["enable_device_token"] = "yes",
-            ["device_name"] = "岚仓 Windows",
+            ["device_name"] = "LanStash Windows",
         };
         if (!string.IsNullOrWhiteSpace(otp))
         {
@@ -104,8 +104,8 @@ public sealed class DsmApiClient(HttpClient httpClient) : IDsmApiClient
         if (string.IsNullOrWhiteSpace(sid))
         {
             throw new DsmException(
-                "NAS 没有返回登录会话",
-                "请重新登录。",
+                UserText.Key("WinSharedab4ce8cd180797fc"),
+                UserText.Key("WinSharedc144a2dc9ace5c1f"),
                 authenticationFailure: true);
         }
         return new DsmSession(
@@ -206,22 +206,22 @@ public sealed class DsmApiClient(HttpClient httpClient) : IDsmApiClient
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             throw new DsmException(
-                "连接 NAS 超时",
-                "请检查网络和地址后重试。");
+                UserText.Key("WinShared5a870c4775a4ef6b"),
+                UserText.Key("WinShared199c5367bae9682d"));
         }
         catch (HttpRequestException)
         {
             throw new DsmException(
-                "无法连接到 NAS",
-                "请检查网络、地址和证书后重试。");
+                UserText.Key("WinSharedf91eef8a1cf7b01c"),
+                UserText.Key("WinShared79c4d60046afa3ff"));
         }
         using (response)
         {
             if (!response.IsSuccessStatusCode)
             {
                 throw new DsmException(
-                    "无法连接到 NAS",
-                    "请检查网络、地址和证书后重试。",
+                    UserText.Key("WinSharedf91eef8a1cf7b01c"),
+                    UserText.Key("WinShared79c4d60046afa3ff"),
                     (int)response.StatusCode,
                     response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden);
             }
@@ -232,8 +232,8 @@ public sealed class DsmApiClient(HttpClient httpClient) : IDsmApiClient
                 stream,
                 cancellationToken: cancellationToken).ConfigureAwait(false) as JsonObject
                 ?? throw new DsmException(
-                    "NAS 返回了无法识别的内容",
-                    "请确认地址指向 DSM 后重试。");
+                    UserText.Key("WinShared9cb9ec075b03b6cb"),
+                    UserText.Key("WinShared09f262a53ad074ca"));
             if (envelope["success"]?.GetValue<bool>() == true)
             {
                 return envelope["data"] as JsonObject ?? [];
@@ -245,14 +245,14 @@ public sealed class DsmApiClient(HttpClient httpClient) : IDsmApiClient
 
     private static DsmException MapFailure(int? code) => code switch
     {
-        102 => new("当前 NAS 不支持这项功能", "请更新 DSM 或相关套件。", code),
-        103 => new("当前套件版本不支持这项操作", "请更新套件后重试。", code),
-        104 => new("登录会话已失效", "请重新登录。", code, true),
-        105 => new("当前账号没有权限", "请使用具备相应权限的账号。", code),
-        406 => new("需要输入双重验证代码", "请输入验证器中的当前代码。", code, true),
-        407 => new("双重验证代码不正确", "请使用最新代码重试。", code, true),
+        102 => new(UserText.Key("WinShared11a208e43c34b77c"), UserText.Key("WinShared371d84f48836296f"), code),
+        103 => new(UserText.Key("WinShared189ee06b7da78f3f"), UserText.Key("WinSharedb5641013fbf13d8b"), code),
+        104 => new(UserText.Key("WinSharedd727aa9e0a8cff65"), UserText.Key("WinSharedc144a2dc9ace5c1f"), code, true),
+        105 => new(UserText.Key("WinShared12188668a1d4cff1"), UserText.Key("WinShared4a1330714c58b25d"), code),
+        406 => new(UserText.Key("WinShared3cd43f3a371513e2"), UserText.Key("WinShared46e3e4901826eb40"), code, true),
+        407 => new(UserText.Key("WinSharedef0eed96e1f28ed8"), UserText.Key("WinShared2ad42c7573d49cbc"), code, true),
         400 or 401 or 402 or 403 or 404 =>
-            new("账号或登录信息不正确", "请核对账号、密码和验证码。", code, true),
-        _ => new("NAS 没有完成这次操作", "请刷新后重试。", code),
+            new(UserText.Key("WinShared78eee40d2f30576e"), UserText.Key("WinShared2f7ffa8e29481728"), code, true),
+        _ => new(UserText.Key("WinShared0addf7c060c570ce"), UserText.Key("WinShared5448ceb91a80e260"), code),
     };
 }

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using LanStash.App.Localization;
 using LanStash.Domain;
 using LanStash.Infrastructure;
 
@@ -25,7 +26,7 @@ public sealed class AppViewModel : ObservableObject
     private bool _isBusy;
     private string? _errorMessage;
     private string? _connectionStatus;
-    private string _displayName = "我的 NAS";
+    private string _displayName = LocalizationService.Current.Get("DefaultNasName");
     private string _host = string.Empty;
     private string _port = string.Empty;
     private string _username = string.Empty;
@@ -169,7 +170,7 @@ public sealed class AppViewModel : ObservableObject
 
     public void NewProfile()
     {
-        DisplayName = "我的 NAS";
+        DisplayName = LocalizationService.Current.Get("DefaultNasName");
         Host = string.Empty;
         Port = string.Empty;
         Username = string.Empty;
@@ -190,7 +191,8 @@ public sealed class AppViewModel : ObservableObject
         }
         IsBusy = true;
         ErrorMessage = null;
-        ConnectionStatus = "正在检查 NAS…";
+        var localization = LocalizationService.Current;
+        ConnectionStatus = localization.Get("StatusCheckingNas");
         try
         {
             var profile = new NasProfile(
@@ -206,8 +208,8 @@ public sealed class AppViewModel : ObservableObject
                 AutoLogin && RememberPassword);
             var connection = await _connectionResolver.DiscoverAsync(
                 profile,
-                status => ConnectionStatus = status).ConfigureAwait(true);
-            ConnectionStatus = "已找到 NAS，正在登录…";
+                status => ConnectionStatus = localization.ResolveUserText(status)).ConfigureAwait(true);
+            ConnectionStatus = localization.Get("StatusNasFoundSigningIn");
             var session = await _api.LoginAsync(
                 connection.Profile,
                 Password,
@@ -232,11 +234,11 @@ public sealed class AppViewModel : ObservableObject
         }
         catch (DsmException error)
         {
-            ErrorMessage = $"{error.Message} {error.Recovery}";
+            ErrorMessage = localization.ErrorMessage(error);
         }
         catch
         {
-            ErrorMessage = "无法连接到 NAS，请检查地址和登录信息后重试。";
+            ErrorMessage = localization.Get("ErrorConnectGeneric");
         }
         finally
         {
@@ -253,18 +255,21 @@ public sealed class AppViewModel : ObservableObject
         }
         IsBusy = true;
         ErrorMessage = null;
-        ConnectionStatus = "正在恢复登录…";
+        var localization = LocalizationService.Current;
+        ConnectionStatus = localization.Get("StatusRestoringLogin");
         var shouldFallbackToPassword = false;
         try
         {
             var session = await _sessionStore.LoadAsync(profile.Id).ConfigureAwait(true);
             if (session is null)
             {
-                throw new DsmException("保存的登录已失效", "请重新登录。");
+                throw new DsmException(
+                    UserText.Key("ErrorSavedLoginExpired"),
+                    UserText.Key("RecoverySignInAgain"));
             }
             var connection = await _connectionResolver.DiscoverAsync(
                 profile,
-                status => ConnectionStatus = status).ConfigureAwait(true);
+                status => ConnectionStatus = localization.ResolveUserText(status)).ConfigureAwait(true);
             var repository = new DsmRepository(
                 connection.Profile,
                 session,
@@ -284,8 +289,8 @@ public sealed class AppViewModel : ObservableObject
             if (!shouldFallbackToPassword)
             {
                 ErrorMessage = string.IsNullOrEmpty(Password)
-                    ? $"{error.Message} 请输入密码重新登录。"
-                    : $"{error.Message} 密码已为你填好，请重新连接。";
+                    ? $"{localization.ResolveUserText(error.Message)} {localization.Get("RecoveryEnterPasswordAgain")}"
+                    : $"{localization.ResolveUserText(error.Message)} {localization.Get("RecoveryPasswordReady")}";
             }
         }
         finally
@@ -378,7 +383,7 @@ public sealed class AppViewModel : ObservableObject
         }
         catch
         {
-            ErrorMessage = "无法读取本机保存的 NAS，请重新添加。";
+            ErrorMessage = LocalizationService.Current.Get("ErrorLoadProfiles");
         }
     }
 

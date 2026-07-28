@@ -1,6 +1,7 @@
 import DsmCore
 import Foundation
 import Security
+import DsmLocalization
 
 actor KeychainSessionStore: SessionSecureStoring {
     private let service = "io.github.qwertyuiop1995.dsmnativeclient.session"
@@ -17,7 +18,7 @@ actor KeychainSessionStore: SessionSecureStoring {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "无法安全保存登录状态。"
+                safeUserMessage: L10n.string("ui.1c9710fc8f8bd0a0")
             )
         }
     }
@@ -35,7 +36,7 @@ actor KeychainSessionStore: SessionSecureStoring {
             throw AppError(
                 category: .authenticationRequired,
                 isRetryable: false,
-                safeUserMessage: "无法读取保存的登录状态，请重新登录。"
+                safeUserMessage: L10n.string("ui.8d39dc55cc21c987")
             )
         }
         return try JSONDecoder().decode(AuthSession.self, from: data)
@@ -47,7 +48,7 @@ actor KeychainSessionStore: SessionSecureStoring {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "无法删除本机登录状态。"
+                safeUserMessage: L10n.string("ui.48c3928377e92110")
             )
         }
     }
@@ -76,7 +77,7 @@ actor KeychainPasswordStore: PasswordSecureStoring {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "无法安全保存密码，请关闭“记住密码”后重试。"
+                safeUserMessage: L10n.string("ui.ec5bffb06977b57a")
             )
         }
     }
@@ -96,7 +97,7 @@ actor KeychainPasswordStore: PasswordSecureStoring {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "无法读取已保存的密码，请重新输入。"
+                safeUserMessage: L10n.string("ui.74ef3d57d3207959")
             )
         }
         return password
@@ -108,7 +109,7 @@ actor KeychainPasswordStore: PasswordSecureStoring {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "无法删除已保存的密码。"
+                safeUserMessage: L10n.string("ui.13ea733db9adbcf0")
             )
         }
     }

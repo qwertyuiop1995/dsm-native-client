@@ -1,3 +1,4 @@
+using LanStash.App.Localization;
 using LanStash.App.ViewModels;
 using LanStash.Domain;
 using Microsoft.UI.Xaml.Controls;
@@ -15,13 +16,20 @@ public sealed partial class ShellPage : Page
         _app = app;
         _workspace = new WorkspacePage(app);
         ContentFrame.Content = _workspace;
+        var localization = LocalizationService.Current;
+        AppNameText.Text = localization.Get("AppName");
+        LogoutItem.Content = localization.Get("ActionSignOut");
+        if (Navigation.SettingsItem is NavigationViewItem settingsItem)
+        {
+            settingsItem.Content = localization.Get("ModuleSettings");
+        }
         ProfileName.Text = app.ActiveProfile?.DisplayName ?? "NAS";
 
         foreach (var module in app.AvailableModules)
         {
             Navigation.MenuItems.Add(new NavigationViewItem
             {
-                Content = module.Title(),
+                Content = localization.ModuleTitle(module),
                 Icon = new FontIcon { Glyph = module.Glyph() },
                 Tag = module,
             });
@@ -33,15 +41,21 @@ public sealed partial class ShellPage : Page
         NavigationView sender,
         NavigationViewSelectionChangedEventArgs args)
     {
+        if (args.IsSettingsSelected)
+        {
+            ContentFrame.Content = new LanguageSettingsPage();
+            return;
+        }
         if (args.SelectedItem == LogoutItem)
         {
+            var localization = LocalizationService.Current;
             var dialog = new ContentDialog
             {
                 XamlRoot = XamlRoot,
-                Title = "退出登录？",
-                Content = "将退出当前连接并关闭自动登录；已保存的 NAS 信息和密码会保留。",
-                PrimaryButtonText = "退出登录",
-                CloseButtonText = "取消",
+                Title = localization.Get("DialogSignOutTitle"),
+                Content = localization.Get("DialogSignOutMessage"),
+                PrimaryButtonText = localization.Get("DialogSignOutAction"),
+                CloseButtonText = localization.Get("ActionCancel"),
                 DefaultButton = ContentDialogButton.Close,
             };
             if (await dialog.ShowAsync() == ContentDialogResult.Primary)

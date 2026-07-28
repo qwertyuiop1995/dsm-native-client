@@ -26,10 +26,9 @@
                     Text="{Binding CurrentPath}" />
             </StackPanel>
             <AutoSuggestBox
+                x:Uid="WorkspaceSearchBox"
                 x:Name="SearchBox"
                 Grid.Column="1"
-                AutomationProperties.Name="搜索"
-                PlaceholderText="搜索"
                 QueryIcon="Find"
                 QuerySubmitted="SearchBox_QuerySubmitted" />
         </Grid>
@@ -53,19 +52,19 @@
             Grid.Row="2"
             Background="Transparent"
             DefaultLabelPosition="Right">
-            <AppBarButton x:Name="CreateButton" Click="Create_Click" Icon="Add" Label="新增" />
-            <AppBarButton x:Name="UpButton" Click="Up_Click" Icon="Up" Label="上一级" />
-            <AppBarButton x:Name="RenameButton" Click="Rename_Click" Icon="Rename" Label="重命名" />
-            <AppBarButton x:Name="StartButton" Click="Start_Click" Icon="Play" Label="启动" />
-            <AppBarButton x:Name="StopButton" Click="Stop_Click" Icon="Stop" Label="停止" />
-            <AppBarButton x:Name="DeleteButton" Click="Delete_Click" Icon="Delete" Label="删除" />
-            <AppBarButton Click="Refresh_Click" Icon="Refresh" Label="刷新" />
+            <AppBarButton x:Uid="ActionCreate" x:Name="CreateButton" Click="Create_Click" Icon="Add" />
+            <AppBarButton x:Uid="ActionUp" x:Name="UpButton" Click="Up_Click" Icon="Up" />
+            <AppBarButton x:Uid="ActionRename" x:Name="RenameButton" Click="Rename_Click" Icon="Rename" />
+            <AppBarButton x:Uid="ActionStart" x:Name="StartButton" Click="Start_Click" Icon="Play" />
+            <AppBarButton x:Uid="ActionStop" x:Name="StopButton" Click="Stop_Click" Icon="Stop" />
+            <AppBarButton x:Uid="ActionDelete" x:Name="DeleteButton" Click="Delete_Click" Icon="Delete" />
+            <AppBarButton x:Uid="ActionRefresh" Click="Refresh_Click" Icon="Refresh" />
         </CommandBar>
 
         <Grid Grid.Row="3">
             <ListView
+                x:Uid="WorkspaceResourceList"
                 x:Name="ResourceList"
-                AutomationProperties.Name="项目"
                 IsItemClickEnabled="True"
                 ItemClick="ResourceList_ItemClick"
                 ItemsSource="{Binding Items}"
@@ -119,9 +118,9 @@
                     TextAlignment="Center"
                     TextWrapping="Wrap" />
                 <Button
+                    x:Uid="ActionReload"
                     HorizontalAlignment="Center"
-                    Click="Refresh_Click"
-                    Content="重新加载" />
+                    Click="Refresh_Click" />
             </StackPanel>
             <ProgressRing
                 x:Name="LoadingIndicator"

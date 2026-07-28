@@ -7,13 +7,13 @@
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleDisplayName</key>
-    <string>岚仓</string>
+    <string>LanStash</string>
     <key>CFBundleName</key>
     <string>LanStash</string>
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleDevelopmentRegion</key>
-    <string>zh_Hans</string>
+    <string>en</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

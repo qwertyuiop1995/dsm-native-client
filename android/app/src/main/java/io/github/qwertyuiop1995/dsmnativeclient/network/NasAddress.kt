@@ -1,6 +1,7 @@
 package io.github.qwertyuiop1995.dsmnativeclient.network
 
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import java.net.URI
 
 internal enum class NasAddressKind {
@@ -27,7 +28,12 @@ internal object NasAddressParser {
         }
         val trimmed = input.trim()
         if (trimmed.isEmpty()) {
-            throw DsmFailure(null, "请输入 NAS 地址或 QuickConnect ID", "填写后重新连接。")
+            throw DsmFailure(
+                null,
+                "NAS address or QuickConnect ID is required",
+                "Enter the address and connect again.",
+                kind = DsmErrorKind.INVALID_ADDRESS,
+            )
         }
 
         val hasExplicitScheme = "://" in trimmed
@@ -55,8 +61,9 @@ internal object NasAddressParser {
         if (uri.scheme?.lowercase() != "https") {
             throw DsmFailure(
                 null,
-                "这个地址不是安全连接",
-                "为了保护登录信息，请使用 HTTPS 地址。",
+                "The address is not secure",
+                "Use an HTTPS address to protect sign-in information.",
+                kind = DsmErrorKind.INSECURE_ADDRESS,
             )
         }
         if (isPotentialQuickConnectId(host)) {
@@ -107,8 +114,9 @@ internal object NasAddressParser {
 
     private fun invalidAddress() = DsmFailure(
         null,
-        "无法识别这个地址",
-        "请输入 QuickConnect ID、NAS 的 IP、域名或完整 HTTPS 地址。",
+        "The address is invalid",
+        "Enter a QuickConnect ID, NAS IP address, domain, or full HTTPS address.",
+        kind = DsmErrorKind.INVALID_ADDRESS,
     )
 
     private const val DEFAULT_HTTPS_PORT = 443

@@ -2,6 +2,7 @@ package io.github.qwertyuiop1995.dsmnativeclient.network
 
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ApiCapability
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import java.io.IOException
@@ -40,19 +41,39 @@ class DsmApiClient(
     fun endpoint(profile: NasProfile): String {
         val raw = profile.address.trim()
         if (raw.endsWith("://")) {
-            throw DsmFailure(null, "NAS 地址缺少主机名", "请输入完整的 NAS 地址。")
+            throw DsmFailure(
+                null,
+                "NAS host is missing",
+                "Enter a complete NAS address.",
+                kind = DsmErrorKind.INVALID_ADDRESS,
+            )
         }
         val uri = runCatching {
             URI(if ("://" in raw) raw else "https://$raw")
         }.getOrElse {
-            throw DsmFailure(null, "NAS 地址格式不正确", "请检查地址后重试。")
+            throw DsmFailure(
+                null,
+                "NAS address is invalid",
+                "Check the address and try again.",
+                kind = DsmErrorKind.INVALID_ADDRESS,
+            )
         }
         val scheme = uri.scheme?.lowercase()
         if (scheme != "https" && !(BuildPolicy.allowCleartext && scheme == "http")) {
-            throw DsmFailure(null, "正式连接仅支持 HTTPS", "请改用 NAS 的 HTTPS 地址。")
+            throw DsmFailure(
+                null,
+                "Only HTTPS connections are supported",
+                "Use the HTTPS address of the NAS.",
+                kind = DsmErrorKind.INSECURE_ADDRESS,
+            )
         }
         val host = uri.host?.takeIf { it.isNotBlank() }
-            ?: throw DsmFailure(null, "NAS 地址缺少主机名", "请输入完整的 NAS 地址。")
+            ?: throw DsmFailure(
+                null,
+                "NAS host is missing",
+                "Enter a complete NAS address.",
+                kind = DsmErrorKind.INVALID_ADDRESS,
+            )
         val port = profile.port ?: if (uri.port > 0) uri.port else -1
         val authority = if (port > 0) "$host:$port" else host
         val basePath = uri.path?.trimEnd('/').orEmpty()
@@ -84,7 +105,7 @@ class DsmApiClient(
         profile: NasProfile,
         password: String,
         otp: String? = null,
-        deviceName: String = "岚仓 Android",
+        deviceName: String = "LanStash Android",
         deviceId: String? = null,
     ): DsmSession {
         val parameters = buildMap {
@@ -104,7 +125,13 @@ class DsmApiClient(
         val result = post(profile, "/webapi/auth.cgi", parameters)
         val data = requireSuccess(result)
         val sid = data.string("sid")
-            ?: throw DsmFailure(null, "NAS 没有返回登录会话", "请重新登录。", true)
+            ?: throw DsmFailure(
+                null,
+                "The NAS did not return a session",
+                "Sign in again.",
+                true,
+                DsmErrorKind.SESSION_EXPIRED,
+            )
         return DsmSession(
             profileId = profile.id,
             sid = sid,
@@ -192,14 +219,20 @@ class DsmApiClient(
             if (!it.isSuccessful) {
                 throw DsmFailure(
                     it.code,
-                    "无法连接到 NAS",
-                    "请检查网络、地址和证书后重试。",
+                    "Could not connect to the NAS",
+                    "Check the network, address, and certificate.",
                     it.code == 401 || it.code == 403,
+                    DsmErrorKind.CONNECTION_FAILED,
                 )
             }
             runCatching { json.parseToJsonElement(text).jsonObject }
                 .getOrElse {
-                    throw DsmFailure(null, "NAS 返回了无法识别的内容", "请确认地址指向 DSM 后重试。")
+                    throw DsmFailure(
+                        null,
+                        "The NAS returned an unrecognized response",
+                        "Make sure the address points to DSM and try again.",
+                        kind = DsmErrorKind.INVALID_RESPONSE,
+                    )
                 }
         }
     }
@@ -213,17 +246,17 @@ class DsmApiClient(
     }
 
     private fun mapFailure(code: Int?): DsmFailure = when (code) {
-        101 -> DsmFailure(code, "DSM 没有完成这次请求", "请刷新后重试。")
-        102 -> DsmFailure(code, "当前 NAS 不支持这项功能", "请更新 DSM 或相关套件。")
-        103 -> DsmFailure(code, "当前套件版本不支持这项操作", "请更新套件后重试。")
-        104 -> DsmFailure(code, "登录会话已失效", "请重新登录。", true)
-        105 -> DsmFailure(code, "当前账号没有权限", "请使用具备相应权限的账号。")
-        106, 107 -> DsmFailure(code, "请求过于频繁", "请稍后再试。")
-        400, 401, 402, 403, 404 -> DsmFailure(code, "账号或登录信息不正确", "请核对账号、密码和验证码。", true)
-        406 -> DsmFailure(code, "需要输入双重验证代码", "请输入验证器中的当前代码。", true)
-        407 -> DsmFailure(code, "双重验证代码不正确", "请使用最新代码重试。", true)
-        408, 409 -> DsmFailure(code, "需要确认登录设备", "请在 DSM 中完成设备确认后重试。", true)
-        else -> DsmFailure(code, "NAS 没有完成这次操作", "请刷新后重试。")
+        101 -> DsmFailure(code, "DSM request failed", "Refresh and try again.", kind = DsmErrorKind.REQUEST_FAILED)
+        102 -> DsmFailure(code, "Feature unsupported", "Update DSM or the related package.", kind = DsmErrorKind.FEATURE_UNSUPPORTED)
+        103 -> DsmFailure(code, "Package version unsupported", "Update the package and try again.", kind = DsmErrorKind.PACKAGE_VERSION_UNSUPPORTED)
+        104 -> DsmFailure(code, "Session expired", "Sign in again.", true, DsmErrorKind.SESSION_EXPIRED)
+        105 -> DsmFailure(code, "Permission denied", "Use an account with the required permission.", kind = DsmErrorKind.PERMISSION_DENIED)
+        106, 107 -> DsmFailure(code, "Too many requests", "Try again later.", kind = DsmErrorKind.RATE_LIMITED)
+        400, 401, 402, 403, 404 -> DsmFailure(code, "Sign-in information is incorrect", "Check the account, password, and verification code.", true, DsmErrorKind.AUTHENTICATION_FAILED)
+        406 -> DsmFailure(code, "Two-factor code required", "Enter the current code from your authenticator.", true, DsmErrorKind.OTP_REQUIRED)
+        407 -> DsmFailure(code, "Two-factor code is incorrect", "Use the latest code and try again.", true, DsmErrorKind.OTP_INVALID)
+        408, 409 -> DsmFailure(code, "Device confirmation required", "Confirm the device in DSM and try again.", true, DsmErrorKind.DEVICE_CONFIRMATION_REQUIRED)
+        else -> DsmFailure(code, "NAS operation failed", "Refresh and try again.", kind = DsmErrorKind.REQUEST_FAILED)
     }
 
     private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
@@ -232,7 +265,12 @@ class DsmApiClient(
             override fun onFailure(call: Call, e: IOException) {
                 if (continuation.isCancelled) return
                 continuation.resumeWithException(
-                    DsmFailure(null, "无法连接到 NAS", "请检查网络连接和 NAS 地址后重试。")
+                    DsmFailure(
+                        null,
+                        "Could not connect to the NAS",
+                        "Check the network connection and NAS address.",
+                        kind = DsmErrorKind.CONNECTION_FAILED,
+                    )
                 )
             }
 

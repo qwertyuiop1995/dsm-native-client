@@ -5,6 +5,7 @@ import Foundation
 import ImageIO
 import Observation
 import SwiftUI
+import DsmLocalization
 
 extension Image.Orientation {
     init(_ cgImageOrientation: CGImagePropertyOrientation) {
@@ -278,7 +279,7 @@ final class PhotoLibraryModel {
     }
 
     var locationTitle: String {
-        guard let selectedSpace else { return "照片" }
+        guard let selectedSpace else { return L10n.string("ui.7b50017ae47eca32") }
         guard currentPath != selectedSpace.rootPath else { return selectedSpace.title }
         return URL(fileURLWithPath: currentPath).lastPathComponent
     }
@@ -434,14 +435,9 @@ final class PhotoLibraryModel {
                 grouped[day, default: []].append(item)
             }
             let sortedDates = grouped.keys.sorted(by: >)
-            let dayFormatter = DateFormatter()
-            dayFormatter.locale = .current
-            dayFormatter.dateStyle = .long
-            dayFormatter.timeStyle = .none
             sections = sortedDates.map { date in
                 PhotoTimelineSection(
                     date: date,
-                    title: date == .distantPast ? "日期未知" : dayFormatter.string(from: date),
                     items: grouped[date] ?? []
                 )
             }
@@ -1309,7 +1305,7 @@ final class PhotoLibraryModel {
         if let error = error as? AppError {
             return error.safeUserMessage
         }
-        return "照片暂时无法读取，请检查连接后重试。"
+        return L10n.string("ui.615dbf7c58c2a074")
     }
 
     private static nonisolated func timelineSort(_ lhs: PhotoLibraryItem, _ rhs: PhotoLibraryItem) -> Bool {

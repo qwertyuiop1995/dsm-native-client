@@ -2,6 +2,7 @@ import AppKit
 import DsmCore
 import SwiftUI
 import UniformTypeIdentifiers
+import DsmLocalization
 
 struct ChatWorkspaceView: View {
     @Environment(\.accessibilityReduceMotion) private var reducesMotion
@@ -37,7 +38,7 @@ struct ChatWorkspaceView: View {
                     .onTapGesture {
                         model.dismissToast()
                     }
-                    .accessibilityHint("点按可关闭提示")
+                    .accessibilityHint(L10n.string("ui.4fdf8b59f329f5ba"))
             }
         }
         .animation(
@@ -53,21 +54,21 @@ struct ChatWorkspaceView: View {
                 Button {
                     Task { await model.reload() }
                 } label: {
-                    Label("刷新消息", systemImage: "arrow.clockwise")
+                    Label(L10n.string("ui.a4d302df47192b25"), systemImage: "arrow.clockwise")
                 }
                 .disabled(model.isLoading)
-                .help("重新检查消息服务并刷新会话")
+                .help(L10n.string("ui.550b0751f537f74e"))
             }
         }
         .sheet(isPresented: $presentsNewConversation) {
             NewChatSheet(model: model)
         }
         .alert(
-            pendingConversationDeletion.count == 1 ? "删除这个会话？" : "删除这 \(pendingConversationDeletion.count) 个会话？",
+            pendingConversationDeletion.count == 1 ? L10n.string("ui.aea0944d46f20836") : L10n.string("ui.bfa1f429dab3881b", String(describing: pendingConversationDeletion.count)),
             isPresented: $presentsConversationDeletionConfirmation
         ) {
-            Button("取消", role: .cancel) {}
-            Button("删除会话", role: .destructive) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
+            Button(L10n.string("ui.d51250d14a5142e5"), role: .destructive) {
                 let ids = pendingConversationDeletion
                 pendingConversationDeletion = []
                 Task {
@@ -77,7 +78,7 @@ struct ChatWorkspaceView: View {
             }
             .disabled(model.isPerformingAction)
         } message: {
-            Text("会话会从群晖 Chat 中关闭，消息将进入归档。此操作不能在岚仓中撤销。")
+            Text(L10n.string("ui.89d21bc75f46d321"))
         }
         .onChange(of: model.selectedConversationID) { _, selectedID in
             guard selectedConversationIDs.count <= 1 else { return }
@@ -87,32 +88,32 @@ struct ChatWorkspaceView: View {
 
     private var newConversationHelp: String {
         if model.canCreateDirectConversation || model.canCreateGroupConversation {
-            return "选择用户开始聊天或创建私人群聊"
+            return L10n.string("ui.c9f2141af12cca30")
         }
-        return "这台 NAS 的消息功能尚未准备好"
+        return L10n.string("ui.a6a7346a19011239")
     }
 
     private var conversationColumn: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text("会话")
+                Text(L10n.string("ui.a63280253f17d440"))
                     .font(.headline)
                 Button {
                     presentsNewConversation = true
                 } label: {
-                    Label("新建聊天", systemImage: "plus")
+                    Label(L10n.string("ui.08d90be0bab08c36"), systemImage: "plus")
                         .labelStyle(.iconOnly)
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.borderless)
                 .disabled(!model.canCreateDirectConversation && !model.canCreateGroupConversation)
                 .help(newConversationHelp)
-                .accessibilityLabel("新建聊天")
+                .accessibilityLabel(L10n.string("ui.08d90be0bab08c36"))
                 Spacer()
                 if model.isLoading {
                     ProgressView()
                         .controlSize(.small)
-                        .accessibilityLabel("正在刷新会话")
+                        .accessibilityLabel(L10n.string("ui.fc34c019b007657d"))
                 }
             }
             .padding(.horizontal, 16)
@@ -129,11 +130,11 @@ struct ChatWorkspaceView: View {
                 )
             } else if model.conversations.isEmpty, !model.isLoading {
                 ContentUnavailableView {
-                    Label("还没有聊天", systemImage: "bubble.left.and.bubble.right")
+                    Label(L10n.string("ui.fa8376c2939150e8"), systemImage: "bubble.left.and.bubble.right")
                 } description: {
-                    Text("选择“新建聊天”与其他用户开始聊天。")
+                    Text(L10n.string("ui.7e7926db0d47d6e0"))
                 } actions: {
-                    Button("新建聊天") {
+                    Button(L10n.string("ui.08d90be0bab08c36")) {
                         presentsNewConversation = true
                     }
                     .disabled(!model.canCreateDirectConversation && !model.canCreateGroupConversation)
@@ -155,8 +156,8 @@ struct ChatWorkspaceView: View {
                                 } label: {
                                     Label(
                                         model.isConversationPinned(conversation.id)
-                                            ? "取消置顶"
-                                            : "置顶会话",
+                                            ? L10n.string("ui.c92179b74af61689")
+                                            : L10n.string("ui.1fd17bddc21bff44"),
                                         systemImage: model.isConversationPinned(conversation.id)
                                             ? "pin.slash"
                                             : "pin"
@@ -209,7 +210,7 @@ struct ChatWorkspaceView: View {
 
     private func conversationDeletionTitle(for conversationID: String) -> String {
         let count = conversationDeletionTargets(from: conversationID).count
-        return count == 1 ? "删除会话" : "删除 \(count) 个会话"
+        return count == 1 ? L10n.string("ui.d51250d14a5142e5") : L10n.string("ui.ebf1ed6fef62420a", String(describing: count))
     }
 
     private func requestConversationDeletion(from conversationID: String) {
@@ -228,9 +229,9 @@ struct ChatWorkspaceView: View {
             ChatConversationView(model: model, conversation: conversation)
         } else if model.canUseMessaging {
             ContentUnavailableView(
-                "选择一个会话",
+                L10n.string("ui.4fc5349db1ff0c87"),
                 systemImage: "bubble.left",
-                description: Text("从左侧选择已有会话，或新建一段聊天。")
+                description: Text(L10n.string("ui.62de39c2c4ba2300"))
             )
             .fillsAvailableContentArea()
         } else {
@@ -253,12 +254,12 @@ private struct ChatActionStatusBanner: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Button(action: onDismiss) {
-                Label("关闭提示", systemImage: "xmark")
+                Label(L10n.string("ui.d301bc1258334c7c"), systemImage: "xmark")
                     .labelStyle(.iconOnly)
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("关闭提示")
+            .accessibilityLabel(L10n.string("ui.d301bc1258334c7c"))
         }
         .foregroundStyle(isError ? Color.red : Color.secondary)
         .padding(.horizontal, 16)
@@ -301,13 +302,13 @@ private struct ConversationRow: View {
                         Image(systemName: "lock.fill")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .accessibilityLabel("加密会话")
+                            .accessibilityLabel(L10n.string("ui.85a68e03fe6e6789"))
                     }
                     if isPinned {
                         Image(systemName: "pin.fill")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                            .accessibilityLabel("已置顶")
+                            .accessibilityLabel(L10n.string("ui.fb47db5e65ff7fa0"))
                     }
                     Spacer(minLength: 4)
                     if let lastActivityAt = conversation.lastActivityAt {
@@ -317,7 +318,7 @@ private struct ConversationRow: View {
                     }
                 }
                 HStack(spacing: 6) {
-                    Text(conversation.lastMessageSummary ?? "还没有消息")
+                    Text(conversation.lastMessageSummary ?? L10n.string("ui.e29432d115e1ae1a"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -329,7 +330,7 @@ private struct ConversationRow: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(.tint, in: Capsule())
-                            .accessibilityLabel("\(conversation.unreadCount) 条未读消息")
+                            .accessibilityLabel(L10n.string("ui.d03793ec01fb7aee", String(describing: conversation.unreadCount)))
                     }
                 }
             }
@@ -351,9 +352,9 @@ private struct ChatServiceStateView: View {
                 .font(.system(size: 34))
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
-            Text(status == .unavailable ? "消息服务不可用" : "消息功能正在准备")
+            Text(status == .unavailable ? L10n.string("ui.4bb23165e9cfcb54") : L10n.string("ui.ac42be48e1fe5bdd"))
                 .font(.headline)
-            Text(message ?? "暂时无法读取会话。")
+            Text(message ?? L10n.string("ui.bb4dbbe3d77db669"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -365,7 +366,7 @@ private struct ChatServiceStateView: View {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Text("重新检查")
+                    Text(L10n.string("ui.c25fb86b1e96e063"))
                 }
             }
             .disabled(isLoading)
@@ -381,14 +382,14 @@ private struct ChatUnavailableDetail: View {
     var body: some View {
         ContentUnavailableView {
             Label(
-                status == .unavailable ? "无法使用消息" : "消息功能尚未开放",
+                status == .unavailable ? L10n.string("ui.4b7c1ba33c604c88") : L10n.string("ui.005661966fc924b6"),
                 systemImage: status == .unavailable ? "exclamationmark.bubble" : "lock.shield"
             )
         } description: {
             Text(
                 status == .unavailable
-                    ? "请确认 NAS 已安装并启用 Synology Chat Server，且当前账号具有使用权限。"
-                    : "为了保护账号和消息，在功能准备好以前不会尝试连接这台 NAS 的消息服务。"
+                    ? L10n.string("ui.b1da68b82fb50f16")
+                    : L10n.string("ui.c54a3dbc28e361c3")
             )
         }
         .fillsAvailableContentArea()
@@ -422,7 +423,7 @@ private struct ChatConversationView: View {
             Divider()
 
             if model.isLoadingMessages {
-                ProgressView("正在载入消息…")
+                ProgressView(L10n.string("ui.68e4421f9ccf609d"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.messages.isEmpty {
                 emptyConversationState
@@ -439,10 +440,10 @@ private struct ChatConversationView: View {
                                     }
                                 } label: {
                                     if model.isLoadingEarlierMessages {
-                                        ProgressView("正在载入更早消息…")
+                                        ProgressView(L10n.string("ui.9f4249261605e43b"))
                                             .controlSize(.small)
                                     } else {
-                                        Label("载入更早消息", systemImage: "arrow.up.circle")
+                                        Label(L10n.string("ui.1843f002069657ae"), systemImage: "arrow.up.circle")
                                     }
                                 }
                                 .buttonStyle(.borderless)
@@ -496,19 +497,19 @@ private struct ChatConversationView: View {
                                             Button {
                                                 Task { await model.retryMessage(id: message.id) }
                                             } label: {
-                                                Label("重新发送", systemImage: "arrow.clockwise")
+                                                Label(L10n.string("ui.9287ac799e545bb0"), systemImage: "arrow.clockwise")
                                             }
                                             .disabled(model.isPerformingAction)
                                             Button(role: .destructive) {
                                                 model.removeFailedMessage(id: message.id)
                                             } label: {
-                                                Label("移除未发送消息", systemImage: "trash")
+                                                Label(L10n.string("ui.a07bcb96af2f3182"), systemImage: "trash")
                                             }
                                         } else if message.deliveryState == .sending {
                                             Button(role: .destructive) {
                                                 model.cancelMessageSend(id: message.id)
                                             } label: {
-                                                Label("取消发送", systemImage: "xmark.circle")
+                                                Label(L10n.string("ui.554bfa5fa81c82cb"), systemImage: "xmark.circle")
                                             }
                                         } else {
                                             if let attachment = message.attachments.first,
@@ -517,13 +518,13 @@ private struct ChatConversationView: View {
                                                     Button {
                                                         presentImagePreview(message: message, attachment: attachment)
                                                     } label: {
-                                                        Label("预览图片", systemImage: "photo")
+                                                        Label(L10n.string("ui.de078ce976cebdbd"), systemImage: "photo")
                                                     }
                                                 }
                                                 Button {
                                                     saveAttachment(message: message, attachment: attachment)
                                                 } label: {
-                                                    Label("将附件另存为…", systemImage: "square.and.arrow.down")
+                                                    Label(L10n.string("ui.f0ab22db233be1f5"), systemImage: "square.and.arrow.down")
                                                 }
                                                 Divider()
                                             }
@@ -532,7 +533,7 @@ private struct ChatConversationView: View {
                                                     reminderMessage = message
                                                 } label: {
                                                     Label(
-                                                        model.reminder(for: message.id) == nil ? "设置提醒…" : "修改提醒…",
+                                                        model.reminder(for: message.id) == nil ? L10n.string("ui.d6171a625a79e798") : L10n.string("ui.908ae6359d3ff66e"),
                                                         systemImage: "bell"
                                                     )
                                                 }
@@ -548,7 +549,7 @@ private struct ChatConversationView: View {
                                                     }
                                                 } label: {
                                                     Label(
-                                                        message.isPinned ? "从群公告中移除" : "设为群公告",
+                                                        message.isPinned ? L10n.string("ui.02bf53bf7b24aff8") : L10n.string("ui.9948214d915ca840"),
                                                         systemImage: message.isPinned ? "pin.slash" : "pin"
                                                     )
                                                 }
@@ -560,14 +561,14 @@ private struct ChatConversationView: View {
                                                     toggleMessageSelection(message.id)
                                                 } label: {
                                                     Label(
-                                                        selectedMessageIDs.contains(message.id) ? "取消选择" : "选择此消息",
+                                                        selectedMessageIDs.contains(message.id) ? L10n.string("ui.74966e20df2ea9fd") : L10n.string("ui.b8b9e1bf1a8c4d99"),
                                                         systemImage: selectedMessageIDs.contains(message.id) ? "checkmark.circle.fill" : "circle"
                                                     )
                                                 }
                                                 Button {
                                                     presentForwardSheet(from: message.id)
                                                 } label: {
-                                                    Label("转发…", systemImage: "arrowshape.turn.up.right")
+                                                    Label(L10n.string("ui.31e2b7f36595d8a5"), systemImage: "arrowshape.turn.up.right")
                                                 }
                                                 .disabled(model.isPerformingAction)
                                             }
@@ -659,11 +660,11 @@ private struct ChatConversationView: View {
             }
         }
         .alert(
-            pendingMessageDeletion.count == 1 ? "删除这条消息？" : "删除这 \(pendingMessageDeletion.count) 条消息？",
+            pendingMessageDeletion.count == 1 ? L10n.string("ui.7d4bf0c7c1ff1a7e") : L10n.string("ui.cbcd5916d736a88e", String(describing: pendingMessageDeletion.count)),
             isPresented: $presentsMessageDeletionConfirmation
         ) {
-            Button("取消", role: .cancel) {}
-            Button("删除消息", role: .destructive) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
+            Button(L10n.string("ui.053d6b4dd1f3b718"), role: .destructive) {
                 let ids = pendingMessageDeletion
                 pendingMessageDeletion = []
                 Task {
@@ -673,7 +674,7 @@ private struct ChatConversationView: View {
             }
             .disabled(model.isPerformingAction)
         } message: {
-            Text("消息会从群晖 Chat 中删除，无法撤销。管理员可能只允许删除最近发送的消息。")
+            Text(L10n.string("ui.e7f653c71078a6ce"))
         }
         .onChange(of: conversation.id) { _, _ in
             selectedMessageIDs = []
@@ -686,7 +687,7 @@ private struct ChatConversationView: View {
     private var selectionBar: some View {
         HStack(spacing: 10) {
             Label(
-                "已选择 \(selectedMessageIDs.count) 条消息",
+                L10n.string("ui.abe7ab8cbde4908f", String(describing: selectedMessageIDs.count)),
                 systemImage: "checkmark.circle.fill"
             )
             .font(.callout.weight(.medium))
@@ -697,7 +698,7 @@ private struct ChatConversationView: View {
             Button {
                 presentsForwardSheet = true
             } label: {
-                Label("转发", systemImage: "arrowshape.turn.up.right")
+                Label(L10n.string("ui.02107ba378e21710"), systemImage: "arrowshape.turn.up.right")
             }
             .buttonStyle(.borderedProminent)
             .disabled(
@@ -711,12 +712,12 @@ private struct ChatConversationView: View {
                 Button(role: .destructive) {
                     requestMessageDeletion(for: selectedMessageIDs)
                 } label: {
-                    Label("删除", systemImage: "trash")
+                    Label(L10n.string("ui.2f9daa828907b93f"), systemImage: "trash")
                 }
                 .disabled(model.isPerformingAction)
             }
 
-            Button("取消选择") {
+            Button(L10n.string("ui.74966e20df2ea9fd")) {
                 selectedMessageIDs = []
             }
             .keyboardShortcut(.cancelAction)
@@ -748,64 +749,64 @@ private struct ChatConversationView: View {
                 Button {
                     scrollToLatestRequest += 1
                 } label: {
-                    Label("\(model.newMessageCount) 条新消息", systemImage: "arrow.down.circle.fill")
+                    Label(L10n.string("ui.b20347ae4157386f", String(describing: model.newMessageCount)), systemImage: "arrow.down.circle.fill")
                 }
                 .buttonStyle(.borderless)
-                    .help("滚动到最新消息")
+                    .help(L10n.string("ui.e15f7624e326b635"))
             }
             if conversation.kind == .group, model.canViewGroupMembers {
                 Button {
                     presentsGroupMembers = true
                 } label: {
-                    Label("群成员", systemImage: "person.2")
+                    Label(L10n.string("ui.9d8692671d208b74"), systemImage: "person.2")
                         .labelStyle(.iconOnly)
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.borderless)
-                .help("查看群成员")
-                .accessibilityLabel("查看群成员")
+                .help(L10n.string("ui.6003a1eadb5754b1"))
+                .accessibilityLabel(L10n.string("ui.6003a1eadb5754b1"))
             }
             if conversation.kind == .group, model.canManagePinnedMessages {
                 Button {
                     presentsPinnedMessages = true
                 } label: {
-                    Label("群公告", systemImage: "pin")
+                    Label(L10n.string("ui.99728d0e0224c355"), systemImage: "pin")
                         .labelStyle(.iconOnly)
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.borderless)
-                .help("查看群公告")
-                .accessibilityLabel("查看群公告")
+                .help(L10n.string("ui.b1ada05af7dc3716"))
+                .accessibilityLabel(L10n.string("ui.b1ada05af7dc3716"))
             }
             if model.canManageReminders {
                 Button {
                     presentsReminderList = true
                 } label: {
-                    Label("提醒", systemImage: model.reminders.isEmpty ? "bell" : "bell.badge")
+                    Label(L10n.string("ui.8f29b3132ccf2182"), systemImage: model.reminders.isEmpty ? "bell" : "bell.badge")
                         .labelStyle(.iconOnly)
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.borderless)
-                .help("查看消息提醒")
-                .accessibilityLabel("查看消息提醒")
+                .help(L10n.string("ui.3f7aab4e272aa227"))
+                .accessibilityLabel(L10n.string("ui.3f7aab4e272aa227"))
             }
             if model.canScheduleMessages {
                 Button {
                     presentsScheduledMessageList = true
                 } label: {
                     Label(
-                        "定时消息",
+                        L10n.string("ui.582feae291691f33"),
                         systemImage: model.scheduledMessages.isEmpty ? "clock" : "clock.badge"
                     )
                     .labelStyle(.iconOnly)
                     .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.borderless)
-                .help("查看定时消息")
-                .accessibilityLabel("查看定时消息")
+                .help(L10n.string("ui.9a57b15141045f99"))
+                .accessibilityLabel(L10n.string("ui.9a57b15141045f99"))
             }
             if conversation.isEncrypted {
-                Label("已加密", systemImage: "lock.fill")
+                Label(L10n.string("ui.b66975fbd35fa85d"), systemImage: "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -832,7 +833,7 @@ private struct ChatConversationView: View {
                     Text(emptyConversationTitle)
                         .font(.title3.weight(.semibold))
                         .multilineTextAlignment(.center)
-                    Text("这里还没有消息。发送第一条消息，开始这段聊天。")
+                    Text(L10n.string("ui.15a3dea878ee9537"))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -843,12 +844,12 @@ private struct ChatConversationView: View {
                     Button {
                         isComposerFocused = true
                     } label: {
-                        Label("发送第一条消息", systemImage: "square.and.pencil")
+                        Label(L10n.string("ui.bf35b31e17d057e6"), systemImage: "square.and.pencil")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
                     .disabled(model.isPerformingAction)
-                    .accessibilityHint("将焦点移到下方的消息输入框")
+                    .accessibilityHint(L10n.string("ui.a492b178304eda98"))
                 }
             }
             .frame(maxWidth: 380)
@@ -863,9 +864,9 @@ private struct ChatConversationView: View {
     private var emptyConversationTitle: String {
         switch conversation.kind {
         case .direct:
-            "开始和 \(conversation.title) 聊天"
+            L10n.string("ui.639159cf49a082cc", String(describing: conversation.title))
         case .group:
-            "开始在“\(conversation.title)”中聊天"
+            L10n.string("ui.13bcea0b712e2b0c", String(describing: conversation.title))
         }
     }
 
@@ -873,10 +874,10 @@ private struct ChatConversationView: View {
         VStack(alignment: .leading, spacing: 8) {
             if !attachmentURLs.isEmpty {
                 HStack {
-                    Label(attachmentURLs.first?.lastPathComponent ?? "已选择附件", systemImage: "paperclip")
+                    Label(attachmentURLs.first?.lastPathComponent ?? L10n.string("ui.31eb2ab65ee4aeb6"), systemImage: "paperclip")
                         .font(.caption)
                     Spacer()
-                    Button("移除附件") {
+                    Button(L10n.string("ui.7ee8b2d0ae7ade97")) {
                         attachmentURLs = []
                     }
                     .buttonStyle(.borderless)
@@ -891,13 +892,13 @@ private struct ChatConversationView: View {
                         model.showAttachmentUnavailable()
                     }
                 } label: {
-                    Label("添加附件", systemImage: "paperclip")
+                    Label(L10n.string("ui.c8a47d0018480abe"), systemImage: "paperclip")
                         .labelStyle(.iconOnly)
                         .frame(width: 28, height: 28)
                 }
                 .disabled(!model.canUseMessaging || model.isPerformingAction)
-                .help(model.canSendAttachments ? "添加图片、视频或文件" : "这台 NAS 尚未开放附件发送")
-                .accessibilityLabel("添加附件")
+                .help(model.canSendAttachments ? L10n.string("ui.92ef78e381a90762") : L10n.string("ui.e19b010fb03f1d59"))
+                .accessibilityLabel(L10n.string("ui.c8a47d0018480abe"))
 
                 Button {
                     isComposerFocused = true
@@ -905,37 +906,37 @@ private struct ChatConversationView: View {
                         NSApp.orderFrontCharacterPalette(nil)
                     }
                 } label: {
-                    Label("插入表情", systemImage: "face.smiling")
+                    Label(L10n.string("ui.d405f59076940eb3"), systemImage: "face.smiling")
                         .labelStyle(.iconOnly)
                         .frame(width: 28, height: 28)
                 }
                 .disabled(!model.canSendText || model.isPerformingAction)
-                .help("打开系统表情与符号")
-                .accessibilityLabel("插入表情")
+                .help(L10n.string("ui.9692543077ef0182"))
+                .accessibilityLabel(L10n.string("ui.d405f59076940eb3"))
 
                 Button {
                     presentsPollComposer = true
                 } label: {
-                    Label("创建投票", systemImage: "chart.bar.xaxis")
+                    Label(L10n.string("ui.54f9e511a851c7da"), systemImage: "chart.bar.xaxis")
                         .labelStyle(.iconOnly)
                         .frame(width: 28, height: 28)
                 }
                 .disabled(!model.canCreatePoll || model.isPerformingAction)
-                .help(model.canCreatePoll ? "创建投票" : "这台 NAS 尚未开放投票")
-                .accessibilityLabel("创建投票")
+                .help(model.canCreatePoll ? L10n.string("ui.54f9e511a851c7da") : L10n.string("ui.073b8283ad1a2e59"))
+                .accessibilityLabel(L10n.string("ui.54f9e511a851c7da"))
 
                 Button {
                     presentsScheduledMessageComposer = true
                 } label: {
-                    Label("定时发送", systemImage: "calendar.badge.clock")
+                    Label(L10n.string("ui.33e4b16591ac7cba"), systemImage: "calendar.badge.clock")
                         .labelStyle(.iconOnly)
                         .frame(width: 28, height: 28)
                 }
                 .disabled(!model.canScheduleMessages || model.isPerformingAction)
-                .help(model.canScheduleMessages ? "安排定时消息" : "这台 NAS 尚未开放定时消息")
-                .accessibilityLabel("安排定时消息")
+                .help(model.canScheduleMessages ? L10n.string("ui.d8c36838861566a9") : L10n.string("ui.91b646fc9336888c"))
+                .accessibilityLabel(L10n.string("ui.d8c36838861566a9"))
 
-                TextField("输入消息", text: draftText, axis: .vertical)
+                TextField(L10n.string("ui.a410452649b38b31"), text: draftText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
                     .focused($isComposerFocused)
@@ -948,7 +949,7 @@ private struct ChatConversationView: View {
                             .controlSize(.small)
                             .frame(width: 28, height: 28)
                     } else {
-                        Label("发送", systemImage: "paperplane.fill")
+                        Label(L10n.string("ui.edecf0ae6e5144f9"), systemImage: "paperplane.fill")
                             .frame(minWidth: 52, minHeight: 28)
                     }
                 }
@@ -1022,7 +1023,7 @@ private struct ChatConversationView: View {
 
     private func messageDeletionTitle(for messageID: String) -> String {
         let count = messageDeletionTargets(from: messageID).count
-        return count == 1 ? "删除消息" : "删除 \(count) 条消息"
+        return count == 1 ? L10n.string("ui.053d6b4dd1f3b718") : L10n.string("ui.f435464807a3dd7d", String(describing: count))
     }
 
     private func requestMessageDeletion(from messageID: String) {
@@ -1059,8 +1060,8 @@ private struct ChatConversationView: View {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = URL(fileURLWithPath: attachment.fileName).lastPathComponent
         panel.canCreateDirectories = true
-        panel.title = "保存附件"
-        panel.prompt = "保存"
+        panel.title = L10n.string("ui.f6c71ae760ba11e7")
+        panel.prompt = L10n.string("ui.a3030bf8f16dc63c")
         panel.begin { response in
             guard response == .OK, let destination = panel.url else { return }
             Task {
@@ -1087,17 +1088,17 @@ private struct ChatImagePreviewSheet: View {
                     .resizable()
                     .scaledToFit()
                     .padding(20)
-                    .accessibilityLabel("图片预览")
+                    .accessibilityLabel(L10n.string("ui.ba8b49f3fd10b338"))
             } else {
                 ProgressView()
                     .controlSize(.large)
                     .tint(.white)
-                    .accessibilityLabel("正在载入图片")
+                    .accessibilityLabel(L10n.string("ui.facec40ad268aefe"))
             }
             Button {
                 dismiss()
             } label: {
-                Label("关闭预览", systemImage: "xmark")
+                Label(L10n.string("ui.1eb05d3115088bdf"), systemImage: "xmark")
                     .labelStyle(.iconOnly)
                     .frame(width: 32, height: 32)
             }
@@ -1106,7 +1107,7 @@ private struct ChatImagePreviewSheet: View {
             .background(.black.opacity(0.55), in: Circle())
             .padding(16)
             .keyboardShortcut(.cancelAction)
-            .help("关闭预览")
+            .help(L10n.string("ui.1eb05d3115088bdf"))
         }
         .frame(minWidth: 720, idealWidth: 960, minHeight: 520, idealHeight: 720)
     }
@@ -1162,37 +1163,37 @@ private struct ForwardMessagesSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("转发消息")
+                    Text(L10n.string("ui.119f4645f840e0f0"))
                         .font(.title2.bold())
-                    Text("将 \(messageIDs.count) 条消息发送到其他会话或联系人")
+                    Text(L10n.string("ui.5515ea66b67846d1", String(describing: messageIDs.count)))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("取消") { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
             .padding(20)
 
             Divider()
 
-            TextField("搜索会话或联系人", text: $searchText)
+            TextField(L10n.string("ui.404de5b870b3e6a2"), text: $searchText)
                 .textFieldStyle(.roundedBorder)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
 
             if conversationCandidates.isEmpty, contactCandidates.isEmpty {
                 ContentUnavailableView(
-                    normalizedSearchText.isEmpty ? "没有可用的转发目标" : "没有找到转发目标",
+                    normalizedSearchText.isEmpty ? L10n.string("ui.9e060cfc78fbe2a5") : L10n.string("ui.c4132456f663ee3b"),
                     systemImage: normalizedSearchText.isEmpty ? "person.2.slash" : "magnifyingglass",
-                    description: Text(normalizedSearchText.isEmpty ? "当前没有其他会话或可联系的用户。" : "请尝试其他关键词。")
+                    description: Text(normalizedSearchText.isEmpty ? L10n.string("ui.38c00260f7d51dda") : L10n.string("ui.5a7c1c3bbad8e5a8"))
                 )
                 .fillsAvailableContentArea()
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 4) {
                         if !conversationCandidates.isEmpty {
-                            recipientSectionTitle("已有会话")
+                            recipientSectionTitle(L10n.string("ui.fe4bfec108f7cd07"))
                             ForEach(conversationCandidates) { conversation in
                                 recipientButton(
                                     title: conversation.title,
@@ -1208,12 +1209,12 @@ private struct ForwardMessagesSheet: View {
                         }
 
                         if !contactCandidates.isEmpty {
-                            recipientSectionTitle("联系人")
+                            recipientSectionTitle(L10n.string("ui.3303b56982a00fd1"))
                                 .padding(.top, conversationCandidates.isEmpty ? 0 : 10)
                             ForEach(contactCandidates) { user in
                                 recipientButton(
                                     title: user.displayName,
-                                    subtitle: "尚未开始聊天",
+                                    subtitle: L10n.string("ui.4da59d59da8a6a6d"),
                                     systemImage: "person.crop.circle.badge.plus",
                                     isSelected: selectedUserIDs.contains(user.id)
                                 ) {
@@ -1240,12 +1241,12 @@ private struct ForwardMessagesSheet: View {
 
             HStack {
                 Text(selectedTargetCount == 0
-                    ? "请选择至少一个目标"
-                    : "已选择 \(selectedTargetCount) 个目标")
+                    ? L10n.string("ui.4b7a63cb61fc5c74")
+                    : L10n.string("ui.2b1630ff83287eb8", String(describing: selectedTargetCount)))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("取消") { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { dismiss() }
                 Button {
                     Task {
                         forwardErrorMessage = nil
@@ -1259,7 +1260,7 @@ private struct ForwardMessagesSheet: View {
                             dismiss()
                         } else {
                             forwardErrorMessage = model.statusMessage
-                                ?? "消息没有转发完成，请稍后重试。"
+                                ?? L10n.string("ui.b72286c6d758db40")
                         }
                     }
                 } label: {
@@ -1267,7 +1268,7 @@ private struct ForwardMessagesSheet: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Label("转发", systemImage: "arrowshape.turn.up.right")
+                        Label(L10n.string("ui.02107ba378e21710"), systemImage: "arrowshape.turn.up.right")
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -1325,8 +1326,15 @@ private struct ForwardMessagesSheet: View {
             )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(title)，\(subtitle)，\(isSelected ? "已选择" : "未选择")")
-        .accessibilityValue(isSelected ? "已选择" : "未选择")
+        .accessibilityLabel(
+            L10n.string(
+                "chat.target.accessibility",
+                title,
+                subtitle,
+                isSelected ? L10n.string("selection.selected") : L10n.string("selection.not_selected")
+            )
+        )
+        .accessibilityValue(isSelected ? L10n.string("ui.3f4ebc4aad9793b6") : L10n.string("ui.1182c5454f113db5"))
     }
 
     private func toggleConversationSelection(_ id: String) {
@@ -1354,17 +1362,17 @@ private struct GroupMembersSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             sheetHeader(
-                title: "群成员",
-                subtitle: "\(conversation.title) · \(model.conversationMembers.count) 位成员"
+                title: L10n.string("ui.9d8692671d208b74"),
+                subtitle: L10n.string("ui.11d084f57f81c408", String(describing: conversation.title), String(describing: model.conversationMembers.count))
             )
             Divider()
 
             if model.isLoadingConversationMembers {
-                ProgressView("正在载入群成员…")
+                ProgressView(L10n.string("ui.82c870073f68d0ca"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = model.conversationMemberLoadError {
                 retryState(
-                    title: "无法载入群成员",
+                    title: L10n.string("ui.2237485372f84189"),
                     message: error,
                     systemImage: "person.2.slash"
                 ) {
@@ -1372,9 +1380,9 @@ private struct GroupMembersSheet: View {
                 }
             } else if model.conversationMembers.isEmpty {
                 ContentUnavailableView(
-                    "没有可显示的成员",
+                    L10n.string("ui.2b66ff22025ce6d0"),
                     systemImage: "person.2",
-                    description: Text("群成员信息可能受当前账号权限限制。")
+                    description: Text(L10n.string("ui.11cf9b18b7bf28d2"))
                 )
                 .fillsAvailableContentArea()
             } else {
@@ -1385,14 +1393,14 @@ private struct GroupMembersSheet: View {
                             Text(member.displayName)
                                 .font(.body.weight(.medium))
                             if member.isCurrentUser == true {
-                                Text("你")
+                                Text(L10n.string("ui.a0c7716669b5ded0"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                         }
                         Spacer()
                         if member.isDisabled {
-                            Text("已停用")
+                            Text(L10n.string("ui.a8c3698b5b8c485d"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -1415,7 +1423,7 @@ private struct GroupMembersSheet: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("完成") { dismiss() }
+            Button(L10n.string("ui.c0b3fbff51ccc40b")) { dismiss() }
                 .keyboardShortcut(.cancelAction)
         }
         .padding(16)
@@ -1432,7 +1440,7 @@ private struct GroupMembersSheet: View {
         } description: {
             Text(message)
         } actions: {
-            Button("重试", action: action)
+            Button(L10n.string("ui.b8784c8dd5636ff2"), action: action)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1447,38 +1455,38 @@ private struct PinnedMessagesSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("群公告")
+                    Text(L10n.string("ui.99728d0e0224c355"))
                         .font(.title2.bold())
                     Text(conversation.title)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("完成") { dismiss() }
+                Button(L10n.string("ui.c0b3fbff51ccc40b")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
             .padding(16)
             Divider()
 
             if model.isLoadingPinnedMessages {
-                ProgressView("正在载入群公告…")
+                ProgressView(L10n.string("ui.45cfae641f1cd044"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = model.pinnedMessageLoadError {
                 ContentUnavailableView {
-                    Label("无法载入群公告", systemImage: "pin.slash")
+                    Label(L10n.string("ui.d93afe72592b384f"), systemImage: "pin.slash")
                 } description: {
                     Text(error)
                 } actions: {
-                    Button("重试") {
+                    Button(L10n.string("ui.b8784c8dd5636ff2")) {
                         Task { await model.loadPinnedMessages() }
                     }
                 }
                 .fillsAvailableContentArea()
             } else if model.pinnedMessages.isEmpty {
                 ContentUnavailableView(
-                    "还没有群公告",
+                    L10n.string("ui.7b938afe1c9cbc79"),
                     systemImage: "pin",
-                    description: Text("在消息上点按右键并选择“设为群公告”。")
+                    description: Text(L10n.string("ui.2abb6d1e3b1abe9e"))
                 )
                 .fillsAvailableContentArea()
             } else {
@@ -1492,7 +1500,7 @@ private struct PinnedMessagesSheet: View {
                             Text(messageSummary(message))
                                 .lineLimit(3)
                             HStack(spacing: 6) {
-                                Text(message.senderDisplayName ?? model.displayName(for: message.senderID) ?? "群成员")
+                                Text(message.senderDisplayName ?? model.displayName(for: message.senderID) ?? L10n.string("ui.9d8692671d208b74"))
                                 if let pinnedAt = message.pinnedAt {
                                     Text("·")
                                     Text(Self.formatter.string(from: pinnedAt))
@@ -1507,13 +1515,13 @@ private struct PinnedMessagesSheet: View {
                                 _ = await model.setMessagePinned(message, isPinned: false)
                             }
                         } label: {
-                            Label("从群公告中移除", systemImage: "pin.slash")
+                            Label(L10n.string("ui.02bf53bf7b24aff8"), systemImage: "pin.slash")
                                 .labelStyle(.iconOnly)
                                 .frame(width: 28, height: 28)
                         }
                         .buttonStyle(.borderless)
-                        .help("从群公告中移除")
-                        .accessibilityLabel("从群公告中移除")
+                        .help(L10n.string("ui.02bf53bf7b24aff8"))
+                        .accessibilityLabel(L10n.string("ui.02bf53bf7b24aff8"))
                         .disabled(model.isPerformingAction)
                     }
                     .padding(.vertical, 5)
@@ -1530,18 +1538,18 @@ private struct PinnedMessagesSheet: View {
             return text
         }
         if let attachment = message.attachments.first {
-            return "附件：\(attachment.fileName)"
+            return L10n.string("ui.b04b74f55264f515", String(describing: attachment.fileName))
         }
-        return "一条群消息"
+        return L10n.string("ui.ea0959a31f383a54")
     }
 
-    private static let formatter: DateFormatter = {
+    private static var formatter: DateFormatter {
         let formatter = DateFormatter()
-        formatter.locale = .autoupdatingCurrent
+        formatter.locale = L10n.locale
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter
-    }()
+    }
 }
 
 private struct ScheduledMessageComposerSheet: View {
@@ -1555,30 +1563,30 @@ private struct ScheduledMessageComposerSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("定时发送")
+                    Text(L10n.string("ui.33e4b16591ac7cba"))
                         .font(.title2.bold())
-                    Text("发送到“\(conversation.title)”")
+                    Text(L10n.string("ui.21fd7ed36d3cd598", String(describing: conversation.title)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("取消") { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
 
-            TextField("消息内容", text: $text, axis: .vertical)
+            TextField(L10n.string("ui.387278213e791913"), text: $text, axis: .vertical)
                 .lineLimit(3...8)
                 .textFieldStyle(.roundedBorder)
 
             DatePicker(
-                "发送时间",
+                L10n.string("ui.4b474d377140ad84"),
                 selection: $sendAt,
                 in: Date()...,
                 displayedComponents: [.date, .hourAndMinute]
             )
             .datePickerStyle(.field)
 
-            Text("消息会由群晖 Chat 在设定时间发送。关闭岚仓不会取消这项安排。")
+            Text(L10n.string("ui.8eab5ec981463240"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1594,7 +1602,7 @@ private struct ScheduledMessageComposerSheet: View {
                     if model.isPerformingAction {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("安排发送")
+                        Text(L10n.string("ui.5246400327a69731"))
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -1619,34 +1627,34 @@ private struct ScheduledMessageListSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("定时消息")
+                Text(L10n.string("ui.582feae291691f33"))
                     .font(.title2.bold())
                 Spacer()
-                Button("完成") { dismiss() }
+                Button(L10n.string("ui.c0b3fbff51ccc40b")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
             .padding(16)
             Divider()
 
             if model.isLoadingScheduledMessages {
-                ProgressView("正在载入定时消息…")
+                ProgressView(L10n.string("ui.9ccea420a6e6866f"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = model.scheduledMessageLoadError {
                 ContentUnavailableView {
-                    Label("无法载入定时消息", systemImage: "clock.badge.exclamationmark")
+                    Label(L10n.string("ui.e9a0f7a382024630"), systemImage: "clock.badge.exclamationmark")
                 } description: {
                     Text(error)
                 } actions: {
-                    Button("重试") {
+                    Button(L10n.string("ui.b8784c8dd5636ff2")) {
                         Task { await model.loadScheduledMessages() }
                     }
                 }
                 .fillsAvailableContentArea()
             } else if model.scheduledMessages.isEmpty {
                 ContentUnavailableView(
-                    "没有定时消息",
+                    L10n.string("ui.ed8995abb028578c"),
                     systemImage: "clock",
-                    description: Text("在消息输入区选择时钟按钮，可以安排以后发送。")
+                    description: Text(L10n.string("ui.9b05e363d99f9af4"))
                 )
                 .fillsAvailableContentArea()
             } else {
@@ -1666,13 +1674,13 @@ private struct ScheduledMessageListSheet: View {
                         Button(role: .destructive) {
                             pendingDeletion = scheduled
                         } label: {
-                            Label("取消定时发送", systemImage: "xmark.circle")
+                            Label(L10n.string("ui.4a9551f5bd002309"), systemImage: "xmark.circle")
                                 .labelStyle(.iconOnly)
                                 .frame(width: 28, height: 28)
                         }
                         .buttonStyle(.borderless)
-                        .help("取消定时发送")
-                        .accessibilityLabel("取消定时发送")
+                        .help(L10n.string("ui.4a9551f5bd002309"))
+                        .accessibilityLabel(L10n.string("ui.4a9551f5bd002309"))
                         .disabled(model.isPerformingAction)
                     }
                     .padding(.vertical, 4)
@@ -1681,28 +1689,28 @@ private struct ScheduledMessageListSheet: View {
         }
         .frame(minWidth: 520, minHeight: 360)
         .task { await model.loadScheduledMessages() }
-        .alert("取消这条定时消息？", isPresented: Binding(
+        .alert(L10n.string("ui.a4b22aa18e0da772"), isPresented: Binding(
             get: { pendingDeletion != nil },
             set: { if !$0 { pendingDeletion = nil } }
         )) {
-            Button("保留安排", role: .cancel) { pendingDeletion = nil }
-            Button("取消发送", role: .destructive) {
+            Button(L10n.string("ui.36745810fb80f3eb"), role: .cancel) { pendingDeletion = nil }
+            Button(L10n.string("ui.554bfa5fa81c82cb"), role: .destructive) {
                 guard let scheduled = pendingDeletion else { return }
                 pendingDeletion = nil
                 Task { _ = await model.deleteScheduledMessage(id: scheduled.id) }
             }
         } message: {
-            Text("取消后这条消息不会按原计划发送。此操作不能撤销。")
+            Text(L10n.string("ui.25a625319ec21c9b"))
         }
     }
 
-    private static let formatter: DateFormatter = {
+    private static var formatter: DateFormatter {
         let formatter = DateFormatter()
-        formatter.locale = .autoupdatingCurrent
+        formatter.locale = L10n.locale
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter
-    }()
+    }
 }
 
 private struct ReminderEditorSheet: View {
@@ -1715,33 +1723,33 @@ private struct ReminderEditorSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(model.reminder(for: message.id) == nil ? "设置提醒" : "修改提醒")
+                    Text(model.reminder(for: message.id) == nil ? L10n.string("ui.b505f2e67d2915cf") : L10n.string("ui.a1515bb44f9169e6"))
                         .font(.title2.bold())
-                    Text(message.text?.isEmpty == false ? message.text! : "附件消息")
+                    Text(message.text?.isEmpty == false ? message.text! : L10n.string("ui.402c881d6d0b5320"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
                 Spacer()
-                Button("取消") { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
 
             DatePicker(
-                "提醒时间",
+                L10n.string("ui.98b552661af4ee50"),
                 selection: $remindAt,
                 in: Date()...,
                 displayedComponents: [.date, .hourAndMinute]
             )
             .datePickerStyle(.field)
 
-            Text("到达设定时间后，群晖 Chat 会按账号的通知设置提醒你。")
+            Text(L10n.string("ui.4c1bc957493ad11c"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             HStack {
                 if model.reminder(for: message.id) != nil {
-                    Button("取消现有提醒", role: .destructive) {
+                    Button(L10n.string("ui.74b01f2e5a7e5b67"), role: .destructive) {
                         Task {
                             if await model.deleteReminder(messageID: message.id) {
                                 dismiss()
@@ -1761,7 +1769,7 @@ private struct ReminderEditorSheet: View {
                     if model.isPerformingAction {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("保存提醒")
+                        Text(L10n.string("ui.e1be3a5c3ec6c09b"))
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -1787,34 +1795,34 @@ private struct ReminderListSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("消息提醒")
+                Text(L10n.string("ui.03671d6ddf237f70"))
                     .font(.title2.bold())
                 Spacer()
-                Button("完成") { dismiss() }
+                Button(L10n.string("ui.c0b3fbff51ccc40b")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
             .padding(16)
             Divider()
 
             if model.isLoadingReminders {
-                ProgressView("正在载入提醒…")
+                ProgressView(L10n.string("ui.482e8b32018b86a4"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = model.reminderLoadError {
                 ContentUnavailableView {
-                    Label("无法载入消息提醒", systemImage: "bell.slash")
+                    Label(L10n.string("ui.db9f66b5649c8570"), systemImage: "bell.slash")
                 } description: {
                     Text(error)
                 } actions: {
-                    Button("重试") {
+                    Button(L10n.string("ui.b8784c8dd5636ff2")) {
                         Task { await model.loadReminders() }
                     }
                 }
                 .fillsAvailableContentArea()
             } else if model.reminders.isEmpty {
                 ContentUnavailableView(
-                    "没有消息提醒",
+                    L10n.string("ui.b95a48f81673658c"),
                     systemImage: "bell.slash",
-                    description: Text("在消息上点按右键，可以为它设置提醒。")
+                    description: Text(L10n.string("ui.a6e6b58600449352"))
                 )
                 .fillsAvailableContentArea()
             } else {
@@ -1834,13 +1842,13 @@ private struct ReminderListSheet: View {
                         Button(role: .destructive) {
                             pendingDeletion = reminder
                         } label: {
-                            Label("取消提醒", systemImage: "bell.slash")
+                            Label(L10n.string("ui.f3b07169f705a135"), systemImage: "bell.slash")
                                 .labelStyle(.iconOnly)
                                 .frame(width: 28, height: 28)
                         }
                         .buttonStyle(.borderless)
-                        .help("取消提醒")
-                        .accessibilityLabel("取消提醒")
+                        .help(L10n.string("ui.f3b07169f705a135"))
+                        .accessibilityLabel(L10n.string("ui.f3b07169f705a135"))
                         .disabled(model.isPerformingAction)
                     }
                     .padding(.vertical, 4)
@@ -1849,37 +1857,37 @@ private struct ReminderListSheet: View {
         }
         .frame(minWidth: 500, minHeight: 360)
         .task { await model.loadReminders() }
-        .alert("取消这条提醒？", isPresented: Binding(
+        .alert(L10n.string("ui.b755927d881bc4f6"), isPresented: Binding(
             get: { pendingDeletion != nil },
             set: { if !$0 { pendingDeletion = nil } }
         )) {
-            Button("保留提醒", role: .cancel) { pendingDeletion = nil }
-            Button("取消提醒", role: .destructive) {
+            Button(L10n.string("ui.b4c72ea3ea038146"), role: .cancel) { pendingDeletion = nil }
+            Button(L10n.string("ui.f3b07169f705a135"), role: .destructive) {
                 guard let reminder = pendingDeletion else { return }
                 pendingDeletion = nil
                 Task { _ = await model.deleteReminder(messageID: reminder.messageID) }
             }
         } message: {
-            Text("取消后将不再收到这条消息的提醒。你之后仍可重新设置。")
+            Text(L10n.string("ui.00e7cde017aeb344"))
         }
     }
 
     private func messageSummary(for reminder: ChatReminder) -> String {
         guard let message = model.messages.first(where: { $0.id == reminder.messageID }) else {
-            return "一条聊天消息"
+            return L10n.string("ui.b8c17ea4bc20f1ae")
         }
         return message.text?.isEmpty == false
             ? message.text!
-            : message.attachments.first?.fileName ?? "一条聊天消息"
+            : message.attachments.first?.fileName ?? L10n.string("ui.b8c17ea4bc20f1ae")
     }
 
-    private static let formatter: DateFormatter = {
+    private static var formatter: DateFormatter {
         let formatter = DateFormatter()
-        formatter.locale = .autoupdatingCurrent
+        formatter.locale = L10n.locale
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter
-    }()
+    }
 }
 
 private struct CreatePollSheet: View {
@@ -1896,33 +1904,33 @@ private struct CreatePollSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("创建投票")
+                    Text(L10n.string("ui.54f9e511a851c7da"))
                         .font(.title2.bold())
-                    Text("发送到“\(conversation.title)”")
+                    Text(L10n.string("ui.21fd7ed36d3cd598", String(describing: conversation.title)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("取消") { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
 
-            TextField("投票问题", text: $question, axis: .vertical)
+            TextField(L10n.string("ui.9717eea92267e626"), text: $question, axis: .vertical)
                 .lineLimit(1...3)
                 .textFieldStyle(.roundedBorder)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("选项")
+                Text(L10n.string("ui.bb7486f4410fd370"))
                     .font(.headline)
                 ForEach(options.indices, id: \.self) { index in
                     HStack {
-                        TextField("选项 \(index + 1)", text: $options[index])
+                        TextField(L10n.string("ui.042274cf3d451290", String(describing: index + 1)), text: $options[index])
                             .focused($focusedField, equals: index)
                         if options.count > 2 {
                             Button {
                                 options.remove(at: index)
                             } label: {
-                                Label("移除选项 \(index + 1)", systemImage: "minus.circle")
+                                Label(L10n.string("ui.c484cd17875d55d1", String(describing: index + 1)), systemImage: "minus.circle")
                                     .labelStyle(.iconOnly)
                             }
                             .buttonStyle(.borderless)
@@ -1934,17 +1942,17 @@ private struct CreatePollSheet: View {
                         options.append("")
                         focusedField = options.count - 1
                     } label: {
-                        Label("添加选项", systemImage: "plus.circle")
+                        Label(L10n.string("ui.d063937855cf99a7"), systemImage: "plus.circle")
                     }
                     .buttonStyle(.borderless)
                 }
             }
 
-            Toggle("允许选择多个选项", isOn: $allowsMultipleSelection)
-            Toggle("匿名投票", isOn: $isAnonymous)
+            Toggle(L10n.string("ui.1fddd507a67e1366"), isOn: $allowsMultipleSelection)
+            Toggle(L10n.string("ui.55edffe99178b192"), isOn: $isAnonymous)
 
             HStack {
-                Text("至少填写两个不同的选项。")
+                Text(L10n.string("ui.83abddba8f54950a"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -1963,7 +1971,7 @@ private struct CreatePollSheet: View {
                     if model.isPerformingAction {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("发送投票")
+                        Text(L10n.string("ui.82c4fa27cdb5f875"))
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -2006,10 +2014,10 @@ private struct ChatMessageRow: View {
     let onSaveAttachment: (ChatAttachment) -> Void
 
     private var senderName: String {
-        if isCurrentUser { return "你" }
+        if isCurrentUser { return L10n.string("ui.a0c7716669b5ded0") }
         return message.senderDisplayName
             ?? users.first(where: { $0.id == message.senderID })?.displayName
-            ?? "成员 \(message.senderID)"
+            ?? L10n.string("ui.4b947c53d3a318fa", String(describing: message.senderID))
     }
 
     var body: some View {
@@ -2049,7 +2057,14 @@ private struct ChatMessageRow: View {
             }
         }
         .accessibilityElement(children: message.attachments.isEmpty ? .combine : .contain)
-        .accessibilityLabel("\(senderName)，\(Self.fullDateTimeFormatter.string(from: message.sentAt))，\(deliveryAccessibilityText)")
+        .accessibilityLabel(
+            L10n.string(
+                "chat.message.accessibility",
+                senderName,
+                Self.fullDateTimeFormatter.string(from: message.sentAt),
+                deliveryAccessibilityText
+            )
+        )
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -2069,16 +2084,16 @@ private struct ChatMessageRow: View {
                     .monospacedDigit()
                 if message.encryptionState == .unlocked {
                     Image(systemName: "lock.fill")
-                        .accessibilityLabel("加密消息")
+                        .accessibilityLabel(L10n.string("ui.aed642276d2b2cc9"))
                 }
                 if message.isPinned {
                     Image(systemName: "pin.fill")
-                        .accessibilityLabel("群公告")
+                        .accessibilityLabel(L10n.string("ui.99728d0e0224c355"))
                 }
             }
 
             if isCurrentUser {
-                Text("你")
+                Text(L10n.string("ui.a0c7716669b5ded0"))
                     .fontWeight(.semibold)
                 senderAvatar
             }
@@ -2115,7 +2130,7 @@ private struct ChatMessageRow: View {
                         .font(.headline)
                     ForEach(poll.options) { option in
                         Label(
-                            "\(option.text)（\(option.voteCount) 票）",
+                            L10n.string("ui.1fcd1b2f7b5527d9", String(describing: option.text), String(describing: option.voteCount)),
                             systemImage: option.isSelectedByCurrentUser ? "checkmark.circle.fill" : "circle"
                         )
                         .font(.callout)
@@ -2155,8 +2170,8 @@ private struct ChatMessageRow: View {
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .help("预览“\(attachment.fileName)”")
-                .accessibilityLabel("预览图片 \(attachment.fileName)")
+                .help(L10n.string("ui.e201b318efc4814d", String(describing: attachment.fileName)))
+                .accessibilityLabel(L10n.string("ui.d4c051bc4e2432c0", String(describing: attachment.fileName)))
             }
             HStack(spacing: 8) {
                 Label(attachment.fileName, systemImage: attachmentIcon(attachment.kind))
@@ -2167,21 +2182,21 @@ private struct ChatMessageRow: View {
                     Button {
                         onSaveAttachment(attachment)
                     } label: {
-                        Label("保存附件", systemImage: "square.and.arrow.down")
+                        Label(L10n.string("ui.f6c71ae760ba11e7"), systemImage: "square.and.arrow.down")
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.borderless)
-                    .help("将附件另存为")
-                    .accessibilityLabel("将附件另存为")
+                    .help(L10n.string("ui.a985840bfc1565dd"))
+                    .accessibilityLabel(L10n.string("ui.a985840bfc1565dd"))
                 }
             }
             if let downloadProgress {
                 HStack(spacing: 8) {
                     ProgressView(value: downloadProgress)
                         .progressViewStyle(.linear)
-                        .accessibilityLabel("附件下载进度")
+                        .accessibilityLabel(L10n.string("ui.78be84b1df57bc4e"))
                         .accessibilityValue("\(Int((downloadProgress * 100).rounded()))%")
-                    Button("取消", action: onCancelDownload)
+                    Button(L10n.string("ui.2cd0f3be8738a86c"), action: onCancelDownload)
                         .buttonStyle(.link)
                         .font(.caption)
                 }
@@ -2208,7 +2223,7 @@ private struct ChatMessageRow: View {
                     ProgressView(value: uploadProgress)
                         .progressViewStyle(.linear)
                         .frame(width: 140)
-                        .accessibilityLabel("附件上传进度")
+                        .accessibilityLabel(L10n.string("ui.09ea0803f63d0de2"))
                         .accessibilityValue("\(Int((uploadProgress * 100).rounded()))%")
                 }
                 HStack(spacing: 7) {
@@ -2216,8 +2231,8 @@ private struct ChatMessageRow: View {
                         ProgressView()
                             .controlSize(.mini)
                     }
-                    Text(uploadProgress.map { "正在上传 \(Int(($0 * 100).rounded()))%" } ?? "正在发送")
-                    Button("取消", action: onCancel)
+                    Text(uploadProgress.map { L10n.string("ui.9e26bbb23d1672d3", String(describing: Int(($0 * 100).rounded()))) } ?? L10n.string("ui.2d88d503d0ffb609"))
+                    Button(L10n.string("ui.2cd0f3be8738a86c"), action: onCancel)
                         .buttonStyle(.link)
                         .font(.caption)
                 }
@@ -2227,7 +2242,7 @@ private struct ChatMessageRow: View {
             .accessibilityElement(children: .combine)
         } else if message.deliveryState == .failed {
             VStack(alignment: .trailing, spacing: 4) {
-                Label("发送失败", systemImage: "exclamationmark.circle.fill")
+                Label(L10n.string("ui.ac77953a1e064ed6"), systemImage: "exclamationmark.circle.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.red)
                 if let failureMessage {
@@ -2237,7 +2252,7 @@ private struct ChatMessageRow: View {
                         .multilineTextAlignment(.trailing)
                         .lineLimit(2)
                 }
-                Button("重新发送", action: onRetry)
+                Button(L10n.string("ui.9287ac799e545bb0"), action: onRetry)
                     .buttonStyle(.link)
                     .font(.caption)
             }
@@ -2246,18 +2261,18 @@ private struct ChatMessageRow: View {
 
     private var deliveryAccessibilityText: String {
         switch message.deliveryState {
-        case .sending: "正在发送"
-        case .sent: "已发送"
-        case .failed: "发送失败"
+        case .sending: L10n.string("ui.2d88d503d0ffb609")
+        case .sent: L10n.string("ui.60823aaec73bd5db")
+        case .failed: L10n.string("ui.ac77953a1e064ed6")
         }
     }
 
-    private static let fullDateTimeFormatter: DateFormatter = {
+    private static var fullDateTimeFormatter: DateFormatter {
         let formatter = DateFormatter()
-        formatter.locale = .autoupdatingCurrent
-        formatter.dateFormat = "yyyy年M月d日 HH:mm:ss"
+        formatter.locale = L10n.locale
+        formatter.dateFormat = L10n.string("ui.cd4bf97f70f364c8")
         return formatter
-    }()
+    }
 
     private func attachmentIcon(_ kind: ChatAttachmentKind) -> String {
         switch kind {
@@ -2310,12 +2325,12 @@ private struct ChatDateSeparator: View {
         .accessibilityElement(children: .combine)
     }
 
-    private static let formatter: DateFormatter = {
+    private static var formatter: DateFormatter {
         let formatter = DateFormatter()
-        formatter.locale = .autoupdatingCurrent
-        formatter.dateFormat = "yyyy年M月d日 EEEE"
+        formatter.locale = L10n.locale
+        formatter.dateFormat = L10n.string("ui.cc0c25cb29e0effd")
         return formatter
-    }()
+    }
 }
 
 private struct NewChatSheet: View {
@@ -2324,7 +2339,7 @@ private struct NewChatSheet: View {
         case group
 
         var id: Self { self }
-        var title: String { self == .direct ? "单聊" : "群聊" }
+        var title: String { self == .direct ? L10n.string("ui.a3e47aadd86c332b") : L10n.string("ui.35b49ee58a4a0e82") }
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -2338,14 +2353,14 @@ private struct NewChatSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("新建聊天")
+                Text(L10n.string("ui.08d90be0bab08c36"))
                     .font(.title2.bold())
                 Spacer()
-                Button("取消") { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
 
-            Picker("聊天类型", selection: $mode) {
+            Picker(L10n.string("ui.4821f9f7af0425b0"), selection: $mode) {
                 ForEach(availableModes) { mode in
                     Text(mode.title).tag(mode)
                 }
@@ -2353,12 +2368,12 @@ private struct NewChatSheet: View {
             .pickerStyle(.segmented)
 
             if mode == .group {
-                TextField("群聊名称", text: $groupTitle)
-                Text("请填写名称，并至少选择两位成员。")
+                TextField(L10n.string("ui.12633e741c9ab2ed"), text: $groupTitle)
+                Text(L10n.string("ui.b97d05b835c3cfc8"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("搜索并选择一位用户。已有会话会直接打开；首次聊天若当前 NAS 不允许创建，会提示下一步操作。")
+                Text(L10n.string("ui.06109056bcb05375"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -2367,7 +2382,7 @@ private struct NewChatSheet: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
-                TextField("搜索用户姓名", text: $userSearchText)
+                TextField(L10n.string("ui.64291b91ee7e76d4"), text: $userSearchText)
                     .textFieldStyle(.plain)
                 if !userSearchText.isEmpty {
                     Button {
@@ -2377,8 +2392,8 @@ private struct NewChatSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("清除用户搜索")
-                    .help("清除搜索")
+                    .accessibilityLabel(L10n.string("ui.5c5418a623489e17"))
+                    .help(L10n.string("ui.ee32f25f70508f9c"))
                 }
             }
             .padding(.horizontal, 10)
@@ -2387,12 +2402,12 @@ private struct NewChatSheet: View {
 
             if filteredUsers.isEmpty {
                 ContentUnavailableView {
-                    Label(userSearchText.isEmpty ? "没有可选择的用户" : "没有找到用户", systemImage: "person.crop.circle.badge.questionmark")
+                    Label(userSearchText.isEmpty ? L10n.string("ui.b7b405d8cf32c2de") : L10n.string("ui.77936eef94b251bd"), systemImage: "person.crop.circle.badge.questionmark")
                 } description: {
                     Text(
                         userSearchText.isEmpty
-                            ? "没有读取到用户。请先重新连接；如果仍为空，请确认当前账号可以使用群晖 Chat。"
-                            : "请尝试输入其他姓名。"
+                            ? L10n.string("ui.42107622c9bbf85c")
+                            : L10n.string("ui.4e6788f38e6553a5")
                     )
                 }
                 .frame(minHeight: 260)
@@ -2416,7 +2431,7 @@ private struct NewChatSheet: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(user.displayName)
-                    .accessibilityValue(selectedUserIDs.contains(user.id) ? "已选择" : "未选择")
+                    .accessibilityValue(selectedUserIDs.contains(user.id) ? L10n.string("ui.3f4ebc4aad9793b6") : L10n.string("ui.1182c5454f113db5"))
                 }
                 .listStyle(.inset)
                 .frame(minHeight: 260)
@@ -2424,12 +2439,12 @@ private struct NewChatSheet: View {
 
             if mode == .group,
                model.availability.supportedFeatures.contains(.encryptedConversation) {
-                Toggle("创建加密群聊", isOn: $createsEncryptedConversation)
+                Toggle(L10n.string("ui.d33475f3928dbe36"), isOn: $createsEncryptedConversation)
             }
 
             HStack {
                 if model.users.isEmpty {
-                    Label("尚未读取到用户", systemImage: "info.circle")
+                    Label(L10n.string("ui.dfdb295f749db3a5"), systemImage: "info.circle")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -2441,7 +2456,7 @@ private struct NewChatSheet: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Text(mode == .direct ? "开始聊天" : "创建群聊")
+                        Text(mode == .direct ? L10n.string("ui.b263cff274346402") : L10n.string("ui.675ee6eef7be449d"))
                     }
                 }
                 .buttonStyle(.borderedProminent)

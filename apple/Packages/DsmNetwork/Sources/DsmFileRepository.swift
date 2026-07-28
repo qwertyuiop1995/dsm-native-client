@@ -1,6 +1,7 @@
 import DsmCore
 import CryptoKit
 import Foundation
+import DsmLocalization
 
 private struct FileListPayload: Decodable, Sendable {
     let offset: Int?
@@ -754,7 +755,7 @@ public actor DsmFileRepository: FileRepository {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: true,
-                        safeUserMessage: "下载暂未完成，可以在传输中心继续。"
+                        safeUserMessage: L10n.string("shared.5e35450bf91845f5")
                     )
                 }
                 try Self.safeReplaceFile(from: partURL, to: localURL)
@@ -956,7 +957,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "无法确定文件大小，暂时不能使用内存中转。"
+                safeUserMessage: L10n.string("shared.edd9dc456f2813da")
             )
         }
         let downloadCapability = try requireCapability(DsmAPIName.fileStationDownload)
@@ -1010,7 +1011,7 @@ public actor DsmFileRepository: FileRepository {
                     throw AppError(
                         category: .invalidResponse,
                         isRetryable: false,
-                        safeUserMessage: "这台 NAS 不支持内存分段读取，跨 NAS 复制已停止。"
+                        safeUserMessage: L10n.string("shared.c51ce9d86ffac125")
                     )
                 }
                 let expectedChunkSize = Int(end - offset + 1)
@@ -1018,7 +1019,7 @@ public actor DsmFileRepository: FileRepository {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: true,
-                        safeUserMessage: "源 NAS 返回的数据不完整，请重试跨 NAS 复制。"
+                        safeUserMessage: L10n.string("shared.b5682d9f261b4a70")
                     )
                 }
                 try pipe.write(response.data, countsAsFileData: true)
@@ -1261,7 +1262,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .versionUnsupported,
                 isRetryable: false,
-                safeUserMessage: "这台 NAS 的系统版本暂不支持创建压缩包。"
+                safeUserMessage: L10n.string("shared.a6d04a723fffe229")
             )
         }
         do {
@@ -1306,7 +1307,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .versionUnsupported,
                 isRetryable: false,
-                safeUserMessage: "这台 NAS 的系统版本暂不支持解压缩。"
+                safeUserMessage: L10n.string("shared.dc01e0e93254c384")
             )
         }
         do {
@@ -1349,7 +1350,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .versionUnsupported,
                 isRetryable: false,
-                safeUserMessage: "这台 NAS 的系统版本暂不支持读取压缩包内容。"
+                safeUserMessage: L10n.string("shared.740aa171913b9fac")
             )
         }
         do {
@@ -1591,7 +1592,7 @@ public actor DsmFileRepository: FileRepository {
                         throw AppError(
                             category: .invalidResponse,
                             isRetryable: true,
-                            safeUserMessage: "文件校验没有完成，请稍后重试。"
+                            safeUserMessage: L10n.string("shared.ddcb8aa6d1e5322c")
                         )
                     }
                     return value.lowercased()
@@ -1725,7 +1726,7 @@ public actor DsmFileRepository: FileRepository {
             )
         }
         guard let id = payload.id, let url = payload.url else {
-            throw AppError(category: .invalidResponse, isRetryable: false, safeUserMessage: "分享已创建，但暂时无法读取链接，请打开分享管理重试。")
+            throw AppError(category: .invalidResponse, isRetryable: false, safeUserMessage: L10n.string("shared.88223e41ac45d405"))
         }
         let path = paths.first ?? ""
         return FileShareLink(
@@ -1796,7 +1797,7 @@ public actor DsmFileRepository: FileRepository {
                     throw AppError(
                         category: .invalidResponse,
                         isRetryable: false,
-                        safeUserMessage: "NAS 返回的容量信息无法读取。"
+                        safeUserMessage: L10n.string("shared.fbb16df36e02d491")
                     )
                 }
                 totalBytes = totalResult.partialValue
@@ -1847,7 +1848,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .unknown,
                 isRetryable: true,
-                safeUserMessage: "原来的远程位置已经断开，但新设置没有连接成功。请检查地址和账号后重试。"
+                safeUserMessage: L10n.string("shared.090ae84e6f05b2a9")
             )
         }
     }
@@ -1936,8 +1937,8 @@ public actor DsmFileRepository: FileRepository {
             category: .invalidResponse,
             isRetryable: true,
             safeUserMessage: shouldExist
-                ? "NAS 已接收连接请求，但暂时无法确认远程位置。请刷新后查看。"
-                : "NAS 已接收断开请求，但暂时无法确认结果。请刷新后查看。"
+                ? L10n.string("shared.698b9393500e69d3")
+                : L10n.string("shared.8d2b1428252accb0")
         )
     }
 
@@ -1985,7 +1986,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "请填写有效的服务器地址和远程文件夹。"
+                safeUserMessage: L10n.string("shared.7fdf000bc1c98dab")
             )
         }
         return RemoteMountConfiguration(
@@ -2009,7 +2010,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "挂载位置必须是 NAS 中的完整文件夹路径。"
+                safeUserMessage: L10n.string("shared.cbcc1b6d8f173727")
             )
         }
         return "/" + components.joined(separator: "/")
@@ -2020,7 +2021,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .apiUnavailable,
                 isRetryable: false,
-                safeUserMessage: "这台 NAS 未启用所需的 File Station 功能。"
+                safeUserMessage: L10n.string("shared.7dc6f291445bfb76")
             )
         }
         return capability
@@ -2031,7 +2032,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .versionUnsupported,
                 isRetryable: false,
-                safeUserMessage: "这台 NAS 的 File Station 版本暂不受支持。"
+                safeUserMessage: L10n.string("shared.03e86493986f245a")
             )
         }
         return version
@@ -2050,7 +2051,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: response.statusCode >= 500 ? .serverBusy : .invalidResponse,
                 isRetryable: response.statusCode >= 500,
-                safeUserMessage: "NAS 没有接受这次文件传输，请检查当前用户的权限。",
+                safeUserMessage: L10n.string("shared.d4522bd42ff2c232"),
                 httpStatus: response.statusCode
             )
         }
@@ -2058,7 +2059,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "上传没有完成，NAS 返回的信息无法读取。"
+                safeUserMessage: L10n.string("shared.7aa519aeec359f04")
             )
         }
         if let error = envelope.error {
@@ -2068,7 +2069,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "NAS 无法完成这次文件操作。"
+                safeUserMessage: L10n.string("shared.39e007a9db856aea")
             )
         }
     }
@@ -2079,77 +2080,77 @@ public actor DsmFileRepository: FileRepository {
             AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "当前用户没有执行此操作的权限。",
+                safeUserMessage: L10n.string("shared.b99b8ea54fa7ef76"),
                 dsmCode: code
             )
         case 106, 107, 119:
             AppError(
                 category: .authenticationRequired,
                 isRetryable: false,
-                safeUserMessage: "登录已过期，请重新登录。",
+                safeUserMessage: L10n.string("shared.18b4f39557c377e4"),
                 dsmCode: code
             )
         case 108:
             AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "文件上传失败，请检查 NAS 剩余空间或传输状态。",
+                safeUserMessage: L10n.string("shared.074152c919ec8351"),
                 dsmCode: code
             )
         case 115:
             AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "当前目录下不允许上传文件，请确认权限与服务器策略。",
+                safeUserMessage: L10n.string("shared.71de0e6207d12dc7"),
                 dsmCode: code
             )
         case 1800:
             AppError(
                 category: .invalidResponse,
                 isRetryable: true,
-                safeUserMessage: "上传的数据不完整，请重试。",
+                safeUserMessage: L10n.string("shared.37312259aaed38d3"),
                 dsmCode: code
             )
         case 1801:
             AppError(
                 category: .timeout,
                 isRetryable: true,
-                safeUserMessage: "上传等待超时，请检查网络后重试。",
+                safeUserMessage: L10n.string("shared.bcf11673adce7bde"),
                 dsmCode: code
             )
         case 1802:
             AppError(
                 category: .invalidResponse,
                 isRetryable: true,
-                safeUserMessage: "NAS 没有收到文件名，请重新选择文件。",
+                safeUserMessage: L10n.string("shared.4758142343e27842"),
                 dsmCode: code
             )
         case 1803:
             AppError(
                 category: .cancelled,
                 isRetryable: true,
-                safeUserMessage: "上传已取消。",
+                safeUserMessage: L10n.string("shared.97f6118b6bbcfb02"),
                 dsmCode: code
             )
         case 1804:
             AppError(
                 category: .remoteStorageFull,
                 isRetryable: false,
-                safeUserMessage: "目标存储不支持这么大的文件。",
+                safeUserMessage: L10n.string("shared.5670981d6f978923"),
                 dsmCode: code
             )
         case 1805:
             AppError(
                 category: .conflict,
                 isRetryable: false,
-                safeUserMessage: "目标文件夹中已有同名文件，请选择覆盖上传或先改名。",
+                safeUserMessage: L10n.string("shared.6c7c8cc0b215216b"),
                 dsmCode: code
             )
         default:
             AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "NAS 没有完成上传，请稍后重试。(错误码: \(code))",
+                safeUserMessage: L10n.string("shared.b0871c53768d919d", String(describing: code)),
                 dsmCode: code
             )
         }
@@ -2161,21 +2162,21 @@ public actor DsmFileRepository: FileRepository {
             AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "当前用户没有执行此操作的权限。",
+                safeUserMessage: L10n.string("shared.b99b8ea54fa7ef76"),
                 dsmCode: code
             )
         case 106, 107, 119:
             AppError(
                 category: .authenticationRequired,
                 isRetryable: false,
-                safeUserMessage: "登录已过期，请重新登录。",
+                safeUserMessage: L10n.string("shared.18b4f39557c377e4"),
                 dsmCode: code
             )
         default:
             AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "下载失败，NAS 无法读取该文件。",
+                safeUserMessage: L10n.string("shared.f259462cccf2903a"),
                 dsmCode: code
             )
         }
@@ -2186,7 +2187,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: response.statusCode >= 500 ? .serverBusy : .invalidResponse,
                 isRetryable: response.statusCode >= 500,
-                safeUserMessage: "下载没有完成，请稍后重试。",
+                safeUserMessage: L10n.string("shared.236b6efd04c99cdc"),
                 httpStatus: response.statusCode
             )
         }
@@ -2202,7 +2203,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "下载失败，请确认当前用户有权读取这个文件。"
+                safeUserMessage: L10n.string("shared.15a56baee335807a")
             )
         }
     }
@@ -2229,7 +2230,7 @@ public actor DsmFileRepository: FileRepository {
         return AppError(
             category: .unknown,
             isRetryable: false,
-            safeUserMessage: "文件操作没有完成。"
+            safeUserMessage: L10n.string("shared.71baa97fe8c71269")
         )
     }
 
@@ -2244,7 +2245,7 @@ public actor DsmFileRepository: FileRepository {
             throw AppError(
                 category: .localStorageFull,
                 isRetryable: false,
-                safeUserMessage: "无法创建上传临时文件。"
+                safeUserMessage: L10n.string("shared.b625a77008c47c54")
             )
         }
         try FileManager.default.setAttributes(

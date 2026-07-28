@@ -1,6 +1,7 @@
 package io.github.qwertyuiop1995.dsmnativeclient
 
 import android.app.Application
+import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.qwertyuiop1995.dsmnativeclient.data.DsmRepository
@@ -8,6 +9,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.ChatConversation
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ContainerOverview
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FilePage
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
@@ -18,6 +20,8 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineOverview
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmApiClient
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmConnectionResolver
+import io.github.qwertyuiop1995.dsmnativeclient.network.ConnectionStatus
+import io.github.qwertyuiop1995.dsmnativeclient.localization.localize
 import io.github.qwertyuiop1995.dsmnativeclient.storage.SecureProfileStore
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +37,7 @@ data class LoginState(
     val rememberPassword: Boolean = false,
     val autoLoginEnabled: Boolean = false,
     val isConnecting: Boolean = false,
-    val connectionStatus: String? = null,
+    val connectionStatus: ConnectionStatus? = null,
     val error: DsmFailure? = null,
     val needsOtp: Boolean = false,
 )
@@ -152,8 +156,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     error = DsmFailure(
                         null,
-                        "请填写 NAS 地址、账号和密码",
-                        "补充登录信息后重新连接。",
+                        "NAS address, account, and password are required",
+                        "Complete the sign-in information and connect again.",
+                        kind = DsmErrorKind.MISSING_LOGIN_FIELDS,
                     )
                 )
             }
@@ -163,7 +168,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _login.update {
                 it.copy(
                     isConnecting = true,
-                    connectionStatus = "正在准备连接…",
+                    connectionStatus = ConnectionStatus.PREPARING,
                     error = null,
                 )
             }
@@ -239,9 +244,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         error = DsmFailure(
                             null,
-                            "没有可恢复的登录",
-                            "请输入密码后重新连接。",
+                            "No saved session is available",
+                            "Enter the password and connect again.",
                             true,
+                            DsmErrorKind.NO_SAVED_SESSION,
                         )
                     )
                 }
@@ -253,7 +259,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _login.update {
                 it.copy(
                     isConnecting = true,
-                    connectionStatus = "正在恢复登录…",
+                    connectionStatus = ConnectionStatus.RESTORING_SESSION,
                     error = null,
                 )
             }
@@ -299,9 +305,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         it.copy(
                             error = DsmFailure(
                                 null,
-                                "保存的登录已失效",
-                                "密码已为你填好，请重新连接。",
+                                "The saved session expired",
+                                "The saved password is filled in. Connect again.",
                                 true,
+                                DsmErrorKind.SAVED_SESSION_EXPIRED,
                             ),
                         )
                     }
@@ -330,7 +337,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (state.availability.firstOrNull { it.module == module }?.isAvailable == false) {
             _workspace.update {
                 it?.copy(
-                    message = state.availability.first { item -> item.module == module }.reason
+                    message = state.availability
+                        .first { item -> item.module == module }
+                        .reason
+                        ?.localize(getApplication<Application>())
                 )
             }
             return
@@ -426,78 +436,78 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun createFolder(name: String) = action("文件夹已创建") { repo ->
+    fun createFolder(name: String) = action(R.string.folder_created) { repo ->
         repo.createFolder(_workspace.value?.path.orEmpty(), name)
         loadFiles(repo, _workspace.value?.path.orEmpty())
     }
 
-    fun renameFile(item: FileItem, newName: String) = action("名称已修改") { repo ->
+    fun renameFile(item: FileItem, newName: String) = action(R.string.name_changed) { repo ->
         repo.rename(item.path, newName)
         loadFiles(repo, _workspace.value?.path.orEmpty())
     }
 
-    fun deleteFiles(items: List<FileItem>) = action("已提交删除") { repo ->
+    fun deleteFiles(items: List<FileItem>) = action(R.string.delete_submitted) { repo ->
         repo.delete(items.map(FileItem::path))
         loadFiles(repo, _workspace.value?.path.orEmpty())
     }
 
-    fun createDownload(uri: String, destination: String?) = action("下载任务已创建") { repo ->
+    fun createDownload(uri: String, destination: String?) = action(R.string.download_task_created) { repo ->
         repo.createDownload(uri, destination)
         _workspace.update { it?.copy(downloads = Loadable.Ready(repo.listDownloads())) }
     }
 
     fun controlDownloads(ids: List<String>, action: String, deleteFiles: Boolean = false) =
-        action("下载任务已更新") { repo ->
+        action(R.string.download_task_updated) { repo ->
             repo.controlDownloads(ids, action, deleteFiles)
             _workspace.update { it?.copy(downloads = Loadable.Ready(repo.listDownloads())) }
         }
 
-    fun controlContainer(id: String, command: String) = action("容器状态已更新") { repo ->
+    fun controlContainer(id: String, command: String) = action(R.string.container_state_updated) { repo ->
         repo.controlContainer(id, command)
         _workspace.update { it?.copy(containers = Loadable.Ready(repo.containerOverview())) }
     }
 
-    fun deleteContainer(id: String) = action("容器已删除") { repo ->
+    fun deleteContainer(id: String) = action(R.string.container_deleted) { repo ->
         repo.deleteContainer(id)
         _workspace.update { it?.copy(containers = Loadable.Ready(repo.containerOverview())) }
     }
 
-    fun deleteContainerImage(id: String) = action("映像已删除") { repo ->
+    fun deleteContainerImage(id: String) = action(R.string.image_deleted) { repo ->
         repo.deleteContainerImage(id)
         _workspace.update { it?.copy(containers = Loadable.Ready(repo.containerOverview())) }
     }
 
-    fun createContainerNetwork(name: String, driver: String) = action("网络已创建") { repo ->
+    fun createContainerNetwork(name: String, driver: String) = action(R.string.network_created) { repo ->
         repo.createContainerNetwork(name, driver)
         _workspace.update { it?.copy(containers = Loadable.Ready(repo.containerOverview())) }
     }
 
-    fun deleteContainerNetwork(id: String) = action("网络已删除") { repo ->
+    fun deleteContainerNetwork(id: String) = action(R.string.network_deleted) { repo ->
         repo.deleteContainerNetwork(id)
         _workspace.update { it?.copy(containers = Loadable.Ready(repo.containerOverview())) }
     }
 
-    fun controlVirtualMachine(id: String, command: String) = action("虚拟机状态已更新") { repo ->
+    fun controlVirtualMachine(id: String, command: String) = action(R.string.virtual_machine_state_updated) { repo ->
         repo.controlVirtualMachine(id, command)
         _workspace.update { it?.copy(virtualMachines = Loadable.Ready(repo.virtualMachineOverview())) }
     }
 
-    fun deleteVirtualMachine(id: String) = action("虚拟机已删除") { repo ->
+    fun deleteVirtualMachine(id: String) = action(R.string.virtual_machine_deleted) { repo ->
         repo.deleteVirtualMachine(id)
         _workspace.update { it?.copy(virtualMachines = Loadable.Ready(repo.virtualMachineOverview())) }
     }
 
-    fun deleteVirtualMachineImage(id: String) = action("映像已删除") { repo ->
+    fun deleteVirtualMachineImage(id: String) = action(R.string.image_deleted) { repo ->
         repo.deleteVirtualMachineImage(id)
         _workspace.update { it?.copy(virtualMachines = Loadable.Ready(repo.virtualMachineOverview())) }
     }
 
-    fun renameVirtualMachineNetwork(id: String, name: String) = action("网络已修改") { repo ->
+    fun renameVirtualMachineNetwork(id: String, name: String) = action(R.string.network_changed) { repo ->
         repo.renameVirtualMachineNetwork(id, name)
         _workspace.update { it?.copy(virtualMachines = Loadable.Ready(repo.virtualMachineOverview())) }
     }
 
-    fun deleteVirtualMachineNetwork(id: String) = action("网络已删除") { repo ->
+    fun deleteVirtualMachineNetwork(id: String) = action(R.string.network_deleted) { repo ->
         repo.deleteVirtualMachineNetwork(id)
         _workspace.update { it?.copy(virtualMachines = Loadable.Ready(repo.virtualMachineOverview())) }
     }
@@ -536,20 +546,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    private fun action(success: String, block: suspend (DsmRepository) -> Unit) {
+    private fun action(@StringRes success: Int, block: suspend (DsmRepository) -> Unit) {
         val repo = repository ?: return
         if (_workspace.value?.isPerformingAction == true) return
         viewModelScope.launch {
             _workspace.update { it?.copy(isPerformingAction = true, message = null) }
             runCatching { block(repo) }
                 .onSuccess {
-                    _workspace.update { it?.copy(isPerformingAction = false, message = success) }
-                }
-                .onFailure { error ->
                     _workspace.update {
                         it?.copy(
                             isPerformingAction = false,
-                            message = "${error.asDsmFailure().message} ${error.asDsmFailure().recovery}",
+                            message = getApplication<Application>().getString(success),
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    val localized = error.asDsmFailure()
+                        .localize(getApplication<Application>())
+                        .combined
+                    _workspace.update {
+                        it?.copy(
+                            isPerformingAction = false,
+                            message = localized,
                         )
                     }
                 }
@@ -568,4 +586,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
 private fun Throwable.asDsmFailure(): DsmFailure =
     this as? DsmFailure
-        ?: DsmFailure(null, "没有完成这次操作", "请稍后重试。")
+        ?: DsmFailure(
+            null,
+            "The operation was not completed",
+            "Try again later.",
+            kind = DsmErrorKind.REQUEST_FAILED,
+        )

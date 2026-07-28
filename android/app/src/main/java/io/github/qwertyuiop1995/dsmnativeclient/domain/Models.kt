@@ -30,26 +30,64 @@ data class ApiCapability(
     fun version(preferred: Int = maxVersion): Int = preferred.coerceIn(minVersion, maxVersion)
 }
 
+enum class DsmErrorKind {
+    UNKNOWN,
+    INVALID_ADDRESS,
+    INSECURE_ADDRESS,
+    INVALID_QUICK_CONNECT_ID,
+    QUICK_CONNECT_NOT_FOUND,
+    QUICK_CONNECT_OFFLINE,
+    QUICK_CONNECT_DIRECT_UNAVAILABLE,
+    QUICK_CONNECT_SERVICE_UNAVAILABLE,
+    QUICK_CONNECT_INVALID_RESPONSE,
+    QUICK_CONNECT_RELAY_DISABLED,
+    QUICK_CONNECT_RELAY_UNAVAILABLE,
+    QUICK_CONNECT_IDENTITY_MISMATCH,
+    MISSING_LOGIN_FIELDS,
+    NO_SAVED_SESSION,
+    SAVED_SESSION_EXPIRED,
+    REQUEST_FAILED,
+    FEATURE_UNSUPPORTED,
+    PACKAGE_VERSION_UNSUPPORTED,
+    SESSION_EXPIRED,
+    PERMISSION_DENIED,
+    RATE_LIMITED,
+    AUTHENTICATION_FAILED,
+    OTP_REQUIRED,
+    OTP_INVALID,
+    DEVICE_CONFIRMATION_REQUIRED,
+    CONNECTION_FAILED,
+    INVALID_RESPONSE,
+    SEARCH_NOT_STARTED,
+    EMPTY_FILE_UNSUPPORTED,
+    CHANGE_NOT_CONFIRMED,
+}
+
 data class DsmFailure(
     val code: Int?,
     override val message: String,
     val recovery: String,
     val isAuthenticationFailure: Boolean = false,
+    val kind: DsmErrorKind = DsmErrorKind.UNKNOWN,
 ) : RuntimeException(message)
 
-enum class Module(
-    val title: String,
-    val subtitle: String,
-) {
-    FILES("文件浏览器", "浏览、搜索和管理 NAS 文件"),
-    PHOTOS("照片", "按时间线浏览和管理照片"),
-    CHAT("消息", "使用 Synology Chat 收发消息"),
-    DOWNLOADS("下载管理", "管理 Download Station 任务"),
-    CONTAINERS("容器管理", "查看和控制容器、映像与项目"),
-    VIRTUAL_MACHINES("虚拟机管理", "管理虚拟机、网络、映像和保护"),
-    NAS_SETTINGS("NAS 设置", "系统、存储、账号、网络和安全"),
-    TRANSFERS("传输中心", "查看上传、下载与 NAS 后台任务"),
-    SETTINGS("设置", "管理模块、缓存和本机数据"),
+enum class Module {
+    FILES,
+    PHOTOS,
+    CHAT,
+    DOWNLOADS,
+    CONTAINERS,
+    VIRTUAL_MACHINES,
+    NAS_SETTINGS,
+    TRANSFERS,
+    SETTINGS,
+}
+
+enum class ModuleUnavailableReason {
+    CHAT_SERVICE,
+    DOWNLOAD_STATION,
+    CONTAINER_MANAGER,
+    VIRTUAL_MACHINE_MANAGER,
 }
 
 enum class FileLocationKind {
@@ -176,7 +214,14 @@ data class ManagedResource(
     val detail: String,
     val state: ResourceState,
     val metadata: Map<String, String> = emptyMap(),
+    val localizedLabel: ManagedResourceLabel? = null,
 )
+
+enum class ManagedResourceLabel {
+    SECURITY_AUTO_BLOCK,
+    SECURITY_DOS_PROTECTION,
+    SECURITY_FIREWALL,
+}
 
 data class DownloadTask(
     val id: String,
@@ -304,6 +349,5 @@ data class NasSettingsSnapshot(
 data class ModuleAvailability(
     val module: Module,
     val isAvailable: Boolean,
-    val reason: String? = null,
+    val reason: ModuleUnavailableReason? = null,
 )
-

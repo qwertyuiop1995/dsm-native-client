@@ -1,4 +1,5 @@
 import Foundation
+import DsmLocalization
 
 public enum NasScheme: String, Codable, Sendable {
     case https
@@ -15,13 +16,13 @@ extension NasProfileValidationError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .emptyDisplayName:
-            "请输入设备名称。"
+            L10n.string("shared.1b0a092359ec2419")
         case .invalidHost:
-            "请输入 NAS 地址，例如 192.168.1.20 或 nas.local。地址中不要包含 https://、端口或路径。"
+            L10n.string("shared.40c3eed3ca9b5204")
         case .invalidPort:
-            "请输入 1 到 65535 之间的端口号。"
+            L10n.string("shared.b7c1d83c222a8ca9")
         case .invalidCertificateFingerprint:
-            "保存的安全信息格式有误，请重新确认这台 NAS。"
+            L10n.string("shared.cb00f9758747274e")
         }
     }
 }

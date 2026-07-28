@@ -22,20 +22,21 @@ public sealed class DsmConnectionResolver(
         var parsed = NasAddressParser.Parse(profile.Host, profile.Port);
         if (parsed.Kind == NasAddressKind.Direct)
         {
-            updateStatus?.Invoke("正在连接 NAS…");
+            updateStatus?.Invoke(UserText.Key("WinShareda6d7b48863714f5e"));
             var directProfile = profile with { Host = parsed.Host, Port = parsed.Port };
             return new(
                 directProfile,
                 await api.DiscoverAsync(directProfile, cancellationToken));
         }
 
-        updateStatus?.Invoke("正在通过 QuickConnect 查找 NAS…");
+        updateStatus?.Invoke(UserText.Key("WinSharedaa0582cad267718e"));
         IReadOnlyList<QuickConnectEndpoint> endpoints;
         try
         {
             endpoints = await quickConnect.ResolveAsync(parsed.Host, cancellationToken);
         }
-        catch (DsmException error) when (error.Message == "QuickConnect 没有提供可用的直接连接")
+        catch (DsmException error) when (
+            error.Kind == DsmErrorKind.QuickConnectDirectUnavailable)
         {
             endpoints = [];
         }
@@ -44,8 +45,8 @@ public sealed class DsmConnectionResolver(
         foreach (var endpoint in endpoints)
         {
             updateStatus?.Invoke(endpoint.Kind == QuickConnectEndpointKind.Local
-                ? "正在尝试局域网连接…"
-                : "正在尝试外网直接连接…");
+                ? UserText.Key("WinShared3b38866d76d21239")
+                : UserText.Key("WinShared307e0c332a164ea1"));
             var connectionProfile = profile with
             {
                 Host = endpoint.Host,
@@ -63,7 +64,7 @@ public sealed class DsmConnectionResolver(
             }
         }
 
-        updateStatus?.Invoke("正在建立 QuickConnect 安全中继…");
+        updateStatus?.Invoke(UserText.Key("WinShared6edbda7d2a81743a"));
         try
         {
             var relay = await quickConnect.RequestRelayAsync(parsed.Host, cancellationToken);
@@ -73,7 +74,8 @@ public sealed class DsmConnectionResolver(
                 await api.DiscoverAsync(relayProfile, cancellationToken));
         }
         catch (DsmException error) when (
-            error.Message == "QuickConnect 暂时无法建立中继连接" && lastDirectError is not null)
+            error.Kind == DsmErrorKind.QuickConnectRelayUnavailable &&
+            lastDirectError is not null)
         {
             throw lastDirectError;
         }

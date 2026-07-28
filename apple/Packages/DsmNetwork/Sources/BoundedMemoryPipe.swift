@@ -1,5 +1,6 @@
 import DsmCore
 import Foundation
+import DsmLocalization
 
 enum MemoryPipeError: Error {
     case cancelled
@@ -28,7 +29,7 @@ final class BoundedMemoryPipe: @unchecked Sendable {
             self.capacity
         )
         guard let readStream, let writeStream else {
-            preconditionFailure("无法创建跨 NAS 内存流")
+            preconditionFailure(L10n.string("shared.7c6f20f3f9050d2c"))
         }
         inputStream = readStream.takeRetainedValue() as InputStream
         outputStream = writeStream.takeRetainedValue() as OutputStream

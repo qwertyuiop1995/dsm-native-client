@@ -1,6 +1,7 @@
 import Charts
 import DsmCore
 import SwiftUI
+import DsmLocalization
 
 struct NasSettingsView: View {
     @Bindable var model: NasSettingsModel
@@ -44,8 +45,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.overview),
                 hasContent: model.overview != nil,
                 errorMessage: model.errorMessage(for: .overview),
-                emptyTitle: "没有系统信息",
-                emptyDescription: "这台 NAS 暂未返回系统概况。",
+                emptyTitle: L10n.string("ui.d39ec043f1522ee0"),
+                emptyDescription: L10n.string("ui.041c8bf2f9cd31f3"),
                 retry: { await model.activate(.overview, force: true) }
             ) {
                 PerformanceDashboard(
@@ -65,8 +66,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.storage),
                 hasContent: model.storage != nil,
                 errorMessage: model.errorMessage(for: .storage),
-                emptyTitle: "没有存储设备",
-                emptyDescription: "这台 NAS 暂未返回存储池、空间或硬盘信息。",
+                emptyTitle: L10n.string("ui.aede80dd80411e6d"),
+                emptyDescription: L10n.string("ui.8b8547f2f11eaa28"),
                 retry: { await model.activate(.storage, force: true) }
             ) {
                 UnifiedStorageView(
@@ -98,8 +99,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.fileServices),
                 hasContent: model.fileServices != nil,
                 errorMessage: model.errorMessage(for: .fileServices),
-                emptyTitle: "没有可管理的文件服务",
-                emptyDescription: "这台 NAS 未提供兼容的文件共享设置，或当前账号没有管理权限。",
+                emptyTitle: L10n.string("ui.f0e2dfb1f52b1108"),
+                emptyDescription: L10n.string("ui.7ef72eb2313692a3"),
                 retry: { await model.activate(.fileServices, force: true) }
             ) {
                 if let settings = model.fileServices {
@@ -117,8 +118,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.terminal),
                 hasContent: model.terminal != nil,
                 errorMessage: model.errorMessage(for: .terminal),
-                emptyTitle: "没有可管理的远程连接",
-                emptyDescription: "这台 NAS 未提供兼容的远程连接设置，或当前账号没有管理权限。",
+                emptyTitle: L10n.string("ui.0ea953130a6f50b8"),
+                emptyDescription: L10n.string("ui.55b016ae17c67bb3"),
                 retry: { await model.activate(.terminal, force: true) }
             ) {
                 if let settings = model.terminal {
@@ -136,8 +137,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.network),
                 hasContent: model.proxy != nil,
                 errorMessage: model.errorMessage(for: .network),
-                emptyTitle: "没有可管理的网络设置",
-                emptyDescription: "这台 NAS 未提供兼容的网络设置，或当前账号没有管理权限。",
+                emptyTitle: L10n.string("ui.88097fae00b3d400"),
+                emptyDescription: L10n.string("ui.1ed9a37b7b4cdfa5"),
                 retry: { await model.activate(.network, force: true) }
             ) {
                 if let settings = model.proxy {
@@ -155,8 +156,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.interfaces),
                 hasContent: !model.ethernetInterfaces.isEmpty,
                 errorMessage: model.errorMessage(for: .interfaces),
-                emptyTitle: "没有可管理的网卡",
-                emptyDescription: "这台 NAS 未提供兼容的网卡设置，或当前账号没有管理权限。",
+                emptyTitle: L10n.string("ui.7854d2b9b333a8b1"),
+                emptyDescription: L10n.string("ui.fa76ab3ce1663dbb"),
                 retry: { await model.activate(.interfaces, force: true) }
             ) {
                 EthernetInterfacesView(
@@ -171,8 +172,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.hardware),
                 hasContent: model.hardware != nil,
                 errorMessage: model.errorMessage(for: .hardware),
-                emptyTitle: "没有可管理的硬件设置",
-                emptyDescription: "这台 NAS 未提供兼容的硬件设置，或当前账号没有管理权限。",
+                emptyTitle: L10n.string("ui.f94427fd03a0c5ff"),
+                emptyDescription: L10n.string("ui.e7b0de9ae1975b01"),
                 retry: { await model.activate(.hardware, force: true) }
             ) {
                 if let settings = model.hardware {
@@ -190,8 +191,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.remoteAccess),
                 hasContent: model.remoteAccess != nil,
                 errorMessage: model.errorMessage(for: .remoteAccess),
-                emptyTitle: "没有可管理的远程访问设置",
-                emptyDescription: "这台 NAS 未提供兼容的远程访问设置，或当前账号没有管理权限。",
+                emptyTitle: L10n.string("ui.9887ff7ba209ca16"),
+                emptyDescription: L10n.string("ui.9b9725c4100073a4"),
                 retry: { await model.activate(.remoteAccess, force: true) }
             ) {
                 if let settings = model.remoteAccess {
@@ -209,8 +210,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.security),
                 hasContent: model.security != nil,
                 errorMessage: model.errorMessage(for: .security),
-                emptyTitle: "没有可管理的安全设置",
-                emptyDescription: "这台 NAS 未提供兼容的安全设置，或当前账号没有管理权限。",
+                emptyTitle: L10n.string("ui.d596c8dbd465788e"),
+                emptyDescription: L10n.string("ui.1ab98de4a8545b85"),
                 retry: { await model.activate(.security, force: true) }
             ) {
                 if let settings = model.security {
@@ -228,8 +229,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.region),
                 hasContent: model.region != nil,
                 errorMessage: model.errorMessage(for: .region),
-                emptyTitle: "没有可管理的区域与时间设置",
-                emptyDescription: "这台 NAS 未提供兼容的区域与时间设置，或当前账号没有管理权限。",
+                emptyTitle: L10n.string("ui.c3ad62ad1f7a1ab0"),
+                emptyDescription: L10n.string("ui.f6e66a9bcbb3091e"),
                 retry: { await model.activate(.region, force: true) }
             ) {
                 if let settings = model.region {
@@ -247,8 +248,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.ddns),
                 hasContent: model.ddns != nil,
                 errorMessage: model.errorMessage(for: .ddns),
-                emptyTitle: "没有可管理的 DDNS 设置",
-                emptyDescription: "这台 NAS 未提供兼容的动态域名设置，或当前账号没有管理权限。",
+                emptyTitle: L10n.string("ui.d22b2fd0eecfd121"),
+                emptyDescription: L10n.string("ui.293c3b515139c342"),
                 retry: { await model.activate(.ddns, force: true) }
             ) {
                 if let directory = model.ddns {
@@ -268,13 +269,13 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.packages),
                 hasContent: !model.packages.isEmpty,
                 errorMessage: model.errorMessage(for: .packages),
-                emptyTitle: "没有已安装套件",
-                emptyDescription: "这台 NAS 没有返回可查看的套件。",
+                emptyTitle: L10n.string("ui.11479f1067001e82"),
+                emptyDescription: L10n.string("ui.3b75e4e910ab2c64"),
                 retry: { await model.activate(.packages, force: true) }
             ) {
                 PackageList(
                     packages: model.packages,
-                    title: "已安装套件",
+                    title: L10n.string("ui.7467e8310073e980"),
                     busyPackageIDs: model.packageOperationIDs,
                     onControlPackage: { id, action in try await model.controlPackage(id: id, action: action) }
                 )
@@ -285,8 +286,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.tasks),
                 hasContent: !model.tasks.isEmpty,
                 errorMessage: model.errorMessage(for: .tasks),
-                emptyTitle: "没有计划任务",
-                emptyDescription: "当前账号没有可查看的任务，或尚未创建计划任务。",
+                emptyTitle: L10n.string("ui.c9cb0f813cc56383"),
+                emptyDescription: L10n.string("ui.b9dc7b6c1ebbe871"),
                 retry: { await model.activate(.tasks, force: true) }
             ) {
                 ScheduledTaskList(
@@ -311,8 +312,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.accounts),
                 hasContent: model.accounts.map { !$0.users.isEmpty || !$0.groups.isEmpty } ?? false,
                 errorMessage: model.errorMessage(for: .accounts),
-                emptyTitle: "没有可查看的账号或群组",
-                emptyDescription: "当前账号没有查看权限，或这台 NAS 尚未配置账号目录。",
+                emptyTitle: L10n.string("ui.e0e9deb2554cf77c"),
+                emptyDescription: L10n.string("ui.58bfa48693373928"),
                 retry: { await model.activate(.accounts, force: true) }
             ) {
                 AccountDirectoryView(
@@ -330,8 +331,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.logs),
                 hasContent: !(model.logs?.entries.isEmpty ?? true),
                 errorMessage: model.errorMessage(for: .logs),
-                emptyTitle: "没有系统日志",
-                emptyDescription: "当前范围内没有日志，或当前账号无权查看。",
+                emptyTitle: L10n.string("ui.755c9c9b40dcab11"),
+                emptyDescription: L10n.string("ui.cdadc6755931def3"),
                 retry: { await model.activate(.logs, force: true) }
             ) {
                 LogEntryList(
@@ -349,8 +350,8 @@ struct NasSettingsView: View {
                 hasLoaded: model.hasLoaded(.connections),
                 hasContent: !(model.connections?.connections.isEmpty ?? true),
                 errorMessage: model.errorMessage(for: .connections),
-                emptyTitle: "当前没有活动连接",
-                emptyDescription: "没有其他设备或服务正在使用这台 NAS。",
+                emptyTitle: L10n.string("ui.6927c3e0155db6ab"),
+                emptyDescription: L10n.string("ui.b2e04250be336577"),
                 retry: { await model.activate(.connections, force: true) }
             ) {
                 ConnectionList(
@@ -366,22 +367,22 @@ struct NasSettingsView: View {
 
     private func pageLabel(_ page: NasSettingsPage) -> (String, String) {
         switch page {
-        case .overview: ("总览与性能", "gauge.with.dots.needle.67percent")
-        case .storage: ("存储管理", "internaldrive")
-        case .fileServices: ("文件服务", "folder.badge.gearshape")
-        case .terminal: ("远程连接", "terminal")
-        case .network: ("网络与代理", "network")
-        case .interfaces: ("网络接口", "cable.connector")
-        case .hardware: ("硬件与电源", "powerplug")
-        case .remoteAccess: ("远程访问", "network.badge.shield.half.filled")
-        case .security: ("安全防护", "lock.shield")
-        case .region: ("区域与时间", "clock.badge.checkmark")
-        case .ddns: ("动态域名", "globe.badge.chevron.backward")
-        case .packages: ("套件", "shippingbox")
-        case .tasks: ("计划任务", "calendar.badge.clock")
-        case .accounts: ("账号与权限", "person.2")
-        case .logs: ("系统日志", "doc.text.magnifyingglass")
-        case .connections: ("当前连接", "network")
+        case .overview: (L10n.string("ui.582da2581a0cd0ee"), "gauge.with.dots.needle.67percent")
+        case .storage: (L10n.string("ui.0e41f8e3d59ec47b"), "internaldrive")
+        case .fileServices: (L10n.string("ui.f771e808e831f599"), "folder.badge.gearshape")
+        case .terminal: (L10n.string("ui.678b783fb578172b"), "terminal")
+        case .network: (L10n.string("ui.841fb4ce271a4e64"), "network")
+        case .interfaces: (L10n.string("ui.f4964357f24503a7"), "cable.connector")
+        case .hardware: (L10n.string("ui.64979ca5c76a8342"), "powerplug")
+        case .remoteAccess: (L10n.string("ui.ce5a7298821d8644"), "network.badge.shield.half.filled")
+        case .security: (L10n.string("ui.e09822e61214bb5f"), "lock.shield")
+        case .region: (L10n.string("ui.6038c1b4b9e464f1"), "clock.badge.checkmark")
+        case .ddns: (L10n.string("ui.fcea58116389894b"), "globe.badge.chevron.backward")
+        case .packages: (L10n.string("ui.58be5abb3cf57752"), "shippingbox")
+        case .tasks: (L10n.string("ui.b61129b1fbb2deea"), "calendar.badge.clock")
+        case .accounts: (L10n.string("ui.4dc833d6dbb9f615"), "person.2")
+        case .logs: (L10n.string("ui.366ada1d2fcfc4b3"), "doc.text.magnifyingglass")
+        case .connections: (L10n.string("ui.e403ba5798ba13a4"), "network")
         }
     }
 }
@@ -402,7 +403,12 @@ private struct EthernetInterfacesView: View {
                     Text(interface.displayName)
                         .font(.headline)
                     Text(interface.usesDHCP
-                        ? "自动获取地址 · \(interface.address.isEmpty ? "尚未分配" : interface.address)"
+                        ? L10n.string(
+                            "network.address.automatic",
+                            interface.address.isEmpty
+                                ? L10n.string("network.address.unassigned")
+                                : interface.address
+                        )
                         : "\(interface.address) · \(interface.subnetMask)")
                         .foregroundStyle(.secondary)
                     Text("MTU \(interface.mtu)"
@@ -414,7 +420,7 @@ private struct EthernetInterfacesView: View {
                 ProgressView()
                     .controlSize(.small)
                     .opacity(busyIDs.contains("network:\(interface.id)") ? 1 : 0)
-                Button("编辑") { editing = interface }
+                Button(L10n.string("ui.051836569928a9f9")) { editing = interface }
                     .disabled(busyIDs.contains("network:\(interface.id)"))
             }
             .padding(.vertical, 5)
@@ -461,18 +467,18 @@ private struct EthernetInterfaceEditor: View {
         VStack(spacing: 0) {
             Form {
                 Section(draft.displayName) {
-                    Toggle("自动获取网络设置", isOn: $draft.usesDHCP)
-                    TextField("IP 地址", text: $draft.address)
+                    Toggle(L10n.string("ui.6696d7df7fecf6fc"), isOn: $draft.usesDHCP)
+                    TextField(L10n.string("ui.572c01ee2bf2cf56"), text: $draft.address)
                         .disabled(draft.usesDHCP)
-                    TextField("子网掩码", text: $draft.subnetMask)
+                    TextField(L10n.string("ui.b1e9e13ef0a4010a"), text: $draft.subnetMask)
                         .disabled(draft.usesDHCP)
-                    TextField("网关", text: $draft.gateway)
+                    TextField(L10n.string("ui.38f36ed30008bc7c"), text: $draft.gateway)
                         .disabled(draft.usesDHCP)
-                    TextField("DNS 服务器", text: $draft.dnsServers)
+                    TextField(L10n.string("ui.0b3ee5cb92329693"), text: $draft.dnsServers)
                         .disabled(draft.usesDHCP)
-                    Toggle("作为默认网关", isOn: $draft.isDefaultGateway)
+                    Toggle(L10n.string("ui.bd46ead425c7ecf0"), isOn: $draft.isDefaultGateway)
                     TextField("MTU", value: $draft.mtu, format: .number)
-                    Toggle("启用 VLAN", isOn: $draft.isVLANEnabled)
+                    Toggle(L10n.string("ui.d8ec4504b07e9f5a"), isOn: $draft.isVLANEnabled)
                     if draft.isVLANEnabled {
                         TextField(
                             "VLAN ID",
@@ -485,7 +491,7 @@ private struct EthernetInterfaceEditor: View {
                     }
                 }
                 Section {
-                    Text("更改正在使用的网卡可能立即中断当前连接。保存后应用会重新读取网卡状态；如果地址发生变化，请用新地址重新连接。")
+                    Text(L10n.string("ui.e6d5eb02942b2f21"))
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -494,8 +500,8 @@ private struct EthernetInterfaceEditor: View {
             Divider()
             HStack {
                 Spacer()
-                Button("取消", action: onCancel)
-                Button("应用网络设置") { isConfirming = true }
+                Button(L10n.string("ui.2cd0f3be8738a86c"), action: onCancel)
+                Button(L10n.string("ui.4a0c1b27983768cd")) { isConfirming = true }
                     .buttonStyle(.borderedProminent)
                     .disabled(draft == original || isSaving)
             }
@@ -503,22 +509,22 @@ private struct EthernetInterfaceEditor: View {
         }
         .frame(minWidth: 560, minHeight: 520)
         .confirmationDialog(
-            "应用这张网卡的设置？",
+            L10n.string("ui.54bd203067659d00"),
             isPresented: $isConfirming,
             titleVisibility: .visible
         ) {
-            Button("应用并可能断开连接", role: .destructive) { save() }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2d734836adb06ab0"), role: .destructive) { save() }
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("如果 IP 地址、网关或 VLAN 改变，当前连接可能立即中断。请先确认你知道新的连接地址。")
+            Text(L10n.string("ui.77afa142d59f95b7"))
         }
-        .alert("无法保存网络设置", isPresented: Binding(
+        .alert(L10n.string("ui.fdc385364ed4d811"), isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )) {
-            Button("好") {}
+            Button(L10n.string("ui.f867f34178594f89")) {}
         } message: {
-            Text(errorMessage ?? "请检查填写内容后重试。")
+            Text(errorMessage ?? L10n.string("ui.ac93ffd4a4a2780b"))
         }
     }
 
@@ -532,7 +538,7 @@ private struct EthernetInterfaceEditor: View {
             } catch {
                 errorMessage = userMessage(
                     for: error,
-                    fallback: "网络设置未保存。请检查 NAS 是否仍可连接。"
+                    fallback: L10n.string("ui.8a62fa61185c60e1")
                 )
             }
         }
@@ -552,13 +558,13 @@ private struct DDNSSettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("动态域名")
+                Text(L10n.string("ui.fcea58116389894b"))
                     .font(.title2.weight(.semibold))
                 Spacer()
                 Button {
                     refresh()
                 } label: {
-                    Label("立即更新", systemImage: "arrow.clockwise")
+                    Label(L10n.string("ui.12487befb4ba483c"), systemImage: "arrow.clockwise")
                 }
                 .disabled(busyIDs.contains("refresh"))
                 Button {
@@ -569,7 +575,7 @@ private struct DDNSSettingsView: View {
                         username: ""
                     )
                 } label: {
-                    Label("新建", systemImage: "plus")
+                    Label(L10n.string("ui.50ef2f4cf6a46924"), systemImage: "plus")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(availableProviders.isEmpty)
@@ -578,12 +584,12 @@ private struct DDNSSettingsView: View {
 
             if directory.records.isEmpty {
                 ContentUnavailableView(
-                    "没有 DDNS 记录",
+                    L10n.string("ui.072c6f7a8e0c6c14"),
                     systemImage: "globe",
                     description: Text(
                         availableProviders.isEmpty
-                            ? "这台 NAS 没有返回可用的动态域名服务商。"
-                            : "可新建记录，让域名随公网地址变化自动更新。"
+                            ? L10n.string("ui.72b5cd5e33471211")
+                            : L10n.string("ui.6096aa8a39da4197")
                     )
                 )
             } else {
@@ -601,7 +607,7 @@ private struct DDNSSettingsView: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(2)
                             if let updated = record.lastUpdated, !updated.isEmpty {
-                                Text("上次更新：\(updated)")
+                                Text(L10n.string("ui.d3c58fe20693dfea", String(describing: updated)))
                                     .font(.caption)
                                     .foregroundStyle(.tertiary)
                             }
@@ -610,11 +616,11 @@ private struct DDNSSettingsView: View {
                         ProgressView()
                             .controlSize(.small)
                             .opacity(busyIDs.contains(record.id) ? 1 : 0)
-                        Button("编辑") {
+                        Button(L10n.string("ui.051836569928a9f9")) {
                             presentedDraft = draft(from: record)
                         }
                         .disabled(busyIDs.contains(record.id))
-                        Button("删除", role: .destructive) {
+                        Button(L10n.string("ui.2f9daa828907b93f"), role: .destructive) {
                             deleteTarget = record
                         }
                         .disabled(busyIDs.contains(record.id))
@@ -637,14 +643,14 @@ private struct DDNSSettingsView: View {
             }
         }
         .confirmationDialog(
-            "删除这条动态域名记录？",
+            L10n.string("ui.bb81e8ba64bbedcf"),
             isPresented: Binding(
                 get: { deleteTarget != nil },
                 set: { if !$0 { deleteTarget = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("删除记录", role: .destructive) {
+            Button(L10n.string("ui.f2cf9101bb2d8816"), role: .destructive) {
                 guard let target = deleteTarget else { return }
                 deleteTarget = nil
                 Task {
@@ -653,22 +659,22 @@ private struct DDNSSettingsView: View {
                     } catch {
                         errorMessage = userMessage(
                             for: error,
-                            fallback: "记录未删除，请稍后重试。"
+                            fallback: L10n.string("ui.236aff02c50d2036")
                         )
                     }
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("删除后，NAS 将不再自动更新这个域名。")
+            Text(L10n.string("ui.886b616f4fb0d8d3"))
         }
-        .alert("无法完成操作", isPresented: Binding(
+        .alert(L10n.string("ui.1f0a01abb1908f19"), isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )) {
-            Button("好") {}
+            Button(L10n.string("ui.f867f34178594f89")) {}
         } message: {
-            Text(errorMessage ?? "请稍后重试。")
+            Text(errorMessage ?? L10n.string("ui.efc81ced18eb3bb0"))
         }
     }
 
@@ -705,7 +711,7 @@ private struct DDNSSettingsView: View {
             do {
                 try await onRefresh()
             } catch {
-                errorMessage = userMessage(for: error, fallback: "暂时无法更新，请稍后重试。")
+                errorMessage = userMessage(for: error, fallback: L10n.string("ui.0f2a476025ef80bb"))
             }
         }
     }
@@ -734,29 +740,29 @@ private struct DDNSRecordEditor: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                Section("动态域名记录") {
-                    Toggle("启用自动更新", isOn: $draft.isEnabled)
-                    Picker("服务商", selection: $draft.providerID) {
+                Section(L10n.string("ui.b6093c02f3fa3a8e")) {
+                    Toggle(L10n.string("ui.e6c04a64954aa920"), isOn: $draft.isEnabled)
+                    Picker(L10n.string("ui.a573affa93895101"), selection: $draft.providerID) {
                         ForEach(providers) { provider in
                             Text(provider.displayName).tag(provider.id)
                         }
                     }
                     .disabled(draft.originalProviderID != nil)
-                    TextField("主机名称", text: $draft.hostname)
-                    TextField("账号", text: $draft.username)
+                    TextField(L10n.string("ui.bc96b2e90db406b4"), text: $draft.hostname)
+                    TextField(L10n.string("ui.311bb313fdeca6aa"), text: $draft.username)
                     if draft.providerID != "Synology" {
                         SecureField(
-                            draft.originalProviderID == nil ? "密码或密钥" : "新密码或密钥（不更改可留空）",
+                            draft.originalProviderID == nil ? L10n.string("ui.24c5488c934b87c5") : L10n.string("ui.5eaa08672ba4bc26"),
                             text: $draft.password
                         )
                     } else {
-                        Text("使用 NAS 已登录的 Synology 账号。")
+                        Text(L10n.string("ui.69dc28bba545cf6b"))
                             .foregroundStyle(.secondary)
                     }
-                    Toggle("定期保持连接", isOn: $draft.heartbeat)
+                    Toggle(L10n.string("ui.0db7eb6a90823c63"), isOn: $draft.heartbeat)
                 }
                 Section {
-                    Text("密码或密钥只用于本次提交，不会保存在 Mac 客户端。保存前会先由 NAS 验证连接，再重新读取记录确认结果。")
+                    Text(L10n.string("ui.03ebb07bb59ddce2"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -765,8 +771,8 @@ private struct DDNSRecordEditor: View {
             Divider()
             HStack {
                 Spacer()
-                Button("取消", action: onCancel)
-                Button("保存") { save() }
+                Button(L10n.string("ui.2cd0f3be8738a86c"), action: onCancel)
+                Button(L10n.string("ui.a3030bf8f16dc63c")) { save() }
                     .buttonStyle(.borderedProminent)
                     .disabled(
                         isSaving
@@ -780,13 +786,13 @@ private struct DDNSRecordEditor: View {
             .padding()
         }
         .frame(minWidth: 520, minHeight: 420)
-        .alert("无法保存记录", isPresented: Binding(
+        .alert(L10n.string("ui.57f2ad2106e6d63e"), isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )) {
-            Button("好") {}
+            Button(L10n.string("ui.f867f34178594f89")) {}
         } message: {
-            Text(errorMessage ?? "请检查填写内容后重试。")
+            Text(errorMessage ?? L10n.string("ui.ac93ffd4a4a2780b"))
         }
     }
 
@@ -798,7 +804,7 @@ private struct DDNSRecordEditor: View {
             do {
                 try await onSave(draft)
             } catch {
-                errorMessage = userMessage(for: error, fallback: "记录未保存，请稍后重试。")
+                errorMessage = userMessage(for: error, fallback: L10n.string("ui.dc241cd7d0e88310"))
             }
         }
     }
@@ -827,31 +833,31 @@ private struct RegionSettingsView: View {
 
     var body: some View {
         Form {
-            Section("显示格式") {
-                TextField("日期格式", text: $draft.dateFormat)
-                TextField("时间格式", text: $draft.timeFormat)
-                Picker("时区", selection: $draft.timeZone) {
+            Section(L10n.string("ui.d7f9a4bfc466ae21")) {
+                TextField(L10n.string("ui.7530fa1a195df77e"), text: $draft.dateFormat)
+                TextField(L10n.string("ui.1a83bdb917697ede"), text: $draft.timeFormat)
+                Picker(L10n.string("ui.b5d72c5c00f2d88e"), selection: $draft.timeZone) {
                     ForEach(draft.timeZones) { zone in
                         Text(zone.displayName).tag(zone.id)
                     }
                 }
             }
-            Section("日期与时间") {
-                Toggle("自动与时间服务器同步", isOn: $draft.isNetworkTimeEnabled)
+            Section(L10n.string("ui.917e4afc231cb1b0")) {
+                Toggle(L10n.string("ui.bb068322c815fb25"), isOn: $draft.isNetworkTimeEnabled)
                 if draft.isNetworkTimeEnabled {
-                    TextField("时间服务器", text: $serverText)
-                    Text("最多填写 3 个地址，并用逗号分隔。保存前会先确认服务器可以正常校时。")
+                    TextField(L10n.string("ui.daca4b0bb4ba448d"), text: $serverText)
+                    Text(L10n.string("ui.4a467d3c2e8fdeda"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     DatePicker(
-                        "设置日期与时间",
+                        L10n.string("ui.18f2e0e937c97c4c"),
                         selection: Binding(
                             get: { draft.manualDate ?? Date() },
                             set: { draft.manualDate = $0 }
                         )
                     )
-                    Text("手动更改系统时间可能使当前登录失效，并影响验证码、证书和计划任务。")
+                    Text(L10n.string("ui.1a85229361b0dc6d"))
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -859,12 +865,12 @@ private struct RegionSettingsView: View {
             Section {
                 HStack {
                     Spacer()
-                    Button("恢复") {
+                    Button(L10n.string("ui.e0534b8a4e46a0cb")) {
                         draft = original
                         serverText = original.timeServers.joined(separator: ", ")
                     }
                     .disabled(!hasChanges || isSaving)
-                    Button("应用更改") { isConfirming = true }
+                    Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
                         .buttonStyle(.borderedProminent)
                         .disabled(!hasChanges || isSaving)
                 }
@@ -872,25 +878,25 @@ private struct RegionSettingsView: View {
         }
         .formStyle(.grouped)
         .confirmationDialog(
-            draft.isNetworkTimeEnabled ? "应用区域与时间设置？" : "手动更改 NAS 系统时间？",
+            draft.isNetworkTimeEnabled ? L10n.string("ui.e17dc95b314b227b") : L10n.string("ui.b730f9f47f97929c"),
             isPresented: $isConfirming,
             titleVisibility: .visible
         ) {
-            Button(draft.isNetworkTimeEnabled ? "应用更改" : "更改系统时间", role: .destructive) {
+            Button(draft.isNetworkTimeEnabled ? L10n.string("ui.741f0c0de7ebbbf8") : L10n.string("ui.5f1e8d1d17bf2a07"), role: .destructive) {
                 save()
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
             Text(
                 draft.isNetworkTimeEnabled
-                    ? "保存后将重新读取 NAS，确认时区、格式和校时方式确实生效。"
-                    : "当前登录可能失效，计划任务的执行时间也可能改变。请确认日期、时间和时区无误。"
+                    ? L10n.string("ui.e622903e0efd3e33")
+                    : L10n.string("ui.f4537a9c032bbfff")
             )
         }
-        .alert("无法保存设置", isPresented: errorBinding) {
-            Button("好") {}
+        .alert(L10n.string("ui.22a52843f39a768e"), isPresented: errorBinding) {
+            Button(L10n.string("ui.f867f34178594f89")) {}
         } message: {
-            Text(errorMessage ?? "请稍后重试。")
+            Text(errorMessage ?? L10n.string("ui.efc81ced18eb3bb0"))
         }
     }
 
@@ -920,7 +926,7 @@ private struct RegionSettingsView: View {
                 draft.timeServers = normalizedServers
                 try await onSave(draft)
             } catch {
-                errorMessage = userMessage(for: error, fallback: "设置未保存，请稍后重试。")
+                errorMessage = userMessage(for: error, fallback: L10n.string("ui.f8f49516c226e6b7"))
             }
         }
     }
@@ -949,28 +955,28 @@ private struct SecuritySettingsView: View {
 
     var body: some View {
         Form {
-            Section("登录保护") {
-                Toggle("自动封锁多次登录失败的地址", isOn: $draft.isAutoBlockEnabled)
+            Section(L10n.string("ui.37c24b911b27dc13")) {
+                Toggle(L10n.string("ui.70847756a3a1af23"), isOn: $draft.isAutoBlockEnabled)
                 Stepper(
-                    "允许失败次数：\(draft.failedAttempts)",
+                    L10n.string("ui.d723a22033ba0cf8", String(describing: draft.failedAttempts)),
                     value: $draft.failedAttempts,
                     in: 1...9_999
                 )
                 .disabled(!draft.isAutoBlockEnabled)
                 Stepper(
-                    "统计时间：\(draft.withinMinutes) 分钟",
+                    L10n.string("ui.641881a0f3be5aaa", String(describing: draft.withinMinutes)),
                     value: $draft.withinMinutes,
                     in: 1...9_999_999
                 )
                 .disabled(!draft.isAutoBlockEnabled)
-                Toggle("自动解除封锁", isOn: $expiresAutomatically)
+                Toggle(L10n.string("ui.cdd39de701b5dfd5"), isOn: $expiresAutomatically)
                     .disabled(!draft.isAutoBlockEnabled)
                     .onChange(of: expiresAutomatically) { _, enabled in
                         draft.expirationDays = enabled ? max(1, draft.expirationDays ?? 1) : nil
                     }
                 if expiresAutomatically {
                     Stepper(
-                        "封锁期限：\(draft.expirationDays ?? 1) 天",
+                        L10n.string("ui.9b69b08c6b4dacd3", String(describing: draft.expirationDays ?? 1)),
                         value: Binding(
                             get: { draft.expirationDays ?? 1 },
                             set: { draft.expirationDays = $0 }
@@ -981,36 +987,36 @@ private struct SecuritySettingsView: View {
                 }
             }
             if !draft.dosProtection.isEmpty {
-                Section("网络攻击防护") {
+                Section(L10n.string("ui.e8cf8cff709d1f9b")) {
                     ForEach(draft.dosProtection.indices, id: \.self) { index in
                         Toggle(
-                            "保护 \(draft.dosProtection[index].displayName)",
+                            L10n.string("ui.24cef3738252401f", String(describing: draft.dosProtection[index].displayName)),
                             isOn: $draft.dosProtection[index].isEnabled
                         )
                     }
-                    Text("按网卡开启后，NAS 会检测并缓解常见的拒绝服务攻击流量。")
+                    Text(L10n.string("ui.f5c9004f2f02f198"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
             if draft.isFirewallEnabled != nil
                 || draft.isPortScanProtectionEnabled != nil {
-                Section("防火墙") {
+                Section(L10n.string("ui.eee30e9d97ca1e61")) {
                     if draft.isFirewallEnabled != nil {
                         Toggle(
-                            "启用防火墙",
+                            L10n.string("ui.8c603369c2c12ca3"),
                             isOn: Binding(
                                 get: { draft.isFirewallEnabled ?? false },
                                 set: { draft.isFirewallEnabled = $0 }
                             )
                         )
                         if let profile = draft.firewallProfileName, !profile.isEmpty {
-                            LabeledContent("当前配置", value: profile)
+                            LabeledContent(L10n.string("ui.283a7f514f66bd17"), value: profile)
                         }
                     }
                     if draft.isPortScanProtectionEnabled != nil {
                         Toggle(
-                            "检测可疑端口扫描",
+                            L10n.string("ui.25c087444118705f"),
                             isOn: Binding(
                                 get: { draft.isPortScanProtectionEnabled ?? false },
                                 set: { draft.isPortScanProtectionEnabled = $0 }
@@ -1018,22 +1024,22 @@ private struct SecuritySettingsView: View {
                         )
                         .disabled(draft.isFirewallEnabled == false)
                     }
-                    Text("启用时会应用 NAS 当前选定的防火墙配置。若该配置没有允许当前连接，连接可能中断。")
+                    Text(L10n.string("ui.80e98ae428ea94e4"))
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
             }
             Section {
-                Text("启用后，短时间内多次登录失败的来源会被自动封锁。设置过宽会降低保护效果，设置过严可能误封正常用户。")
+                Text(L10n.string("ui.edd8f7a8fbe466ab"))
                     .foregroundStyle(.secondary)
                 HStack {
                     Spacer()
-                    Button("恢复") {
+                    Button(L10n.string("ui.e0534b8a4e46a0cb")) {
                         draft = original
                         expiresAutomatically = original.expirationDays != nil
                     }
                     .disabled(draft == original || isSaving)
-                    Button("应用更改") { isConfirming = true }
+                    Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
                         .buttonStyle(.borderedProminent)
                         .disabled(draft == original || isSaving)
                 }
@@ -1041,19 +1047,19 @@ private struct SecuritySettingsView: View {
         }
         .formStyle(.grouped)
         .confirmationDialog(
-            "应用安全防护设置？",
+            L10n.string("ui.2f33995ca5d7a41e"),
             isPresented: $isConfirming,
             titleVisibility: .visible
         ) {
-            Button("应用更改") { save() }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.741f0c0de7ebbbf8")) { save() }
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("更改会影响后续登录和网络连接。启用防火墙前请确认当前配置允许你的管理连接；保存后将重新读取 NAS 确认结果。")
+            Text(L10n.string("ui.bf843d78254c6bf7"))
         }
-        .alert("无法保存设置", isPresented: errorBinding) {
-            Button("好") {}
+        .alert(L10n.string("ui.22a52843f39a768e"), isPresented: errorBinding) {
+            Button(L10n.string("ui.f867f34178594f89")) {}
         } message: {
-            Text(errorMessage ?? "请稍后重试。")
+            Text(errorMessage ?? L10n.string("ui.efc81ced18eb3bb0"))
         }
     }
 
@@ -1069,7 +1075,7 @@ private struct SecuritySettingsView: View {
             do {
                 try await onSave(draft)
             } catch {
-                errorMessage = userMessage(for: error, fallback: "设置未保存，请稍后重试。")
+                errorMessage = userMessage(for: error, fallback: L10n.string("ui.f8f49516c226e6b7"))
             }
         }
     }
@@ -1099,7 +1105,7 @@ private struct RemoteAccessSettingsView: View {
             Section("QuickConnect") {
                 if draft.isRelayEnabled != nil {
                     Toggle(
-                        "无法直连时使用远程中继",
+                        L10n.string("ui.c228914d93ed28bd"),
                         isOn: Binding(
                             get: { draft.isRelayEnabled ?? false },
                             set: { draft.isRelayEnabled = $0 }
@@ -1107,14 +1113,14 @@ private struct RemoteAccessSettingsView: View {
                     )
                     .disabled(!draft.canDisableRelay && draft.isRelayEnabled == true)
                     if !draft.canDisableRelay {
-                        Text("当前连接正在使用远程中继。请先改用局域网或直连地址，再关闭此选项。")
+                        Text(L10n.string("ui.897bd9e724c0b06c"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
                 if draft.isRouterConfigurationEnabled != nil {
                     Toggle(
-                        "允许自动配置路由器",
+                        L10n.string("ui.e60e66f63ab0fd13"),
                         isOn: Binding(
                             get: { draft.isRouterConfigurationEnabled ?? false },
                             set: { draft.isRouterConfigurationEnabled = $0 }
@@ -1123,13 +1129,13 @@ private struct RemoteAccessSettingsView: View {
                 }
             }
             Section {
-                Text("远程中继可在无法直接连接时提供访问路径；自动配置路由器会尝试开放所需连接。")
+                Text(L10n.string("ui.ace40ffe0474ce20"))
                     .foregroundStyle(.secondary)
                 HStack {
                     Spacer()
-                    Button("恢复") { draft = original }
+                    Button(L10n.string("ui.e0534b8a4e46a0cb")) { draft = original }
                         .disabled(draft == original || isSaving)
-                    Button("应用更改") { isConfirming = true }
+                    Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
                         .buttonStyle(.borderedProminent)
                         .disabled(draft == original || isSaving)
                 }
@@ -1137,19 +1143,19 @@ private struct RemoteAccessSettingsView: View {
         }
         .formStyle(.grouped)
         .confirmationDialog(
-            "应用远程访问设置？",
+            L10n.string("ui.8b407f60394498f2"),
             isPresented: $isConfirming,
             titleVisibility: .visible
         ) {
-            Button("应用更改") { save() }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.741f0c0de7ebbbf8")) { save() }
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("更改可能影响外部设备连接。保存后将重新读取 NAS，确认设置确实生效。")
+            Text(L10n.string("ui.0e34c65bf1c9b2b7"))
         }
-        .alert("无法保存设置", isPresented: errorBinding) {
-            Button("好") {}
+        .alert(L10n.string("ui.22a52843f39a768e"), isPresented: errorBinding) {
+            Button(L10n.string("ui.f867f34178594f89")) {}
         } message: {
-            Text(errorMessage ?? "请稍后重试。")
+            Text(errorMessage ?? L10n.string("ui.efc81ced18eb3bb0"))
         }
     }
 
@@ -1165,7 +1171,7 @@ private struct RemoteAccessSettingsView: View {
             do {
                 try await onSave(draft)
             } catch {
-                errorMessage = userMessage(for: error, fallback: "设置未保存，请稍后重试。")
+                errorMessage = userMessage(for: error, fallback: L10n.string("ui.f8f49516c226e6b7"))
             }
         }
     }
@@ -1193,9 +1199,9 @@ private struct HardwareSettingsView: View {
     var body: some View {
         Form {
             if draft.restartsAfterPowerFailure != nil {
-                Section("断电恢复") {
+                Section(L10n.string("ui.6ad3f1579827e17e")) {
                     Toggle(
-                        "恢复供电后自动启动",
+                        L10n.string("ui.ffdb53bb11165394"),
                         isOn: Binding(
                             get: { draft.restartsAfterPowerFailure ?? false },
                             set: { draft.restartsAfterPowerFailure = $0 }
@@ -1205,9 +1211,9 @@ private struct HardwareSettingsView: View {
             }
             if let range = draft.ledBrightnessRange,
                draft.ledBrightness != nil {
-                Section("设备灯光") {
+                Section(L10n.string("ui.f340aef6e9e2edbe")) {
                     Stepper(
-                        "亮度 \(draft.ledBrightness ?? range.lowerBound)",
+                        L10n.string("ui.d582553b18b8f98c", String(describing: draft.ledBrightness ?? range.lowerBound)),
                         value: Binding(
                             get: { draft.ledBrightness ?? range.lowerBound },
                             set: { draft.ledBrightness = $0 }
@@ -1217,20 +1223,20 @@ private struct HardwareSettingsView: View {
                 }
             }
             if draft.fanMode != nil {
-                Section("散热") {
+                Section(L10n.string("ui.02bc400b18f1258f")) {
                     Picker(
-                        "风扇模式",
+                        L10n.string("ui.25252048254441c8"),
                         selection: Binding(
                             get: { draft.fanMode ?? "coolfan" },
                             set: { draft.fanMode = $0 }
                         )
                     ) {
-                        Text("散热优先").tag("highfan")
-                        Text("低速").tag("lowfan")
-                        Text("全速").tag("fullfan")
-                        Text("凉爽模式").tag("coolfan")
-                        Text("安静模式").tag("quietfan")
-                        Text("低功耗安静模式").tag("quietstopfan")
+                        Text(L10n.string("ui.390ea09574f38da3")).tag("highfan")
+                        Text(L10n.string("ui.0949910fb8c4e07f")).tag("lowfan")
+                        Text(L10n.string("ui.f327f82035eeb44c")).tag("fullfan")
+                        Text(L10n.string("ui.844749143a0da5a0")).tag("coolfan")
+                        Text(L10n.string("ui.5b31e21cdb562f6a")).tag("quietfan")
+                        Text(L10n.string("ui.1b3589f9dbf18de9")).tag("quietstopfan")
                     }
                 }
             }
@@ -1239,25 +1245,25 @@ private struct HardwareSettingsView: View {
                 || draft.isPowerOnSoundEnabled != nil
                 || draft.isPowerOffSoundEnabled != nil
                 || draft.isResetSoundEnabled != nil {
-                Section("提示音") {
+                Section(L10n.string("ui.fdd8ff337f90943e")) {
                     optionalHardwareToggle(
-                        "风扇异常时发出提示音",
+                        L10n.string("ui.d27bea3fb648a93b"),
                         value: $draft.isFanFailureAlertEnabled
                     )
                     optionalHardwareToggle(
-                        "存储空间异常时发出提示音",
+                        L10n.string("ui.de67d20cb4a50dca"),
                         value: $draft.isVolumeFailureAlertEnabled
                     )
                     optionalHardwareToggle(
-                        "启动时发出提示音",
+                        L10n.string("ui.be0b881e8f500acb"),
                         value: $draft.isPowerOnSoundEnabled
                     )
                     optionalHardwareToggle(
-                        "关机时发出提示音",
+                        L10n.string("ui.c7e4c29ba726a639"),
                         value: $draft.isPowerOffSoundEnabled
                     )
                     optionalHardwareToggle(
-                        "重置时发出提示音",
+                        L10n.string("ui.97995bc03cbe4d14"),
                         value: $draft.isResetSoundEnabled
                     )
                 }
@@ -1267,53 +1273,53 @@ private struct HardwareSettingsView: View {
                 || draft.isSATASleepEnabled != nil
                 || draft.ignoresNetworkDiscoveryDuringSleep != nil
                 || draft.isAutomaticPowerOffEnabled != nil {
-                Section("休眠与节能") {
+                Section(L10n.string("ui.8a4a54b78e56cc0e")) {
                     optionalHardwareToggle(
-                        "允许外接存储进入深度休眠",
+                        L10n.string("ui.8292c5b4a1591f60"),
                         value: $draft.isExternalDriveDeepSleepEnabled
                     )
                     optionalHardwareToggle(
-                        "记录硬盘唤醒事件",
+                        L10n.string("ui.79ee2c731e5f0162"),
                         value: $draft.isWakeUpLogEnabled
                     )
                     optionalHardwareToggle(
-                        "允许 SATA 设备深度休眠",
+                        L10n.string("ui.9a5a924761affd44"),
                         value: $draft.isSATASleepEnabled
                     )
                     optionalHardwareToggle(
-                        "休眠时忽略局域网发现流量",
+                        L10n.string("ui.1d18b4496d03940e"),
                         value: $draft.ignoresNetworkDiscoveryDuringSleep
                     )
                     optionalHardwareToggle(
-                        "长时间闲置后自动关机",
+                        L10n.string("ui.d8577cf2d181ec6d"),
                         value: $draft.isAutomaticPowerOffEnabled
                     )
                 }
             }
             if draft.ups != nil {
-                Section("不间断电源") {
+                Section(L10n.string("ui.57a20e0e41013b7a")) {
                     Toggle(
-                        "启用 UPS 支持",
+                        L10n.string("ui.b096bfe5e2d9f5b0"),
                         isOn: Binding(
                             get: { draft.ups?.isEnabled ?? false },
                             set: { draft.ups?.isEnabled = $0 }
                         )
                     )
                     Picker(
-                        "连接方式",
+                        L10n.string("ui.485a26050ce57431"),
                         selection: Binding(
                             get: { draft.ups?.mode ?? "USB" },
                             set: { draft.ups?.mode = $0 }
                         )
                     ) {
-                        Text("USB").tag("USB")
-                        Text("网络 UPS 服务器").tag("SLAVE")
-                        Text("SNMP UPS").tag("SNMP")
+                        Text(L10n.string("connection.usb")).tag("USB")
+                        Text(L10n.string("ui.2403e129b2155129")).tag("SLAVE")
+                        Text(L10n.string("connection.snmp_ups")).tag("SNMP")
                     }
                     .disabled(draft.ups?.isEnabled != true)
                     if draft.ups?.mode == "SLAVE" {
                         TextField(
-                            "UPS 服务器地址",
+                            L10n.string("ui.5b8c6d3919913aa1"),
                             text: Binding(
                                 get: { draft.ups?.networkServerAddress ?? "" },
                                 set: { draft.ups?.networkServerAddress = $0 }
@@ -1323,7 +1329,7 @@ private struct HardwareSettingsView: View {
                     }
                     if draft.ups?.mode == "SNMP" {
                         TextField(
-                            "SNMP UPS 地址",
+                            L10n.string("ui.7a6414b016dbdb29"),
                             text: Binding(
                                 get: { draft.ups?.snmpServerAddress ?? "" },
                                 set: { draft.ups?.snmpServerAddress = $0 }
@@ -1333,7 +1339,7 @@ private struct HardwareSettingsView: View {
                     }
                     if draft.ups?.waitsUntilLowBattery != nil {
                         Toggle(
-                            "电池电量低时进入安全模式",
+                            L10n.string("ui.1ec8115ce215ba9e"),
                             isOn: Binding(
                                 get: { draft.ups?.waitsUntilLowBattery ?? false },
                                 set: { draft.ups?.waitsUntilLowBattery = $0 }
@@ -1344,7 +1350,7 @@ private struct HardwareSettingsView: View {
                     if draft.ups?.safeModeDelaySeconds != nil,
                        draft.ups?.waitsUntilLowBattery != true {
                         TextField(
-                            "进入安全模式前等待（秒）",
+                            L10n.string("ui.e0f51bbce02654e3"),
                             value: Binding(
                                 get: { draft.ups?.safeModeDelaySeconds ?? 0 },
                                 set: { draft.ups?.safeModeDelaySeconds = $0 }
@@ -1355,7 +1361,7 @@ private struct HardwareSettingsView: View {
                     }
                     if draft.ups?.shutsDownUPSAfterSafeMode != nil {
                         Toggle(
-                            "NAS 进入安全模式后关闭 UPS",
+                            L10n.string("ui.4d1f3d962d8e694a"),
                             isOn: Binding(
                                 get: { draft.ups?.shutsDownUPSAfterSafeMode ?? false },
                                 set: { draft.ups?.shutsDownUPSAfterSafeMode = $0 }
@@ -1363,19 +1369,19 @@ private struct HardwareSettingsView: View {
                         )
                         .disabled(draft.ups?.isEnabled != true)
                     }
-                    Text("设置错误可能使停电时无法安全关机。连接方式和服务器地址必须与实际 UPS 部署一致。")
+                    Text(L10n.string("ui.d34c79c4ecbe48f6"))
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
             }
             Section {
-                Text("灯光设置会立即反映在设备上；断电恢复设置会在下一次供电恢复时生效。")
+                Text(L10n.string("ui.8c76e485f46f5a7c"))
                     .foregroundStyle(.secondary)
                 HStack {
                     Spacer()
-                    Button("恢复") { draft = original }
+                    Button(L10n.string("ui.e0534b8a4e46a0cb")) { draft = original }
                         .disabled(draft == original || isSaving)
-                    Button("应用更改") { isConfirming = true }
+                    Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
                         .buttonStyle(.borderedProminent)
                         .disabled(draft == original || isSaving)
                 }
@@ -1383,19 +1389,19 @@ private struct HardwareSettingsView: View {
         }
         .formStyle(.grouped)
         .confirmationDialog(
-            "应用硬件设置？",
+            L10n.string("ui.1553d0e4266fec45"),
             isPresented: $isConfirming,
             titleVisibility: .visible
         ) {
-            Button("应用更改") { save() }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.741f0c0de7ebbbf8")) { save() }
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("保存后将重新读取 NAS，确认设置确实生效。UPS 设置错误可能影响停电时的安全关机。")
+            Text(L10n.string("ui.b772378791d88c9a"))
         }
-        .alert("无法保存设置", isPresented: errorBinding) {
-            Button("好") {}
+        .alert(L10n.string("ui.22a52843f39a768e"), isPresented: errorBinding) {
+            Button(L10n.string("ui.f867f34178594f89")) {}
         } message: {
-            Text(errorMessage ?? "请稍后重试。")
+            Text(errorMessage ?? L10n.string("ui.efc81ced18eb3bb0"))
         }
     }
 
@@ -1424,7 +1430,7 @@ private struct HardwareSettingsView: View {
             do {
                 try await onSave(draft)
             } catch {
-                errorMessage = userMessage(for: error, fallback: "设置未保存，请稍后重试。")
+                errorMessage = userMessage(for: error, fallback: L10n.string("ui.f8f49516c226e6b7"))
             }
         }
     }
@@ -1451,12 +1457,12 @@ private struct ProxySettingsView: View {
 
     var body: some View {
         Form {
-            Section("互联网代理") {
-                Toggle("通过代理服务器连接互联网", isOn: $draft.isEnabled)
-                TextField("服务器地址", text: $draft.host)
+            Section(L10n.string("ui.a7f07cdbba10843c")) {
+                Toggle(L10n.string("ui.66cd771d3bbc9335"), isOn: $draft.isEnabled)
+                TextField(L10n.string("ui.d3716cc5a2f5a810"), text: $draft.host)
                     .disabled(!draft.isEnabled)
                 if draft.port != nil {
-                    TextField("端口", value: Binding(
+                    TextField(L10n.string("ui.e71ac32b544b0ebf"), value: Binding(
                         get: { draft.port ?? 0 },
                         set: { draft.port = $0 }
                     ), format: .number)
@@ -1464,13 +1470,13 @@ private struct ProxySettingsView: View {
                 }
             }
             Section {
-                Text("代理设置会影响套件下载、系统更新和其他需要访问互联网的功能。保存前请确认服务器地址可用。")
+                Text(L10n.string("ui.0bdd80480ee76860"))
                     .foregroundStyle(.secondary)
                 HStack {
                     Spacer()
-                    Button("恢复") { draft = original }
+                    Button(L10n.string("ui.e0534b8a4e46a0cb")) { draft = original }
                         .disabled(draft == original || isSaving)
-                    Button("应用更改") { isConfirming = true }
+                    Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
                         .buttonStyle(.borderedProminent)
                         .disabled(draft == original || isSaving)
                 }
@@ -1478,19 +1484,19 @@ private struct ProxySettingsView: View {
         }
         .formStyle(.grouped)
         .confirmationDialog(
-            "应用代理设置？",
+            L10n.string("ui.ee21795e5c0ba467"),
             isPresented: $isConfirming,
             titleVisibility: .visible
         ) {
-            Button("应用更改") { save() }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.741f0c0de7ebbbf8")) { save() }
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("错误的设置可能使 NAS 无法访问互联网。保存后将重新读取 NAS，确认设置确实生效。")
+            Text(L10n.string("ui.764a8de38e9081f7"))
         }
-        .alert("无法保存设置", isPresented: errorBinding) {
-            Button("好") {}
+        .alert(L10n.string("ui.22a52843f39a768e"), isPresented: errorBinding) {
+            Button(L10n.string("ui.f867f34178594f89")) {}
         } message: {
-            Text(errorMessage ?? "请稍后重试。")
+            Text(errorMessage ?? L10n.string("ui.efc81ced18eb3bb0"))
         }
     }
 
@@ -1506,7 +1512,7 @@ private struct ProxySettingsView: View {
             do {
                 try await onSave(draft)
             } catch {
-                errorMessage = userMessage(for: error, fallback: "设置未保存，请稍后重试。")
+                errorMessage = userMessage(for: error, fallback: L10n.string("ui.f8f49516c226e6b7"))
             }
         }
     }
@@ -1533,37 +1539,37 @@ private struct FileServiceSettingsView: View {
 
     var body: some View {
         Form {
-            Section("局域网共享") {
-                optionalToggle("SMB 文件共享", value: $draft.isSMBEnabled)
-                optionalToggle("NFS 文件共享", value: $draft.isNFSEnabled)
+            Section(L10n.string("ui.6424af044d400e74")) {
+                optionalToggle(L10n.string("ui.8a8a49d2fa4b099f"), value: $draft.isSMBEnabled)
+                optionalToggle(L10n.string("ui.3d4ef43e8def6e66"), value: $draft.isNFSEnabled)
             }
-            Section("文件传输") {
+            Section(L10n.string("ui.f3c32e652f6592d1")) {
                 optionalToggle("FTP", value: $draft.isFTPEnabled)
-                optionalToggle("加密 FTP", value: $draft.isFTPSEnabled)
-                optionalPort("FTP 端口", value: $draft.ftpPort)
+                optionalToggle(L10n.string("ui.d0b9d702115fa28d"), value: $draft.isFTPSEnabled)
+                optionalPort(L10n.string("ui.4e685f7722bd0d8b"), value: $draft.ftpPort)
                 optionalToggle("SFTP", value: $draft.isSFTPEnabled)
-                optionalPort("SFTP 端口", value: $draft.sftpPort)
+                optionalPort(L10n.string("ui.bc665cd348c4f6ce"), value: $draft.sftpPort)
             }
             if draft.isSSDPEnabled != nil
                 || draft.isBonjourEnabled != nil
                 || draft.isSMBTimeMachineEnabled != nil {
-                Section("局域网发现") {
-                    optionalToggle("允许媒体设备发现 NAS", value: $draft.isSSDPEnabled)
-                    optionalToggle("允许 Apple 设备发现 NAS", value: $draft.isBonjourEnabled)
+                Section(L10n.string("ui.e25e85e8bdee7232")) {
+                    optionalToggle(L10n.string("ui.b5d04e41c41138ee"), value: $draft.isSSDPEnabled)
+                    optionalToggle(L10n.string("ui.52065b753b2e22aa"), value: $draft.isBonjourEnabled)
                     optionalToggle(
-                        "通过 SMB 提供 Time Machine",
+                        L10n.string("ui.c7355ca3ccf1da39"),
                         value: $draft.isSMBTimeMachineEnabled
                     )
                 }
             }
             Section {
-                Text("开启服务会允许其他设备连接这台 NAS。请只启用确实需要的服务，并确认路由器和防火墙设置安全。")
+                Text(L10n.string("ui.4bd325bd22926e87"))
                     .foregroundStyle(.secondary)
                 HStack {
                     Spacer()
-                    Button("恢复") { draft = original }
+                    Button(L10n.string("ui.e0534b8a4e46a0cb")) { draft = original }
                         .disabled(draft == original || isSaving)
-                    Button("应用更改") { isConfirming = true }
+                    Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
                         .buttonStyle(.borderedProminent)
                         .disabled(draft == original || isSaving)
                 }
@@ -1571,19 +1577,19 @@ private struct FileServiceSettingsView: View {
         }
         .formStyle(.grouped)
         .confirmationDialog(
-            "应用文件服务更改？",
+            L10n.string("ui.2496baae26a2c1e4"),
             isPresented: $isConfirming,
             titleVisibility: .visible
         ) {
-            Button("应用更改") { save() }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.741f0c0de7ebbbf8")) { save() }
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("连接中的设备可能会短暂断开。保存后将重新读取 NAS，确认设置确实生效。")
+            Text(L10n.string("ui.f0436f46dd161383"))
         }
-        .alert("无法保存设置", isPresented: errorBinding) {
-            Button("好") {}
+        .alert(L10n.string("ui.22a52843f39a768e"), isPresented: errorBinding) {
+            Button(L10n.string("ui.f867f34178594f89")) {}
         } message: {
-            Text(errorMessage ?? "请稍后重试。")
+            Text(errorMessage ?? L10n.string("ui.efc81ced18eb3bb0"))
         }
     }
 
@@ -1619,7 +1625,7 @@ private struct FileServiceSettingsView: View {
             do {
                 try await onSave(draft)
             } catch {
-                errorMessage = userMessage(for: error, fallback: "设置未保存，请稍后重试。")
+                errorMessage = userMessage(for: error, fallback: L10n.string("ui.f8f49516c226e6b7"))
             }
         }
     }
@@ -1646,24 +1652,24 @@ private struct TerminalSettingsView: View {
 
     var body: some View {
         Form {
-            Section("远程连接") {
-                Toggle("允许 SSH 连接", isOn: $draft.isSSHEnabled)
-                Toggle("允许 Telnet 连接", isOn: $draft.isTelnetEnabled)
+            Section(L10n.string("ui.678b783fb578172b")) {
+                Toggle(L10n.string("ui.e07f0d5f213bcc57"), isOn: $draft.isSSHEnabled)
+                Toggle(L10n.string("ui.ead7ad3c36f86eb8"), isOn: $draft.isTelnetEnabled)
                 if draft.sshPort != nil {
-                    TextField("SSH 端口", value: Binding(
+                    TextField(L10n.string("ui.1c22cc57aee8c65a"), value: Binding(
                         get: { draft.sshPort ?? 0 },
                         set: { draft.sshPort = $0 }
                     ), format: .number)
                 }
             }
             Section {
-                Text("Telnet 不会加密传输内容，除非旧设备确实需要，否则建议保持关闭。更改 SSH 端口可能会断开现有连接。")
+                Text(L10n.string("ui.5ec51d41f6ba329f"))
                     .foregroundStyle(.secondary)
                 HStack {
                     Spacer()
-                    Button("恢复") { draft = original }
+                    Button(L10n.string("ui.e0534b8a4e46a0cb")) { draft = original }
                         .disabled(draft == original || isSaving)
-                    Button("应用更改") { isConfirming = true }
+                    Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
                         .buttonStyle(.borderedProminent)
                         .disabled(draft == original || isSaving)
                 }
@@ -1671,19 +1677,19 @@ private struct TerminalSettingsView: View {
         }
         .formStyle(.grouped)
         .confirmationDialog(
-            "应用远程连接更改？",
+            L10n.string("ui.6625229f10ed7976"),
             isPresented: $isConfirming,
             titleVisibility: .visible
         ) {
-            Button("应用更改") { save() }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.741f0c0de7ebbbf8")) { save() }
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("现有远程连接可能会断开。保存后将重新读取 NAS，确认设置确实生效。")
+            Text(L10n.string("ui.53e6c0f8afdb1609"))
         }
-        .alert("无法保存设置", isPresented: errorBinding) {
-            Button("好") {}
+        .alert(L10n.string("ui.22a52843f39a768e"), isPresented: errorBinding) {
+            Button(L10n.string("ui.f867f34178594f89")) {}
         } message: {
-            Text(errorMessage ?? "请稍后重试。")
+            Text(errorMessage ?? L10n.string("ui.efc81ced18eb3bb0"))
         }
     }
 
@@ -1699,7 +1705,7 @@ private struct TerminalSettingsView: View {
             do {
                 try await onSave(draft)
             } catch {
-                errorMessage = userMessage(for: error, fallback: "设置未保存，请稍后重试。")
+                errorMessage = userMessage(for: error, fallback: L10n.string("ui.f8f49516c226e6b7"))
             }
         }
     }
@@ -1764,7 +1770,7 @@ private struct AdministrationPageContainer<Content: View>: View {
                     .padding(8)
                     .background(.regularMaterial, in: Capsule())
                     .padding(.top, 10)
-                    .accessibilityLabel("正在更新")
+                    .accessibilityLabel(L10n.string("ui.2336147a7f843985"))
             }
         }
     }
@@ -1874,20 +1880,20 @@ private struct MetricCard: View {
 }
 
 private enum UnifiedStorageSection: String, CaseIterable, Identifiable {
-    case overview = "总览"
-    case analysis = "空间分析"
-    case hardware = "存储池与硬盘"
+    case overview = "ui.a33db573055626c5"
+    case analysis = "ui.90438f3b6e413299"
+    case hardware = "ui.418342623fc30942"
 
     var id: Self { self }
 }
 
 private enum StorageReportSection: String, CaseIterable, Identifiable {
-    case shares = "共享文件夹"
-    case types = "文件类型"
-    case largeFiles = "大文件"
-    case duplicates = "重复文件"
-    case owners = "所有者"
-    case activity = "文件时间"
+    case shares = "ui.8df2fa80a06c49b5"
+    case types = "ui.9a8457b3dc844478"
+    case largeFiles = "ui.7400f5fabb559999"
+    case duplicates = "ui.3b0db02d8063b59f"
+    case owners = "ui.43a7f4b4c5c88a2a"
+    case activity = "ui.d913a95d6c9599d9"
 
     var id: Self { self }
 }
@@ -1913,9 +1919,9 @@ private struct UnifiedStorageView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Picker("存储管理内容", selection: $section) {
+                Picker(L10n.string("ui.ceebdfc7f13d0429"), selection: $section) {
                     ForEach(UnifiedStorageSection.allCases) { item in
-                        Text(item.rawValue).tag(item)
+                        Text(L10n.string(item.rawValue)).tag(item)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -1927,9 +1933,9 @@ private struct UnifiedStorageView: View {
                 Button {
                     Task { await refresh() }
                 } label: {
-                    Label("刷新", systemImage: "arrow.clockwise")
+                    Label(L10n.string("ui.aee88743413144a2"), systemImage: "arrow.clockwise")
                 }
-                .help("刷新容量和硬盘状态")
+                .help(L10n.string("ui.562868f9b8372a48"))
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 14)
@@ -1998,7 +2004,7 @@ private struct StorageOverviewDashboard: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Label(
-                    "统一存储管理合并了“存储管理器”和“存储空间分析器”的常用功能。",
+                    L10n.string("ui.d8fdd9c0f38cc267"),
                     systemImage: "square.grid.2x2"
                 )
                 .font(.callout)
@@ -2006,75 +2012,75 @@ private struct StorageOverviewDashboard: View {
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12)], spacing: 12) {
                     StorageMetricCard(
-                        title: "总容量",
+                        title: L10n.string("ui.9e4972cf66420340"),
                         value: byteCount(totalBytes),
-                        detail: "\(snapshot?.volumes.count ?? 0) 个存储空间",
+                        detail: L10n.string("ui.ead16b41c57b5f4e", String(describing: snapshot?.volumes.count ?? 0)),
                         icon: "externaldrive.fill",
                         tint: .blue
                     )
                     StorageMetricCard(
-                        title: "已使用",
+                        title: L10n.string("ui.9845c165151daee3"),
                         value: byteCount(usedBytes),
                         detail: totalBytes > 0
                             ? "\((Double(usedBytes) / Double(totalBytes) * 100).formatted(.number.precision(.fractionLength(1))))%"
-                            : "尚无容量数据",
+                            : L10n.string("ui.e57bc250f8a812ba"),
                         icon: "chart.pie.fill",
                         tint: .indigo
                     )
                     StorageMetricCard(
-                        title: "可用空间",
+                        title: L10n.string("ui.cec82ccb6e81e727"),
                         value: byteCount(availableBytes),
-                        detail: "当前可写容量",
+                        detail: L10n.string("ui.e313f1a4fe87ede0"),
                         icon: "internaldrive",
                         tint: .teal
                     )
                     StorageMetricCard(
-                        title: "整体状态",
-                        value: hasWarning ? "需要关注" : "良好",
-                        detail: "\(snapshot?.pools.count ?? 0) 个存储池 · \(snapshot?.disks.count ?? 0) 块硬盘",
+                        title: L10n.string("ui.f7b9a497c88ea2bc"),
+                        value: hasWarning ? L10n.string("ui.f121ab742cefcb8e") : L10n.string("ui.cfea0dce5c5d6d72"),
+                        detail: L10n.string("ui.0454b8cb1913f89f", String(describing: snapshot?.pools.count ?? 0), String(describing: snapshot?.disks.count ?? 0)),
                         icon: hasWarning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
                         tint: hasWarning ? .orange : .green
                     )
                 }
 
                 if !usageHistory.isEmpty {
-                    GroupBox("容量趋势") {
+                    GroupBox(L10n.string("ui.ca367d74342bb4f8")) {
                         Chart(usageHistory) { point in
                             LineMark(
-                                x: .value("时间", point.recordedAt),
-                                y: .value("已使用", point.usedBytes)
+                                x: .value(L10n.string("ui.8b6ff498515bcc2f"), point.recordedAt),
+                                y: .value(L10n.string("ui.9845c165151daee3"), point.usedBytes)
                             )
-                            .foregroundStyle(by: .value("存储空间", point.volumeName))
+                            .foregroundStyle(by: .value(L10n.string("ui.26de3dd933ce00e3"), point.volumeName))
                             PointMark(
-                                x: .value("时间", point.recordedAt),
-                                y: .value("已使用", point.usedBytes)
+                                x: .value(L10n.string("ui.8b6ff498515bcc2f"), point.recordedAt),
+                                y: .value(L10n.string("ui.9845c165151daee3"), point.usedBytes)
                             )
-                            .foregroundStyle(by: .value("存储空间", point.volumeName))
+                            .foregroundStyle(by: .value(L10n.string("ui.26de3dd933ce00e3"), point.volumeName))
                         }
                         .chartYAxis {
                             AxisMarks(format: .byteCount(style: .file))
                         }
                         .frame(height: 220)
                         .padding(.top, 8)
-                        .accessibilityLabel("各存储空间已使用容量趋势")
+                        .accessibilityLabel(L10n.string("ui.1d0f6982184475a5"))
                     }
                 }
 
                 HStack(alignment: .top, spacing: 12) {
                     StorageOverviewActionCard(
-                        title: "空间分析",
+                        title: L10n.string("ui.90438f3b6e413299"),
                         description: analysis.map {
-                            "上次分析 \($0.generatedAt.formatted(date: .abbreviated, time: .shortened))，共 \($0.scannedFileCount.formatted()) 个文件。"
-                        } ?? "查看共享文件夹、文件类型、大文件、重复文件和所有者占用。",
+                            L10n.string("ui.ce6a94d231c1d9a5", String(describing: $0.generatedAt.formatted(date: .abbreviated, time: .shortened)), String(describing: $0.scannedFileCount.formatted()))
+                        } ?? L10n.string("ui.292d1de321ab8029"),
                         icon: "chart.bar.xaxis",
-                        actionTitle: analysis == nil ? "开始查看" : "查看报告",
+                        actionTitle: analysis == nil ? L10n.string("ui.7e732df3bd81d015") : L10n.string("ui.a08bfa0c50e2895f"),
                         action: showAnalysis
                     )
                     StorageOverviewActionCard(
-                        title: "存储池与硬盘",
-                        description: "查看 RAID、文件系统、硬盘温度、健康状态和 S.M.A.R.T. 检测。",
+                        title: L10n.string("ui.418342623fc30942"),
+                        description: L10n.string("ui.1d7b08c73e628019"),
                         icon: "internaldrive",
-                        actionTitle: "查看硬件",
+                        actionTitle: L10n.string("ui.2e1f1effcaa9b7b4"),
                         action: showHardware
                     )
                 }
@@ -2157,20 +2163,20 @@ private struct StorageAnalysisView: View {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("空间分析")
+                        Text(L10n.string("ui.90438f3b6e413299"))
                             .font(.title2.weight(.semibold))
-                        Text("按当前账号可见的共享文件夹生成报告；分析只读取文件信息，不会修改或删除内容。")
+                        Text(L10n.string("ui.8df9cc3ad1bfa54f"))
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                     if isAnalyzing {
-                        Button("停止分析", role: .cancel, action: cancelAnalysis)
+                        Button(L10n.string("ui.546be3ab7e6722e7"), role: .cancel, action: cancelAnalysis)
                     } else {
                         Button {
                             beginAnalysis()
                         } label: {
-                            Label(snapshot == nil ? "开始分析" : "重新分析", systemImage: "play.fill")
+                            Label(snapshot == nil ? L10n.string("ui.b2be5f83c9490950") : L10n.string("ui.734b1551161f6b46"), systemImage: "play.fill")
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -2179,7 +2185,7 @@ private struct StorageAnalysisView: View {
                 if isAnalyzing {
                     GroupBox {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(progress?.title ?? "正在分析")
+                            Text(progress?.title ?? L10n.string("ui.bde2834d4917ecf8"))
                                 .font(.headline)
                             if let fraction = progress?.fraction {
                                 ProgressView(value: fraction)
@@ -2211,11 +2217,11 @@ private struct StorageAnalysisView: View {
                     analysisContent(snapshot)
                 } else if !isAnalyzing {
                     ContentUnavailableView {
-                        Label("还没有分析报告", systemImage: "chart.bar.doc.horizontal")
+                        Label(L10n.string("ui.f2ff8c0767cf59b5"), systemImage: "chart.bar.doc.horizontal")
                     } description: {
-                        Text("开始分析后，可查看共享文件夹占用、文件类型、大文件、重复文件和所有者分布。")
+                        Text(L10n.string("ui.003ebad73cce017f"))
                     } actions: {
-                        Button("开始分析", action: beginAnalysis)
+                        Button(L10n.string("ui.b2be5f83c9490950"), action: beginAnalysis)
                     }
                     .frame(maxWidth: .infinity, minHeight: 320)
                 }
@@ -2228,39 +2234,39 @@ private struct StorageAnalysisView: View {
     private func analysisContent(_ snapshot: StorageAnalysisSnapshot) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12)], spacing: 12) {
             StorageMetricCard(
-                title: "已分析文件",
+                title: L10n.string("ui.2649fbc02a65cef6"),
                 value: snapshot.scannedFileCount.formatted(),
-                detail: "本次报告",
+                detail: L10n.string("ui.5171196ff6661c1c"),
                 icon: "doc.on.doc",
                 tint: .blue
             )
             StorageMetricCard(
-                title: "文件占用",
+                title: L10n.string("ui.c8c21b6589b1eabe"),
                 value: byteCount(snapshot.scannedBytes),
-                detail: "不含套件数据和快照",
+                detail: L10n.string("ui.472411affcce59ba"),
                 icon: "chart.pie.fill",
                 tint: .indigo
             )
             StorageMetricCard(
-                title: "共享文件夹",
+                title: L10n.string("ui.8df2fa80a06c49b5"),
                 value: snapshot.shares.count.formatted(),
-                detail: "当前账号可见",
+                detail: L10n.string("ui.44238dab0c531162"),
                 icon: "folder.fill",
                 tint: .teal
             )
             StorageMetricCard(
-                title: "可整理重复内容",
+                title: L10n.string("ui.1756e99530b969c9"),
                 value: byteCount(snapshot.duplicateGroups.reduce(Int64(0)) { $0 + $1.reclaimableBytes }),
-                detail: "\(snapshot.duplicateGroups.count) 组内容相同的文件",
+                detail: L10n.string("ui.7344d54a0f940dec", String(describing: snapshot.duplicateGroups.count)),
                 icon: "square.on.square",
                 tint: .orange
             )
         }
 
         HStack {
-            Picker("报告内容", selection: $reportSection) {
+            Picker(L10n.string("ui.cde63c6e590dba29"), selection: $reportSection) {
                 ForEach(StorageReportSection.allCases) { item in
-                    Text(item.rawValue).tag(item)
+                    Text(L10n.string(item.rawValue)).tag(item)
                 }
             }
             .pickerStyle(.segmented)
@@ -2274,32 +2280,32 @@ private struct StorageAnalysisView: View {
         switch reportSection {
         case .shares:
             StorageUsageBars(
-                title: "共享文件夹占用",
+                title: L10n.string("ui.142497611cf2f7d0"),
                 rows: snapshot.shares.map { ($0.name, $0.usedBytes, $0.fileCount) }
             )
         case .types:
             StorageUsageBars(
-                title: "文件类型分布",
+                title: L10n.string("ui.c9a138d4dfdd880c"),
                 rows: snapshot.categories.map { ($0.name, $0.usedBytes, $0.fileCount) }
             )
         case .largeFiles:
-            StorageFileList(title: "最大的 200 个文件", files: snapshot.largeFiles, dateKind: nil)
+            StorageFileList(title: L10n.string("ui.a8977ce1b8649ad3"), files: snapshot.largeFiles, dateKind: nil)
         case .duplicates:
             StorageDuplicateList(snapshot: snapshot)
         case .owners:
             StorageUsageBars(
-                title: "所有者占用",
+                title: L10n.string("ui.17429e6e0200d5e9"),
                 rows: snapshot.owners.map { ($0.name, $0.usedBytes, $0.fileCount) }
             )
         case .activity:
             VStack(alignment: .leading, spacing: 16) {
                 StorageFileList(
-                    title: "最近修改",
+                    title: L10n.string("ui.ad3bf1eea84b70e4"),
                     files: snapshot.recentlyModifiedFiles,
                     dateKind: .modified
                 )
                 StorageFileList(
-                    title: "最久未访问",
+                    title: L10n.string("ui.b9044c43503f4a1c"),
                     files: snapshot.leastRecentlyAccessedFiles,
                     dateKind: .accessed
                 )
@@ -2316,14 +2322,14 @@ private struct StorageUsageBars: View {
         GroupBox(title) {
             VStack(alignment: .leading, spacing: 14) {
                 if rows.isEmpty {
-                    Text("没有可显示的数据")
+                    Text(L10n.string("ui.1c77a8adce30a16e"))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 120)
                 } else {
                     Chart(Array(rows.prefix(12)), id: \.name) { row in
                         BarMark(
-                            x: .value("占用", row.bytes),
-                            y: .value("项目", row.name)
+                            x: .value(L10n.string("ui.c0aa76aebce68788"), row.bytes),
+                            y: .value(L10n.string("ui.79f326be4409d51f"), row.name)
                         )
                         .foregroundStyle(.blue.gradient)
                     }
@@ -2340,7 +2346,7 @@ private struct StorageUsageBars: View {
                             Text(row.name)
                                 .lineLimit(1)
                             Spacer()
-                            Text("\(row.count.formatted()) 个文件")
+                            Text(L10n.string("ui.057c1760db06e516", String(describing: row.count.formatted())))
                                 .foregroundStyle(.secondary)
                             Text(byteCount(row.bytes))
                                 .monospacedDigit()
@@ -2369,7 +2375,7 @@ private struct StorageFileList: View {
         GroupBox(title) {
             LazyVStack(spacing: 0) {
                 if files.isEmpty {
-                    Text("没有可显示的文件")
+                    Text(L10n.string("ui.76ada2f67941689e"))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 120)
                 } else {
@@ -2423,13 +2429,13 @@ private struct StorageDuplicateList: View {
         VStack(alignment: .leading, spacing: 12) {
             if snapshot.duplicateCheckUnavailable {
                 Label(
-                    "这台 NAS 暂不能校验文件内容；其他分析结果不受影响。",
+                    L10n.string("ui.51029dff33be8570"),
                     systemImage: "info.circle"
                 )
                 .foregroundStyle(.secondary)
             } else if snapshot.duplicateCheckWasLimited {
                 Label(
-                    "为避免长时间占用硬盘，本次优先校验了较大的 400 个候选文件。",
+                    L10n.string("ui.39981e1118b2a80c"),
                     systemImage: "info.circle"
                 )
                 .foregroundStyle(.secondary)
@@ -2437,9 +2443,9 @@ private struct StorageDuplicateList: View {
 
             if snapshot.duplicateGroups.isEmpty {
                 ContentUnavailableView(
-                    "没有发现重复内容",
+                    L10n.string("ui.a5c90c9e9d138455"),
                     systemImage: "checkmark.circle",
-                    description: Text("在本次已校验的文件中，没有发现内容完全相同的文件。")
+                    description: Text(L10n.string("ui.31eafc88cde6f593"))
                 )
                 .frame(maxWidth: .infinity, minHeight: 220)
             } else {
@@ -2447,10 +2453,10 @@ private struct StorageDuplicateList: View {
                     GroupBox {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Text("\(group.files.count) 个相同文件")
+                                Text(L10n.string("ui.9f9ad98d5023adfc", String(describing: group.files.count)))
                                     .font(.headline)
                                 Spacer()
-                                Text("可整理 \(byteCount(group.reclaimableBytes))")
+                                Text(L10n.string("ui.397c2c34dd163883", String(describing: byteCount(group.reclaimableBytes))))
                                     .foregroundStyle(.orange)
                             }
                             ForEach(group.files) { file in
@@ -2488,7 +2494,7 @@ private struct StorageView: View {
         ScrollView {
             if let snapshot {
                 VStack(alignment: .leading, spacing: 22) {
-                    SectionHeader(title: "存储空间", count: snapshot.volumes.count)
+                    SectionHeader(title: L10n.string("ui.26de3dd933ce00e3"), count: snapshot.volumes.count)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
                         ForEach(snapshot.volumes) { volume in
                             Button {
@@ -2505,11 +2511,11 @@ private struct StorageView: View {
                                 )
                             }
                             .buttonStyle(.plain)
-                            .accessibilityHint("查看存储空间详情")
+                            .accessibilityHint(L10n.string("ui.9485a9c23c18d624"))
                         }
                     }
 
-                    SectionHeader(title: "存储池", count: snapshot.pools.count)
+                    SectionHeader(title: L10n.string("ui.ba380b79ff47c4c2"), count: snapshot.pools.count)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
                         ForEach(snapshot.pools) { pool in
                             Button {
@@ -2526,11 +2532,11 @@ private struct StorageView: View {
                                 )
                             }
                             .buttonStyle(.plain)
-                            .accessibilityHint("查看存储池详情")
+                            .accessibilityHint(L10n.string("ui.bd724d9515edda8a"))
                         }
                     }
 
-                    SectionHeader(title: "硬盘", count: snapshot.disks.count)
+                    SectionHeader(title: L10n.string("ui.1e7098fe0f6eaae2"), count: snapshot.disks.count)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], spacing: 12) {
                         ForEach(snapshot.disks) { disk in
                             Button {
@@ -2539,7 +2545,7 @@ private struct StorageView: View {
                                 DiskCard(disk: disk, testStatus: testStatuses[disk.id])
                             }
                             .buttonStyle(.plain)
-                            .accessibilityHint("查看硬盘详情和检测选项")
+                            .accessibilityHint(L10n.string("ui.e5ad27587f394f41"))
                         }
                     }
                 }
@@ -2567,8 +2573,8 @@ private struct StorageView: View {
 }
 
 private enum DisplayMode: String, CaseIterable, Identifiable {
-    case list = "列表"
-    case grid = "卡片"
+    case list = "ui.aedd6814ff8c516c"
+    case grid = "ui.fb5640f8e12e3337"
     var id: Self { self }
 
     var icon: String {
@@ -2612,7 +2618,7 @@ private struct CapacityCard: View {
                     Label(title, systemImage: icon)
                         .font(.headline)
                     Spacer()
-                    Label("查看详情", systemImage: "chevron.right")
+                    Label(L10n.string("ui.a748cc074f78de00"), systemImage: "chevron.right")
                         .labelStyle(.titleAndIcon)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -2623,16 +2629,16 @@ private struct CapacityCard: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack {
-                    Text(used.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "未知")
+                    Text(used.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? L10n.string("ui.4d8c1c5b42830791"))
                     Spacer()
-                    Text(total.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "未知")
+                    Text(total.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? L10n.string("ui.4d8c1c5b42830791"))
                         .foregroundStyle(.secondary)
                 }
                 .font(.caption)
                 if let ratio {
                     ProgressView(value: ratio)
                         .accessibilityLabel(title)
-                        .accessibilityValue("\((ratio * 100).formatted(.number.precision(.fractionLength(0))))% 已使用")
+                        .accessibilityValue(L10n.string("ui.cb1758dd87db4aae", String(describing: (ratio * 100).formatted(.number.precision(.fractionLength(0))))))
                 }
             }
             .padding(6)
@@ -2654,10 +2660,10 @@ private struct DiskCard: View {
                     Spacer()
                     HStack(spacing: 8) {
                         StatusPill(
-                            text: storageStatusText(disk.status) ?? "状态未知",
+                            text: storageStatusText(disk.status) ?? L10n.string("ui.93e474c68ed55647"),
                             isWarning: isWarning(disk.status)
                         )
-                        Label("查看详情", systemImage: "chevron.right")
+                        Label(L10n.string("ui.a748cc074f78de00"), systemImage: "chevron.right")
                             .labelStyle(.titleAndIcon)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -2670,23 +2676,23 @@ private struct DiskCard: View {
                 }
                 VStack(spacing: 6) {
                     HStack {
-                        Text("容量").font(.caption).foregroundStyle(.secondary)
+                        Text(L10n.string("ui.d8272b3c5f197b58")).font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Text(byteCount(disk.totalBytes)).font(.caption.weight(.medium))
                     }
                     HStack {
-                        Text("S.M.A.R.T.").font(.caption).foregroundStyle(.secondary)
+                        Text(L10n.string("storage.smart")).font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Text(
                             testStatus?.isRunning == true
-                                ? "正在检测"
+                                ? L10n.string("ui.2b5941013cfefb7a")
                                 : storageStatusText(disk.smartStatus)
-                                    ?? (disk.supportsSmartTest ? "可检测" : "未提供")
+                                    ?? (disk.supportsSmartTest ? L10n.string("ui.9f0d1751bf3d4c46") : L10n.string("ui.756762e293f2aaff"))
                         ).font(.caption.weight(.medium))
                     }
                     if let temperature = disk.temperatureCelsius {
                         HStack {
-                            Text("温度").font(.caption).foregroundStyle(.secondary)
+                            Text(L10n.string("ui.3732e264dfa95cae")).font(.caption).foregroundStyle(.secondary)
                             Spacer()
                             Text("\(temperature.formatted(.number.precision(.fractionLength(0))))℃")
                                 .font(.caption.weight(.medium))
@@ -2734,14 +2740,14 @@ private struct StorageDetailSheet: View {
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
+                    Button(L10n.string("ui.3fd47edce45b3603")) { dismiss() }
                         .keyboardShortcut(.cancelAction)
                 }
             }
         }
         .frame(minWidth: 560, idealWidth: 600, minHeight: 480, idealHeight: 580)
         .confirmationDialog(
-            pendingTestType == .extended ? "开始完整检测？" : "开始快速检测？",
+            pendingTestType == .extended ? L10n.string("ui.2af894351735b6b2") : L10n.string("ui.4a1b05399e6f67e5"),
             isPresented: Binding(
                 get: { pendingTestType != nil },
                 set: { if !$0 { pendingTestType = nil } }
@@ -2749,25 +2755,25 @@ private struct StorageDetailSheet: View {
             titleVisibility: .visible
         ) {
             if let pendingTestType {
-                Button(pendingTestType == .extended ? "开始完整检测" : "开始快速检测") {
+                Button(pendingTestType == .extended ? L10n.string("ui.8e633fa28061f170") : L10n.string("ui.c09a70021eb37cd0")) {
                     beginTest(pendingTestType)
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
             Text(testConfirmationMessage)
         }
         .confirmationDialog(
-            "停止当前硬盘检测？",
+            L10n.string("ui.1b9c2c6c1c1184d8"),
             isPresented: $showStopTestConfirm,
             titleVisibility: .visible
         ) {
-            Button("继续检测", role: .cancel) {}
-            Button("停止检测", role: .destructive) {
+            Button(L10n.string("ui.c94345e7ee036366"), role: .cancel) {}
+            Button(L10n.string("ui.605fca0de8478944"), role: .destructive) {
                 stopCurrentTest()
             }
         } message: {
-            Text("停止后，本次检测不会产生完整结果；以后仍可重新开始检测。")
+            Text(L10n.string("ui.d0b8762f8066116a"))
         }
     }
 
@@ -2775,7 +2781,7 @@ private struct StorageDetailSheet: View {
         switch selection {
         case .volume(let volume): volume.name
         case .pool(let pool): pool.name
-        case .disk(let disk): "\(disk.name) 详情"
+        case .disk(let disk): L10n.string("ui.e2adcced2dca9394", String(describing: disk.name))
         }
     }
 
@@ -2786,26 +2792,26 @@ private struct StorageDetailSheet: View {
             title: volume.name,
             status: volume.status
         )
-        DetailSection(title: "容量") {
-            DetailValueRow(title: "已使用", value: byteCount(volume.usedBytes))
+        DetailSection(title: L10n.string("ui.d8272b3c5f197b58")) {
+            DetailValueRow(title: L10n.string("ui.9845c165151daee3"), value: byteCount(volume.usedBytes))
             Divider().opacity(0.4)
-            DetailValueRow(title: "总容量", value: byteCount(volume.totalBytes))
+            DetailValueRow(title: L10n.string("ui.9e4972cf66420340"), value: byteCount(volume.totalBytes))
             Divider().opacity(0.4)
             DetailValueRow(
-                title: "可用容量",
+                title: L10n.string("ui.21e4406096127b26"),
                 value: byteCount(availableBytes(used: volume.usedBytes, total: volume.totalBytes))
             )
         }
-        DetailSection(title: "信息") {
-            DetailValueRow(title: "文件系统", value: volume.fileSystem ?? "未提供")
+        DetailSection(title: L10n.string("ui.e7028601e7da793d")) {
+            DetailValueRow(title: L10n.string("ui.47b6174788b64db5"), value: volume.fileSystem ?? L10n.string("ui.756762e293f2aaff"))
             Divider().opacity(0.4)
-            DetailValueRow(title: "所在存储池", value: poolName(for: volume.poolID) ?? "未提供")
+            DetailValueRow(title: L10n.string("ui.64a316a3dda35b2a"), value: poolName(for: volume.poolID) ?? L10n.string("ui.756762e293f2aaff"))
             Divider().opacity(0.4)
-            DetailValueRow(title: "位置", value: volume.path ?? "未提供")
+            DetailValueRow(title: L10n.string("ui.1fb4d574da92f1c1"), value: volume.path ?? L10n.string("ui.756762e293f2aaff"))
             Divider().opacity(0.4)
-            DetailValueRow(title: "加密", value: volume.isEncrypted ? "已加密" : "未加密")
+            DetailValueRow(title: L10n.string("ui.320c254572c48488"), value: volume.isEncrypted ? L10n.string("ui.b66975fbd35fa85d") : L10n.string("ui.7c568abbd672a29b"))
             Divider().opacity(0.4)
-            DetailValueRow(title: "访问状态", value: volume.isWritable ? "可读写" : "只读")
+            DetailValueRow(title: L10n.string("ui.02899fd66a4138da"), value: volume.isWritable ? L10n.string("ui.b00028289a40061a") : L10n.string("ui.3b5ec3533b0e4485"))
         }
     }
 
@@ -2816,36 +2822,36 @@ private struct StorageDetailSheet: View {
             title: pool.name,
             status: pool.status
         )
-        DetailSection(title: "容量") {
-            DetailValueRow(title: "已使用", value: byteCount(pool.usedBytes))
+        DetailSection(title: L10n.string("ui.d8272b3c5f197b58")) {
+            DetailValueRow(title: L10n.string("ui.9845c165151daee3"), value: byteCount(pool.usedBytes))
             Divider().opacity(0.4)
-            DetailValueRow(title: "总容量", value: byteCount(pool.totalBytes))
+            DetailValueRow(title: L10n.string("ui.9e4972cf66420340"), value: byteCount(pool.totalBytes))
             Divider().opacity(0.4)
             DetailValueRow(
-                title: "可用容量",
+                title: L10n.string("ui.21e4406096127b26"),
                 value: byteCount(availableBytes(used: pool.usedBytes, total: pool.totalBytes))
             )
         }
-        DetailSection(title: "配置") {
-            DetailValueRow(title: "RAID 类型", value: pool.raidType ?? "未提供")
+        DetailSection(title: L10n.string("ui.148d195e21b05db5")) {
+            DetailValueRow(title: L10n.string("ui.f0ce89906e42d561"), value: pool.raidType ?? L10n.string("ui.756762e293f2aaff"))
             Divider().opacity(0.4)
-            DetailValueRow(title: "访问状态", value: pool.isWritable ? "可读写" : "只读")
+            DetailValueRow(title: L10n.string("ui.02899fd66a4138da"), value: pool.isWritable ? L10n.string("ui.b00028289a40061a") : L10n.string("ui.3b5ec3533b0e4485"))
             Divider().opacity(0.4)
             DetailValueRow(
-                title: "多个存储空间",
-                value: pool.supportsMultipleVolumes.map { $0 ? "支持" : "不支持" } ?? "未提供"
+                title: L10n.string("ui.e19a4386e921ddda"),
+                value: pool.supportsMultipleVolumes.map { $0 ? L10n.string("ui.d93373f81363e3cc") : L10n.string("ui.7c5378606570020b") } ?? L10n.string("ui.756762e293f2aaff")
             )
             Divider().opacity(0.4)
-            DetailValueRow(title: "硬盘", value: diskNames(for: pool.diskIDs))
+            DetailValueRow(title: L10n.string("ui.1e7098fe0f6eaae2"), value: diskNames(for: pool.diskIDs))
             Divider().opacity(0.4)
-            DetailValueRow(title: "热备盘", value: diskNames(for: pool.spareDiskIDs))
+            DetailValueRow(title: L10n.string("ui.10068c390c1b7106"), value: diskNames(for: pool.spareDiskIDs))
             if pool.isScrubbing {
                 Divider().opacity(0.4)
-                DetailValueRow(title: "数据清理", value: "正在进行")
+                DetailValueRow(title: L10n.string("ui.b69ac4021aeb68bd"), value: L10n.string("ui.055da4d50c7e6524"))
             } else if let date = pool.nextScrubbingDate {
                 Divider().opacity(0.4)
                 DetailValueRow(
-                    title: "下次数据清理",
+                    title: L10n.string("ui.b4f2550d09b20994"),
                     value: date.formatted(date: .abbreviated, time: .shortened)
                 )
             }
@@ -2870,49 +2876,49 @@ private struct StorageDetailSheet: View {
                 .accessibilityElement(children: .combine)
         }
 
-        DetailSection(title: "硬盘信息") {
+        DetailSection(title: L10n.string("ui.f1a586cb6b297efe")) {
             DetailValueRow(
-                title: "型号",
+                title: L10n.string("ui.322408c53beda26b"),
                 value: diskModelDescription(disk)
             )
             Divider().opacity(0.4)
-            DetailValueRow(title: "类型", value: disk.type ?? (disk.isSSD ? "SSD" : "HDD"))
+            DetailValueRow(title: L10n.string("ui.ba40014ff496f64e"), value: disk.type ?? (disk.isSSD ? "SSD" : "HDD"))
             Divider().opacity(0.4)
-            DetailValueRow(title: "容量", value: byteCount(disk.totalBytes))
+            DetailValueRow(title: L10n.string("ui.d8272b3c5f197b58"), value: byteCount(disk.totalBytes))
             Divider().opacity(0.4)
-            DetailValueRow(title: "位置", value: disk.location ?? "未提供")
+            DetailValueRow(title: L10n.string("ui.1fb4d574da92f1c1"), value: disk.location ?? L10n.string("ui.756762e293f2aaff"))
             Divider().opacity(0.4)
-            DetailValueRow(title: "配置用途", value: poolName(for: disk.usedBy) ?? "未分配")
+            DetailValueRow(title: L10n.string("ui.7394a2e11d9d511d"), value: poolName(for: disk.usedBy) ?? L10n.string("ui.52496e5aeff43353"))
             Divider().opacity(0.4)
-            DetailValueRow(title: "序列号", value: disk.serialNumber ?? "未提供")
+            DetailValueRow(title: L10n.string("ui.94854c89ae715c4d"), value: disk.serialNumber ?? L10n.string("ui.756762e293f2aaff"))
             Divider().opacity(0.4)
-            DetailValueRow(title: "固件版本", value: disk.firmwareVersion ?? "未提供")
+            DetailValueRow(title: L10n.string("ui.e5b17aa7b4420a59"), value: disk.firmwareVersion ?? L10n.string("ui.756762e293f2aaff"))
             Divider().opacity(0.4)
             DetailValueRow(
-                title: "4K 原生硬盘",
-                value: disk.is4KNative.map { $0 ? "是" : "否" } ?? "未提供"
+                title: L10n.string("ui.a2bcbaab777f5f33"),
+                value: disk.is4KNative.map { $0 ? L10n.string("ui.b5141d3d19e9a048") : L10n.string("ui.0c70665b6eb65f1a") } ?? L10n.string("ui.756762e293f2aaff")
             )
         }
 
-        DetailSection(title: "健康状态") {
+        DetailSection(title: L10n.string("ui.85788192fbeb1559")) {
             DetailValueRow(
                 title: "S.M.A.R.T.",
-                value: storageStatusText(disk.smartStatus) ?? "未提供"
+                value: storageStatusText(disk.smartStatus) ?? L10n.string("ui.756762e293f2aaff")
             )
             if let temperature = disk.temperatureCelsius {
                 Divider().opacity(0.4)
                 DetailValueRow(
-                    title: "温度",
+                    title: L10n.string("ui.3732e264dfa95cae"),
                     value: "\(temperature.formatted(.number.precision(.fractionLength(0))))℃"
                 )
             }
             if let estimatedLifePercent = disk.estimatedLifePercent {
                 Divider().opacity(0.4)
-                DetailValueRow(title: "预计寿命", value: "\(estimatedLifePercent)%")
+                DetailValueRow(title: L10n.string("ui.084cdd3bd691b577"), value: "\(estimatedLifePercent)%")
             }
             if let badSectorCount = disk.badSectorCount {
                 Divider().opacity(0.4)
-                DetailValueRow(title: "坏扇数", value: badSectorCount.formatted())
+                DetailValueRow(title: L10n.string("ui.59276986a35a5ee8"), value: badSectorCount.formatted())
             }
         }
 
@@ -2934,7 +2940,7 @@ private struct StorageDetailSheet: View {
 
     @ViewBuilder
     private func smartTestSection(_ disk: NasDisk) -> some View {
-        DetailSection(title: "S.M.A.R.T. 检测") {
+        DetailSection(title: L10n.string("ui.56407b34cf24fff9")) {
             if let testStatusError {
                 Label(testStatusError, systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)
@@ -2944,7 +2950,7 @@ private struct StorageDetailSheet: View {
             } else if isLoadingStatus, testStatus == nil {
                 HStack(spacing: 10) {
                     ProgressView()
-                    Text("正在读取检测状态…")
+                    Text(L10n.string("ui.f648f64ea3808f65"))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 8)
@@ -2952,7 +2958,7 @@ private struct StorageDetailSheet: View {
                 HStack(spacing: 12) {
                     ProgressView().controlSize(.small)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(testStatus?.runningType == .extended ? "正在进行完整检测" : "正在进行硬盘检测")
+                        Text(testStatus?.runningType == .extended ? L10n.string("ui.5348d00e4c4f4e24") : L10n.string("ui.a11397d11730995b"))
                             .font(.subheadline.weight(.medium))
                         if let progress = testStatus?.progressDescription, !progress.isEmpty {
                             Text(progress).font(.caption).foregroundStyle(.secondary)
@@ -2965,7 +2971,7 @@ private struct StorageDetailSheet: View {
                 .accessibilityElement(children: .combine)
             } else if testStatus?.isBusyWithOtherTest == true {
                 Label(
-                    "这块硬盘正在执行其他检测，完成后即可运行 S.M.A.R.T. 检测。",
+                    L10n.string("ui.05237464f2f31ef4"),
                     systemImage: "clock.badge.exclamationmark"
                 )
                 .font(.callout)
@@ -2976,17 +2982,17 @@ private struct StorageDetailSheet: View {
             if let testStatus {
                 if testStatus.isHistoryAvailable {
                     DetailValueRow(
-                        title: "上次快速检测",
+                        title: L10n.string("ui.785c6da4969257b2"),
                         value: smartTestTimeText(testStatus.lastQuickTest)
                     )
                     Divider().opacity(0.4)
                     DetailValueRow(
-                        title: "上次完整检测",
+                        title: L10n.string("ui.49b365c501f835cb"),
                         value: smartTestTimeText(testStatus.lastExtendedTest)
                     )
                 } else {
                     Label(
-                        "暂时无法读取检测记录，可点击“刷新状态”重试。",
+                        L10n.string("ui.a35aaa5ca137e151"),
                         systemImage: "exclamationmark.arrow.triangle.2.circlepath"
                     )
                     .font(.callout)
@@ -2997,30 +3003,30 @@ private struct StorageDetailSheet: View {
             }
             if let result = testStatus?.lastResult {
                 Divider().opacity(0.4)
-                DetailValueRow(title: "最近结果", value: smartResultText(result))
+                DetailValueRow(title: L10n.string("ui.8f0ef3b2b86d2fb3"), value: smartResultText(result))
             }
 
             Divider().opacity(0.4).padding(.vertical, 2)
 
             HStack(spacing: 10) {
                 if testStatus?.isRunning == true {
-                    Button("停止检测…", role: .destructive) {
+                    Button(L10n.string("ui.f26a82f0afc23414"), role: .destructive) {
                         showStopTestConfirm = true
                     }
                     .disabled(isLoadingStatus || isDiskBusy)
-                    .accessibilityHint("停止当前正在进行的硬盘检测")
+                    .accessibilityHint(L10n.string("ui.f13df6406802a1d9"))
                 } else {
-                    Button("快速检测…") {
+                    Button(L10n.string("ui.6e9caf206065b778")) {
                         pendingTestType = .quick
                     }
                     .disabled(!canStartTest(disk))
-                    .accessibilityHint("执行基本诊断，检查机械和电气问题")
+                    .accessibilityHint(L10n.string("ui.380485dd92387bc2"))
 
-                    Button("完整检测…") {
+                    Button(L10n.string("ui.5554d06b7b8152c6")) {
                         pendingTestType = .extended
                     }
                     .disabled(!canStartTest(disk))
-                    .accessibilityHint("扫描整块硬盘，可能需要数小时")
+                    .accessibilityHint(L10n.string("ui.bc3c58ae8d17d7f4"))
                 }
 
                 Spacer()
@@ -3028,17 +3034,17 @@ private struct StorageDetailSheet: View {
                 Button {
                     Task { await refreshTestStatus(disk.id, reportsError: true) }
                 } label: {
-                    Label("刷新状态", systemImage: "arrow.clockwise")
+                    Label(L10n.string("ui.802a407c774302aa"), systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(isLoadingStatus || isDiskBusy)
-                .accessibilityHint("重新读取当前检测状态和历史记录")
+                .accessibilityHint(L10n.string("ui.c535140a29494034"))
             }
             .padding(.top, 4)
 
             if !disk.supportsSmartTest {
-                Text("这块硬盘没有提供可用的 S.M.A.R.T. 检测功能。")
+                Text(L10n.string("ui.affdb1b5d9e5b288"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.top, 4)
@@ -3057,7 +3063,7 @@ private struct StorageDetailSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.title2.weight(.bold))
                 StatusPill(
-                    text: storageStatusText(status) ?? "状态未知",
+                    text: storageStatusText(status) ?? L10n.string("ui.93e474c68ed55647"),
                     isWarning: isWarning(status)
                 )
             }
@@ -3081,7 +3087,7 @@ private struct StorageDetailSheet: View {
     }
 
     private func diskNames(for ids: [String]) -> String {
-        guard !ids.isEmpty else { return "无" }
+        guard !ids.isEmpty else { return L10n.string("ui.484d55613910eb8c") }
         let names = ids.map { id in
             snapshot?.disks.first(where: { $0.id == id })?.name ?? id
         }
@@ -3090,11 +3096,11 @@ private struct StorageDetailSheet: View {
 
     private func diskModelDescription(_ disk: NasDisk) -> String {
         let value = [disk.vendor, disk.model].compactMap { $0 }.joined(separator: " ")
-        return value.isEmpty ? "未提供" : value
+        return value.isEmpty ? L10n.string("ui.756762e293f2aaff") : value
     }
 
     private func smartTestTimeText(_ value: String?) -> String {
-        guard let value, !value.isEmpty else { return "暂无记录" }
+        guard let value, !value.isEmpty else { return L10n.string("ui.46ca86da52b3db5c") }
         let date: Date?
         if let timestamp = Double(value) {
             date = Date(
@@ -3120,9 +3126,9 @@ private struct StorageDetailSheet: View {
 
     private var testConfirmationMessage: String {
         if pendingTestType == .extended {
-            return "完整检测会扫描整块硬盘，可能需要数小时，并可能暂时影响存储性能。建议在使用较少的时段运行。"
+            return L10n.string("ui.f9ce1451d7fa633a")
         }
-        return "快速检测会检查硬盘的基本机械和电气状态，运行期间请勿移除硬盘。"
+        return L10n.string("ui.ab28f3ef53f07e77")
     }
 
     private func beginTest(_ type: NasDiskTestType) {
@@ -3132,10 +3138,10 @@ private struct StorageDetailSheet: View {
         Task {
             do {
                 try await startTest(disk.id, type)
-                message = type == .extended ? "完整检测已开始。" : "快速检测已开始。"
+                message = type == .extended ? L10n.string("ui.13f8e4d6e493f0e2") : L10n.string("ui.7ca7666a8802812b")
             } catch {
                 message = (error as? AppError)?.safeUserMessage
-                    ?? "无法开始检测，请确认硬盘空闲后重试。"
+                    ?? L10n.string("ui.2283e70152a7033f")
             }
         }
     }
@@ -3146,10 +3152,10 @@ private struct StorageDetailSheet: View {
         Task {
             do {
                 try await stopTest(disk.id)
-                message = "硬盘检测已停止。"
+                message = L10n.string("ui.8ac5fb00b1e6f4cd")
             } catch {
                 message = (error as? AppError)?.safeUserMessage
-                    ?? "无法停止检测，请稍后刷新状态。"
+                    ?? L10n.string("ui.623aa2293401b4a5")
             }
         }
     }
@@ -3169,7 +3175,7 @@ private struct StorageDetailSheet: View {
         } catch {
             if reportsError {
                 testStatusError = (error as? AppError)?.safeUserMessage
-                    ?? "暂时无法读取检测状态，请稍后重试。"
+                    ?? L10n.string("ui.82e9fcbc8d0b608b")
             }
         }
     }
@@ -3247,7 +3253,7 @@ private struct PerformanceDashboard: View {
     @State private var isPerformingPowerAction = false
     @State private var isCheckingSystemUpdate = false
     @State private var actionMessage: String? = nil
-    @State private var updateAlertTitle: String = "系统更新"
+    @State private var updateAlertTitle: String = L10n.string("ui.101da319b2a7ef1c")
     @State private var updateAlertMessage: String? = nil
     @State private var showUpdateAlert = false
 
@@ -3264,18 +3270,18 @@ private struct PerformanceDashboard: View {
                 dashboardHeader
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 140, maximum: 220), spacing: 12)], spacing: 12) {
-                    MetricCard(title: "处理器", value: percent(latest?.cpuUsage), icon: "cpu", progress: latest?.cpuUsage, tint: .blue)
-                    MetricCard(title: "内存", value: percent(latest?.memoryUsage), icon: "memorychip", progress: latest?.memoryUsage, tint: .purple)
-                    MetricCard(title: "网络接收", value: speed(latest?.networkReceivedBytesPerSecond), icon: "arrow.down", tint: .green)
-                    MetricCard(title: "网络发送", value: speed(latest?.networkSentBytesPerSecond), icon: "arrow.up", tint: .teal)
-                    MetricCard(title: "硬盘读取", value: speed(latest?.diskReadBytesPerSecond), icon: "internaldrive", tint: .orange)
-                    MetricCard(title: "硬盘写入", value: speed(latest?.diskWriteBytesPerSecond), icon: "internaldrive.fill", tint: .indigo)
+                    MetricCard(title: L10n.string("ui.43b8de30fe4bab74"), value: percent(latest?.cpuUsage), icon: "cpu", progress: latest?.cpuUsage, tint: .blue)
+                    MetricCard(title: L10n.string("ui.7d8f8c37ec7885bc"), value: percent(latest?.memoryUsage), icon: "memorychip", progress: latest?.memoryUsage, tint: .purple)
+                    MetricCard(title: L10n.string("ui.686e07a16801ddf2"), value: speed(latest?.networkReceivedBytesPerSecond), icon: "arrow.down", tint: .green)
+                    MetricCard(title: L10n.string("ui.a40f7cba9a03065c"), value: speed(latest?.networkSentBytesPerSecond), icon: "arrow.up", tint: .teal)
+                    MetricCard(title: L10n.string("ui.374ea05318d9c904"), value: speed(latest?.diskReadBytesPerSecond), icon: "internaldrive", tint: .orange)
+                    MetricCard(title: L10n.string("ui.aa6da089e94a6b9f"), value: speed(latest?.diskWriteBytesPerSecond), icon: "internaldrive.fill", tint: .indigo)
                 }
 
                 if history.isEmpty {
                     HStack(spacing: 10) {
                         ProgressView()
-                        Text("正在读取实时性能数据…")
+                        Text(L10n.string("ui.3e89d0dc0208a69c"))
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
@@ -3283,21 +3289,21 @@ private struct PerformanceDashboard: View {
                 } else {
                     LazyVGrid(columns: mainDashboardColumns, spacing: 16) {
                         PerformanceChartCard(
-                            title: "资源使用率",
-                            subtitle: "处理器与内存",
+                            title: L10n.string("ui.02e204b5df587f2b"),
+                            subtitle: L10n.string("ui.7f5cc0a851ac4208"),
                             unit: "%",
                             chart: percentageChart
                         )
                         PerformanceChartCard(
-                            title: "网络速率",
-                            subtitle: "接收与发送",
-                            unit: "每秒",
+                            title: L10n.string("ui.b2341108e587a772"),
+                            subtitle: L10n.string("ui.aa9feeb265adaebf"),
+                            unit: L10n.string("ui.bb04885264dcd5f0"),
                             chart: networkChart
                         )
                         PerformanceChartCard(
-                            title: "存储速率",
-                            subtitle: "读取与写入",
-                            unit: "每秒",
+                            title: L10n.string("ui.66058307ba084ef2"),
+                            subtitle: L10n.string("ui.7578dff495c79979"),
+                            unit: L10n.string("ui.bb04885264dcd5f0"),
                             chart: storageChart
                         )
                         ActiveConnectionsCard(
@@ -3309,48 +3315,48 @@ private struct PerformanceDashboard: View {
             }
             .padding(20)
         }
-        .confirmationDialog("确定要关闭这台 NAS 吗？", isPresented: $showShutdownConfirm, titleVisibility: .visible) {
-            Button("确认关机", role: .destructive) {
+        .confirmationDialog(L10n.string("ui.8195cd7121749f82"), isPresented: $showShutdownConfirm, titleVisibility: .visible) {
+            Button(L10n.string("ui.bc9f788c6c9933bd"), role: .destructive) {
                 Task {
                     guard !isPerformingPowerAction else { return }
                     isPerformingPowerAction = true
                     defer { isPerformingPowerAction = false }
                     do {
                         try await onPerformPowerAction?(.shutdown)
-                        actionMessage = "NAS 已接受关机请求，连接即将中断。"
+                        actionMessage = L10n.string("ui.ffb3f3679c6343f0")
                     } catch {
-                        actionMessage = "无法关闭 NAS：\(powerActionError(error))"
+                        actionMessage = L10n.string("ui.170bef6bf5746898", String(describing: powerActionError(error)))
                     }
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("关机后将中断所有在线服务与文件共享，需人工按下物理按键方可再次开机。")
+            Text(L10n.string("ui.1883fa0694806094"))
         }
-        .confirmationDialog("确定要重启这台 NAS 吗？", isPresented: $showRebootConfirm, titleVisibility: .visible) {
-            Button("确认重启", role: .destructive) {
+        .confirmationDialog(L10n.string("ui.6a46e64958540614"), isPresented: $showRebootConfirm, titleVisibility: .visible) {
+            Button(L10n.string("ui.4a7dfba7106183fc"), role: .destructive) {
                 Task {
                     guard !isPerformingPowerAction else { return }
                     isPerformingPowerAction = true
                     defer { isPerformingPowerAction = false }
                     do {
                         try await onPerformPowerAction?(.reboot)
-                        updateAlertTitle = "电源请求已提交"
-                        updateAlertMessage = "NAS 已接受重启请求，连接与服务将暂时中断。"
+                        updateAlertTitle = L10n.string("ui.6bf34903da08500c")
+                        updateAlertMessage = L10n.string("ui.2dbb39e958cd5cfd")
                         showUpdateAlert = true
                     } catch {
-                        updateAlertTitle = "无法重启 NAS"
+                        updateAlertTitle = L10n.string("ui.a24adb66a42645c8")
                         updateAlertMessage = powerActionError(error)
                         showUpdateAlert = true
                     }
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("重启需要数分钟时间，期间网络连接和服务将暂时不可用。")
+            Text(L10n.string("ui.2d2b6c1494a654d7"))
         }
         .alert(updateAlertTitle, isPresented: $showUpdateAlert) {
-            Button("确定", role: .cancel) {}
+            Button(L10n.string("ui.fac2a67ad87807c4"), role: .cancel) {}
         } message: {
             if let updateAlertMessage {
                 Text(updateAlertMessage)
@@ -3389,7 +3395,7 @@ private struct PerformanceDashboard: View {
                     Button {
                         checkSystemUpdate()
                     } label: {
-                        Label("检查系统更新", systemImage: "arrow.down.circle")
+                        Label(L10n.string("ui.48954b3a9a918624"), systemImage: "arrow.down.circle")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -3399,16 +3405,16 @@ private struct PerformanceDashboard: View {
                         Button(role: .destructive) {
                             showRebootConfirm = true
                         } label: {
-                            Label("重启 NAS", systemImage: "arrow.clockwise.circle")
+                            Label(L10n.string("ui.301353687f12cedf"), systemImage: "arrow.clockwise.circle")
                         }
 
                         Button(role: .destructive) {
                             showShutdownConfirm = true
                         } label: {
-                            Label("关机", systemImage: "power")
+                            Label(L10n.string("ui.5acf2082d7fd4f9e"), systemImage: "power")
                         }
                     } label: {
-                        Label("电源操作", systemImage: "power")
+                        Label(L10n.string("ui.ec8d59ceec9ed48e"), systemImage: "power")
                     }
                     .menuStyle(.borderedButton)
                     .controlSize(.small)
@@ -3417,16 +3423,16 @@ private struct PerformanceDashboard: View {
                     Button {
                         isPaused.toggle()
                     } label: {
-                        Label(isPaused ? "继续更新" : "暂停更新", systemImage: isPaused ? "play.fill" : "pause.fill")
+                        Label(isPaused ? L10n.string("ui.a6d2451928165b24") : L10n.string("ui.8c78e736df180bf3"), systemImage: isPaused ? "play.fill" : "pause.fill")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help(isPaused ? "继续读取实时数据" : "暂时停止读取实时数据")
+                    .help(isPaused ? L10n.string("ui.55a1c68a11cec535") : L10n.string("ui.3520cd6a732829bb"))
 
                     Button {
                         Task { await refresh() }
                     } label: {
-                        Label("刷新", systemImage: "arrow.clockwise")
+                        Label(L10n.string("ui.aee88743413144a2"), systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
@@ -3435,15 +3441,15 @@ private struct PerformanceDashboard: View {
 
             if let overview {
                 HStack(spacing: 16) {
-                    SystemInfoBadge(icon: "cpu", label: "处理器", value: [overview.cpuModel, overview.cpuCoreCount.map { "\($0)核" }].compactMap { $0 }.joined(separator: " · "))
+                    SystemInfoBadge(icon: "cpu", label: L10n.string("ui.43b8de30fe4bab74"), value: [overview.cpuModel, overview.cpuCoreCount.map { L10n.string("ui.d28a48164279209f", String(describing: $0)) }].compactMap { $0 }.joined(separator: " · "))
                     if let memory = overview.memoryBytes {
-                        SystemInfoBadge(icon: "memorychip", label: "内存", value: ByteCountFormatter.string(fromByteCount: memory, countStyle: .memory))
+                        SystemInfoBadge(icon: "memorychip", label: L10n.string("ui.7d8f8c37ec7885bc"), value: ByteCountFormatter.string(fromByteCount: memory, countStyle: .memory))
                     }
                     if let temperature = overview.temperatureCelsius {
-                        SystemInfoBadge(icon: "thermometer.medium", label: "温度", value: "\(temperature.formatted(.number.precision(.fractionLength(0))))℃")
+                        SystemInfoBadge(icon: "thermometer.medium", label: L10n.string("ui.3732e264dfa95cae"), value: "\(temperature.formatted(.number.precision(.fractionLength(0))))℃")
                     }
                     if let uptime = overview.uptimeSeconds {
-                        SystemInfoBadge(icon: "clock", label: "已运行", value: uptimeDescription(uptime))
+                        SystemInfoBadge(icon: "clock", label: L10n.string("ui.1add43f798162a38"), value: uptimeDescription(uptime))
                     }
                 }
                 .padding(.vertical, 8)
@@ -3455,7 +3461,7 @@ private struct PerformanceDashboard: View {
 
     private func powerActionError(_ error: Error) -> String {
         (error as? AppError)?.safeUserMessage
-            ?? "请求没有完成，请确认当前账号有管理权限后重试。"
+            ?? L10n.string("ui.115497be67470c77")
     }
 
     private func checkSystemUpdate() {
@@ -3467,19 +3473,19 @@ private struct PerformanceDashboard: View {
                 let info = try await onCheckSystemUpdate()
                 if info.isUpdateAvailable {
                     let version = info.latestVersion.map { " \($0)" } ?? ""
-                    updateAlertTitle = "发现新版本"
-                    updateAlertMessage = "发现可用的系统更新\(version)。\n\n请在 DSM 控制面板中查看说明并安排安装。"
+                    updateAlertTitle = L10n.string("ui.ac217e4d1ca410f1")
+                    updateAlertMessage = L10n.string("ui.63a3e6c253c5323b", String(describing: version))
                 } else if let current = info.currentVersion {
-                    updateAlertTitle = "已是最新版本"
-                    updateAlertMessage = "当前系统（\(current)）已是最新版本，没有发现可用的系统更新。"
+                    updateAlertTitle = L10n.string("ui.bc310480b4ce9236")
+                    updateAlertMessage = L10n.string("ui.2744a3e4d928c6d6", String(describing: current))
                 } else {
-                    updateAlertTitle = "系统更新"
-                    updateAlertMessage = "当前没有发现可用的系统更新。"
+                    updateAlertTitle = L10n.string("ui.101da319b2a7ef1c")
+                    updateAlertMessage = L10n.string("ui.0d8f9e8efd964bef")
                 }
             } catch {
-                updateAlertTitle = "检查更新失败"
+                updateAlertTitle = L10n.string("ui.d07abfb11e7e0d48")
                 updateAlertMessage = (error as? AppError)?.safeUserMessage
-                    ?? "暂时无法检查系统更新，请确认网络与系统状态后重试。"
+                    ?? L10n.string("ui.e3b91993e9c3f67e")
             }
             showUpdateAlert = true
         }
@@ -3488,16 +3494,16 @@ private struct PerformanceDashboard: View {
     private var percentageChart: some View {
         Chart(history) { point in
             AreaMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("使用率", point.cpuUsage)
+                x: .value(L10n.string("ui.8b6ff498515bcc2f"), point.recordedAt),
+                y: .value(L10n.string("ui.9746ae777abb6dbf"), point.cpuUsage)
             )
-            .foregroundStyle(by: .value("指标", "处理器"))
+            .foregroundStyle(by: .value(L10n.string("ui.b87e67c7dae03991"), L10n.string("ui.43b8de30fe4bab74")))
 
             AreaMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("使用率", point.memoryUsage)
+                x: .value(L10n.string("ui.8b6ff498515bcc2f"), point.recordedAt),
+                y: .value(L10n.string("ui.9746ae777abb6dbf"), point.memoryUsage)
             )
-            .foregroundStyle(by: .value("指标", "内存"))
+            .foregroundStyle(by: .value(L10n.string("ui.b87e67c7dae03991"), L10n.string("ui.7d8f8c37ec7885bc")))
         }
         .chartYScale(domain: 0...100)
     }
@@ -3505,32 +3511,32 @@ private struct PerformanceDashboard: View {
     private var networkChart: some View {
         Chart(history) { point in
             LineMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("速率", Double(point.networkReceivedBytesPerSecond) / 1_024)
+                x: .value(L10n.string("ui.8b6ff498515bcc2f"), point.recordedAt),
+                y: .value(L10n.string("ui.a918a345eb435745"), Double(point.networkReceivedBytesPerSecond) / 1_024)
             )
-            .foregroundStyle(by: .value("方向", "接收"))
+            .foregroundStyle(by: .value(L10n.string("ui.1121471a0ff440f8"), L10n.string("ui.6e684586884ebee6")))
 
             LineMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("速率", Double(point.networkSentBytesPerSecond) / 1_024)
+                x: .value(L10n.string("ui.8b6ff498515bcc2f"), point.recordedAt),
+                y: .value(L10n.string("ui.a918a345eb435745"), Double(point.networkSentBytesPerSecond) / 1_024)
             )
-            .foregroundStyle(by: .value("方向", "发送"))
+            .foregroundStyle(by: .value(L10n.string("ui.1121471a0ff440f8"), L10n.string("ui.edecf0ae6e5144f9")))
         }
     }
 
     private var storageChart: some View {
         Chart(history) { point in
             LineMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("速率", Double(point.diskReadBytesPerSecond) / 1_024)
+                x: .value(L10n.string("ui.8b6ff498515bcc2f"), point.recordedAt),
+                y: .value(L10n.string("ui.a918a345eb435745"), Double(point.diskReadBytesPerSecond) / 1_024)
             )
-            .foregroundStyle(by: .value("操作", "读取"))
+            .foregroundStyle(by: .value(L10n.string("ui.ed31fbb483ee1b0a"), L10n.string("ui.534cb3fa8fbf373f")))
 
             LineMark(
-                x: .value("时间", point.recordedAt),
-                y: .value("速率", Double(point.diskWriteBytesPerSecond) / 1_024)
+                x: .value(L10n.string("ui.8b6ff498515bcc2f"), point.recordedAt),
+                y: .value(L10n.string("ui.a918a345eb435745"), Double(point.diskWriteBytesPerSecond) / 1_024)
             )
-            .foregroundStyle(by: .value("操作", "写入"))
+            .foregroundStyle(by: .value(L10n.string("ui.ed31fbb483ee1b0a"), L10n.string("ui.5c783c4679655185")))
         }
     }
 }
@@ -3566,8 +3572,8 @@ private struct PackageList: View {
         }
         var label: String {
             switch self {
-            case .grid: return "卡片"
-            case .list: return "列表"
+            case .grid: return L10n.string("ui.fb5640f8e12e3337")
+            case .list: return L10n.string("ui.aedd6814ff8c516c")
             }
         }
     }
@@ -3598,11 +3604,11 @@ private struct PackageList: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("共 \(filtered.count) 项")
+                Text(L10n.string("ui.9b8d987fe9376800", String(describing: filtered.count)))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Picker("视图模式", selection: $displayModeRaw) {
+                Picker(L10n.string("ui.9f8f3cc264bae3ce"), selection: $displayModeRaw) {
                     ForEach(DisplayMode.allCases) { mode in
                         Label(mode.label, systemImage: mode.icon).tag(mode.rawValue)
                     }
@@ -3617,7 +3623,7 @@ private struct PackageList: View {
             Divider()
 
             if filtered.isEmpty {
-                ContentUnavailableView("未找到匹配的套件", systemImage: "shippingbox", description: Text("尝试输入其他关键词搜索"))
+                ContentUnavailableView(L10n.string("ui.47938644fb53e315"), systemImage: "shippingbox", description: Text(L10n.string("ui.db67c6383ce3e747")))
                     .frame(maxHeight: .infinity)
             } else {
                 switch displayMode {
@@ -3651,12 +3657,12 @@ private struct PackageList: View {
             }
         }
         .navigationTitle(title)
-        .searchable(text: $searchText, prompt: "搜索套件名称或说明")
-        .alert("确定要卸载此套件吗？", isPresented: Binding(
+        .searchable(text: $searchText, prompt: L10n.string("ui.30f6e9928347c1d6"))
+        .alert(L10n.string("ui.bcdf89eee8276d3f"), isPresented: Binding(
             get: { packageToUninstall != nil },
             set: { if !$0 { packageToUninstall = nil } }
         )) {
-            Button("确认卸载", role: .destructive) {
+            Button(L10n.string("ui.4fec200ac3f7fc85"), role: .destructive) {
                 if let pkg = packageToUninstall {
                     packageToUninstall = nil
                     Task {
@@ -3666,23 +3672,23 @@ private struct PackageList: View {
                             actionError = packageActionError(
                                 error,
                                 packageName: pkg.name,
-                                actionText: "卸载"
+                                actionText: L10n.string("ui.06bc14b60f3598a3")
                             )
                         }
                     }
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
             if let pkg = packageToUninstall {
-                Text("将被卸载的套件：\(pkg.name)\n卸载后相关配置和应用数据可能会被清空。")
+                Text(L10n.string("ui.f1ff4c701fff6787", String(describing: pkg.name)))
             }
         }
-        .alert("套件操作提示", isPresented: Binding(
+        .alert(L10n.string("ui.e147727c86db353b"), isPresented: Binding(
             get: { actionError != nil },
             set: { if !$0 { actionError = nil } }
         )) {
-            Button("确定", role: .cancel) {}
+            Button(L10n.string("ui.fac2a67ad87807c4"), role: .cancel) {}
         } message: {
             if let actionError {
                 Text(actionError)
@@ -3699,7 +3705,7 @@ private struct PackageList: View {
             do {
                 try await onControlPackage?(package.id, action)
             } catch {
-                let actionText = action == .stop ? "暂停" : (action == .start ? "启动" : "更新")
+                let actionText = action == .stop ? L10n.string("ui.8d12fc0d4eb26021") : (action == .start ? L10n.string("ui.56410fc65314dfb5") : L10n.string("ui.3055a035f0eb7a8b"))
                 actionError = packageActionError(
                     error,
                     packageName: package.name,
@@ -3715,8 +3721,8 @@ private struct PackageList: View {
         actionText: String
     ) -> String {
         let message = (error as? AppError)?.safeUserMessage
-            ?? "操作没有完成，请稍后重试。"
-        return "无法\(actionText)套件“\(packageName)”：\(message)"
+            ?? L10n.string("ui.3c311955d51d6210")
+        return L10n.string("ui.f9e493557350b30d", String(describing: actionText), String(describing: packageName), String(describing: message))
     }
 }
 
@@ -3756,7 +3762,7 @@ private struct PackageCard: View {
 
             HStack(alignment: .center) {
                 StatusPill(
-                    text: package.statusDescription ?? package.status ?? "常规",
+                    text: package.statusDescription ?? package.status ?? L10n.string("ui.40fae00b7c6d8ac0"),
                     isWarning: isWarning(package.status)
                 )
 
@@ -3775,14 +3781,14 @@ private struct PackageCard: View {
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help("更新套件")
+                            .help(L10n.string("ui.5dafce9fd14a5c3d"))
                         }
 
                         if package.canStop {
                             Button {
                                 triggerAction(.stop)
                             } label: {
-                                Label("暂停", systemImage: "pause.fill")
+                                Label(L10n.string("ui.8d12fc0d4eb26021"), systemImage: "pause.fill")
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
@@ -3790,7 +3796,7 @@ private struct PackageCard: View {
                             Button {
                                 triggerAction(.start)
                             } label: {
-                                Label("启动", systemImage: "play.fill")
+                                Label(L10n.string("ui.56410fc65314dfb5"), systemImage: "play.fill")
                             }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
@@ -3809,23 +3815,23 @@ private struct PackageCard: View {
         .contextMenu {
             if package.canStart {
                 Button { triggerAction(.start) } label: {
-                    Label("启动套件", systemImage: "play.fill")
+                    Label(L10n.string("ui.15e634f8040489f5"), systemImage: "play.fill")
                 }
             }
             if package.canStop {
                 Button { triggerAction(.stop) } label: {
-                    Label("暂停套件", systemImage: "pause.fill")
+                    Label(L10n.string("ui.eba40655c00d97e6"), systemImage: "pause.fill")
                 }
             }
             if package.canUpgrade {
                 Button { triggerAction(.upgrade) } label: {
-                    Label("更新套件", systemImage: "arrow.triangle.2.circlepath")
+                    Label(L10n.string("ui.5dafce9fd14a5c3d"), systemImage: "arrow.triangle.2.circlepath")
                 }
             }
             if package.canUninstall {
                 Divider()
                 Button(role: .destructive) { triggerAction(.uninstall) } label: {
-                    Label("卸载套件…", systemImage: "trash")
+                    Label(L10n.string("ui.330dc1fd06685f18"), systemImage: "trash")
                 }
             }
         }
@@ -3860,7 +3866,7 @@ private struct PackageRow: View {
             Spacer()
 
             StatusPill(
-                text: package.statusDescription ?? package.status ?? "常规",
+                text: package.statusDescription ?? package.status ?? L10n.string("ui.40fae00b7c6d8ac0"),
                 isWarning: isWarning(package.status)
             )
 
@@ -3876,15 +3882,15 @@ private struct PackageRow: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .help("更新套件")
+                        .help(L10n.string("ui.5dafce9fd14a5c3d"))
                     }
 
                     if package.canStop {
-                        Button("暂停") { triggerAction(.stop) }
+                        Button(L10n.string("ui.8d12fc0d4eb26021")) { triggerAction(.stop) }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                     } else if package.canStart {
-                        Button("启动") { triggerAction(.start) }
+                        Button(L10n.string("ui.56410fc65314dfb5")) { triggerAction(.start) }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
                     }
@@ -3895,23 +3901,23 @@ private struct PackageRow: View {
         .contextMenu {
             if package.canStart {
                 Button { triggerAction(.start) } label: {
-                    Label("启动套件", systemImage: "play.fill")
+                    Label(L10n.string("ui.15e634f8040489f5"), systemImage: "play.fill")
                 }
             }
             if package.canStop {
                 Button { triggerAction(.stop) } label: {
-                    Label("暂停套件", systemImage: "pause.fill")
+                    Label(L10n.string("ui.eba40655c00d97e6"), systemImage: "pause.fill")
                 }
             }
             if package.canUpgrade {
                 Button { triggerAction(.upgrade) } label: {
-                    Label("更新套件", systemImage: "arrow.triangle.2.circlepath")
+                    Label(L10n.string("ui.5dafce9fd14a5c3d"), systemImage: "arrow.triangle.2.circlepath")
                 }
             }
             if package.canUninstall {
                 Divider()
                 Button(role: .destructive) { triggerAction(.uninstall) } label: {
-                    Label("卸载套件…", systemImage: "trash")
+                    Label(L10n.string("ui.330dc1fd06685f18"), systemImage: "trash")
                 }
             }
         }
@@ -3982,14 +3988,14 @@ private struct ScheduledTaskList: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("\(tasks.count) 个任务")
+                Text(L10n.string("ui.6d98ee97c17222de", String(describing: tasks.count)))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
 
-                Picker("展示方式", selection: $displayMode) {
+                Picker(L10n.string("ui.a9fd468be9c085d6"), selection: $displayMode) {
                     ForEach(DisplayMode.allCases) { mode in
-                        Label(mode.rawValue, systemImage: mode.icon).tag(mode)
+                        Label(L10n.string(mode.rawValue), systemImage: mode.icon).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -3999,7 +4005,7 @@ private struct ScheduledTaskList: View {
                 Button {
                     openEditor(for: nil, readOnly: false)
                 } label: {
-                    Label("新建任务", systemImage: "plus")
+                    Label(L10n.string("ui.6bee2372805a2fd7"), systemImage: "plus")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -4032,7 +4038,7 @@ private struct ScheduledTaskList: View {
                         } catch {
                             return userMessage(
                                 for: error,
-                                fallback: "没有保存这个任务，请检查内容后重试。"
+                                fallback: L10n.string("ui.e36b82a7a05a4b9c")
                             )
                         }
                     }
@@ -4049,49 +4055,49 @@ private struct ScheduledTaskList: View {
             )
         }
         .confirmationDialog(
-            "立即运行“\(pendingRun?.name ?? "")”？",
+            L10n.string("task.run.confirm", pendingRun?.name ?? ""),
             isPresented: Binding(
                 get: { pendingRun != nil },
                 set: { if !$0 { pendingRun = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("取消", role: .cancel) { pendingRun = nil }
-            Button("立即运行") {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { pendingRun = nil }
+            Button(L10n.string("ui.04eb539709cf130d")) {
                 guard let task = pendingRun else { return }
                 pendingRun = nil
                 perform { try await onRun(task) }
             }
         } message: {
-            Text("任务会在 NAS 上立即执行，可能影响正在使用的服务。")
+            Text(L10n.string("ui.385f09791aa95b34"))
         }
         .confirmationDialog(
-            "删除“\(pendingDelete?.name ?? "")”？",
+            L10n.string("task.delete.confirm", pendingDelete?.name ?? ""),
             isPresented: Binding(
                 get: { pendingDelete != nil },
                 set: { if !$0 { pendingDelete = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("取消", role: .cancel) { pendingDelete = nil }
-            Button("删除任务", role: .destructive) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { pendingDelete = nil }
+            Button(L10n.string("ui.29dfebea0fdac1f6"), role: .destructive) {
                 guard let task = pendingDelete else { return }
                 pendingDelete = nil
                 perform { try await onDelete(task) }
             }
         } message: {
-            Text("删除后，这个任务不会再自动运行。")
+            Text(L10n.string("ui.29e4c1ab37ce8a20"))
         }
         .alert(
-            "操作没有完成",
+            L10n.string("ui.7d6b5b294bc1297d"),
             isPresented: Binding(
                 get: { operationError != nil },
                 set: { if !$0 { operationError = nil } }
             )
         ) {
-            Button("确定") { operationError = nil }
+            Button(L10n.string("ui.fac2a67ad87807c4")) { operationError = nil }
         } message: {
-            Text(operationError ?? "请刷新后重试。")
+            Text(operationError ?? L10n.string("ui.5448ceb91a80e260"))
         }
     }
 
@@ -4112,7 +4118,7 @@ private struct ScheduledTaskList: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
-                    StatusPill(text: task.isEnabled ? "已启用" : "已停用", isWarning: false)
+                    StatusPill(text: task.isEnabled ? L10n.string("ui.dfb802238b38fbd4") : L10n.string("ui.a8c3698b5b8c485d"), isWarning: false)
                     if let next = task.nextTriggerDescription {
                         Text(next).font(.caption2).foregroundStyle(.secondary)
                     }
@@ -4127,7 +4133,7 @@ private struct ScheduledTaskList: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
-                    .accessibilityLabel("\(task.name)的更多操作")
+                    .accessibilityLabel(L10n.string("ui.f357af26f77463eb", String(describing: task.name)))
                 }
             }
             .padding(.vertical, 5)
@@ -4152,7 +4158,7 @@ private struct ScheduledTaskList: View {
                                 .font(.body.weight(.medium))
                                 .lineLimit(1)
                             Spacer()
-                            StatusPill(text: task.isEnabled ? "已启用" : "已停用", isWarning: false)
+                            StatusPill(text: task.isEnabled ? L10n.string("ui.dfb802238b38fbd4") : L10n.string("ui.a8c3698b5b8c485d"), isWarning: false)
                         }
 
                         Text([task.owner, task.type].compactMap { $0 }.joined(separator: " · "))
@@ -4210,17 +4216,17 @@ private struct ScheduledTaskList: View {
 
     @ViewBuilder
     private func taskMenu(for task: NasScheduledTask) -> some View {
-        Button("查看详情") {
+        Button(L10n.string("ui.a748cc074f78de00")) {
             openEditor(for: task, readOnly: true)
         }
-        Button("运行记录") {
+        Button(L10n.string("ui.6e55e0f207bfd2e0")) {
             resultsTask = task
         }
         if task.canEdit {
-            Button("修改…") {
+            Button(L10n.string("ui.1eff9b7d894c0ff9")) {
                 openEditor(for: task, readOnly: false)
             }
-            Button(task.isEnabled ? "停用" : "启用") {
+            Button(task.isEnabled ? L10n.string("ui.4e6fd0e28c55860b") : L10n.string("ui.f4f0ead1116b5b62")) {
                 perform {
                     try await onSetEnabled(task, !task.isEnabled)
                 }
@@ -4228,11 +4234,11 @@ private struct ScheduledTaskList: View {
         }
         if task.canRun {
             Divider()
-            Button("立即运行…") { pendingRun = task }
+            Button(L10n.string("ui.b8fcaa5efdab00ed")) { pendingRun = task }
         }
         if task.canEdit {
             Divider()
-            Button("删除…", role: .destructive) {
+            Button(L10n.string("ui.0552e329ccf875fb"), role: .destructive) {
                 pendingDelete = task
             }
         }
@@ -4247,7 +4253,7 @@ private struct ScheduledTaskList: View {
             } catch {
                 operationError = userMessage(
                     for: error,
-                    fallback: "暂时无法读取任务详情，请刷新后重试。"
+                    fallback: L10n.string("ui.38245f0b3e213b62")
                 )
             }
         }
@@ -4260,7 +4266,7 @@ private struct ScheduledTaskList: View {
             } catch {
                 operationError = userMessage(
                     for: error,
-                    fallback: "操作没有完成，请刷新后重试。"
+                    fallback: L10n.string("ui.5a0bab31173d86c4")
                 )
             }
         }
@@ -4293,9 +4299,9 @@ private struct ScheduledTaskResultsSheet: View {
                     .foregroundStyle(Color.accentColor)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("“\(task.name)”运行记录")
+                    Text(L10n.string("ui.8900caeb81733b85", String(describing: task.name)))
                         .font(.title3.weight(.bold))
-                    Text("查看任务在 NAS 上的历史执行状态与控制台输出")
+                    Text(L10n.string("ui.73aeeae6e000c78c"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -4304,13 +4310,13 @@ private struct ScheduledTaskResultsSheet: View {
                 Button {
                     Task { await refreshResults() }
                 } label: {
-                    Label("刷新", systemImage: "arrow.clockwise")
+                    Label(L10n.string("ui.aee88743413144a2"), systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(isLoading || isLoadingOutput)
 
-                Button("关闭") { dismiss() }
+                Button(L10n.string("ui.3fd47edce45b3603")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .controlSize(.small)
             }
@@ -4325,7 +4331,7 @@ private struct ScheduledTaskResultsSheet: View {
                 if isLoading, results.isEmpty {
                     VStack(spacing: 12) {
                         ProgressView().controlSize(.large)
-                        Text("正在读取运行记录…")
+                        Text(L10n.string("ui.ffd6030d3f286b7d"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -4337,9 +4343,9 @@ private struct ScheduledTaskResultsSheet: View {
                             .foregroundStyle(.secondary.opacity(0.6))
 
                         VStack(spacing: 6) {
-                            Text("还没有运行记录")
+                            Text(L10n.string("ui.35d7a7756ff23adf"))
                                 .font(.headline)
-                            Text(errorMessage ?? "这个任务尚未被自动或手动触发运行，或 NAS 当前没有保留历史结果。")
+                            Text(errorMessage ?? L10n.string("ui.50ddbbbaf7f947a1"))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
@@ -4349,7 +4355,7 @@ private struct ScheduledTaskResultsSheet: View {
                         Button {
                             Task { await refreshResults() }
                         } label: {
-                            Label("重新读取", systemImage: "arrow.clockwise")
+                            Label(L10n.string("ui.df7392cc96bedc51"), systemImage: "arrow.clockwise")
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
@@ -4369,13 +4375,13 @@ private struct ScheduledTaskResultsSheet: View {
                                     Image(systemName: result.exitCode == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
                                         .foregroundStyle(result.exitCode == 0 ? .green : .red)
                                         .accessibilityHidden(true)
-                                    Text(result.startedAt?.formatted(date: .abbreviated, time: .standard) ?? "时间未知")
+                                    Text(result.startedAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.string("ui.664939a1fa2ef755"))
                                         .font(.body.weight(.medium))
                                 }
                                 HStack {
-                                    StatusPill(text: result.exitCode == 0 ? "执行成功" : "执行失败", isWarning: result.exitCode != 0)
+                                    StatusPill(text: result.exitCode == 0 ? L10n.string("ui.ae3fb35412112cf9") : L10n.string("ui.9344597efd4950cc"), isWarning: result.exitCode != 0)
                                     if let code = result.exitCode {
-                                        Text("代码: \(code)").font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
+                                        Text(L10n.string("ui.331de778c25359db", String(describing: code))).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
                                     }
                                 }
                             }
@@ -4404,35 +4410,35 @@ private struct ScheduledTaskResultsSheet: View {
         if let result = selectedResult {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    DetailSection(title: "运行信息") {
+                    DetailSection(title: L10n.string("ui.0020a684697fef9d")) {
                         DetailValueRow(
-                            title: "开始时间",
-                            value: result.startedAt?.formatted(date: .long, time: .standard) ?? "未提供"
+                            title: L10n.string("ui.6a9906c79f26c0ba"),
+                            value: result.startedAt?.formatted(date: .long, time: .standard) ?? L10n.string("ui.756762e293f2aaff")
                         )
                         Divider().opacity(0.4)
                         DetailValueRow(
-                            title: "结束时间",
-                            value: result.stoppedAt?.formatted(date: .long, time: .standard) ?? "未提供"
+                            title: L10n.string("ui.f50276449943286c"),
+                            value: result.stoppedAt?.formatted(date: .long, time: .standard) ?? L10n.string("ui.756762e293f2aaff")
                         )
                         Divider().opacity(0.4)
                         DetailValueRow(
-                            title: "退出状态",
-                            value: result.exitCode.map(String.init) ?? result.exitType ?? "未提供"
+                            title: L10n.string("ui.de6e7e6afacd538e"),
+                            value: result.exitCode.map(String.init) ?? result.exitType ?? L10n.string("ui.756762e293f2aaff")
                         )
                         if let trigger = result.triggerEvent, !trigger.isEmpty {
                             Divider().opacity(0.4)
-                            DetailValueRow(title: "触发方式", value: trigger)
+                            DetailValueRow(title: L10n.string("ui.3c7b79b734942877"), value: trigger)
                         }
                     }
 
                     if isLoadingOutput {
-                        ProgressView("正在读取详细结果…")
+                        ProgressView(L10n.string("ui.518c7ce82817a812"))
                     } else if let errorMessage {
                         Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                     } else {
-                        TaskOutputSection(title: "执行内容", text: output?.command)
-                        TaskOutputSection(title: "运行输出", text: output?.output)
+                        TaskOutputSection(title: L10n.string("ui.7007f0b16e77f041"), text: output?.command)
+                        TaskOutputSection(title: L10n.string("ui.d144838a957a3066"), text: output?.output)
                     }
                 }
                 .padding(20)
@@ -4442,9 +4448,9 @@ private struct ScheduledTaskResultsSheet: View {
                 Image(systemName: "list.bullet.rectangle")
                     .font(.system(size: 36))
                     .foregroundStyle(.secondary.opacity(0.5))
-                Text("选择一次运行记录")
+                Text(L10n.string("ui.434c1311b62a64fd"))
                     .font(.headline)
-                Text("可以在左侧选择不同时间的执行记录，查看开始时间、退出码和完整输出。")
+                Text(L10n.string("ui.8bdde5a2fb782204"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -4471,7 +4477,7 @@ private struct ScheduledTaskResultsSheet: View {
             results = []
             errorMessage = userMessage(
                 for: error,
-                fallback: "暂时无法读取运行记录，请稍后重试。"
+                fallback: L10n.string("ui.1c556eade5e0c59b")
             )
         }
     }
@@ -4492,7 +4498,7 @@ private struct ScheduledTaskResultsSheet: View {
         } catch {
             errorMessage = userMessage(
                 for: error,
-                fallback: "暂时无法读取这次运行的详细结果。"
+                fallback: L10n.string("ui.a2ba336ac157d73a")
             )
         }
     }
@@ -4510,7 +4516,7 @@ private struct TaskOutputSection: View {
                     .foregroundStyle(.primary)
                 Spacer()
                 if let text, !text.isEmpty {
-                    Text("\(text.components(separatedBy: .newlines).count) 行")
+                    Text(L10n.string("ui.9068bbe511dfd9d8", String(describing: text.components(separatedBy: .newlines).count)))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -4518,7 +4524,7 @@ private struct TaskOutputSection: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 ScrollView([.horizontal, .vertical]) {
-                    Text(text.flatMap { $0.isEmpty ? nil : $0 } ?? "暂无输出日志内容")
+                    Text(text.flatMap { $0.isEmpty ? nil : $0 } ?? L10n.string("ui.10be5c3635676eb7"))
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(text?.isEmpty == false ? Color.primary : Color.secondary)
                         .textSelection(.enabled)
@@ -4565,15 +4571,15 @@ private struct ScheduledTaskEditor: View {
             // 顶栏 Header
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(isReadOnly ? "任务详情" : (draft.id == nil ? "新建任务" : "修改任务"))
+                    Text(isReadOnly ? L10n.string("ui.56b3909705f355fc") : (draft.id == nil ? L10n.string("ui.6bee2372805a2fd7") : L10n.string("ui.b1ff92551ca54adb")))
                         .font(.title3.weight(.bold))
-                    Text(isReadOnly ? "查看 NAS 计划任务配置" : "配置定期自动执行的系统脚本")
+                    Text(isReadOnly ? L10n.string("ui.0c77558bf9193a4f") : L10n.string("ui.00508bcf3ddc6a49"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 if !isReadOnly {
-                    Toggle("启用", isOn: $draft.isEnabled)
+                    Toggle(L10n.string("ui.f4f0ead1116b5b62"), isOn: $draft.isEnabled)
                         .toggleStyle(.switch)
                         .controlSize(.small)
                 }
@@ -4589,21 +4595,21 @@ private struct ScheduledTaskEditor: View {
                 VStack(alignment: .leading, spacing: 20) {
                     // 卡片1：基础配置
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("常规设置")
+                        Text(L10n.string("ui.d4743efb124c5c38"))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
                         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
                             GridRow {
-                                Text("任务名称")
+                                Text(L10n.string("ui.2479560deb339bea"))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                     .gridColumnAlignment(.trailing)
-                                TextField("如：自动清理临时文件", text: $draft.name)
+                                TextField(L10n.string("ui.00fab97819af9321"), text: $draft.name)
                                     .textFieldStyle(.roundedBorder)
                             }
                             GridRow {
-                                Text("执行账号")
+                                Text(L10n.string("ui.548203cd46ba4d4d"))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                 TextField("root / admin", text: $draft.owner)
@@ -4624,7 +4630,7 @@ private struct ScheduledTaskEditor: View {
 
                     // 卡片2：调度策略
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("运行调度")
+                        Text(L10n.string("ui.dc462e060ee7c1c6"))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
@@ -4633,22 +4639,22 @@ private struct ScheduledTaskEditor: View {
                                 Image(systemName: "clock")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
-                                Text("执行时间")
+                                Text(L10n.string("ui.45e03e436ed0f697"))
                                     .font(.subheadline)
                             }
 
                             HStack(spacing: 4) {
-                                Picker("小时", selection: $draft.schedule.hour) {
+                                Picker(L10n.string("ui.3b6fefc50febace4"), selection: $draft.schedule.hour) {
                                     ForEach(0..<24, id: \.self) { hour in
-                                        Text(String(format: "%02d 点", hour)).tag(hour)
+                                        Text(String(format: L10n.string("ui.15508e7440ce6517"), hour)).tag(hour)
                                     }
                                 }
                                 .labelsHidden()
                                 .fixedSize()
 
-                                Picker("分钟", selection: $draft.schedule.minute) {
+                                Picker(L10n.string("ui.bd957bc497aa1a41"), selection: $draft.schedule.minute) {
                                     ForEach(0..<60, id: \.self) { minute in
-                                        Text(String(format: "%02d 分", minute)).tag(minute)
+                                        Text(String(format: L10n.string("ui.e370c4e9dd79a3e9"), minute)).tag(minute)
                                     }
                                 }
                                 .labelsHidden()
@@ -4657,7 +4663,7 @@ private struct ScheduledTaskEditor: View {
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("重复运行日")
+                            Text(L10n.string("ui.6cd078d899dbed72"))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                             WeekdaySelector(selection: $draft.schedule.weekDays)
@@ -4677,11 +4683,11 @@ private struct ScheduledTaskEditor: View {
                     // 卡片3：命令编辑器
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("执行命令")
+                            Text(L10n.string("ui.be12f84c407f5a53"))
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Label("Shell 脚本", systemImage: "terminal")
+                            Label(L10n.string("ui.e07741f9a580b023"), systemImage: "terminal")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
@@ -4701,7 +4707,7 @@ private struct ScheduledTaskEditor: View {
                                 .frame(minHeight: 120, maxHeight: 200)
 
                             if draft.script.isEmpty {
-                                Text("输入要在 NAS 上运行的 Shell 命令，例如：\n/volume1/scripts/backup.sh")
+                                Text(L10n.string("ui.c2e9a19e629c31b5"))
                                     .font(.system(.body, design: .monospaced))
                                     .foregroundStyle(.tertiary)
                                     .padding(.top, 13)
@@ -4715,11 +4721,11 @@ private struct ScheduledTaskEditor: View {
                     // 卡片4：高级选项 (通知设置)
                     DisclosureGroup {
                         VStack(alignment: .leading, spacing: 10) {
-                            Toggle("只在运行失败时发送通知", isOn: $draft.notifyOnError)
+                            Toggle(L10n.string("ui.fc1f341d48da5901"), isOn: $draft.notifyOnError)
                                 .toggleStyle(.checkbox)
 
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("接收邮箱")
+                                Text(L10n.string("ui.045a035d525fa22f"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 TextField("admin@example.com", text: $draft.notificationEmails)
@@ -4728,7 +4734,7 @@ private struct ScheduledTaskEditor: View {
                         }
                         .padding(.top, 8)
                     } label: {
-                        Label("通知设置", systemImage: "bell")
+                        Label(L10n.string("ui.247ca01ae2808bf7"), systemImage: "bell")
                             .font(.subheadline.weight(.medium))
                     }
                     .padding(12)
@@ -4749,7 +4755,7 @@ private struct ScheduledTaskEditor: View {
                                 .foregroundStyle(.orange)
                                 .font(.body)
 
-                            Text("请确认脚本命令安全。任务将以所选账号的高权限在 NAS 设备上全速执行。")
+                            Text(L10n.string("ui.547f14499475c8e7"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -4787,7 +4793,7 @@ private struct ScheduledTaskEditor: View {
             // 底栏 Footer
             HStack {
                 Spacer()
-                Button(isReadOnly ? "关闭" : "取消", action: onCancel)
+                Button(isReadOnly ? L10n.string("ui.3fd47edce45b3603") : L10n.string("ui.2cd0f3be8738a86c"), action: onCancel)
                     .keyboardShortcut(.cancelAction)
 
                 if !isReadOnly {
@@ -4803,7 +4809,7 @@ private struct ScheduledTaskEditor: View {
                                 ProgressView()
                                     .controlSize(.small)
                             }
-                            Text("保存")
+                            Text(L10n.string("ui.a3030bf8f16dc63c"))
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -4827,13 +4833,13 @@ private struct ScheduledTaskEditor: View {
 private struct WeekdaySelector: View {
     @Binding var selection: String
     private let days = [
-        (0, "日", "星期日"),
-        (1, "一", "星期一"),
-        (2, "二", "星期二"),
-        (3, "三", "星期三"),
-        (4, "四", "星期四"),
-        (5, "五", "星期五"),
-        (6, "六", "星期六")
+        (0, L10n.string("ui.85217f7aff778414"), L10n.string("ui.7e06f3148f70f58c")),
+        (1, L10n.string("ui.51a75f4634dfa859"), L10n.string("ui.56451fdf19c23fb6")),
+        (2, L10n.string("ui.084b42f6e95e4e65"), L10n.string("ui.8621c00d3b2c45f7")),
+        (3, L10n.string("ui.a4c3313deb180960"), L10n.string("ui.23ae0a11ac5bab27")),
+        (4, L10n.string("ui.754a9d5828d502f1"), L10n.string("ui.478911d29ab88b95")),
+        (5, L10n.string("ui.c9b87f516a38ea36"), L10n.string("ui.6e5969e50e4df390")),
+        (6, L10n.string("ui.de07b5383874b2a3"), L10n.string("ui.7bb2f5ecaa1dc683"))
     ]
 
     private var selectedDays: Set<Int> {
@@ -4873,14 +4879,14 @@ private struct WeekdaySelector: View {
 
 private struct AccountDirectoryView: View {
     enum Scope: String, CaseIterable, Identifiable {
-        case users = "账号"
-        case groups = "群组"
+        case users = "ui.311bb313fdeca6aa"
+        case groups = "ui.f3f8bcf3f57de41f"
         var id: Self { self }
     }
 
     enum DisplayMode: String, CaseIterable, Identifiable {
-        case list = "列表"
-        case grid = "卡片"
+        case list = "ui.aedd6814ff8c516c"
+        case grid = "ui.fb5640f8e12e3337"
         var id: Self { self }
         var icon: String { self == .list ? "list.bullet" : "square.grid.2x2" }
     }
@@ -4912,17 +4918,17 @@ private struct AccountDirectoryView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Picker("显示内容", selection: $scope) {
+                Picker(L10n.string("ui.de90186fc66371a8"), selection: $scope) {
                     ForEach(Scope.allCases) { scope in
-                        Text("\(scope.rawValue) \(count(scope))").tag(scope)
+                        Text("\(L10n.string(scope.rawValue)) \(count(scope))").tag(scope)
                     }
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 320)
 
-                Picker("展示方式", selection: $displayMode) {
+                Picker(L10n.string("ui.a9fd468be9c085d6"), selection: $displayMode) {
                     ForEach(DisplayMode.allCases) { mode in
-                        Label(mode.rawValue, systemImage: mode.icon).tag(mode)
+                        Label(L10n.string(mode.rawValue), systemImage: mode.icon).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -4938,7 +4944,7 @@ private struct AccountDirectoryView: View {
                             } == true ? ["users"] : nil
                         )
                     } label: {
-                        Label("新建账号", systemImage: "plus")
+                        Label(L10n.string("ui.3afa11aa32529cb9"), systemImage: "plus")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
@@ -4947,7 +4953,7 @@ private struct AccountDirectoryView: View {
                     Button {
                         groupEditorDraft = NasGroupDraft()
                     } label: {
-                        Label("新建群组", systemImage: "plus")
+                        Label(L10n.string("ui.65435939fefcf576"), systemImage: "plus")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
@@ -4981,7 +4987,7 @@ private struct AccountDirectoryView: View {
                         } catch {
                             return userMessage(
                                 for: error,
-                                fallback: "没有保存这个账号，请检查内容后重试。"
+                                fallback: L10n.string("ui.4e175f38276efa53")
                             )
                         }
                     }
@@ -5006,7 +5012,7 @@ private struct AccountDirectoryView: View {
                         } catch {
                             return userMessage(
                                 for: error,
-                                fallback: "没有保存这个群组，请检查内容后重试。"
+                                fallback: L10n.string("ui.19b98ccdabc60873")
                             )
                         }
                     }
@@ -5014,15 +5020,21 @@ private struct AccountDirectoryView: View {
             }
         }
         .confirmationDialog(
-            "删除\(pendingDelete?.kind == .group ? "群组" : "账号")“\(pendingDelete?.name ?? "")”？",
+            L10n.string(
+                "account.delete.confirm",
+                pendingDelete?.kind == .group
+                    ? L10n.string("account.type.group")
+                    : L10n.string("account.type.user"),
+                pendingDelete?.name ?? ""
+            ),
             isPresented: Binding(
                 get: { pendingDelete != nil },
                 set: { if !$0 { pendingDelete = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("取消", role: .cancel) { pendingDelete = nil }
-            Button(pendingDelete?.kind == .group ? "删除群组" : "删除账号", role: .destructive) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { pendingDelete = nil }
+            Button(pendingDelete?.kind == .group ? L10n.string("ui.39dc22ae05f9eb06") : L10n.string("ui.cd3266d91ae10abc"), role: .destructive) {
                 guard let item = pendingDelete else { return }
                 pendingDelete = nil
                 Task {
@@ -5035,26 +5047,26 @@ private struct AccountDirectoryView: View {
                     } catch {
                         operationError = userMessage(
                             for: error,
-                            fallback: "没有删除这个账号，请刷新后重试。"
+                            fallback: L10n.string("ui.e0e2682d4801f7db")
                         )
                     }
                 }
             }
         } message: {
             if pendingDelete?.kind == .group {
-                Text("群组会从成员的权限设置中移除，账号本身不会被删除。")
+                Text(L10n.string("ui.dafbb926cc945ae1"))
             } else {
-                Text("这个账号将无法再登录 NAS。账号的个人文件是否保留由 NAS 的现有设置决定。")
+                Text(L10n.string("ui.d20250eee2ac6caa"))
             }
         }
         .alert(
-            "操作没有完成",
+            L10n.string("ui.7d6b5b294bc1297d"),
             isPresented: Binding(
                 get: { operationError != nil },
                 set: { if !$0 { operationError = nil } }
             )
         ) {
-            Button("确定") { operationError = nil }
+            Button(L10n.string("ui.fac2a67ad87807c4")) { operationError = nil }
         } message: {
             if let operationError {
                 Text(operationError)
@@ -5078,7 +5090,7 @@ private struct AccountDirectoryView: View {
                 }
                 Spacer()
                 if account.isExpired {
-                    StatusPill(text: "已停用", isWarning: true)
+                    StatusPill(text: L10n.string("ui.a8c3698b5b8c485d"), isWarning: true)
                 }
                 if let id = account.numericID {
                     Text("#\(id)").font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
@@ -5093,7 +5105,7 @@ private struct AccountDirectoryView: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
-                    .accessibilityLabel("\(account.name)的更多操作")
+                    .accessibilityLabel(L10n.string("ui.f357af26f77463eb", String(describing: account.name)))
                 } else if account.kind == .group, account.canEdit || account.canDelete {
                     Menu {
                         accountMenu(for: account)
@@ -5102,7 +5114,7 @@ private struct AccountDirectoryView: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
-                    .accessibilityLabel("\(account.name)的更多操作")
+                    .accessibilityLabel(L10n.string("ui.f357af26f77463eb", String(describing: account.name)))
                 }
             }
             .padding(.vertical, 5)
@@ -5112,7 +5124,7 @@ private struct AccountDirectoryView: View {
             }
             .accessibilityElement(children: .combine)
         }
-        .searchable(text: $searchText, prompt: "搜索\(scope.rawValue)")
+        .searchable(text: $searchText, prompt: L10n.string("ui.0f201cb88b5f99a3", L10n.string(scope.rawValue)))
     }
 
     private var gridContent: some View {
@@ -5136,7 +5148,7 @@ private struct AccountDirectoryView: View {
                             }
                             Spacer()
                             if account.isExpired {
-                                StatusPill(text: "已停用", isWarning: true)
+                                StatusPill(text: L10n.string("ui.a8c3698b5b8c485d"), isWarning: true)
                             }
                         }
 
@@ -5183,30 +5195,30 @@ private struct AccountDirectoryView: View {
             }
             .padding(20)
         }
-        .searchable(text: $searchText, prompt: "搜索\(scope.rawValue)")
+        .searchable(text: $searchText, prompt: L10n.string("ui.0f201cb88b5f99a3", L10n.string(scope.rawValue)))
     }
 
     @ViewBuilder
     private func accountMenu(for account: NasAccount) -> some View {
         if account.kind == .user {
             if account.canEdit {
-                Button("修改…") {
+                Button(L10n.string("ui.1eff9b7d894c0ff9")) {
                     openUserEditor(for: account)
                 }
             }
             if account.canDelete {
-                Button("删除…", role: .destructive) {
+                Button(L10n.string("ui.0552e329ccf875fb"), role: .destructive) {
                     pendingDelete = account
                 }
             }
         } else {
             if account.canEdit {
-                Button("修改…") {
+                Button(L10n.string("ui.1eff9b7d894c0ff9")) {
                     openGroupEditor(for: account)
                 }
             }
             if account.canDelete {
-                Button("删除…", role: .destructive) {
+                Button(L10n.string("ui.0552e329ccf875fb"), role: .destructive) {
                     pendingDelete = account
                 }
             }
@@ -5266,9 +5278,9 @@ private struct AccountEditor: View {
             // Header
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(draft.originalName == nil ? "新建账号" : "修改账号")
+                    Text(draft.originalName == nil ? L10n.string("ui.3afa11aa32529cb9") : L10n.string("ui.324b13154e4e60fc"))
                         .font(.title3.weight(.bold))
-                    Text(draft.originalName == nil ? "创建 NAS 系统访问与权限账号" : "更新现有的账号配置与登录凭证")
+                    Text(draft.originalName == nil ? L10n.string("ui.e8aa54377d97effc") : L10n.string("ui.74eaeed6953c8a0e"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -5285,29 +5297,29 @@ private struct AccountEditor: View {
                 VStack(alignment: .leading, spacing: 18) {
                     // 卡片1：常规信息
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("常规信息")
+                        Text(L10n.string("ui.5376ca741c1f56ad"))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
                         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
                             GridRow {
-                                Text("账号名称")
+                                Text(L10n.string("ui.19779e66852f82fc"))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                     .gridColumnAlignment(.trailing)
                                 VStack(alignment: .leading, spacing: 4) {
-                                    TextField("输入账号名称", text: $draft.name)
+                                    TextField(L10n.string("ui.937c0bce7323331f"), text: $draft.name)
                                         .textFieldStyle(.roundedBorder)
                                         .disabled(draft.originalName != nil)
                                     if draft.originalName != nil {
-                                        Text("已创建账号的名称不可修改")
+                                        Text(L10n.string("ui.8782d898e26733e5"))
                                             .font(.caption2)
                                             .foregroundStyle(.tertiary)
                                     }
                                 }
                             }
                             GridRow {
-                                Text("邮箱 (可选)")
+                                Text(L10n.string("ui.fa1d3771541290d6"))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                 TextField("user@example.com", text: $draft.email)
@@ -5315,10 +5327,10 @@ private struct AccountEditor: View {
                                     .textContentType(.emailAddress)
                             }
                             GridRow {
-                                Text("备注 (可选)")
+                                Text(L10n.string("ui.f7180079550edc42"))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
-                                TextField("填写账号说明或备注", text: $draft.description)
+                                TextField(L10n.string("ui.c0150cdbacc2c217"), text: $draft.description)
                                     .textFieldStyle(.roundedBorder)
                             }
                         }
@@ -5327,9 +5339,9 @@ private struct AccountEditor: View {
 
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("暂停账号登录")
+                                Text(L10n.string("ui.5549fd9845d7fcfc"))
                                     .font(.subheadline.weight(.medium))
-                                Text("开启后该账号将暂时无法登录 NAS 服务")
+                                Text(L10n.string("ui.e79ab23a5b386675"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -5375,7 +5387,7 @@ private struct AccountEditor: View {
                             }
                             .padding(.top, 8)
                         } label: {
-                            Label("所属群组", systemImage: "person.3")
+                            Label(L10n.string("ui.09c442dcc4bc1b43"), systemImage: "person.3")
                                 .font(.subheadline.weight(.medium))
                         }
                         .padding(12)
@@ -5392,25 +5404,25 @@ private struct AccountEditor: View {
 
                     // 卡片3：密码安全
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(draft.originalName == nil ? "设置登录密码" : "更改登录密码 (可选)")
+                        Text(draft.originalName == nil ? L10n.string("ui.d353cf2a684e1f27") : L10n.string("ui.3f0492dd3c0bd817"))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
                         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
                             GridRow {
-                                Text("登录密码")
+                                Text(L10n.string("ui.fb5bbea8d049c01d"))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                     .gridColumnAlignment(.trailing)
-                                SecureField(draft.originalName == nil ? "输入登录密码" : "留空表示保留原密码", text: $draft.password)
+                                SecureField(draft.originalName == nil ? L10n.string("ui.739d1cc26c305520") : L10n.string("ui.fa81e66107f6ec3d"), text: $draft.password)
                                     .textFieldStyle(.roundedBorder)
                                     .textContentType(.newPassword)
                             }
                             GridRow {
-                                Text("再次输入密码")
+                                Text(L10n.string("ui.d0c9a0e81079a7b2"))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
-                                SecureField("再次输入以确认", text: $draft.passwordConfirmation)
+                                SecureField(L10n.string("ui.090c778dd910a7ac"), text: $draft.passwordConfirmation)
                                     .textFieldStyle(.roundedBorder)
                                     .textContentType(.newPassword)
                             }
@@ -5420,7 +5432,7 @@ private struct AccountEditor: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "exclamationmark.circle.fill")
                                     .font(.caption)
-                                Text("两次输入的密码不一致")
+                                Text(L10n.string("ui.58807745708ed726"))
                                     .font(.caption)
                             }
                             .foregroundStyle(.red)
@@ -5456,7 +5468,7 @@ private struct AccountEditor: View {
             // Footer
             HStack {
                 Spacer()
-                Button("取消", action: onCancel)
+                Button(L10n.string("ui.2cd0f3be8738a86c"), action: onCancel)
                     .keyboardShortcut(.cancelAction)
                 Button {
                     isSaving = true
@@ -5470,7 +5482,7 @@ private struct AccountEditor: View {
                             ProgressView()
                                 .controlSize(.small)
                         }
-                        Text("保存")
+                        Text(L10n.string("ui.a3030bf8f16dc63c"))
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -5512,9 +5524,9 @@ private struct GroupEditor: View {
             // Header
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(draft.originalName == nil ? "新建群组" : "修改群组")
+                    Text(draft.originalName == nil ? L10n.string("ui.65435939fefcf576") : L10n.string("ui.631d7d2c234092f2"))
                         .font(.title3.weight(.bold))
-                    Text("管理 NAS 用户群组结构与权限划分")
+                    Text(L10n.string("ui.9473c7977cee8c09"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -5528,25 +5540,25 @@ private struct GroupEditor: View {
 
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("群组参数")
+                    Text(L10n.string("ui.53742a9ca2c94390"))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
                         GridRow {
-                            Text("群组名称")
+                            Text(L10n.string("ui.7f7f88883c30b3d1"))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .gridColumnAlignment(.trailing)
-                            TextField("输入群组名称", text: $draft.name)
+                            TextField(L10n.string("ui.ee9f98e0db8dca19"), text: $draft.name)
                                 .textFieldStyle(.roundedBorder)
                                 .disabled(draft.originalName != nil)
                         }
                         GridRow {
-                            Text("备注 (可选)")
+                            Text(L10n.string("ui.f7180079550edc42"))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            TextField("填写群组说明", text: $draft.description)
+                            TextField(L10n.string("ui.8773eadcd92b77fd"), text: $draft.description)
                                 .textFieldStyle(.roundedBorder)
                         }
                     }
@@ -5582,7 +5594,7 @@ private struct GroupEditor: View {
             // Footer
             HStack {
                 Spacer()
-                Button("取消", action: onCancel)
+                Button(L10n.string("ui.2cd0f3be8738a86c"), action: onCancel)
                     .keyboardShortcut(.cancelAction)
                 Button {
                     isSaving = true
@@ -5596,7 +5608,7 @@ private struct GroupEditor: View {
                             ProgressView()
                                 .controlSize(.small)
                         }
-                        Text("保存")
+                        Text(L10n.string("ui.a3030bf8f16dc63c"))
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -5621,14 +5633,14 @@ private struct ActiveConnectionsCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("当前连接", systemImage: "network")
+                Label(L10n.string("ui.e403ba5798ba13a4"), systemImage: "network")
                     .font(.headline)
                 Spacer()
                 Button {
                     onNavigate()
                 } label: {
                     HStack(spacing: 3) {
-                        Text("查看全部")
+                        Text(L10n.string("ui.fa2ff3c379a7c988"))
                         Image(systemName: "chevron.right")
                     }
                     .font(.caption.weight(.medium))
@@ -5643,7 +5655,7 @@ private struct ActiveConnectionsCard: View {
                         Text("\(page.connections.count)")
                             .font(.title2.weight(.bold))
                             .monospacedDigit()
-                        Text("个活动连接")
+                        Text(L10n.string("ui.d345a56ab5f39042"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -5677,7 +5689,7 @@ private struct ActiveConnectionsCard: View {
                         }
 
                         if page.connections.count > 5 {
-                            Text("另外包含 \(page.connections.count - 5) 个连接…")
+                            Text(L10n.string("ui.e6aace8c08efbfbf", String(describing: page.connections.count - 5)))
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                                 .padding(.top, 2)
@@ -5686,7 +5698,7 @@ private struct ActiveConnectionsCard: View {
                 }
             } else {
                 VStack(spacing: 6) {
-                    Text("暂无活动连接数据")
+                    Text(L10n.string("ui.51c4d3852f4b0d44"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -5712,10 +5724,10 @@ private struct LogEntryList: View {
     let onFetchPage: (Int, Int) async -> Void
 
     enum LogFilter: String, CaseIterable, Identifiable {
-        case all = "全部"
-        case error = "错误"
-        case warning = "警告"
-        case info = "信息"
+        case all = "ui.5c55a67935af8f45"
+        case error = "ui.0bc1fb72ae1be5c5"
+        case warning = "ui.a8b7a4480407ac8a"
+        case info = "ui.e7028601e7da793d"
 
         var id: Self { self }
     }
@@ -5754,8 +5766,8 @@ private struct LogEntryList: View {
             List(filteredEntries) { entry in
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
-                        StatusPill(text: entry.level ?? "信息", isWarning: isWarning(entry.level))
-                        Text(entry.source ?? "系统").font(.caption.weight(.semibold))
+                        StatusPill(text: entry.level ?? L10n.string("ui.e7028601e7da793d"), isWarning: isWarning(entry.level))
+                        Text(entry.source ?? L10n.string("ui.5b50d7c4b5950dc5")).font(.caption.weight(.semibold))
                         if let account = entry.account { Text(account).font(.caption).foregroundStyle(.secondary) }
                         Spacer()
                         if let date = entry.date {
@@ -5769,7 +5781,7 @@ private struct LogEntryList: View {
                 .padding(.vertical, 5)
                 .accessibilityElement(children: .combine)
             }
-            .searchable(text: $searchText, prompt: "搜索日志")
+            .searchable(text: $searchText, prompt: L10n.string("ui.1b9b75f51d2061d7"))
 
             Divider()
             paginationBar
@@ -5779,7 +5791,10 @@ private struct LogEntryList: View {
     private var filterHeaderBar: some View {
         HStack(spacing: 10) {
             FilterChipButton(
-                title: "\(page?.total.formatted() ?? "0") 条",
+                title: L10n.string(
+                    "nas.logs.total_count",
+                    page?.total.formatted() ?? "0"
+                ),
                 icon: "doc.text",
                 isSelected: selectedFilter == .all,
                 badgeColor: .accentColor
@@ -5788,7 +5803,7 @@ private struct LogEntryList: View {
             }
 
             FilterChipButton(
-                title: "\(page?.errorCount ?? 0) 个错误",
+                title: L10n.string("ui.8c04c080fcc61432", String(describing: page?.errorCount ?? 0)),
                 icon: "xmark.octagon.fill",
                 isSelected: selectedFilter == .error,
                 badgeColor: .red
@@ -5797,7 +5812,7 @@ private struct LogEntryList: View {
             }
 
             FilterChipButton(
-                title: "\(page?.warningCount ?? 0) 个警告",
+                title: L10n.string("ui.d8f4ace8370f7001", String(describing: page?.warningCount ?? 0)),
                 icon: "exclamationmark.triangle.fill",
                 isSelected: selectedFilter == .warning,
                 badgeColor: .orange
@@ -5806,7 +5821,7 @@ private struct LogEntryList: View {
             }
 
             FilterChipButton(
-                title: "信息",
+                title: L10n.string("ui.e7028601e7da793d"),
                 icon: "info.circle.fill",
                 isSelected: selectedFilter == .info,
                 badgeColor: .blue
@@ -5823,7 +5838,7 @@ private struct LogEntryList: View {
 
     private var paginationBar: some View {
         HStack(spacing: 12) {
-            Text("每页")
+            Text(L10n.string("ui.8c932f987c21bf0a"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -5833,16 +5848,16 @@ private struct LogEntryList: View {
                     Task { await onFetchPage(1, newSize) }
                 }
             )) {
-                Text("50 条").tag(50)
-                Text("100 条").tag(100)
-                Text("200 条").tag(200)
+                Text(L10n.string("ui.14118b6919402a94")).tag(50)
+                Text(L10n.string("ui.5bcf252872463a5a")).tag(100)
+                Text(L10n.string("ui.4b9fea4d5f57c2c3")).tag(200)
             }
             .pickerStyle(.menu)
             .fixedSize()
 
             Spacer()
 
-            Text("第 \(currentPage) / \(totalPages) 页 (共 \(page?.total ?? 0) 条)")
+            Text(L10n.string("ui.cbe23459337a9228", String(describing: currentPage), String(describing: totalPages), String(describing: page?.total ?? 0)))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
@@ -5855,7 +5870,7 @@ private struct LogEntryList: View {
                     Image(systemName: "chevron.left")
                 }
                 .disabled(currentPage <= 1)
-                .help("上一页")
+                .help(L10n.string("ui.c9b9ae7a61444ab7"))
 
                 Button {
                     guard currentPage < totalPages else { return }
@@ -5864,7 +5879,7 @@ private struct LogEntryList: View {
                     Image(systemName: "chevron.right")
                 }
                 .disabled(currentPage >= totalPages)
-                .help("下一页")
+                .help(L10n.string("ui.8a8542f6964852dc"))
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -5919,14 +5934,14 @@ private struct ConnectionList: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("\(page?.connections.count ?? 0) 个活跃连接")
+                Text(L10n.string("ui.33adfa1b256632d5", String(describing: page?.connections.count ?? 0)))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
 
-                Picker("展示方式", selection: $displayMode) {
+                Picker(L10n.string("ui.a9fd468be9c085d6"), selection: $displayMode) {
                     ForEach(DisplayMode.allCases) { mode in
-                        Label(mode.rawValue, systemImage: mode.icon).tag(mode)
+                        Label(L10n.string(mode.rawValue), systemImage: mode.icon).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -5942,15 +5957,18 @@ private struct ConnectionList: View {
             }
         }
         .confirmationDialog(
-            "断开“\(pendingDisconnect?.account ?? "")”的连接？",
+            L10n.string(
+                "nas.connections.disconnect.confirm",
+                pendingDisconnect?.account ?? L10n.string("ui.38e4b6b38c8a8eec")
+            ),
             isPresented: Binding(
                 get: { pendingDisconnect != nil },
                 set: { if !$0 { pendingDisconnect = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("取消", role: .cancel) { pendingDisconnect = nil }
-            Button("断开连接", role: .destructive) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { pendingDisconnect = nil }
+            Button(L10n.string("ui.a33f3804768e68ee"), role: .destructive) {
                 guard let connection = pendingDisconnect else { return }
                 pendingDisconnect = nil
                 Task {
@@ -5959,28 +5977,28 @@ private struct ConnectionList: View {
                     } catch {
                         operationError = userMessage(
                             for: error,
-                            fallback: "没有断开这个连接，请刷新后重试。"
+                            fallback: L10n.string("ui.7f7201fdd7e5afec")
                         )
                     }
                 }
             }
         } message: {
             if pendingDisconnect?.isCurrentConnection == true {
-                Text("这可能包括岚仓正在使用的会话。断开后，你可能需要重新登录 NAS。")
+                Text(L10n.string("ui.bfbc568f4cd9c80d"))
             } else {
-                Text("对方会立即退出当前会话，需要重新登录才能继续使用 NAS。")
+                Text(L10n.string("ui.faf68aeb4c262b5c"))
             }
         }
         .alert(
-            "没有断开连接",
+            L10n.string("ui.8811c5f235420b04"),
             isPresented: Binding(
                 get: { operationError != nil },
                 set: { if !$0 { operationError = nil } }
             )
         ) {
-            Button("确定") { operationError = nil }
+            Button(L10n.string("ui.fac2a67ad87807c4")) { operationError = nil }
         } message: {
-            Text(operationError ?? "请刷新后重试。")
+            Text(operationError ?? L10n.string("ui.5448ceb91a80e260"))
         }
     }
 
@@ -5994,7 +6012,7 @@ private struct ConnectionList: View {
                     HStack {
                         Text(connection.account).font(.body.weight(.medium))
                         if connection.isCurrentConnection {
-                            Text("当前连接").font(.caption2).foregroundStyle(.green)
+                            Text(L10n.string("ui.e403ba5798ba13a4")).font(.caption2).foregroundStyle(.green)
                         }
                     }
                     Text([connection.protocolName, connection.source, connection.location].compactMap { $0 }.joined(separator: " · "))
@@ -6013,14 +6031,14 @@ private struct ConnectionList: View {
                 if busyConnectionIDs.contains(connection.id) {
                     ProgressView()
                         .controlSize(.small)
-                        .accessibilityLabel("正在断开连接")
+                        .accessibilityLabel(L10n.string("ui.dc6ee00a278a45f5"))
                 } else if connection.canDisconnect {
-                    Button("断开") {
+                    Button(L10n.string("ui.f33ac04eece6a6a6")) {
                         pendingDisconnect = connection
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help("让这个设备或服务重新登录")
+                    .help(L10n.string("ui.719814130cbc3162"))
                 }
             }
             .padding(.vertical, 5)
@@ -6047,7 +6065,7 @@ private struct ConnectionList: View {
                                     .font(.body.weight(.medium))
                                     .lineLimit(1)
                                 if connection.isCurrentConnection {
-                                    Text("当前连接")
+                                    Text(L10n.string("ui.e403ba5798ba13a4"))
                                         .font(.caption2.weight(.semibold))
                                         .foregroundStyle(.green)
                                 }
@@ -6081,7 +6099,7 @@ private struct ConnectionList: View {
                             if busyConnectionIDs.contains(connection.id) {
                                 ProgressView().controlSize(.small)
                             } else if connection.canDisconnect {
-                                Button("断开") {
+                                Button(L10n.string("ui.f33ac04eece6a6a6")) {
                                     pendingDisconnect = connection
                                 }
                                 .buttonStyle(.bordered)
@@ -6112,7 +6130,7 @@ private struct ConnectionList: View {
     @ViewBuilder
     private func connectionMenu(for connection: NasConnection) -> some View {
         if connection.canDisconnect {
-            Button("断开连接…", role: .destructive) {
+            Button(L10n.string("ui.19715691e1f046cb"), role: .destructive) {
                 pendingDisconnect = connection
             }
         }
@@ -6149,7 +6167,7 @@ private struct LoadingAdministrationView: View {
     var body: some View {
         VStack(spacing: 12) {
             ProgressView()
-            Text("正在读取 NAS 信息…")
+            Text(L10n.string("ui.318846938ad187ec"))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -6163,26 +6181,26 @@ private struct AdministrationErrorView: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label("暂时无法显示", systemImage: "exclamationmark.triangle")
+            Label(L10n.string("ui.9482c10d4833f834"), systemImage: "exclamationmark.triangle")
         } description: {
             Text(message)
         } actions: {
-            Button("重新加载", action: retry)
+            Button(L10n.string("ui.7bdd5ce1e298a972"), action: retry)
         }
     }
 }
 
 private func percent(_ value: Double?) -> String {
-    value.map { "\($0.formatted(.number.precision(.fractionLength(0))))%" } ?? "正在读取"
+    value.map { "\($0.formatted(.number.precision(.fractionLength(0))))%" } ?? L10n.string("ui.2d1341db7717c694")
 }
 
 private func speed(_ value: Int64?) -> String {
-    guard let value else { return "正在读取" }
-    return "\(ByteCountFormatter.string(fromByteCount: value, countStyle: .file))/秒"
+    guard let value else { return L10n.string("ui.2d1341db7717c694") }
+    return L10n.string("ui.3b14d1af77ab3e3e", String(describing: ByteCountFormatter.string(fromByteCount: value, countStyle: .file)))
 }
 
 private func byteCount(_ value: Int64?) -> String {
-    value.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "未知"
+    value.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? L10n.string("ui.4d8c1c5b42830791")
 }
 
 private func availableBytes(used: Int64?, total: Int64?) -> Int64? {
@@ -6194,24 +6212,24 @@ private func storageStatusText(_ status: String?) -> String? {
     guard let status, !status.isEmpty else { return nil }
     switch status.lowercased() {
     case "normal", "healthy", "good", "smart_complete":
-        return "良好"
+        return L10n.string("ui.cfea0dce5c5d6d72")
     case "background":
-        return "正在检查"
+        return L10n.string("ui.d85ff08f9141848c")
     case "attention", "warning":
-        return "需要注意"
+        return L10n.string("ui.47a6e46e0880c994")
     case "not_use":
-        return "未初始化"
+        return L10n.string("ui.07564e6524ba73ad")
     case "sys_partition_normal":
-        return "已初始化"
+        return L10n.string("ui.c6d125d5b7100f6f")
     case "error", "failed", "critical", "abnormal":
-        return "异常"
+        return L10n.string("ui.428fb8bfeecf7f91")
     default:
         return status
     }
 }
 
 private func smartResultText(_ result: String) -> String {
-    storageStatusText(result) ?? "未提供"
+    storageStatusText(result) ?? L10n.string("ui.756762e293f2aaff")
 }
 
 private func isWarning(_ status: String?) -> Bool {
@@ -6234,7 +6252,7 @@ private func uptimeDescription(_ seconds: Int64) -> String {
     let days = seconds / 86_400
     let hours = seconds % 86_400 / 3_600
     let minutes = seconds % 3_600 / 60
-    if days > 0 { return "\(days) 天 \(hours) 小时" }
-    if hours > 0 { return "\(hours) 小时 \(minutes) 分钟" }
-    return "\(minutes) 分钟"
+    if days > 0 { return L10n.string("ui.ce52dbf8c0d2406e", String(describing: days), String(describing: hours)) }
+    if hours > 0 { return L10n.string("ui.8cf1ab2084092e4e", String(describing: hours), String(describing: minutes)) }
+    return L10n.string("ui.6885cad929bb5eae", String(describing: minutes))
 }

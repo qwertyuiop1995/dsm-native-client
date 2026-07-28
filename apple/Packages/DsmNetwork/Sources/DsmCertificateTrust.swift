@@ -2,6 +2,7 @@ import CryptoKit
 import DsmCore
 import Foundation
 import Security
+import DsmLocalization
 
 public struct DsmCertificateReview: Equatable, Sendable {
     public let host: String
@@ -47,11 +48,11 @@ extension DsmCertificateTrustError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .untrusted:
-            "无法自动确认这台 NAS 的身份，请核对安全信息后继续。"
+            L10n.string("shared.747b72d0d6fc61f9")
         case .changed:
-            "这台 NAS 的安全信息与上次不同，请确认设备是否刚刚更新过证书。"
+            L10n.string("shared.fef968eaed0aa357")
         case .invalid:
-            "这台 NAS 的证书已过期或无法用于安全连接，请先在 NAS 中更新证书。"
+            L10n.string("shared.3cc5b95fb6003934")
         }
     }
 }
@@ -150,7 +151,7 @@ final class DsmTLSDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate
         let fingerprint = SHA256.hash(data: data)
             .map { String(format: "%02X", $0) }
             .joined()
-        let subject = SecCertificateCopySubjectSummary(leaf) as String? ?? "未知证书"
+        let subject = SecCertificateCopySubjectSummary(leaf) as String? ?? L10n.string("shared.3436b7107f7e8dc4")
 
         var systemError: CFError?
         let systemTrusted = SecTrustEvaluateWithError(trust, &systemError)

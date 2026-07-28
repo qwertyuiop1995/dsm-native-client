@@ -1,5 +1,6 @@
 import AppKit
 import DsmCore
+import DsmLocalization
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -19,10 +20,10 @@ private enum FileGrouping: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .none: "不分组"
-        case .type: "按类型"
-        case .date: "按时间"
-        case .size: "按大小"
+        case .none: L10n.string("ui.fcd40ee3f05a3cfa")
+        case .type: L10n.string("ui.5ba65a74c4e792c5")
+        case .date: L10n.string("ui.5f622df4ed56933c")
+        case .size: L10n.string("ui.1d656a29f92194cc")
         }
     }
 }
@@ -136,19 +137,19 @@ struct WorkspaceView: View {
                     Button {
                         navigateBack()
                     } label: {
-                        Label("返回", systemImage: "chevron.backward")
+                        Label(L10n.string("ui.572cf45ba43634b3"), systemImage: "chevron.backward")
                     }
                     .disabled(!canNavigateBack)
-                    .help(isFileSection ? "返回上一个目录（⌘[）" : "返回刚才浏览的文件夹（⌘[）")
+                    .help(isFileSection ? L10n.string("ui.265f9b089511054a") : L10n.string("ui.09059160dce356aa"))
                     .keyboardShortcut("[", modifiers: .command)
 
                     Button {
                         navigateUp()
                     } label: {
-                        Label("上一级", systemImage: "arrow.up")
+                        Label(L10n.string("ui.8e7847be62b68c2b"), systemImage: "arrow.up")
                     }
                     .disabled(!canNavigateUp)
-                    .help("前往上一级目录")
+                    .help(L10n.string("ui.3f374e18fac0a39b"))
                 }
             }
 
@@ -159,7 +160,7 @@ struct WorkspaceView: View {
                     Button {
                         Task { await model.refresh() }
                     } label: {
-                        Label("刷新", systemImage: "arrow.clockwise")
+                        Label(L10n.string("ui.aee88743413144a2"), systemImage: "arrow.clockwise")
                     }
                     .disabled(model.currentPath.isEmpty || model.isRefreshing)
                     .keyboardShortcut("r", modifiers: .command)
@@ -167,71 +168,71 @@ struct WorkspaceView: View {
                     Button {
                         presentUploadPanel()
                     } label: {
-                        Label("上传", systemImage: "square.and.arrow.up")
+                        Label(L10n.string("ui.9e07e3c0532d4976"), systemImage: "square.and.arrow.up")
                     }
                     .disabled(!isFileSection)
-                    .help("上传文件到当前目录")
+                    .help(L10n.string("ui.f7c49cca76cd2166"))
 
                     Menu {
                         if model.selectedItems.count > 1 {
-                            Button("下载所选项目为压缩包…") {
+                            Button(L10n.string("ui.b97cad08035a15e2")) {
                                 presentBatchDownloadPanel(model.selectedItems)
                             }
                         } else if let item = model.selectedItem {
                             if item.isDirectory {
-                                Button("下载为压缩包…") {
+                                Button(L10n.string("ui.f956089b945b92cf")) {
                                     presentDownloadPanel(item, folderMode: .archive)
                                 }
-                                Button("下载为文件夹…") {
+                                Button(L10n.string("ui.0f50ddf3fa8bb870")) {
                                     presentDownloadPanel(item, folderMode: .directory)
                                 }
                             } else {
-                                Button("下载…") {
+                                Button(L10n.string("ui.29610562f4b1c377")) {
                                     presentDownloadPanel(item, folderMode: .archive)
                                 }
                             }
                         }
                     } label: {
-                        Label("下载", systemImage: "square.and.arrow.down")
+                        Label(L10n.string("ui.4673a23061656125"), systemImage: "square.and.arrow.down")
                     }
                     .disabled(model.selectedItem == nil)
-                    .help("下载文件夹时默认保存为压缩包，也可以保留原来的文件夹结构")
+                    .help(L10n.string("ui.3d8f89112076525f"))
 
                     Button {
                         shareTargets = model.selectedItems
                     } label: {
-                        Label("分享", systemImage: "link")
+                        Label(L10n.string("ui.7e564575eb7d5eb2"), systemImage: "link")
                     }
                     .disabled(model.selectedItems.isEmpty)
-                    .help("创建可发送给他人的下载链接")
+                    .help(L10n.string("ui.bcb4ca87b0024cf4"))
 
                     Button {
                         deleteTargets = model.selectedItems
                     } label: {
-                        Label("删除", systemImage: "trash")
+                        Label(L10n.string("ui.2f9daa828907b93f"), systemImage: "trash")
                     }
                     .disabled(model.selectedItems.isEmpty)
-                    .help("打开删除确认，不会直接删除")
+                    .help(L10n.string("ui.33006fc9ca3c7e3e"))
 
                     Button {
                         onPaste()
                     } label: {
-                        Label("粘贴", systemImage: "doc.on.clipboard")
+                        Label(L10n.string("ui.33517926747180e6"), systemImage: "doc.on.clipboard")
                     }
                     .disabled(!hasFileClipboard || !isFileSection)
-                    .help("复制或移动到当前目录")
+                    .help(L10n.string("ui.2246a02a18714b5b"))
                     .keyboardShortcut("v", modifiers: .command)
 
                     Button {
                         model.section = .transfers
                     } label: {
-                        Label("传输", systemImage: "arrow.up.arrow.down.circle")
+                        Label(L10n.string("ui.a2f59f64d2623d19"), systemImage: "arrow.up.arrow.down.circle")
                     }
                     .badge(model.activeTransferCount)
 
-                    Picker("视图模式", selection: $viewMode) {
-                        Label("列表", systemImage: "list.bullet").tag(FileViewMode.list)
-                        Label("图标", systemImage: "square.grid.3x3").tag(FileViewMode.grid)
+                    Picker(L10n.string("ui.9f8f3cc264bae3ce"), selection: $viewMode) {
+                        Label(L10n.string("ui.aedd6814ff8c516c"), systemImage: "list.bullet").tag(FileViewMode.list)
+                        Label(L10n.string("ui.0d720eeea26466dd"), systemImage: "square.grid.3x3").tag(FileViewMode.grid)
                     }
                     .pickerStyle(.segmented)
                     .disabled(!isFileSection)
@@ -244,47 +245,47 @@ struct WorkspaceView: View {
                     Button {
                         presentPhotoUploadPanel()
                     } label: {
-                        Label("上传", systemImage: "square.and.arrow.up")
+                        Label(L10n.string("ui.9e07e3c0532d4976"), systemImage: "square.and.arrow.up")
                     }
                     .disabled(model.photoLibrary.currentPath.isEmpty)
-                    .help("上传照片或视频到当前文件夹")
+                    .help(L10n.string("ui.05bbc74c43b8bd85"))
 
                     Button {
                         presentBatchDownloadPanel(model.photoLibrary.selectedItems.map(\.fileItem))
                     } label: {
-                        Label("下载", systemImage: "square.and.arrow.down")
+                        Label(L10n.string("ui.4673a23061656125"), systemImage: "square.and.arrow.down")
                     }
                     .disabled(model.photoLibrary.selectedItems.isEmpty)
-                    .help("将所选照片或视频保存为压缩包")
+                    .help(L10n.string("ui.9c859eb557775b37"))
 
                     Button {
                         shareTargets = model.photoLibrary.selectedItems.map(\.fileItem)
                     } label: {
-                        Label("分享", systemImage: "link")
+                        Label(L10n.string("ui.7e564575eb7d5eb2"), systemImage: "link")
                     }
                     .disabled(model.photoLibrary.selectedItems.isEmpty)
-                    .help("创建可发送给他人的下载链接")
+                    .help(L10n.string("ui.bcb4ca87b0024cf4"))
 
                     Button {
                         showingInfoItem = model.photoLibrary.selectedItems.first?.fileItem
                     } label: {
-                        Label("信息", systemImage: "info.circle")
+                        Label(L10n.string("ui.e7028601e7da793d"), systemImage: "info.circle")
                     }
                     .disabled(model.photoLibrary.selectedItems.count != 1)
-                    .help("查看拍摄时间、大小和所在位置")
+                    .help(L10n.string("ui.e8e8050316db3857"))
 
                     Button {
                         deleteTargets = model.photoLibrary.selectedItems.map(\.fileItem)
                     } label: {
-                        Label("删除", systemImage: "trash")
+                        Label(L10n.string("ui.2f9daa828907b93f"), systemImage: "trash")
                     }
                     .disabled(model.photoLibrary.selectedItems.isEmpty)
-                    .help("打开删除确认，不会直接删除")
+                    .help(L10n.string("ui.33006fc9ca3c7e3e"))
 
                     Button {
                         model.section = .transfers
                     } label: {
-                        Label("传输", systemImage: "arrow.up.arrow.down.circle")
+                        Label(L10n.string("ui.a2f59f64d2623d19"), systemImage: "arrow.up.arrow.down.circle")
                     }
                     .badge(model.activeTransferCount)
 
@@ -292,19 +293,19 @@ struct WorkspaceView: View {
                         Button {
                             Task { await model.photoLibrary.refreshAll() }
                         } label: {
-                            Label("重新扫描全部照片", systemImage: "arrow.clockwise")
+                            Label(L10n.string("ui.049019b1718726b4"), systemImage: "arrow.clockwise")
                         }
                     } label: {
-                        Label("更多照片操作", systemImage: "ellipsis.circle")
+                        Label(L10n.string("ui.ae163cfa2ee91303"), systemImage: "ellipsis.circle")
                     }
                     .disabled(
                         model.photoLibrary.isLoading
                             || model.photoLibrary.isLoadingTimeline
                             || model.photoLibrary.isRetryingTimelineFolders
                     )
-                    .help("更多照片操作")
+                    .help(L10n.string("ui.ae163cfa2ee91303"))
                 } else if model.section == .transfers {
-                    Button("清除已完成") {
+                    Button(L10n.string("ui.349c4b7eb1f36c5a")) {
                         clearCompleted()
                     }
                     .disabled(!canClearCompleted)
@@ -312,13 +313,13 @@ struct WorkspaceView: View {
                     Button {
                         restoreFileBrowser()
                     } label: {
-                        Label("返回文件", systemImage: "folder")
+                        Label(L10n.string("ui.72225d17027d36c7"), systemImage: "folder")
                     }
                     } else if model.section == .settings {
                         Button {
                             restoreFileBrowser()
                         } label: {
-                            Label("返回文件", systemImage: "folder")
+                            Label(L10n.string("ui.72225d17027d36c7"), systemImage: "folder")
                         }
                     }
                 }
@@ -347,18 +348,18 @@ struct WorkspaceView: View {
                     .zIndex(999)
             }
         }
-        .alert("恢复到原位置？", isPresented: restoreAlertPresented) {
-            Button("取消", role: .cancel) {
+        .alert(L10n.string("ui.9c82d7205cdc6a84"), isPresented: restoreAlertPresented) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 restoreTarget = nil
             }
-            Button("恢复") {
+            Button(L10n.string("ui.e0534b8a4e46a0cb")) {
                 if let item = restoreTarget {
                     model.restoreToOriginalLocation(item)
                 }
                 restoreTarget = nil
             }
         } message: {
-            Text("恢复前会检查目标目录和同名冲突；不会覆盖已有文件。")
+            Text(L10n.string("ui.2c33e68b793e860d"))
         }
         .sheet(item: $showingInfoItem) { item in
             FilePropertiesView(item: item, model: model)
@@ -371,13 +372,13 @@ struct WorkspaceView: View {
                 shareTargets = []
             }
         }
-        .alert("需要重新确认登录", isPresented: $model.requiresReauthentication) {
-            Button("重试") {
+        .alert(L10n.string("ui.9d8546855ba4a822"), isPresented: $model.requiresReauthentication) {
+            Button(L10n.string("ui.b8784c8dd5636ff2")) {
                 model.requiresReauthentication = false
                 Task { await model.load() }
             }
-            Button("重新登录") {
-                let message = model.statusMessage ?? "登录状态已失效，请重新登录。"
+            Button(L10n.string("ui.957244cdb9f232ab")) {
+                let message = model.statusMessage ?? L10n.string("ui.bd0bb959fbb4f47c")
                 Task { await onSessionExpired(message) }
             }
         } message: {
@@ -387,7 +388,10 @@ struct WorkspaceView: View {
     }
 
     private var reauthenticationMessage: String {
-        "\(model.statusMessage ?? "NAS 没有接受当前登录状态。")你可以先重试；如果仍然失败，请重新登录。"
+        L10n.string(
+            "auth.reauthentication.recovery",
+            model.statusMessage ?? L10n.string("auth.reauthentication.default")
+        )
     }
 
     /// 如果当前有未保存的文本编辑，弹出警告并阻止切换侧边栏栏目。
@@ -398,10 +402,10 @@ struct WorkspaceView: View {
     ) -> Bool {
         guard model.hasUnsavedTextEdits, newSection != previousSection else { return false }
         let alert = NSAlert()
-        alert.messageText = "请先处理未保存的修改"
-        alert.informativeText = "保存或取消当前文件的修改后，才能离开文件管理。"
+        alert.messageText = L10n.string("ui.98a339d246ed8e40")
+        alert.informativeText = L10n.string("ui.6744fcd7b7235a67")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "继续编辑")
+        alert.addButton(withTitle: L10n.string("ui.fd4b9e3b6c685bae"))
         alert.runModal()
         isRestoringSectionAfterUnsavedEdit = true
         model.section = previousSection
@@ -411,7 +415,7 @@ struct WorkspaceView: View {
     @ViewBuilder
     private var groupingMenu: some View {
         Menu {
-            Picker("分组方式", selection: $fileGrouping) {
+            Picker(L10n.string("ui.72148c2201764726"), selection: $fileGrouping) {
                 ForEach(FileGrouping.allCases) { grouping in
                     Text(grouping.title).tag(grouping)
                 }
@@ -419,35 +423,35 @@ struct WorkspaceView: View {
         } label: {
             Label(fileGrouping.title, systemImage: "rectangle.3.group")
         }
-        .help("选择图标视图中的文件分组方式")
+        .help(L10n.string("ui.493a93469c82d2d9"))
     }
 
     private var navigationTitle: String {
         switch model.section {
         case .favorites:
-            return "收藏"
+            return L10n.string("ui.60a53514eb9228a2")
         case .recent:
-            return "最近访问"
+            return L10n.string("ui.de314b445e076e84")
         case .remoteLocations:
-            return "远程位置"
+            return L10n.string("ui.6727073e65194528")
         case .sharedLinks:
-            return "分享管理"
+            return L10n.string("ui.76cdc4a13d1eecc0")
         case .photos:
-            return "照片"
+            return L10n.string("ui.7b50017ae47eca32")
         case .transfers:
-            return "传输中心"
+            return L10n.string("ui.74c2308f64b688ae")
         case .chat:
-            return "消息"
+            return L10n.string("ui.4da199fae933d4fa")
         case .nasSettings:
-            return "NAS 设置"
+            return L10n.string("ui.b1729f4b03c4b97d")
         case .downloadStation:
-            return "下载管理"
+            return L10n.string("ui.5248507df52ff455")
         case .containerManager:
-            return "容器管理"
+            return L10n.string("ui.aaf778d85ce5c2ed")
         case .virtualMachineManager:
-            return "虚拟机管理"
+            return L10n.string("ui.80c43bd2481c9580")
         case .settings:
-            return "设置"
+            return L10n.string("ui.df3d58c7d84b85f2")
         default:
             return (model.currentPath.isEmpty || model.currentPath == "/") ? model.profile.displayName : (model.currentPath.split(separator: "/").last.map(String.init) ?? model.currentPath)
         }
@@ -470,9 +474,9 @@ struct WorkspaceView: View {
         switch model.section {
         case .favorites:
             LocationCollectionView(
-                title: "收藏",
+                title: L10n.string("ui.60a53514eb9228a2"),
                 locations: model.favorites,
-                emptyMessage: "还没有收藏的文件夹。",
+                emptyMessage: L10n.string("ui.827428ead1987b8a"),
                 onOpen: openLocation,
                 onRemove: { location in model.toggleFavorite(path: location.path, name: location.name) }
             )
@@ -630,8 +634,8 @@ struct WorkspaceView: View {
 
     private func presentUploadPanel() {
         let panel = NSOpenPanel()
-        panel.title = "选择要上传的文件"
-        panel.prompt = "上传"
+        panel.title = L10n.string("ui.bf3f404e39b7d03e")
+        panel.prompt = L10n.string("ui.9e07e3c0532d4976")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
@@ -642,9 +646,9 @@ struct WorkspaceView: View {
 
     private func presentPhotoUploadPanel() {
         let panel = NSOpenPanel()
-        panel.title = "选择要添加的照片或视频"
-        panel.message = "所选项目会上传到当前照片文件夹。"
-        panel.prompt = "上传"
+        panel.title = L10n.string("ui.4ac6bc668684aba4")
+        panel.message = L10n.string("ui.61f2a0f5010d37cf")
+        panel.prompt = L10n.string("ui.9e07e3c0532d4976")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
@@ -664,11 +668,15 @@ struct WorkspaceView: View {
         let downloadsDirectoryAsArchive = item.isDirectory && folderMode == .archive
         let panel = NSSavePanel()
         panel.title = downloadsDirectoryAsArchive
-            ? "下载“\(item.name)”文件夹"
-            : (item.isDirectory ? "下载文件夹 \(item.name)" : "下载 \(item.name)")
+            ? L10n.string("ui.240d3a887010077f", String(describing: item.name))
+            : (
+                item.isDirectory
+                    ? L10n.string("folder.download.named", item.name)
+                    : L10n.string("ui.6e0814e3ae47bc99", String(describing: item.name))
+            )
         panel.message = downloadsDirectoryAsArchive
-            ? "下载后会得到一个压缩包，打开即可查看其中的全部内容。"
-            : (item.isDirectory ? "保留原目录结构并逐个下载其中的文件。" : "选择文件的保存位置。")
+            ? L10n.string("ui.5a83ac39313ee6d7")
+            : (item.isDirectory ? L10n.string("ui.079fb654ed51bcc6") : L10n.string("ui.09cf01aa643d7bb6"))
         panel.nameFieldStringValue = downloadsDirectoryAsArchive ? "\(item.name).zip" : item.name
         if downloadsDirectoryAsArchive {
             panel.allowedContentTypes = [.zip]
@@ -682,9 +690,9 @@ struct WorkspaceView: View {
     private func presentBatchDownloadPanel(_ items: [FileItem]) {
         guard !items.isEmpty else { return }
         let panel = NSSavePanel()
-        panel.title = "下载所选项目"
-        panel.message = "所选项目会保存为一个压缩包。"
-        panel.nameFieldStringValue = "下载项目.zip"
+        panel.title = L10n.string("ui.e07cc22167e60dff")
+        panel.message = L10n.string("ui.9d268900ee8b3e84")
+        panel.nameFieldStringValue = L10n.string("ui.9cfc76e4f86bc453")
         panel.allowedContentTypes = [.zip]
         panel.canCreateDirectories = true
         if panel.runModal() == .OK, let url = panel.url {
@@ -760,11 +768,11 @@ private final class FloatingPreviewWindowController: NSObject, NSWindowDelegate 
         }
         guard model.hasUnsavedTextEdits else { return true }
         let alert = NSAlert()
-        alert.messageText = "放弃未保存的修改？"
-        alert.informativeText = "关闭后，尚未保存到 NAS 的修改会丢失。"
+        alert.messageText = L10n.string("ui.01aeaa37eedefb79")
+        alert.informativeText = L10n.string("ui.f76d9fbcbb4dd66f")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "继续编辑")
-        alert.addButton(withTitle: "放弃修改")
+        alert.addButton(withTitle: L10n.string("ui.fd4b9e3b6c685bae"))
+        alert.addButton(withTitle: L10n.string("ui.9b7824cefa1e8b16"))
         guard alert.runModal() == .alertSecondButtonReturn else { return false }
         model.cancelTextEditing()
         return true
@@ -791,7 +799,7 @@ private final class FloatingPreviewWindowController: NSObject, NSWindowDelegate 
             backing: .buffered,
             defer: false
         )
-        previewWindow.title = "项目预览"
+        previewWindow.title = L10n.string("ui.326950f6b7b32e5b")
         previewWindow.titleVisibility = .hidden
         previewWindow.titlebarAppearsTransparent = true
         previewWindow.isMovableByWindowBackground = false
@@ -830,6 +838,36 @@ private final class FloatingPreviewWindowController: NSObject, NSWindowDelegate 
     }
 }
 
+private struct TruncationAwareText: View {
+    let title: String
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            Text(title)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+
+            Text(title)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(title)
+        }
+    }
+}
+
+private struct TruncationAwareLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label {
+            TruncationAwareText(title: title)
+        } icon: {
+            Image(systemName: systemImage)
+        }
+    }
+}
+
 private struct SidebarModuleLabel: View {
     let title: String
     let systemImage: String
@@ -843,8 +881,7 @@ private struct SidebarModuleLabel: View {
                 .font(.system(size: 17, weight: .semibold))
                 .frame(width: 22, height: 20, alignment: .center)
                 .accessibilityHidden(true)
-            Text(title)
-                .lineLimit(1)
+            TruncationAwareText(title: title)
         }
         .foregroundStyle(
             isSelected
@@ -873,7 +910,7 @@ private struct SidebarView: View {
 
     var body: some View {
         List(selection: $model.section) {
-            Section("NAS 设备", isExpanded: $isNasListExpanded) {
+            Section(L10n.string("ui.4084e8707628b196"), isExpanded: $isNasListExpanded) {
                 ForEach(profiles) { profile in
                     let isCurrent = profile.id == selectedProfileID
                     let isConnecting = connectingProfileID == profile.id
@@ -887,9 +924,11 @@ private struct SidebarView: View {
                         .foregroundStyle(isCurrent ? .blue : .secondary)
                         
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(profile.displayName)
+                            TruncationAwareText(title: profile.displayName)
                                 .font(.headline)
-                            Text(isCurrent ? "当前连接" : profile.host)
+                            TruncationAwareText(
+                                title: isCurrent ? L10n.string("ui.e403ba5798ba13a4") : profile.host
+                            )
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -903,7 +942,7 @@ private struct SidebarView: View {
                             Image(systemName: "checkmark")
                                 .foregroundStyle(.blue)
                                 .font(.system(size: 11, weight: .bold))
-                                .accessibilityLabel("当前 NAS")
+                                .accessibilityLabel(L10n.string("ui.01d5b647f634042d"))
                         }
                     }
                     .contentShape(Rectangle())
@@ -921,7 +960,10 @@ private struct SidebarView: View {
                 .onMove(perform: onMoveProfiles)
 
                 HStack {
-                    Label("添加 NAS", systemImage: "plus")
+                    TruncationAwareLabel(
+                        title: L10n.string("ui.8249cd04be30c505"),
+                        systemImage: "plus"
+                    )
                         .foregroundStyle(.blue)
                     Spacer()
                 }
@@ -944,7 +986,7 @@ private struct SidebarView: View {
                 Section {
                     NavigationLink(value: model.currentFileSection) {
                         SidebarModuleLabel(
-                            title: "文件浏览器",
+                            title: L10n.string("ui.8e8343f9178e476d"),
                             systemImage: "folder",
                             tint: .blue,
                             isSelected: model.section == model.currentFileSection
@@ -953,21 +995,33 @@ private struct SidebarView: View {
 
                     if showFileDetails {
                         NavigationLink(value: WorkspaceSection.favorites) {
-                            Label("收藏", systemImage: "star.fill")
+                            TruncationAwareLabel(
+                                title: L10n.string("ui.60a53514eb9228a2"),
+                                systemImage: "star.fill"
+                            )
                         }
                         NavigationLink(value: WorkspaceSection.recent) {
-                            Label("最近访问", systemImage: "clock")
+                            TruncationAwareLabel(
+                                title: L10n.string("ui.de314b445e076e84"),
+                                systemImage: "clock"
+                            )
                         }
                         NavigationLink(value: WorkspaceSection.remoteLocations) {
-                            Label("远程位置", systemImage: "network")
+                            TruncationAwareLabel(
+                                title: L10n.string("ui.6727073e65194528"),
+                                systemImage: "network"
+                            )
                         }
                         NavigationLink(value: WorkspaceSection.sharedLinks) {
-                            Label("分享管理", systemImage: "link")
+                            TruncationAwareLabel(
+                                title: L10n.string("ui.76cdc4a13d1eecc0"),
+                                systemImage: "link"
+                            )
                         }
                     }
                 } header: {
                     HStack {
-                        Text("文件管理")
+                        Text(L10n.string("ui.b3bd5ac7cc4d668b"))
                         Spacer()
                         Button {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -985,10 +1039,10 @@ private struct SidebarView: View {
             }
 
             if model.isPhotosModuleEnabled {
-                Section("照片管理") {
+                Section(L10n.string("ui.67c683672f7ff48d")) {
                     NavigationLink(value: WorkspaceSection.photos) {
                         SidebarModuleLabel(
-                            title: "照片",
+                            title: L10n.string("ui.7b50017ae47eca32"),
                             systemImage: "photo.on.rectangle.angled",
                             tint: .orange,
                             isSelected: model.section == .photos
@@ -998,10 +1052,10 @@ private struct SidebarView: View {
             }
 
             if model.isChatModuleEnabled {
-                Section("沟通") {
+                Section(L10n.string("ui.aadb2d9d805f9164")) {
                     NavigationLink(value: WorkspaceSection.chat) {
                         SidebarModuleLabel(
-                            title: "消息",
+                            title: L10n.string("ui.4da199fae933d4fa"),
                             systemImage: "bubble.left.and.bubble.right",
                             tint: .indigo,
                             isSelected: model.section == .chat
@@ -1012,9 +1066,9 @@ private struct SidebarView: View {
             }
 
             let enabledPackages: [(section: WorkspaceSection, title: String, icon: String, tint: Color)] = [
-                model.isDownloadStationModuleEnabled ? (WorkspaceSection.downloadStation, "下载管理", "arrow.down.circle", Color.green) : nil,
-                model.isContainerManagerModuleEnabled ? (WorkspaceSection.containerManager, "容器管理", "shippingbox", Color.blue) : nil,
-                model.isVirtualMachineManagerModuleEnabled ? (WorkspaceSection.virtualMachineManager, "虚拟机管理", "desktopcomputer", Color.indigo) : nil
+                model.isDownloadStationModuleEnabled ? (WorkspaceSection.downloadStation, L10n.string("ui.5248507df52ff455"), "arrow.down.circle", Color.green) : nil,
+                model.isContainerManagerModuleEnabled ? (WorkspaceSection.containerManager, L10n.string("ui.aaf778d85ce5c2ed"), "shippingbox", Color.blue) : nil,
+                model.isVirtualMachineManagerModuleEnabled ? (WorkspaceSection.virtualMachineManager, L10n.string("ui.80c43bd2481c9580"), "desktopcomputer", Color.indigo) : nil
             ].compactMap { $0 }
 
             if !enabledPackages.isEmpty {
@@ -1047,7 +1101,7 @@ private struct SidebarView: View {
                     }
                 } header: {
                     HStack {
-                        Text("套件管理")
+                        Text(L10n.string("ui.d7617d7b3b1fa180"))
                         if enabledPackages.count > 1 {
                             Spacer()
                             Button {
@@ -1070,7 +1124,7 @@ private struct SidebarView: View {
                 if model.isNasSettingsModuleEnabled {
                     NavigationLink(value: WorkspaceSection.nasSettings) {
                         SidebarModuleLabel(
-                            title: "NAS 设置",
+                            title: L10n.string("ui.b1729f4b03c4b97d"),
                             systemImage: "server.rack",
                             tint: .teal,
                             isSelected: model.section == .nasSettings
@@ -1079,12 +1133,18 @@ private struct SidebarView: View {
                 }
                 if model.isFileModuleEnabled {
                     NavigationLink(value: WorkspaceSection.transfers) {
-                        Label("传输中心", systemImage: "arrow.up.arrow.down.circle")
+                        TruncationAwareLabel(
+                            title: L10n.string("ui.74c2308f64b688ae"),
+                            systemImage: "arrow.up.arrow.down.circle"
+                        )
                             .badge(model.activeTransferCount)
                     }
                 }
                 NavigationLink(value: WorkspaceSection.settings) {
-                    Label("设置", systemImage: "gearshape")
+                    TruncationAwareLabel(
+                        title: L10n.string("ui.df3d58c7d84b85f2"),
+                        systemImage: "gearshape"
+                    )
                 }
             }
         }
@@ -1104,11 +1164,12 @@ private struct SidebarView: View {
                         .foregroundStyle(.green)
                         .frame(width: 20)
                         .accessibilityHidden(true)
-                    Text(connectionRoute?.title ?? "已连接")
+                    TruncationAwareText(
+                        title: connectionRoute?.title ?? L10n.string("ui.5be0323e8adcaeae")
+                    )
                         .font(.caption.weight(.medium))
-                        .lineLimit(1)
                     Spacer(minLength: 6)
-                    Button("退出") {
+                    Button(L10n.string("ui.498e1d59b4d787ee")) {
                         if model.activeTransferCount > 0 {
                             confirmsLogout = true
                         } else {
@@ -1118,20 +1179,20 @@ private struct SidebarView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(.red)
-                    .help("退出这台 NAS")
+                    .help(L10n.string("ui.eee4ecee6e6275ea"))
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
             }
             .background(.bar)
         }
-        .alert("退出这台 NAS？", isPresented: $confirmsLogout) {
-            Button("继续使用", role: .cancel) {}
-            Button("退出并取消任务", role: .destructive) {
+        .alert(L10n.string("ui.d6c03418feb80517"), isPresented: $confirmsLogout) {
+            Button(L10n.string("ui.a6474132ac36cbb9"), role: .cancel) {}
+            Button(L10n.string("ui.60c04f5366d555f1"), role: .destructive) {
                 Task { await onLogout() }
             }
         } message: {
-            Text("还有 \(model.activeTransferCount) 个任务正在进行。退出后，这些任务会被取消。")
+            Text(L10n.string("ui.32e3ea0fabc36062", String(describing: model.activeTransferCount)))
         }
     }
 }
@@ -1144,7 +1205,10 @@ private struct StorageCapacityView: View {
         VStack(alignment: .leading, spacing: 6) {
             if let summary {
                 HStack(spacing: 6) {
-                    Label("存储空间", systemImage: "internaldrive")
+                    TruncationAwareLabel(
+                        title: L10n.string("ui.26de3dd933ce00e3"),
+                        systemImage: "internaldrive"
+                    )
                         .font(.caption.weight(.semibold))
                     Spacer(minLength: 4)
                     Text(Self.format(summary.totalBytes))
@@ -1153,39 +1217,42 @@ private struct StorageCapacityView: View {
                 }
                 ProgressView(value: summary.usedFraction)
                     .progressViewStyle(.linear)
-                    .accessibilityLabel("存储空间使用情况")
+                    .accessibilityLabel(L10n.string("ui.042828ceb40655f9"))
                     .accessibilityValue(
-                        "已使用 \(Self.format(summary.usedBytes))，剩余 \(Self.format(summary.remainingBytes))"
+                        L10n.string("ui.d98de69897d983e7", String(describing: Self.format(summary.usedBytes)), String(describing: Self.format(summary.remainingBytes)))
                     )
-                Text("已用 \(Self.format(summary.usedBytes)) · 剩余 \(Self.format(summary.remainingBytes))")
+                Text(L10n.string("ui.3dd4b9257f2385ec", String(describing: Self.format(summary.usedBytes)), String(describing: Self.format(summary.remainingBytes))))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 if summary.volumeCount > 1 {
-                    Text("当前账号可见的 \(summary.volumeCount) 个存储空间合计")
+                    Text(L10n.string("ui.354a35ab2265ff7b", String(describing: summary.volumeCount)))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
             } else if isLoading {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("正在读取存储空间…")
+                    Text(L10n.string("ui.8b80123824c3c6d1"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Label("暂时无法读取存储空间", systemImage: "internaldrive")
+                Label(L10n.string("ui.1253e85101c3dc79"), systemImage: "internaldrive")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .help("显示当前登录账号可访问的存储空间，不包含无权查看的存储空间。")
+        .help(L10n.string("ui.8c1a000858cfcd2d"))
     }
 
     private static func format(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        bytes.formatted(
+            .byteCount(style: .file)
+                .locale(L10n.locale)
+        )
     }
 }
 
@@ -1218,7 +1285,7 @@ private struct LocationCollectionView: View {
                         .buttonStyle(.plain)
                         Spacer()
                         if let onRemove {
-                            Button("移除") { onRemove(location) }
+                            Button(L10n.string("ui.6135d4159e892541")) { onRemove(location) }
                                 .buttonStyle(.borderless)
                         }
                     }
@@ -1243,9 +1310,9 @@ private struct RecentLocationsView: View {
         Group {
             if locations.isEmpty {
                 ContentUnavailableView(
-                    "暂无最近访问",
+                    L10n.string("ui.b25d5816536d9ef0"),
                     systemImage: "clock",
-                    description: Text("打开过的文件夹会显示在这里。")
+                    description: Text(L10n.string("ui.32761759ec740ab3"))
                 )
             } else {
                 List(selection: $selection) {
@@ -1260,32 +1327,32 @@ private struct RecentLocationsView: View {
                                 Image(systemName: "folder.fill").foregroundStyle(.blue)
                             }
                             Spacer()
-                            Button("移除", systemImage: "xmark.circle") { onRemove(location) }
+                            Button(L10n.string("ui.6135d4159e892541"), systemImage: "xmark.circle") { onRemove(location) }
                                 .labelStyle(.iconOnly)
                                 .buttonStyle(.borderless)
-                                .help("从最近访问中移除")
+                                .help(L10n.string("ui.8c22e5562e176879"))
                         }
                         .contentShape(Rectangle())
                         .tag(location.id)
                         .onTapGesture(count: 2) { onOpen(location) }
                         .contextMenu {
-                            Button("从最近访问中移除", role: .destructive) { onRemove(location) }
+                            Button(L10n.string("ui.8c22e5562e176879"), role: .destructive) { onRemove(location) }
                         }
                     }
                 }
                 .toolbar {
-                    Button("清除全部", systemImage: "trash") { confirmsClearAll = true }
-                        .help("清除全部最近访问记录")
+                    Button(L10n.string("ui.55f1033fab699842"), systemImage: "trash") { confirmsClearAll = true }
+                        .help(L10n.string("ui.61c7e3ab7996a8ff"))
                 }
             }
         }
         .fillsAvailableContentArea()
-        .navigationTitle("最近访问")
-        .alert("清除全部最近访问记录？", isPresented: $confirmsClearAll) {
-            Button("取消", role: .cancel) {}
-            Button("清除全部", role: .destructive, action: onClearAll)
+        .navigationTitle(L10n.string("ui.de314b445e076e84"))
+        .alert(L10n.string("ui.9f192aaa3a4d5330"), isPresented: $confirmsClearAll) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
+            Button(L10n.string("ui.55f1033fab699842"), role: .destructive, action: onClearAll)
         } message: {
-            Text("这只会清除本机保存的访问记录，不会删除 NAS 中的文件。")
+            Text(L10n.string("ui.faadde4b2f41b490"))
         }
     }
 }
@@ -1301,7 +1368,7 @@ private struct RemoteLocationsView: View {
         let parent = model.shares.first(where: { $0.permissions?.canWrite == true })?.path
             ?? model.shares.first?.path
             ?? "/home"
-        return parent + "/远程位置"
+        return parent + L10n.string("ui.d8d872031d5fe104")
     }
 
     var body: some View {
@@ -1309,16 +1376,16 @@ private struct RemoteLocationsView: View {
             if model.remoteLocations.isEmpty {
                 VStack(spacing: 16) {
                     ContentUnavailableView(
-                        "没有远程位置",
+                        L10n.string("ui.9155045b349728e4"),
                         systemImage: "network",
                         description: Text(
                             model.allowsRemoteMountManagement
-                                ? "连接另一台设备上的共享文件夹后，会显示在这里。"
-                                : "这台 NAS 暂不提供远程位置管理。"
+                                ? L10n.string("ui.5021ceb1d3b63a2b")
+                                : L10n.string("ui.fe08319f29c48252")
                         )
                     )
                     if model.allowsRemoteMountManagement {
-                        Button("连接远程位置") { showsCreate = true }
+                        Button(L10n.string("ui.21539a2c4f05e43d")) { showsCreate = true }
                     }
                 }
             } else {
@@ -1337,29 +1404,29 @@ private struct RemoteLocationsView: View {
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
-                        Button("打开") { onOpen(location) }
+                        Button(L10n.string("ui.c771248e511fbf93")) { onOpen(location) }
                         if model.allowsRemoteMountManagement {
                             Divider()
-                            Button("修改连接…") { editingItem = location }
-                            Button("删除远程位置…", role: .destructive) { removingItem = location }
+                            Button(L10n.string("ui.27765faa9412fc59")) { editingItem = location }
+                            Button(L10n.string("ui.94a750d92afbec3e"), role: .destructive) { removingItem = location }
                         }
                     }
                 }
             }
         }
         .fillsAvailableContentArea()
-        .navigationTitle("远程位置")
+        .navigationTitle(L10n.string("ui.6727073e65194528"))
         .toolbar {
             Button {
                 showsCreate = true
             } label: {
-                Label("连接远程位置", systemImage: "plus")
+                Label(L10n.string("ui.21539a2c4f05e43d"), systemImage: "plus")
             }
             .disabled(!model.allowsRemoteMountManagement || model.isManagingRemoteMount)
             .help(
                 model.allowsRemoteMountManagement
-                    ? "连接另一台设备上的 SMB 或 NFS 共享文件夹"
-                    : "这台 NAS 暂不提供远程位置管理"
+                    ? L10n.string("ui.47be2e832d971204")
+                    : L10n.string("ui.0b41577c05d286f3")
             )
         }
         .sheet(isPresented: $showsCreate) {
@@ -1368,7 +1435,7 @@ private struct RemoteLocationsView: View {
                 initialMountPoint: defaultMountPoint
             ) { configuration in
                 let succeeded = await model.createRemoteMount(configuration)
-                return succeeded ? nil : (model.statusMessage ?? "远程位置没有连接成功，请检查设置后重试。")
+                return succeeded ? nil : (model.statusMessage ?? L10n.string("ui.b6a766fd18efca46"))
             }
         }
         .sheet(item: $editingItem) { item in
@@ -1377,27 +1444,27 @@ private struct RemoteLocationsView: View {
                 initialMountPoint: item.path
             ) { configuration in
                 let succeeded = await model.updateRemoteMount(item, configuration: configuration)
-                return succeeded ? nil : (model.statusMessage ?? "远程位置没有更新，请检查设置后重试。")
+                return succeeded ? nil : (model.statusMessage ?? L10n.string("ui.7d859f1cdcf0302b"))
             }
         }
-        .alert("删除这个远程位置？", isPresented: Binding(
+        .alert(L10n.string("ui.d1df2211a0b4fb89"), isPresented: Binding(
             get: { removingItem != nil },
             set: { if !$0 { removingItem = nil } }
         )) {
-            Button("取消", role: .cancel) { removingItem = nil }
-            Button("删除远程位置", role: .destructive) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { removingItem = nil }
+            Button(L10n.string("ui.96ded06c37b28ebc"), role: .destructive) {
                 guard let item = removingItem else { return }
                 removingItem = nil
                 Task { _ = await model.removeRemoteMount(item) }
             }
         } message: {
-            Text("只会断开这个远程位置，不会删除远程设备中的文件。")
+            Text(L10n.string("ui.9400b6a479badb98"))
         }
     }
 
     private func remoteLocationDescription(_ item: FileItem) -> String {
         let type = item.mountPointType?.lowercased() ?? ""
-        let protocolName = type.contains("nfs") ? "NFS" : type.contains("cifs") || type.contains("smb") ? "SMB" : "远程存储"
+        let protocolName = type.contains("nfs") ? "NFS" : type.contains("cifs") || type.contains("smb") ? "SMB" : L10n.string("ui.c201790492030d84")
         return "\(protocolName) · \(item.path)"
     }
 }
@@ -1433,36 +1500,36 @@ private struct RemoteMountEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Label(
-                existingItem == nil ? "连接远程位置" : "修改远程位置",
+                existingItem == nil ? L10n.string("ui.21539a2c4f05e43d") : L10n.string("ui.3070367ee12e6c91"),
                 systemImage: "network"
             )
             .font(.title2.weight(.semibold))
 
             if existingItem != nil {
-                Text("为保护连接密码，修改时需要重新填写远程地址和账号。保存时会短暂断开原连接。")
+                Text(L10n.string("ui.2752260d080806b1"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
-                Text("把另一台设备上的共享文件夹连接到这台 NAS。")
+                Text(L10n.string("ui.12440134971860f7"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
             Form {
-                Picker("连接方式", selection: $protocolType) {
-                    Text("SMB（常用）").tag(RemoteMountProtocol.smb)
-                    Text("NFS").tag(RemoteMountProtocol.nfs)
+                Picker(L10n.string("ui.485a26050ce57431"), selection: $protocolType) {
+                    Text(L10n.string("ui.a8321322c1053180")).tag(RemoteMountProtocol.smb)
+                    Text(L10n.string("protocol.nfs")).tag(RemoteMountProtocol.nfs)
                 }
-                TextField("服务器地址", text: $server, prompt: Text("例如 192.168.1.20"))
-                TextField("远程共享文件夹", text: $remotePath, prompt: Text("例如 documents"))
-                TextField("挂载到", text: $mountPoint, prompt: Text("例如 /home/远程资料"))
+                TextField(L10n.string("ui.d3716cc5a2f5a810"), text: $server, prompt: Text(L10n.string("ui.d7cebe5eb5bbe1b4")))
+                TextField(L10n.string("ui.9545e72a358cec9f"), text: $remotePath, prompt: Text(L10n.string("ui.cabd6e6b138047b3")))
+                TextField(L10n.string("ui.23efe7b33221d11f"), text: $mountPoint, prompt: Text(L10n.string("ui.f2201180d039ff88")))
 
                 if protocolType == .smb {
-                    TextField("用户名", text: $username)
-                    SecureField("密码", text: $password)
-                    TextField("域（可选）", text: $domain)
+                    TextField(L10n.string("ui.1a3f0617d6de8e52"), text: $username)
+                    SecureField(L10n.string("ui.a621ab606db2a11f"), text: $password)
+                    TextField(L10n.string("ui.99ac911a386914a8"), text: $domain)
                 }
-                Toggle("只读连接", isOn: $readOnly)
+                Toggle(L10n.string("ui.ac9d2114005fe37f"), isOn: $readOnly)
             }
             .formStyle(.grouped)
 
@@ -1470,15 +1537,15 @@ private struct RemoteMountEditorView: View {
                 Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)
                     .foregroundStyle(.red)
-                    .accessibilityLabel("连接失败：\(errorMessage)")
+                    .accessibilityLabel(L10n.string("ui.c23788be4567dc28", String(describing: errorMessage)))
             }
 
             HStack {
                 Spacer()
-                Button("取消") { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(isSubmitting)
-                Button(existingItem == nil ? "连接" : "保存修改") {
+                Button(existingItem == nil ? L10n.string("ui.a5574109f0208e89") : L10n.string("ui.991bb7cfe5a81550")) {
                     submit()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -1539,31 +1606,35 @@ private struct ShareCreationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("创建分享链接").font(.title2.weight(.semibold))
-            Text(targets.count == 1 ? "分享“\(targets[0].name)”" : "分享所选的 \(targets.count) 个项目")
+            Text(L10n.string("ui.4c4f2eb53c85407b")).font(.title2.weight(.semibold))
+            Text(
+                targets.count == 1
+                    ? L10n.string("item.share.named", targets[0].name)
+                    : L10n.string("ui.e1b60edbc9502ad7", String(describing: targets.count))
+            )
                 .foregroundStyle(.secondary)
             Form {
                 VStack(alignment: .leading, spacing: 4) {
-                    SecureField("访问密码（可选）", text: $password)
+                    SecureField(L10n.string("ui.145ffb632a72ddbd"), text: $password)
                         .onChange(of: password) { _, value in
                             if value.count > 16 { password = String(value.prefix(16)) }
                         }
-                    Text("最多 16 个字符").font(.caption).foregroundStyle(.secondary)
+                    Text(L10n.string("ui.0f39ff632ac67207")).font(.caption).foregroundStyle(.secondary)
                 }
-                Picker("有效期", selection: $expirationDays) {
-                    Text("长期有效").tag(0)
-                    Text("7 天").tag(7)
-                    Text("30 天").tag(30)
-                    Text("90 天").tag(90)
+                Picker(L10n.string("ui.9c2a28e8f98fb5df"), selection: $expirationDays) {
+                    Text(L10n.string("ui.824fe235445dd1be")).tag(0)
+                    Text(L10n.string("ui.38eefacbb326e37f")).tag(7)
+                    Text(L10n.string("ui.84ad2952a3089ce7")).tag(30)
+                    Text(L10n.string("ui.cb82f419192b0423")).tag(90)
                 }
             }
             HStack {
                 Spacer()
-                Button("取消", role: .cancel, action: onClose)
+                Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel, action: onClose)
                 Button {
                     createLink()
                 } label: {
-                    if isCreating { ProgressView().controlSize(.small) } else { Text("创建并复制链接") }
+                    if isCreating { ProgressView().controlSize(.small) } else { Text(L10n.string("ui.a71bf6df75763893")) }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isCreating)
@@ -1604,54 +1675,54 @@ private struct ShareLinksView: View {
     var body: some View {
         Group {
             if model.isLoadingShareLinks {
-                ProgressView("正在读取分享…")
+                ProgressView(L10n.string("ui.fe59090f0d4bc698"))
             } else if model.shareLinks.isEmpty {
                 ContentUnavailableView(
-                    "还没有分享链接",
+                    L10n.string("ui.a4a471232364a4e3"),
                     systemImage: "link",
-                    description: Text("在文件列表中选择项目，然后点按“分享”。")
+                    description: Text(L10n.string("ui.9b90b76e744938f2"))
                 )
             } else {
                 List(model.shareLinks) { link in
                     HStack(spacing: 12) {
                         Image(systemName: "link.circle.fill").foregroundStyle(.blue)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(link.name.isEmpty ? "已分享项目" : link.name)
+                            Text(link.name.isEmpty ? L10n.string("ui.15d422f6042e7855") : link.name)
                             HStack(spacing: 8) {
-                                if link.hasPassword { Label("已设密码", systemImage: "lock.fill") }
-                                if let expiration = link.expiresAt { Text("有效期至 \(expiration)") }
+                                if link.hasPassword { Label(L10n.string("ui.8aa0da83b66e54f0"), systemImage: "lock.fill") }
+                                if let expiration = link.expiresAt { Text(L10n.string("ui.f491436ed3a96c9c", String(describing: expiration))) }
                             }
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("复制链接") {
+                        Button(L10n.string("ui.8e86f9b1d54f2c51")) {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(link.url, forType: .string)
                             model.statusIsError = false
-                            model.statusMessage = "链接已复制。"
+                            model.statusMessage = L10n.string("ui.de1804fdf8096e84")
                         }
-                        Button("取消分享", role: .destructive) { linkToDelete = link }
+                        Button(L10n.string("ui.21d728b6664ca9bc"), role: .destructive) { linkToDelete = link }
                     }
                     .padding(.vertical, 4)
                 }
             }
         }
         .fillsAvailableContentArea()
-        .navigationTitle("分享管理")
+        .navigationTitle(L10n.string("ui.76cdc4a13d1eecc0"))
         .task { await model.loadShareLinks() }
-        .alert("取消这个分享？", isPresented: Binding(
+        .alert(L10n.string("ui.0c1777d6b7a70cc7"), isPresented: Binding(
             get: { linkToDelete != nil },
             set: { if !$0 { linkToDelete = nil } }
         )) {
-            Button("保留", role: .cancel) { linkToDelete = nil }
-            Button("取消分享", role: .destructive) {
+            Button(L10n.string("ui.670ec25af8419f48"), role: .cancel) { linkToDelete = nil }
+            Button(L10n.string("ui.21d728b6664ca9bc"), role: .destructive) {
                 guard let link = linkToDelete else { return }
                 linkToDelete = nil
                 Task { await model.deleteShareLinks(ids: [link.id]) }
             }
         } message: {
-            Text("取消后，收到这个链接的人将无法继续访问。")
+            Text(L10n.string("ui.0fefbd857362afbe"))
         }
     }
 }
@@ -1705,7 +1776,7 @@ private struct FileBrowserView: View {
         let isRoot = model.currentPath.isEmpty || model.currentPath == "/"
         items.append(
             BreadcrumbItem(
-                name: "文件管理",
+                name: L10n.string("ui.b3bd5ac7cc4d668b"),
                 path: "/",
                 isLast: isRoot
             )
@@ -1716,7 +1787,7 @@ private struct FileBrowserView: View {
             for (index, component) in components.enumerated() {
                 currentAccumulatedPath += "/" + component
                 let isLast = index == components.count - 1
-                let displayName = component == "#recycle" ? "回收站" : component
+                let displayName = component == "#recycle" ? L10n.string("ui.ba35dc23b245e61e") : component
                 items.append(
                     BreadcrumbItem(
                         name: displayName,
@@ -1795,7 +1866,15 @@ private struct FileBrowserView: View {
                         ProgressView()
                             .controlSize(.small)
                     }
-                    Text(model.hasMore ? "已载入 \(model.items.count) / \(model.totalItemCount) 项" : "\(model.filteredItems.count) 项")
+                    Text(
+                        model.hasMore
+                            ? L10n.string(
+                                "items.loaded_progress",
+                                String(model.items.count),
+                                String(model.totalItemCount)
+                            )
+                            : L10n.string("ui.fca58a18c69c0ffa", String(describing: model.filteredItems.count))
+                    )
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if model.hasMore {
@@ -1806,7 +1885,7 @@ private struct FileBrowserView: View {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
-                                Text("加载更多")
+                                Text(L10n.string("ui.af90a08fec8ee28d"))
                             }
                         }
                         .buttonStyle(.borderless)
@@ -1831,9 +1910,9 @@ private struct FileBrowserView: View {
 
             if model.filteredItems.isEmpty {
                 ContentUnavailableView(
-                    model.searchText.isEmpty ? "目录为空" : "没有匹配项目",
+                    model.searchText.isEmpty ? L10n.string("ui.77fa57e99556ca33") : L10n.string("ui.37b2f0bcebfc3490"),
                     systemImage: model.searchText.isEmpty ? "folder" : "magnifyingglass",
-                    description: Text(model.searchText.isEmpty ? "可以上传文件到这个目录。" : "尝试其他搜索词。")
+                    description: Text(model.searchText.isEmpty ? L10n.string("ui.efa74aff15bd0698") : L10n.string("ui.49e7a5872fdd5088"))
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -1854,9 +1933,9 @@ private struct FileBrowserView: View {
                     VStack(spacing: 12) {
                         ProgressView()
                             .controlSize(.regular)
-                        Text(model.isSearching ? "正在搜索…" : (model.isLoading ? "正在读取目录…" : "正在打开文件夹…"))
+                        Text(model.isSearching ? L10n.string("ui.c37059a3d9dfd5b1") : (model.isLoading ? L10n.string("ui.36517d179e0f88a8") : L10n.string("ui.d09045a8a3d7a70e")))
                             .font(.callout.weight(.medium))
-                        Text("请稍候，完成后即可继续操作。")
+                        Text(L10n.string("ui.95c3f74ad4864f1a"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1867,14 +1946,14 @@ private struct FileBrowserView: View {
                 }
                 .contentShape(Rectangle())
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel(model.isSearching ? "正在搜索，请稍候" : "正在加载文件夹，请稍候")
+                .accessibilityLabel(model.isSearching ? L10n.string("ui.6b7b618b0639aa8b") : L10n.string("ui.d5e639d4eab3fbaf"))
             } else if let undoMessage = model.recentDragMoveUndoMessage {
                 VStack {
                     Spacer()
                     HStack(spacing: 12) {
                         Label(undoMessage, systemImage: "arrowshape.turn.up.backward.circle.fill")
                             .lineLimit(1)
-                        Button("撤销") {
+                        Button(L10n.string("ui.926a50b98ece2667")) {
                             model.undoRecentDragMove()
                         }
                         .keyboardShortcut("z", modifiers: .command)
@@ -1886,11 +1965,11 @@ private struct FileBrowserView: View {
                     .shadow(radius: 8, y: 3)
                     .padding(.bottom, 18)
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(undoMessage)，可在十秒内撤销")
+                    .accessibilityLabel(L10n.string("ui.69113f5c36207312", String(describing: undoMessage)))
                 }
             }
         }
-        .searchable(text: $model.searchText, placement: .toolbar, prompt: "搜索文件")
+        .searchable(text: $model.searchText, placement: .toolbar, prompt: L10n.string("ui.9c8bd1565def7849"))
         .searchScopes($model.searchScope) {
             ForEach(WorkspaceModel.SearchScope.allCases) { scope in
                 Text(scope.title).tag(scope)
@@ -1910,39 +1989,39 @@ private struct FileBrowserView: View {
         .contextMenu {
             blankAreaContextMenu
         }
-        .alert("新建文件夹", isPresented: $showsCreateFolderPrompt) {
-            TextField("文件夹名称", text: $newItemName)
-            Button("取消", role: .cancel) { newItemName = "" }
-            Button("创建") {
+        .alert(L10n.string("ui.84244abc71de03ac"), isPresented: $showsCreateFolderPrompt) {
+            TextField(L10n.string("ui.bacf701908d8cf45"), text: $newItemName)
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { newItemName = "" }
+            Button(L10n.string("ui.cde2cd071d25bbab")) {
                 let name = newItemName
                 newItemName = ""
                 Task { await model.createFolder(named: name) }
             }
             .disabled(newItemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } message: {
-            Text("将在当前目录中创建一个文件夹。")
+            Text(L10n.string("ui.43b157d93104f2df"))
         }
-        .alert("新建空白文件", isPresented: $showsCreateFilePrompt) {
-            TextField("文件名，例如 说明.txt", text: $newItemName)
-            Button("取消", role: .cancel) { newItemName = "" }
-            Button("创建") {
+        .alert(L10n.string("ui.b3ab661d4917ccc6"), isPresented: $showsCreateFilePrompt) {
+            TextField(L10n.string("ui.28427b364ef9ef33"), text: $newItemName)
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { newItemName = "" }
+            Button(L10n.string("ui.cde2cd071d25bbab")) {
                 let name = newItemName
                 newItemName = ""
                 Task { await model.createEmptyFile(named: name) }
             }
             .disabled(newItemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } message: {
-            Text("将创建一个 0 字节文件；文件类型由扩展名决定。")
+            Text(L10n.string("ui.1479722cc4fda8bf"))
         }
-        .alert("重命名", isPresented: Binding(
+        .alert(L10n.string("ui.0d0cbac2eee54113"), isPresented: Binding(
             get: { renameTarget != nil },
             set: { if !$0 { renameTarget = nil } }
         )) {
-            TextField("新名称", text: $renameName)
-            Button("取消", role: .cancel) {
+            TextField(L10n.string("ui.92ddb51db6c45cf7"), text: $renameName)
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 renameTarget = nil
             }
-            Button("重命名") {
+            Button(L10n.string("ui.0d0cbac2eee54113")) {
                 guard let target = renameTarget else { return }
                 let newName = renameName
                 renameTarget = nil
@@ -1950,7 +2029,7 @@ private struct FileBrowserView: View {
             }
             .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } message: {
-            Text("输入文件或文件夹的新名称。")
+            Text(L10n.string("ui.709941435c31f938"))
         }
         .sheet(isPresented: showsCompressionSheet) {
             ArchiveCreationView(targets: compressionTargets) { name, format, level, password in
@@ -1994,7 +2073,7 @@ private struct FileBrowserView: View {
         .task(id: displayedItemIDs) {
             model.updateDisplayedItemOrder(displayedItems)
         }
-        .navigationTitle(model.currentPath.isEmpty ? "文件" : (model.currentPath as NSString).lastPathComponent)
+        .navigationTitle(model.currentPath.isEmpty ? L10n.string("ui.39932f24fe11a6ba") : (model.currentPath as NSString).lastPathComponent)
     }
 
     private var sortedItems: [FileItem] {
@@ -2089,65 +2168,65 @@ private struct FileBrowserView: View {
     private func contextMenuForFile(_ item: FileItem) -> some View {
         let targets = contextTargets(for: item)
         if item.isDirectory {
-            Button("打开") {
+            Button(L10n.string("ui.c771248e511fbf93")) {
                 Task { await model.open(item) }
             }
         } else if PreviewKind.classify(item) != .unsupported {
-            Button("预览") {
+            Button(L10n.string("ui.13d61fea9f174905")) {
                 Task { await model.open(item) }
             }
         }
-        Button("重命名…") {
+        Button(L10n.string("ui.ec4cd05f5147b1a9")) {
             beginRename(item)
         }
         .disabled(!canRename(item))
         .keyboardShortcut(.return, modifiers: [])
-        Button(model.favorites.contains(where: { $0.path == item.path }) ? "取消收藏" : "添加到收藏") {
+        Button(model.favorites.contains(where: { $0.path == item.path }) ? L10n.string("ui.dca60869e7d26839") : L10n.string("ui.0cfc396e4aa347ad")) {
             model.toggleFavorite(item)
         }
         if canCreateItems && !item.isRecyclePath {
             Divider()
-            Button(targets.count > 1 ? "压缩所选项目…" : "压缩…") {
+            Button(targets.count > 1 ? L10n.string("ui.d7b17fd1aa5a82f8") : L10n.string("ui.ed3955526cf93b82")) {
                 compressionTargets = targets
             }
             if targets.count == 1, isSupportedArchive(item) {
-                Button("解压缩…") {
+                Button(L10n.string("ui.a79e38aec37eb305")) {
                     extractionTarget = item
                 }
             }
         }
         if targets.count > 1 {
-            Button("下载所选项目为压缩包…") { onDownloadBatch(targets) }
+            Button(L10n.string("ui.b97cad08035a15e2")) { onDownloadBatch(targets) }
         } else if item.isDirectory {
-            Button("下载为压缩包…") { onDownload(item, .archive) }
-            Button("下载为文件夹…") { onDownload(item, .directory) }
+            Button(L10n.string("ui.f956089b945b92cf")) { onDownload(item, .archive) }
+            Button(L10n.string("ui.0f50ddf3fa8bb870")) { onDownload(item, .directory) }
         } else {
-            Button("下载…") { onDownload(item, .archive) }
+            Button(L10n.string("ui.29610562f4b1c377")) { onDownload(item, .archive) }
         }
-        Button(targets.count > 1 ? "分享所选项目…" : "分享…") { onShare(targets) }
+        Button(targets.count > 1 ? L10n.string("ui.0d0313e9ffdb27fc") : L10n.string("ui.a6e09bfc6210d1e0")) { onShare(targets) }
         Divider()
-        Button("复制") {
+        Button(L10n.string("ui.63d90d977348ab1f")) {
             onCopy(contextTargets(for: item))
         }
         .keyboardShortcut("c", modifiers: .command)
-        Button("剪切") {
+        Button(L10n.string("ui.410a8e8a6bf253ac")) {
             onCut(contextTargets(for: item))
         }
         .keyboardShortcut("x", modifiers: .command)
-        Button("移动…") {
+        Button(L10n.string("ui.117e686f123e67e9")) {
             onCut(contextTargets(for: item))
         }
         if item.isRecyclePath, model.allowsVerifiedRestore {
             Divider()
-            Button("恢复到原位置…") { onRestore(item) }
+            Button(L10n.string("ui.44614f5e3f1bf84d")) { onRestore(item) }
         }
         Divider()
-        Button("查看详情") {
+        Button(L10n.string("ui.a748cc074f78de00")) {
             showingInfoItem = item
         }
         .keyboardShortcut("i", modifiers: .command)
         Divider()
-        Button(item.isRecyclePath ? "永久删除…" : "删除…", role: .destructive) {
+        Button(item.isRecyclePath ? L10n.string("ui.0c6742d6c283bcf7") : L10n.string("ui.0552e329ccf875fb"), role: .destructive) {
             onDelete([item])
         }
         .keyboardShortcut(.delete, modifiers: .command)
@@ -2161,21 +2240,21 @@ private struct FileBrowserView: View {
 
     @ViewBuilder
     private var blankAreaContextMenu: some View {
-        Button("刷新") {
+        Button(L10n.string("ui.aee88743413144a2")) {
             Task { await model.refresh() }
         }
         .disabled(model.isRefreshing)
         Divider()
-        Button("粘贴") { onPaste() }
+        Button(L10n.string("ui.33517926747180e6")) { onPaste() }
         .disabled(!hasFileClipboard || !canCreateItems)
         Divider()
-        Button("新建文件夹…") {
-            newItemName = "未命名文件夹"
+        Button(L10n.string("ui.fe33cf222f5b4d78")) {
+            newItemName = L10n.string("ui.9e043005fd4d9367")
             showsCreateFolderPrompt = true
         }
         .disabled(!canCreateItems)
-        Button("新建空白文件…") {
-            newItemName = "未命名.txt"
+        Button(L10n.string("ui.911c82a8b69d5efa")) {
+            newItemName = L10n.string("ui.7c477d119775959c")
             showsCreateFilePrompt = true
         }
         .disabled(!canCreateItems)
@@ -2195,7 +2274,7 @@ private struct FileBrowserView: View {
                                 HStack(spacing: 8) {
                                     Text(title)
                                         .font(.headline)
-                                    Text("\(group.items.count) 项")
+                                    Text(L10n.string("ui.fca58a18c69c0ffa", String(describing: group.items.count)))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     Spacer()
@@ -2362,35 +2441,35 @@ private struct FileBrowserView: View {
     private func gridGroup(for item: FileItem) -> (id: String, title: String) {
         switch fileGrouping {
         case .none:
-            return ("all", "全部")
+            return ("all", L10n.string("ui.5c55a67935af8f45"))
         case .type:
-            if item.isDirectory { return ("folder", "文件夹") }
+            if item.isDirectory { return ("folder", L10n.string("ui.7c7802d8adaed72e")) }
             switch PreviewKind.classify(item) {
-            case .image: return ("image", "图片")
-            case .video: return ("video", "视频")
-            case .audio: return ("audio", "音频")
-            case .pdf, .text: return ("document", "文档")
-            case .unsupported: return ("other", "其他文件")
+            case .image: return ("image", L10n.string("ui.d24c10d37db0feea"))
+            case .video: return ("video", L10n.string("ui.c20f7618d330a854"))
+            case .audio: return ("audio", L10n.string("ui.296c632ec857a0ba"))
+            case .pdf, .text: return ("document", L10n.string("ui.2687ccdbb1d2288a"))
+            case .unsupported: return ("other", L10n.string("ui.6ef019219ad4700a"))
             }
         case .date:
-            guard let date = item.times?.modifiedAt else { return ("unknown-date", "时间未知") }
+            guard let date = item.times?.modifiedAt else { return ("unknown-date", L10n.string("ui.664939a1fa2ef755")) }
             let calendar = Calendar.current
-            if calendar.isDateInToday(date) { return ("today", "今天") }
-            if calendar.isDateInYesterday(date) { return ("yesterday", "昨天") }
+            if calendar.isDateInToday(date) { return ("today", L10n.string("ui.d5f5a7a010731feb")) }
+            if calendar.isDateInYesterday(date) { return ("yesterday", L10n.string("ui.0c184871f658375a")) }
             if let week = calendar.dateInterval(of: .weekOfYear, for: Date()), week.contains(date) {
-                return ("week", "本周")
+                return ("week", L10n.string("ui.b4c6c3eb0bce6b78"))
             }
             if let month = calendar.dateInterval(of: .month, for: Date()), month.contains(date) {
-                return ("month", "本月")
+                return ("month", L10n.string("ui.0eeecd26f2ba61f9"))
             }
-            return ("earlier", "更早")
+            return ("earlier", L10n.string("ui.c56a5bb657de8f96"))
         case .size:
-            if item.isDirectory { return ("folder", "文件夹") }
-            guard let size = item.sizeBytes else { return ("unknown-size", "大小未知") }
-            if size < 10 * 1_024 * 1_024 { return ("tiny", "小于 10 MB") }
+            if item.isDirectory { return ("folder", L10n.string("ui.7c7802d8adaed72e")) }
+            guard let size = item.sizeBytes else { return ("unknown-size", L10n.string("ui.f8f5f153c20d00b9")) }
+            if size < 10 * 1_024 * 1_024 { return ("tiny", L10n.string("ui.70161cf3170dff10")) }
             if size < 100 * 1_024 * 1_024 { return ("small", "10 MB – 100 MB") }
             if size < 1_024 * 1_024 * 1_024 { return ("medium", "100 MB – 1 GB") }
-            return ("large", "1 GB 以上")
+            return ("large", L10n.string("ui.157794b18eccb99e"))
         }
     }
 
@@ -2411,7 +2490,7 @@ private struct FileBrowserView: View {
 
     private var fileTable: some View {
         Table(sortedItems, selection: $model.selection, sortOrder: $sortOrder) {
-            TableColumn("名称", value: \.name) { item in
+            TableColumn(L10n.string("ui.d44e9b3d3b31d37b"), value: \.name) { item in
                 hoverableTableCell(item) {
                     HStack(spacing: 8) {
                         FileIcon(item: item)
@@ -2430,7 +2509,7 @@ private struct FileBrowserView: View {
             }
             .width(min: 220, ideal: 320)
 
-            TableColumn("大小", value: \.sizeForSort) { item in
+            TableColumn(L10n.string("ui.50db7447b966f5ef"), value: \.sizeForSort) { item in
                 hoverableTableCell(item) {
                     Text(item.isDirectory ? "—" : item.sizeBytes.map {
                         ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)
@@ -2441,7 +2520,7 @@ private struct FileBrowserView: View {
             }
             .width(min: 80, ideal: 100)
 
-            TableColumn("类型", value: \.fileTypeDisplay) { item in
+            TableColumn(L10n.string("ui.ba40014ff496f64e"), value: \.fileTypeDisplay) { item in
                 hoverableTableCell(item) {
                     Text(item.fileTypeDisplay)
                         .foregroundStyle(.secondary)
@@ -2449,7 +2528,7 @@ private struct FileBrowserView: View {
             }
             .width(min: 80, ideal: 100)
 
-            TableColumn("修改日期", value: \.modifiedTimeForSort) { item in
+            TableColumn(L10n.string("ui.2cbced881b2df35a"), value: \.modifiedTimeForSort) { item in
                 hoverableTableCell(item) {
                     Group {
                         if let date = item.times?.modifiedAt {
@@ -2463,7 +2542,7 @@ private struct FileBrowserView: View {
             }
             .width(min: 130, ideal: 160)
 
-            TableColumn("所有者", value: \.ownerForSort) { item in
+            TableColumn(L10n.string("ui.43a7f4b4c5c88a2a"), value: \.ownerForSort) { item in
                 hoverableTableCell(item) {
                     Text(item.owner ?? "—")
                         .foregroundStyle(.secondary)
@@ -2472,7 +2551,7 @@ private struct FileBrowserView: View {
             .width(min: 80, ideal: 100)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: false))
-        .accessibilityLabel("\(model.currentPath) 文件列表")
+        .accessibilityLabel(L10n.string("ui.b37e64a8db35fd15", String(describing: model.currentPath)))
         .background {
             TableDoubleClickHandler(items: sortedItems) { itemID in
                 guard let item = sortedItems.first(where: { $0.id == itemID }) else { return }
@@ -2486,11 +2565,11 @@ private struct FileBrowserView: View {
                 isRefreshing: model.isRefreshing,
                 onPaste: onPaste,
                 onCreateFolder: {
-                    newItemName = "未命名文件夹"
+                    newItemName = L10n.string("ui.9e043005fd4d9367")
                     showsCreateFolderPrompt = true
                 },
                 onCreateFile: {
-                    newItemName = "未命名.txt"
+                    newItemName = L10n.string("ui.7c477d119775959c")
                     showsCreateFilePrompt = true
                 },
                 onRefresh: {
@@ -2762,26 +2841,26 @@ private struct BlankTableContextMenuArea: NSViewRepresentable {
         func showMenu(for event: NSEvent, in view: NSView) {
             let menu = NSMenu()
             
-            let refreshItem = NSMenuItem(title: "刷新", action: #selector(refresh), keyEquivalent: "")
+            let refreshItem = NSMenuItem(title: L10n.string("ui.aee88743413144a2"), action: #selector(refresh), keyEquivalent: "")
             refreshItem.target = self
             refreshItem.isEnabled = !isRefreshing
             menu.addItem(refreshItem)
             
             menu.addItem(.separator())
             
-            let pasteItem = NSMenuItem(title: "粘贴", action: #selector(paste), keyEquivalent: "")
+            let pasteItem = NSMenuItem(title: L10n.string("ui.33517926747180e6"), action: #selector(paste), keyEquivalent: "")
             pasteItem.target = self
             pasteItem.isEnabled = canPaste
             menu.addItem(pasteItem)
             
             menu.addItem(.separator())
 
-            let folderItem = NSMenuItem(title: "新建文件夹…", action: #selector(createFolder), keyEquivalent: "")
+            let folderItem = NSMenuItem(title: L10n.string("ui.fe33cf222f5b4d78"), action: #selector(createFolder), keyEquivalent: "")
             folderItem.target = self
             folderItem.isEnabled = canCreateItems
             menu.addItem(folderItem)
 
-            let fileItem = NSMenuItem(title: "新建空白文件…", action: #selector(createFile), keyEquivalent: "")
+            let fileItem = NSMenuItem(title: L10n.string("ui.911c82a8b69d5efa"), action: #selector(createFile), keyEquivalent: "")
             fileItem.target = self
             fileItem.isEnabled = canCreateItems
             menu.addItem(fileItem)
@@ -2851,21 +2930,25 @@ private struct ArchiveCreationView: View {
         self.targets = targets
         self.onCreate = onCreate
         self.onCancel = onCancel
-        let baseName = targets.count == 1 ? targets[0].name : "压缩项目"
+        let baseName = targets.count == 1 ? targets[0].name : L10n.string("ui.42b6ace9affb8353")
         _archiveName = State(initialValue: "\(baseName).zip")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Label("创建压缩包", systemImage: "archivebox.fill")
+            Label(L10n.string("ui.e185d04bcc5fef85"), systemImage: "archivebox.fill")
                 .font(.title2.weight(.semibold))
-            Text(targets.count == 1 ? "压缩“\(targets[0].name)”" : "压缩所选的 \(targets.count) 个项目")
+            Text(
+                targets.count == 1
+                    ? L10n.string("item.compress.named", targets[0].name)
+                    : L10n.string("ui.9e9fedbbc2308426", String(describing: targets.count))
+            )
                 .foregroundStyle(.secondary)
             Form {
-                TextField("压缩包名称", text: $archiveName)
-                Picker("格式", selection: $format) {
-                    Text("ZIP（兼容性更好）").tag(ArchiveFormat.zip)
-                    Text("7z（通常更节省空间）").tag(ArchiveFormat.sevenZip)
+                TextField(L10n.string("ui.13e694ce68bd0039"), text: $archiveName)
+                Picker(L10n.string("ui.0e8b1c78c5f335ba"), selection: $format) {
+                    Text(L10n.string("ui.4ba915abd4fd4008")).tag(ArchiveFormat.zip)
+                    Text(L10n.string("ui.cbe200589b728e56")).tag(ArchiveFormat.sevenZip)
                 }
                 .onChange(of: format) { _, newFormat in
                     let desired = newFormat == .zip ? "zip" : "7z"
@@ -2874,31 +2957,31 @@ private struct ArchiveCreationView: View {
                         archiveName = (archiveName as NSString).deletingPathExtension + "." + desired
                     }
                 }
-                Picker("压缩程度", selection: $level) {
-                    Text("均衡（推荐）").tag(ArchiveCompressionLevel.moderate)
-                    Text("仅打包，不压缩").tag(ArchiveCompressionLevel.store)
-                    Text("更快完成").tag(ArchiveCompressionLevel.fastest)
-                    Text("尽量节省空间").tag(ArchiveCompressionLevel.best)
+                Picker(L10n.string("ui.c5b196e1399fb762"), selection: $level) {
+                    Text(L10n.string("ui.8dd1fceed43b6a45")).tag(ArchiveCompressionLevel.moderate)
+                    Text(L10n.string("ui.320096f1c73f2097")).tag(ArchiveCompressionLevel.store)
+                    Text(L10n.string("ui.2578adcaa131dd22")).tag(ArchiveCompressionLevel.fastest)
+                    Text(L10n.string("ui.d0fd2507d68680ab")).tag(ArchiveCompressionLevel.best)
                 }
                 HStack {
                     Group {
                         if showsPassword {
-                            TextField("密码（可选）", text: $password)
+                            TextField(L10n.string("ui.44733c95379ca123"), text: $password)
                         } else {
-                            SecureField("密码（可选）", text: $password)
+                            SecureField(L10n.string("ui.44733c95379ca123"), text: $password)
                         }
                     }
-                    Button(showsPassword ? "隐藏" : "显示") { showsPassword.toggle() }
+                    Button(showsPassword ? L10n.string("ui.145219e726b87790") : L10n.string("ui.4e1449e7d5e50593")) { showsPassword.toggle() }
                         .buttonStyle(.borderless)
                 }
             }
-            Text("压缩过程由 NAS 完成，关闭此窗口后可在传输中心查看进度。")
+            Text(L10n.string("ui.0f00b880813ce106"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                Button("取消", role: .cancel, action: onCancel)
-                Button("开始压缩") {
+                Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel, action: onCancel)
+                Button(L10n.string("ui.b141929b4e20fad7")) {
                     onCreate(archiveName, format, level, password.isEmpty ? nil : password)
                 }
                 .buttonStyle(.borderedProminent)
@@ -2922,27 +3005,27 @@ private struct ArchiveExtractionView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Label("解压缩", systemImage: "archivebox.fill")
+            Label(L10n.string("ui.9f592131529b5467"), systemImage: "archivebox.fill")
                 .font(.title2.weight(.semibold))
-            Text("将“\(item.name)”解压到当前文件夹")
+            Text(L10n.string("ui.c63d516cb699c824", String(describing: item.name)))
                 .foregroundStyle(.secondary)
             Form {
-                Toggle("创建同名文件夹", isOn: $createSubfolder)
-                Toggle("保留压缩包内的文件夹结构", isOn: $keepDirectoryStructure)
-                Toggle("替换同名文件", isOn: $overwrite)
+                Toggle(L10n.string("ui.82e9111f1c4f130c"), isOn: $createSubfolder)
+                Toggle(L10n.string("ui.afd0935d8e0eeb33"), isOn: $keepDirectoryStructure)
+                Toggle(L10n.string("ui.c834c7a717bae791"), isOn: $overwrite)
                 if overwrite {
-                    Label("已有的同名文件可能会被替换。开始前会再次确认。", systemImage: "exclamationmark.triangle.fill")
+                    Label(L10n.string("ui.5d0f3a5095aeafa0"), systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
             }
-            Text("支持 ZIP、7z、RAR、TAR、GZ、BZ2 和 ISO 等常见格式。")
+            Text(L10n.string("ui.f61b061246e4390f"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                Button("取消", role: .cancel, action: onCancel)
-                Button("开始解压") {
+                Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel, action: onCancel)
+                Button(L10n.string("ui.d63e300f62a9a232")) {
                     if overwrite {
                         confirmsOverwrite = true
                     } else {
@@ -2954,11 +3037,11 @@ private struct ArchiveExtractionView: View {
         }
         .padding(24)
         .frame(width: 500)
-        .alert("替换同名文件？", isPresented: $confirmsOverwrite) {
-            Button("取消", role: .cancel) {}
-            Button("替换并继续", role: .destructive, action: startExtraction)
+        .alert(L10n.string("ui.cf24ad005620d2c7"), isPresented: $confirmsOverwrite) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
+            Button(L10n.string("ui.3fcff1dca38adc47"), role: .destructive, action: startExtraction)
         } message: {
-            Text("当前文件夹中已有的同名文件可能会被替换，原内容可能无法恢复。")
+            Text(L10n.string("ui.a8bca50469cec17d"))
         }
     }
 
@@ -2977,11 +3060,11 @@ private struct ArchivePasswordView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("需要压缩包密码", systemImage: "lock.fill")
+            Label(L10n.string("ui.421d797b31083050"), systemImage: "lock.fill")
                 .font(.title2.weight(.semibold))
-            Text("“\(archiveName)”已加密，请输入密码后继续解压。")
+            Text(L10n.string("ui.e607b3e23af516cd", String(describing: archiveName)))
                 .foregroundStyle(.secondary)
-            SecureField("压缩包密码", text: $password)
+            SecureField(L10n.string("ui.9bde604e54c266b6"), text: $password)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { submit() }
             if let errorMessage {
@@ -2992,8 +3075,8 @@ private struct ArchivePasswordView: View {
             HStack {
                 if isChecking { ProgressView().controlSize(.small) }
                 Spacer()
-                Button("取消", role: .cancel, action: onCancel)
-                Button("继续解压", action: submit)
+                Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel, action: onCancel)
+                Button(L10n.string("ui.959216b78f9062f1"), action: submit)
                     .buttonStyle(.borderedProminent)
                     .disabled(password.isEmpty || isChecking)
             }
@@ -3089,11 +3172,11 @@ private struct TransferCenterView: View {
 
         var displayName: String {
             switch self {
-            case .upload: return "上传"
-            case .download: return "下载"
-            case .fileOperation: return "文件操作"
-            case .completed: return "已完成"
-            case .failed: return "已失败"
+            case .upload: return L10n.string("ui.9e07e3c0532d4976")
+            case .download: return L10n.string("ui.4673a23061656125")
+            case .fileOperation: return L10n.string("ui.a6a7e454cf11a050")
+            case .completed: return L10n.string("ui.f28461bb49c85647")
+            case .failed: return L10n.string("ui.7e9ef4d39655399e")
             }
         }
     }
@@ -3208,15 +3291,15 @@ private struct TransferCenterView: View {
         Group {
             if allConnectedTasks.isEmpty {
                 ContentUnavailableView(
-                    "暂无传输任务",
+                    L10n.string("ui.d01c644a2d1f3570"),
                     systemImage: "arrow.up.arrow.down.circle",
-                    description: Text("上传、下载和文件操作会显示在这里。")
+                    description: Text(L10n.string("ui.f7503c0037f86224"))
                 )
                 .fillsAvailableContentArea()
             } else {
                 VStack(spacing: 0) {
                     HStack {
-                        Text("\(model.profile.displayName) · 上传、下载和文件操作")
+                        Text(L10n.string("ui.cebeae3f4b78f233", String(describing: model.profile.displayName)))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -3228,11 +3311,11 @@ private struct TransferCenterView: View {
                     HStack(spacing: 12) {
                         if connectedWorkspaces.count > 1 {
                             HStack(spacing: 6) {
-                                Text("NAS:")
+                                Text(L10n.string("label.nas"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 
-                                FilterChip(title: "全部", isSelected: selectedNasID == nil) {
+                                FilterChip(title: L10n.string("ui.5c55a67935af8f45"), isSelected: selectedNasID == nil) {
                                     selectedNasID = nil
                                 }
                                 
@@ -3251,11 +3334,11 @@ private struct TransferCenterView: View {
                         let activeFilters = availableFilters
                         if !activeFilters.isEmpty {
                             HStack(spacing: 6) {
-                                Text("类型:")
+                                Text(L10n.string("ui.f9082aad585f4fb9"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 
-                                FilterChip(title: "全部", isSelected: currentActiveFilter == nil) {
+                                FilterChip(title: L10n.string("ui.5c55a67935af8f45"), isSelected: currentActiveFilter == nil) {
                                     activeFilter = nil
                                 }
                                 
@@ -3281,9 +3364,9 @@ private struct TransferCenterView: View {
 
                     if filteredTasks.isEmpty {
                         ContentUnavailableView(
-                            "没有匹配的传输任务",
+                            L10n.string("ui.e8c286bbf6e5bd12"),
                             systemImage: "arrow.up.arrow.down.circle",
-                            description: Text("当前过滤条件下没有任务显示，可尝试切换标签。")
+                            description: Text(L10n.string("ui.6fed029eeaa6ec22"))
                         )
                         .fillsAvailableContentArea()
                     } else {
@@ -3398,7 +3481,7 @@ private struct TransferRow: View {
                 )
                 .progressViewStyle(.linear)
                 .tint(progressTint)
-                .accessibilityLabel("\(task.displayName)传输进度")
+                .accessibilityLabel(L10n.string("ui.4dab9831931a4a38", String(describing: task.displayName)))
                 .accessibilityValue(progressAccessibilityValue(total: total))
             } else if task.state == .running || task.state == .cancelling {
                 ProgressView()
@@ -3419,20 +3502,20 @@ private struct TransferRow: View {
 
                 HStack(spacing: 8) {
                     if task.state == .running, task.kind == .download || task.kind == .upload {
-                        TransferActionButton(icon: "pause.fill", label: "暂停", color: .blue, action: onPause)
+                        TransferActionButton(icon: "pause.fill", label: L10n.string("ui.8d12fc0d4eb26021"), color: .blue, action: onPause)
                     } else if task.state == .paused {
-                        TransferActionButton(icon: "play.fill", label: task.kind == .upload ? "重新上传" : "继续", color: .green, action: onResume)
+                        TransferActionButton(icon: "play.fill", label: task.kind == .upload ? L10n.string("ui.11b7c7173da21db8") : L10n.string("ui.7c9691192f1b7340"), color: .green, action: onResume)
                     } else if task.state == .failed || task.state == .cancelled {
-                        TransferActionButton(icon: "arrow.clockwise", label: "重试", color: .blue, action: onRetry)
+                        TransferActionButton(icon: "arrow.clockwise", label: L10n.string("ui.b8784c8dd5636ff2"), color: .blue, action: onRetry)
                     }
                     
                     if task.state == .queued || task.state == .running || task.state == .paused {
-                        TransferActionButton(icon: "xmark", label: "取消", color: .orange, action: onCancel)
+                        TransferActionButton(icon: "xmark", label: L10n.string("ui.2cd0f3be8738a86c"), color: .orange, action: onCancel)
                     }
                     
                     // 醒目明确的删除任务按钮
                     TransferDeleteButton(
-                        label: isFinishedState ? "删除记录" : "删除任务",
+                        label: isFinishedState ? L10n.string("ui.f2cf9101bb2d8816") : L10n.string("ui.29dfebea0fdac1f6"),
                         action: {
                             if !isFinishedState {
                                 isConfirmingDeletion = true
@@ -3461,20 +3544,20 @@ private struct TransferRow: View {
         .accessibilityElement(children: .combine)
         .contextMenu {
             if task.state == .running, task.kind == .download || task.kind == .upload {
-                Button("暂停", action: onPause)
+                Button(L10n.string("ui.8d12fc0d4eb26021"), action: onPause)
             }
             if task.state == .paused {
-                Button(task.kind == .upload ? "重新上传" : "继续", action: onResume)
+                Button(task.kind == .upload ? L10n.string("ui.11b7c7173da21db8") : L10n.string("ui.7c9691192f1b7340"), action: onResume)
             }
             if task.state == .failed || task.state == .cancelled {
-                Button("重试", action: onRetry)
+                Button(L10n.string("ui.b8784c8dd5636ff2"), action: onRetry)
             }
             if task.state == .queued || task.state == .running || task.state == .paused {
-                Button("取消任务", action: onCancel)
+                Button(L10n.string("ui.537d17f1c5313861"), action: onCancel)
             }
             Divider()
             Button(
-                isFinishedState ? "删除传输记录" : "取消并删除任务",
+                isFinishedState ? L10n.string("ui.debfd7b5a3f0fe49") : L10n.string("ui.b0a7a91c9b821434"),
                 role: .destructive,
                 action: {
                     if !isFinishedState {
@@ -3486,20 +3569,20 @@ private struct TransferRow: View {
             )
         }
         .confirmationDialog(
-            "删除这个传输任务？",
+            L10n.string("ui.1eb43f6b5fe62345"),
             isPresented: $isConfirmingDeletion,
             titleVisibility: .visible
         ) {
             Button(
-                "取消并删除任务",
+                L10n.string("ui.b0a7a91c9b821434"),
                 role: .destructive,
                 action: onDelete
             )
-            Button("保留任务", role: .cancel) {}
+            Button(L10n.string("ui.ca6db9df0f202957"), role: .cancel) {}
         } message: {
             Text(task.kind == .download
-                ? "任务记录和未下载完成的临时文件都会被删除。"
-                : "任务记录会被删除，正在进行的操作也会先取消。")
+                ? L10n.string("ui.c01928816c334e4e")
+                : L10n.string("ui.350ca379750211a9"))
         }
     }
 
@@ -3533,14 +3616,14 @@ private struct TransferRow: View {
 
     private var kindBadgeLabel: String {
         switch task.kind {
-        case .upload: "上传"
-        case .download: "下载"
-        case .copy: "复制"
-        case .move: "移动"
-        case .delete: "删除"
-        case .restore: "恢复"
-        case .compress: "压缩"
-        case .extract: "解压"
+        case .upload: L10n.string("ui.9e07e3c0532d4976")
+        case .download: L10n.string("ui.4673a23061656125")
+        case .copy: L10n.string("ui.63d90d977348ab1f")
+        case .move: L10n.string("ui.fc6bb436b8caf08b")
+        case .delete: L10n.string("ui.2f9daa828907b93f")
+        case .restore: L10n.string("ui.e0534b8a4e46a0cb")
+        case .compress: L10n.string("ui.a22879cda61a8da0")
+        case .extract: L10n.string("ui.a147ebf3581ab1ee")
         }
     }
 
@@ -3575,18 +3658,18 @@ private struct TransferRow: View {
 
     private var stateLabel: String {
         switch task.state {
-        case .queued: return "等待中"
+        case .queued: return L10n.string("ui.26c8cfcbf763073f")
         case .running:
             if let total = task.totalUnits, total > 0 {
                 let percentage = Int((Double(task.completedUnits) / Double(total) * 100).rounded())
                 return "\(min(max(percentage, 0), 100))%"
             }
-            return "进行中"
-        case .paused: return task.kind == .upload ? "已暂停（继续重传）" : "已暂停"
-        case .cancelling: return "正在取消"
-        case .succeeded: return "已完成"
-        case .failed: return "失败"
-        case .cancelled: return "已取消"
+            return L10n.string("ui.dc9591e56d502b43")
+        case .paused: return task.kind == .upload ? L10n.string("ui.7d53a3f66521e362") : L10n.string("ui.eb0c326b60ae897a")
+        case .cancelling: return L10n.string("ui.0b58e0113da68f91")
+        case .succeeded: return L10n.string("ui.f28461bb49c85647")
+        case .failed: return L10n.string("ui.28384d7afd2e4fa6")
+        case .cancelled: return L10n.string("ui.a37778f17c5f3ee5")
         }
     }
 
@@ -3600,20 +3683,20 @@ private struct TransferRow: View {
 
         var parts: [String] = []
         if let fileSize = task.fileSizeBytes {
-            parts.append("大小 \(formatBytes(fileSize))")
+            parts.append(L10n.string("ui.db678ce1adf72227", String(describing: formatBytes(fileSize))))
         }
         if let total = task.totalUnits, total > 0 {
             let prefix: String
             if (task.kind == .copy || task.kind == .move), task.fileSizeBytes != nil {
-                prefix = "中转 "
+                prefix = L10n.string("ui.156c8a1021a70e06")
             } else if task.kind == .copy || task.kind == .move {
-                prefix = "进度 "
+                prefix = L10n.string("ui.755ca1516d681c2c")
             } else {
                 prefix = ""
             }
             parts.append("\(prefix)\(formatBytes(task.completedUnits)) / \(formatBytes(total))")
         } else if task.completedUnits > 0 {
-            parts.append("已完成 \(formatBytes(task.completedUnits))")
+            parts.append(L10n.string("ui.a95725bb323a9eb8", String(describing: formatBytes(task.completedUnits))))
         }
         if let speed = task.bytesPerSecond, speed > 0,
            task.state == .running || task.state == .cancelling {
@@ -3621,7 +3704,7 @@ private struct TransferRow: View {
         }
         if let remaining = task.estimatedSecondsRemaining, remaining.isFinite, remaining > 0,
            task.state == .running {
-            parts.append("剩余 \(formatDuration(remaining))")
+            parts.append(L10n.string("ui.11364de0fdc8576a", String(describing: formatDuration(remaining))))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
@@ -3633,14 +3716,16 @@ private struct TransferRow: View {
     private func formatDuration(_ seconds: TimeInterval) -> String {
         let rounded = max(Int(seconds.rounded(.up)), 1)
         if rounded < 60 {
-            return "\(rounded)秒"
+            return L10n.string("ui.4579627524209c40", String(describing: rounded))
         }
         if rounded < 3_600 {
-            return "\((rounded + 59) / 60)分钟"
+            return L10n.string("ui.cd3da627ff642a0c", String(describing: (rounded + 59) / 60))
         }
         let hours = rounded / 3_600
         let minutes = (rounded % 3_600 + 59) / 60
-        return minutes > 0 ? "\(hours)小时\(minutes)分" : "\(hours)小时"
+        return minutes > 0
+            ? L10n.string("duration.hours_minutes", String(hours), String(minutes))
+            : L10n.string("ui.b4f4b24037d30509", String(describing: hours))
     }
 
     private func progressAccessibilityValue(total: Int64) -> String {
@@ -3718,7 +3803,7 @@ private struct TransferDeleteButton: View {
                 isHovered = inside
             }
         }
-        .help("删除此传输任务记录")
+        .help(L10n.string("ui.7ea7469a91c940e6"))
     }
 }
 
@@ -3883,19 +3968,37 @@ private struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
 
+                SettingsSectionCard(
+                    title: L10n.string("settings.language.title"),
+                    icon: "globe",
+                    iconColor: .blue
+                ) {
+                    HStack {
+                        Text(L10n.string("settings.language.title"))
+                        Spacer()
+                        AppLanguagePicker()
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(width: 180)
+                    }
+                    Text(L10n.string("settings.language.footer"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
                 // 1. 连接信息
                 SettingsSectionCard(
-                    title: "连接信息",
+                    title: L10n.string("ui.82479cb6ca73042d"),
                     icon: "server.rack",
                     iconColor: .blue
                 ) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("设备名称")
+                        Text(L10n.string("ui.65d8f92232ae77b0"))
                             .foregroundStyle(.secondary)
                         Spacer()
                         Text(model.profile.displayName)
                             .textSelection(.enabled)
-                        Button("修改…") {
+                        Button(L10n.string("ui.1eff9b7d894c0ff9")) {
                             renamedNAS = model.profile.displayName
                             renameError = nil
                             showsRenamePrompt = true
@@ -3907,25 +4010,25 @@ private struct SettingsView: View {
                             .foregroundStyle(.red)
                     }
                     Divider().opacity(0.3)
-                    SettingsRow(label: "主机地址", value: "https://\(model.profile.host):\(model.profile.port)")
+                    SettingsRow(label: L10n.string("ui.317c133e7a877caf"), value: "https://\(model.profile.host):\(model.profile.port)")
                     Divider().opacity(0.3)
-                    SettingsRow(label: "用户名", value: model.profile.usernameHint ?? "未保存")
+                    SettingsRow(label: L10n.string("ui.1a3f0617d6de8e52"), value: model.profile.usernameHint ?? L10n.string("ui.6a1be012c99c34e8"))
                     Divider().opacity(0.3)
-                    SettingsRow(label: "连接状态", value: "已安全连接")
+                    SettingsRow(label: L10n.string("ui.b8f945ea49ff3774"), value: L10n.string("ui.39c35b1b42f8d938"))
                 }
 
                 // 4. 功能模块管理
                 SettingsSectionCard(
-                    title: "功能",
+                    title: L10n.string("ui.25f5ce57a1909740"),
                     icon: "square.grid.3x3.fill",
                     iconColor: .blue
                 ) {
                     VStack(alignment: .leading, spacing: 14) {
                         Toggle(isOn: $model.isFileModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("文件管理")
+                                Text(L10n.string("ui.b3bd5ac7cc4d668b"))
                                     .font(.body.weight(.medium))
-                                Text("在侧边栏显示共享文件夹、回收站入口，支持文件浏览、下载和管理。")
+                                Text(L10n.string("ui.b3ba4f016f790299"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -3937,10 +4040,10 @@ private struct SettingsView: View {
                         Toggle(isOn: $model.isPhotosModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 6) {
-                                    Text("照片管理")
+                                    Text(L10n.string("ui.67c683672f7ff48d"))
                                         .font(.body.weight(.medium))
                                 }
-                                Text("在侧边栏显示个人和共享照片空间，支持按相册浏览照片与视频。")
+                                Text(L10n.string("ui.a7b4352894d3f848"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -3951,9 +4054,9 @@ private struct SettingsView: View {
 
                         Toggle(isOn: $model.isChatModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("消息")
+                                Text(L10n.string("ui.4da199fae933d4fa"))
                                     .font(.body.weight(.medium))
-                                Text("在侧边栏显示聊天入口。消息服务接入完成后，可用于一对一聊天、群聊和发送附件。")
+                                Text(L10n.string("ui.77d90374f41aaf36"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -3964,9 +4067,9 @@ private struct SettingsView: View {
 
                         Toggle(isOn: $model.isNasSettingsModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("NAS 设置")
+                                Text(L10n.string("ui.b1729f4b03c4b97d"))
                                     .font(.body.weight(.medium))
-                                Text("查看系统性能、存储与硬盘、套件、计划任务、账号、系统日志和当前连接。")
+                                Text(L10n.string("ui.ab0dbdbdfe0bfe42"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -3977,9 +4080,9 @@ private struct SettingsView: View {
 
                         Toggle(isOn: $model.isDownloadStationModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("下载管理")
+                                Text(L10n.string("ui.5248507df52ff455"))
                                     .font(.body.weight(.medium))
-                                Text("添加和管理 NAS 下载任务，查看进度、速度和完成状态。")
+                                Text(L10n.string("ui.476f084918556c4f"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -3990,9 +4093,9 @@ private struct SettingsView: View {
 
                         Toggle(isOn: $model.isContainerManagerModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("容器管理")
+                                Text(L10n.string("ui.aaf778d85ce5c2ed"))
                                     .font(.body.weight(.medium))
-                                Text("查看和控制容器、映像、网络、项目与活动记录。")
+                                Text(L10n.string("ui.fe5d8ebe107b885f"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -4003,9 +4106,9 @@ private struct SettingsView: View {
 
                         Toggle(isOn: $model.isVirtualMachineManagerModuleEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("虚拟机管理")
+                                Text(L10n.string("ui.80c43bd2481c9580"))
                                     .font(.body.weight(.medium))
-                                Text("查看虚拟机、主机、存储、网络、映像和保护状态。")
+                                Text(L10n.string("ui.81d1084630dcb682"))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -4016,27 +4119,27 @@ private struct SettingsView: View {
 
                 // 5. 传输设置
                 SettingsSectionCard(
-                    title: "传输设置",
+                    title: L10n.string("ui.04451130e17bac43"),
                     icon: "arrow.up.and.down.and.sparkles",
                     iconColor: .orange
                 ) {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("下载性能")
+                            Text(L10n.string("ui.9159bd6506fdcf1e"))
                                 .font(.body)
                             Spacer()
                             Picker("", selection: $chunkSizeSetting) {
-                                Text("网络不稳定（4 MB）").tag(4)
-                                Text("标准（8 MB）").tag(8)
-                                Text("较快网络（16 MB）").tag(16)
-                                Text("高速网络（32 MB）").tag(32)
-                                Text("超高速网络（64 MB）").tag(64)
+                                Text(L10n.string("ui.19e6e917e4b79680")).tag(4)
+                                Text(L10n.string("ui.d0621e01d3a44aed")).tag(8)
+                                Text(L10n.string("ui.28e307d638dc8de8")).tag(16)
+                                Text(L10n.string("ui.9aaec86f3a5dfb9a")).tag(32)
+                                Text(L10n.string("ui.d621b33c69f45f77")).tag(64)
                             }
                             .pickerStyle(.menu)
                             .frame(width: 155)
                         }
                         
-                        Text("通常保持“标准”即可。如果下载经常中断，可以选择“网络不稳定”；网络稳定且速度较快时，可以选择更高的档位。")
+                        Text(L10n.string("ui.a684d5ddd3cc0bea"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(nil)
@@ -4045,18 +4148,18 @@ private struct SettingsView: View {
                 }
 
                 SettingsSectionCard(
-                    title: "存储管理",
+                    title: L10n.string("ui.0e41f8e3d59ec47b"),
                     icon: "internaldrive.fill",
                     iconColor: .teal
                 ) {
-                    SettingsRow(label: "本地数据与缓存", value: ByteCountFormatter.string(fromByteCount: storage.total, countStyle: .file))
+                    SettingsRow(label: L10n.string("ui.f47f13394910cbaa"), value: ByteCountFormatter.string(fromByteCount: storage.total, countStyle: .file))
                     Divider().opacity(0.3)
-                    SettingsRow(label: "无风险临时垃圾 (默认清理)", value: ByteCountFormatter.string(fromByteCount: storage.safeTrash, countStyle: .file))
+                    SettingsRow(label: L10n.string("ui.f19c6c4c2cf77247"), value: ByteCountFormatter.string(fromByteCount: storage.safeTrash, countStyle: .file))
                     Divider().opacity(0.3)
-                    SettingsRow(label: "照片库时间线缓存", value: ByteCountFormatter.string(fromByteCount: storage.photoCache, countStyle: .file))
+                    SettingsRow(label: L10n.string("ui.05ca0d4a5aed9488"), value: ByteCountFormatter.string(fromByteCount: storage.photoCache, countStyle: .file))
                     Divider().opacity(0.3)
-                    SettingsRow(label: "登录与设置数据 (强制保护)", value: ByteCountFormatter.string(fromByteCount: storage.protectedData, countStyle: .file))
-                    Text("默认清理仅删除无影响的临时文件与网络缓存。您可在‘选择性清理’中单独清除照片索引缓存，清理后再次进入照片会自动从 NAS 重新同步。")
+                    SettingsRow(label: L10n.string("ui.5513fba74a6c8c0b"), value: ByteCountFormatter.string(fromByteCount: storage.protectedData, countStyle: .file))
+                    Text(L10n.string("ui.fa01182022325b0b"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     HStack {
@@ -4064,10 +4167,10 @@ private struct SettingsView: View {
                             Text(storageMessage).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("重新计算") { storage = AppStorageInspector.snapshot() }
-                        Button("选择性清理…") { showsSelectiveCleanupSheet = true }
+                        Button(L10n.string("ui.99a713a1340efda3")) { storage = AppStorageInspector.snapshot() }
+                        Button(L10n.string("ui.4499f757f9894ee7")) { showsSelectiveCleanupSheet = true }
                             .disabled(storage.reclaimable == 0)
-                        Button("清理无风险垃圾") { confirmsCacheCleanup = true }
+                        Button(L10n.string("ui.1079be00e4efe07d")) { confirmsCacheCleanup = true }
                             .disabled(storage.safeTrash == 0)
                     }
                 }
@@ -4077,20 +4180,20 @@ private struct SettingsView: View {
             .frame(maxWidth: .infinity)
         }
         .task { storage = AppStorageInspector.snapshot() }
-        .alert("清理无风险应用垃圾？", isPresented: $confirmsCacheCleanup) {
-            Button("取消", role: .cancel) {}
-            Button("清理", role: .destructive) {
+        .alert(L10n.string("ui.536d12618defa1a3"), isPresented: $confirmsCacheCleanup) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
+            Button(L10n.string("ui.9d2998cca5172319"), role: .destructive) {
                 model.dismissPreview()
                 do {
                     try AppStorageInspector.clearReclaimableData(options: .safeTrash)
                     storage = AppStorageInspector.snapshot()
-                    storageMessage = "无风险临时垃圾已成功清理。"
+                    storageMessage = L10n.string("ui.6b4d085770642d6b")
                 } catch {
-                    storageMessage = "部分缓存未能清理，请稍后重试。"
+                    storageMessage = L10n.string("ui.1ca55c6d7f531f67")
                 }
             }
         } message: {
-            Text("将清理文件预览临时解包文件和系统 HTTP 缓存，对应用正常使用没有任何影响。")
+            Text(L10n.string("ui.d547ad40c1fb9469"))
         }
         .sheet(isPresented: $showsSelectiveCleanupSheet) {
             SelectiveCacheCleanupSheet(storage: storage) { options in
@@ -4098,21 +4201,21 @@ private struct SettingsView: View {
                 do {
                     try AppStorageInspector.clearReclaimableData(options: options)
                     storage = AppStorageInspector.snapshot()
-                    storageMessage = "选定缓存已成功清理。"
+                    storageMessage = L10n.string("ui.ea80daed400569fc")
                 } catch {
-                    storageMessage = "部分缓存未能清理，请稍后重试。"
+                    storageMessage = L10n.string("ui.1ca55c6d7f531f67")
                 }
             }
         }
-        .alert("修改 NAS 名称", isPresented: $showsRenamePrompt) {
-            TextField("设备名称", text: $renamedNAS)
-            Button("取消", role: .cancel) {}
-            Button("保存") {
+        .alert(L10n.string("ui.baa1159c128223dd"), isPresented: $showsRenamePrompt) {
+            TextField(L10n.string("ui.65d8f92232ae77b0"), text: $renamedNAS)
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
+            Button(L10n.string("ui.a3030bf8f16dc63c")) {
                 renameError = onRenameNAS(renamedNAS)
             }
             .disabled(renamedNAS.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } message: {
-            Text("这里只修改岚仓中的显示名称，不会更改 NAS 本身的名称。")
+            Text(L10n.string("ui.c0fb0cc138b48413"))
         }
     }
 }
@@ -4127,8 +4230,8 @@ extension FileItem {
     }
     
     var fileTypeDisplay: String {
-        if isDirectory { return "文件夹" }
-        return fileExtension?.uppercased() ?? "未知文件"
+        if isDirectory { return L10n.string("ui.7c7802d8adaed72e") }
+        return fileExtension?.uppercased() ?? L10n.string("ui.1bd7e9d2d5fd30e6")
     }
     
     var ownerForSort: String {
@@ -4299,7 +4402,7 @@ struct FilePropertiesView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("查看详情")
+                Text(L10n.string("ui.a748cc074f78de00"))
                     .font(.headline.weight(.semibold))
                 Spacer()
                 Button {
@@ -4334,20 +4437,20 @@ struct FilePropertiesView: View {
                     
                     // 1. 基本信息卡片
                     SettingsSectionCard(
-                        title: "基本信息",
+                        title: L10n.string("ui.e8df058725699a17"),
                         icon: "info.circle",
                         iconColor: .blue
                     ) {
-                        SettingsRow(label: "种类", value: item.fileTypeDisplay)
+                        SettingsRow(label: L10n.string("ui.a28cf187c617333f"), value: item.fileTypeDisplay)
                         Divider().opacity(0.3)
                         HStack(alignment: .firstTextBaseline) {
-                            Text("大小")
+                            Text(L10n.string("ui.50db7447b966f5ef"))
                                 .foregroundStyle(.secondary)
                             Spacer()
                             if isCalculatingFolderSize {
                                 ProgressView()
                                     .controlSize(.small)
-                                Text("正在计算…")
+                                Text(L10n.string("ui.e1fa1bf0cd786284"))
                                     .foregroundStyle(.secondary)
                             } else {
                                 Text(sizeDisplayValue)
@@ -4358,8 +4461,8 @@ struct FilePropertiesView: View {
                         if let folderStatistics {
                             Divider().opacity(0.3)
                             SettingsRow(
-                                label: "内容",
-                                value: "\(folderStatistics.fileCount) 个文件，\(folderStatistics.folderCount) 个文件夹"
+                                label: L10n.string("ui.7a688306423bec17"),
+                                value: L10n.string("ui.1455e4d7dd9068d4", String(describing: folderStatistics.fileCount), String(describing: folderStatistics.folderCount))
                             )
                         } else if let folderSizeError {
                             Text(folderSizeError)
@@ -4367,37 +4470,37 @@ struct FilePropertiesView: View {
                                 .foregroundStyle(.red)
                         }
                         Divider().opacity(0.3)
-                        SettingsRow(label: "位置", value: item.path, isMonospaced: true)
+                        SettingsRow(label: L10n.string("ui.1fb4d574da92f1c1"), value: item.path, isMonospaced: true)
                     }
 
                     // 2. 时间卡片
                     SettingsSectionCard(
-                        title: "时间节点",
+                        title: L10n.string("ui.a229d4f9ee0e4dfa"),
                         icon: "calendar",
                         iconColor: .purple
                     ) {
-                        SettingsRow(label: "修改时间", value: formatDateString(item.times?.modifiedAt))
+                        SettingsRow(label: L10n.string("ui.257bbcc44c839db4"), value: formatDateString(item.times?.modifiedAt))
                         if let createdAt = item.times?.createdAt {
                             Divider().opacity(0.3)
-                            SettingsRow(label: "创建时间", value: formatDateString(createdAt))
+                            SettingsRow(label: L10n.string("ui.07ec86e0f1d44f91"), value: formatDateString(createdAt))
                         }
                         if let accessedAt = item.times?.accessedAt {
                             Divider().opacity(0.3)
-                            SettingsRow(label: "访问时间", value: formatDateString(accessedAt))
+                            SettingsRow(label: L10n.string("ui.92cfc7de2e886725"), value: formatDateString(accessedAt))
                         }
                     }
 
                     // 3. 所有权卡片
                     SettingsSectionCard(
-                        title: "权限管理",
+                        title: L10n.string("ui.15157c55c392d1e4"),
                         icon: "person.badge.key",
                         iconColor: .green
                     ) {
-                        SettingsRow(label: "所有者", value: item.owner ?? "—")
+                        SettingsRow(label: L10n.string("ui.43a7f4b4c5c88a2a"), value: item.owner ?? "—")
                         Divider().opacity(0.3)
-                        SettingsRow(label: "用户组", value: item.group ?? "—")
+                        SettingsRow(label: L10n.string("ui.963ead08d78d597c"), value: item.group ?? "—")
                         Divider().opacity(0.3)
-                        SettingsRow(label: "权限码", value: item.permissions?.posixMode != nil ? String(format: "%o", item.permissions!.posixMode!) : "—")
+                        SettingsRow(label: L10n.string("ui.281d3a306f2dc6cd"), value: item.permissions?.posixMode != nil ? String(format: "%o", item.permissions!.posixMode!) : "—")
                     }
                 }
                 .padding(.horizontal, 24)
@@ -4414,7 +4517,7 @@ struct FilePropertiesView: View {
             } catch is CancellationError {
                 return
             } catch {
-                folderSizeError = "暂时无法计算大小，请检查连接后重新打开详情。"
+                folderSizeError = L10n.string("ui.7d8eb62241dc5e7b")
             }
             isCalculatingFolderSize = false
         }
@@ -4432,12 +4535,12 @@ struct FilePropertiesView: View {
     }
 
     private func formatBytesDetailed(_ bytes: Int64, isComplete: Bool) -> String {
-        let prefix = isComplete ? "" : "至少 "
+        let prefix = isComplete ? "" : L10n.string("ui.7f99164ef0aac2fc")
         if bytes < 0 {
-            return "\(prefix)0 字节"
+            return L10n.string("ui.698c80932fdc228e", String(describing: prefix))
         }
         if bytes < 1024 {
-            return "\(prefix)\(bytes) 字节"
+            return L10n.string("ui.08d75ecb4e667a28", String(describing: prefix), String(describing: bytes))
         }
 
         let doubleBytes = Double(bytes)
@@ -4494,11 +4597,11 @@ private struct SelectiveCacheCleanupSheet: View {
                 Image(systemName: "trash.circle.fill")
                     .font(.title)
                     .foregroundStyle(.teal)
-                Text("选择性清理本地缓存")
+                Text(L10n.string("ui.3d10daba847a0695"))
                     .font(.title2.weight(.bold))
             }
 
-            Text("请勾选您希望清理的项。清理本地缓存绝对不会删除登录凭据、设置项或 NAS 中的真实文件。")
+            Text(L10n.string("ui.c524c199a5c08251"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -4506,13 +4609,13 @@ private struct SelectiveCacheCleanupSheet: View {
                 Toggle(isOn: $cleanSafeTrash) {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack {
-                            Text("无风险临时垃圾")
+                            Text(L10n.string("ui.d238ffac2960e8e1"))
                                 .font(.body.weight(.medium))
                             Spacer()
                             Text(ByteCountFormatter.string(fromByteCount: storage.safeTrash, countStyle: .file))
                                 .foregroundStyle(.secondary)
                         }
-                        Text("包含文件临时解包预览和网络请求缓存，清理对应用使用没有任何影响（推荐清理）。")
+                        Text(L10n.string("ui.105156f052acc424"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -4523,13 +4626,13 @@ private struct SelectiveCacheCleanupSheet: View {
                 Toggle(isOn: $cleanPhotoCache) {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack {
-                            Text("照片库时间线索引缓存")
+                            Text(L10n.string("ui.996449099693965c"))
                                 .font(.body.weight(.medium))
                             Spacer()
                             Text(ByteCountFormatter.string(fromByteCount: storage.photoCache, countStyle: .file))
                                 .foregroundStyle(.secondary)
                         }
-                        Text("包含磁盘存储的照片索引元数据。清理后不会影响 NAS 照片，下次进入照片功能会自动重新扫描。")
+                        Text(L10n.string("ui.cb35276fd56e7db8"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -4540,9 +4643,9 @@ private struct SelectiveCacheCleanupSheet: View {
 
             HStack {
                 Spacer()
-                Button("取消") { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { dismiss() }
                     .keyboardShortcut(.escape, modifiers: [])
-                Button("清理选中项") {
+                Button(L10n.string("ui.d395bbae498e085a")) {
                     var selected: CacheCleanupOptions = []
                     if cleanSafeTrash { selected.insert(.safeTrash) }
                     if cleanPhotoCache { selected.insert(.photoCache) }
@@ -4614,10 +4717,10 @@ struct ModernDeleteConfirmationDialog: View {
 
             // 标题与副标题
             VStack(spacing: 4) {
-                Text(isPermanent ? "确定要永久删除吗？" : (targets.count == 1 ? "确定要删除这个项目吗？" : "确定要删除这 \(targets.count) 个项目吗？"))
+                Text(isPermanent ? L10n.string("ui.93838d5d880c6302") : (targets.count == 1 ? L10n.string("ui.a187b67796d30665") : L10n.string("ui.8ca04ccbe1e7fbf7", String(describing: targets.count))))
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.primary)
-                Text(isPermanent ? "项目位于回收站，删除后将无法恢复。" : "项目将被移至 NAS 回收站或被删除。")
+                Text(isPermanent ? L10n.string("ui.1694e0aa50f1fed7") : L10n.string("ui.fd2f12c9d6cb9fe7"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -4646,9 +4749,9 @@ struct ModernDeleteConfirmationDialog: View {
                             .font(.system(size: 20))
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("已选择 \(targets.count) 个文件或文件夹")
+                            Text(L10n.string("ui.3757aad933f4ef7b", String(describing: targets.count)))
                                 .font(.callout.weight(.semibold))
-                            Text("NAS 账号: \(profileName)")
+                            Text(L10n.string("ui.1015814a58fcd174", String(describing: profileName)))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -4662,7 +4765,7 @@ struct ModernDeleteConfirmationDialog: View {
             // 底部操作按钮
             HStack(spacing: 12) {
                 Button(action: onCancel) {
-                    Text("取消")
+                    Text(L10n.string("ui.2cd0f3be8738a86c"))
                         .font(.callout.weight(.medium))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
@@ -4671,7 +4774,7 @@ struct ModernDeleteConfirmationDialog: View {
                 .keyboardShortcut(.escape, modifiers: [])
 
                 Button(action: onConfirm) {
-                    Text(isPermanent ? "永久删除" : "确认删除")
+                    Text(isPermanent ? L10n.string("ui.4e01a4d26a03423b") : L10n.string("ui.a3ea3c17b401bd2f"))
                         .font(.callout.weight(.bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)

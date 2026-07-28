@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "defaultMode": "system",
+  "fallbackLocale": "en",
+  "systemResolution": {
+    "usesPrimaryPreferredLanguageOnly": true,
+    "unsupportedLocaleFallsBackTo": "en"
+  },
+  "locales": [
+    {
+      "id": "en",
+      "englishName": "English",
+      "nativeName": "English",
+      "apple": "en",
+      "android": "en",
+      "windows": "en-US",
+      "matches": [
+        "en",
+        "en-*"
+      ]
+    },
+    {
+      "id": "zh-Hans",
+      "englishName": "Simplified Chinese",
+      "nativeName": "简体中文",
+      "apple": "zh-Hans",
+      "android": "zh-CN",
+      "windows": "zh-CN",
+      "matches": [
+        "zh-Hans",
+        "zh-Hans-*",
+        "zh-CN",
+        "zh-SG"
+      ]
+    }
+  ],
+  "selectionModes": [
+    "system",
+    "en",
+    "zh-Hans"
+  ]
+}

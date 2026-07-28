@@ -28,8 +28,9 @@ public static class NasAddressParser
         if (trimmed.Length == 0)
         {
             throw new DsmException(
-                "请输入 NAS 地址或 QuickConnect ID",
-                "填写后重新连接。");
+                UserText.Key("WinShared2d790edfcf9d3321"),
+                UserText.Key("WinShared2608798758baa746"),
+                kind: DsmErrorKind.InvalidAddress);
         }
 
         var hasScheme = trimmed.Contains("://", StringComparison.Ordinal);
@@ -53,8 +54,9 @@ public static class NasAddressParser
         if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
         {
             throw new DsmException(
-                "这个地址不是安全连接",
-                "为了保护登录信息，请使用 HTTPS 地址。");
+                UserText.Key("WinSharedba22fbf3f7f63943"),
+                UserText.Key("WinShared4234d503af1c54d5"),
+                kind: DsmErrorKind.InsecureAddress);
         }
         if (IsPotentialQuickConnectId(host))
         {
@@ -96,6 +98,7 @@ public static class NasAddressParser
     }
 
     private static DsmException InvalidAddress() => new(
-        "无法识别这个地址",
-        "请输入 QuickConnect ID、NAS 的 IP、域名或完整 HTTPS 地址。");
+        UserText.Key("WinSharedd69866d5c54d766d"),
+        UserText.Key("WinShared07e42c78bef61378"),
+        kind: DsmErrorKind.InvalidAddress);
 }

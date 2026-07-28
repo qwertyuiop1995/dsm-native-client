@@ -2,6 +2,7 @@ import DsmCore
 import DsmNetwork
 import Foundation
 import Observation
+import DsmLocalization
 
 enum MobileModule: String, CaseIterable, Identifiable {
     case files
@@ -18,15 +19,15 @@ enum MobileModule: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .files: "文件浏览器"
-        case .photos: "照片"
-        case .chat: "消息"
-        case .downloads: "下载管理"
-        case .containers: "容器管理"
-        case .virtualMachines: "虚拟机管理"
-        case .nasSettings: "NAS 设置"
-        case .transfers: "传输中心"
-        case .settings: "设置"
+        case .files: L10n.string("ui.8e8343f9178e476d")
+        case .photos: L10n.string("ui.7b50017ae47eca32")
+        case .chat: L10n.string("ui.4da199fae933d4fa")
+        case .downloads: L10n.string("ui.5248507df52ff455")
+        case .containers: L10n.string("ui.aaf778d85ce5c2ed")
+        case .virtualMachines: L10n.string("ui.80c43bd2481c9580")
+        case .nasSettings: L10n.string("ui.b1729f4b03c4b97d")
+        case .transfers: L10n.string("ui.74c2308f64b688ae")
+        case .settings: L10n.string("ui.df3d58c7d84b85f2")
         }
     }
 
@@ -64,7 +65,7 @@ final class MobileAppModel {
 
     var profiles: [NasProfile] = []
     var selectedProfileID: UUID?
-    var displayName = "我的 NAS"
+    var displayName = L10n.string("ui.b457fa7f7764aef5")
     var host = ""
     var port = ""
     var username = ""
@@ -149,7 +150,7 @@ final class MobileAppModel {
 
     func newProfile() {
         selectedProfileID = nil
-        displayName = "我的 NAS"
+        displayName = L10n.string("ui.b457fa7f7764aef5")
         host = ""
         port = ""
         username = ""
@@ -179,12 +180,12 @@ final class MobileAppModel {
         guard !isConnecting else { return }
         isConnecting = true
         loginError = nil
-        connectionStatus = "正在检查 NAS…"
+        connectionStatus = L10n.string("ui.a50211f01216a878")
         Task {
             do {
                 let profile = try makeProfile()
                 let connection = try await discoverConnection(for: profile)
-                connectionStatus = "已找到 NAS，正在登录…"
+                connectionStatus = L10n.string("ui.1bdcf10e68a6e8f3")
                 let session = try await authRepository.login(
                     profile: connection.profile,
                     capabilities: connection.capabilities,
@@ -225,7 +226,7 @@ final class MobileAppModel {
                 needsOTP = appError?.category == .otpRequired
                 loginError = appError?.safeUserMessage
                     ?? (error as? LocalizedError)?.errorDescription
-                    ?? "无法连接到 NAS，请检查地址和登录信息后重试。"
+                    ?? L10n.string("ui.0279a181344aee7f")
                 isConnecting = false
                 connectionStatus = nil
             }
@@ -236,14 +237,14 @@ final class MobileAppModel {
         guard !isConnecting else { return }
         isConnecting = true
         loginError = nil
-        connectionStatus = "正在恢复登录…"
+        connectionStatus = L10n.string("ui.9e10c995ba5971bf")
         Task {
             do {
                 guard let session = try await sessionStore.load(for: profile.id) else {
                     throw AppError(
                         category: .authenticationRequired,
                         isRetryable: false,
-                        safeUserMessage: "请输入密码重新登录。"
+                        safeUserMessage: L10n.string("ui.77a666ac48251d37")
                     )
                 }
                 let connection = try await discoverConnection(for: profile)
@@ -271,8 +272,8 @@ final class MobileAppModel {
                     connect()
                 } else {
                     loginError = password.isEmpty
-                        ? "保存的登录已失效，请输入密码重新登录。"
-                        : "保存的登录已失效，密码已为你填好，请重新连接。"
+                        ? L10n.string("ui.5a05e9e1ddd2c79b")
+                        : L10n.string("ui.c57ce687fd05d636")
                 }
             }
         }
@@ -365,7 +366,7 @@ final class MobileAppModel {
     }
 
     func createFolder(name: String) {
-        perform("文件夹已创建") { [self] in
+        perform(L10n.string("ui.f1edc97079ecdfaf")) { [self] in
             try await fileRepository?.createFolder(
                 parentPath: currentPath.isEmpty ? "/" : currentPath,
                 name: name
@@ -375,14 +376,14 @@ final class MobileAppModel {
     }
 
     func rename(_ item: FileItem, to name: String) {
-        perform("名称已修改") { [self] in
+        perform(L10n.string("ui.be3a2e72dd8864ae")) { [self] in
             try await fileRepository?.rename(path: item.path, newName: name)
             try await loadFiles()
         }
     }
 
     func delete(_ items: [FileItem]) {
-        perform("已提交删除") { [self] in
+        perform(L10n.string("ui.c78689437446b833")) { [self] in
             guard let fileRepository else { return }
             try await fileRepository.delete(paths: items.map(\.path)) { _, _ in }
             try await loadFiles()
@@ -390,21 +391,21 @@ final class MobileAppModel {
     }
 
     func createDownload(uri: String, destination: String?) {
-        perform("下载任务已创建") { [self] in
+        perform(L10n.string("ui.aa35f61b37346876")) { [self] in
             try await serviceRepository?.createDownloadTask(uri: uri, destination: destination)
             downloadSnapshot = try await serviceRepository?.loadDownloadStation()
         }
     }
 
     func controlDownload(_ task: DownloadStationTask, action: DownloadStationTaskAction) {
-        perform("下载任务已更新") { [self] in
+        perform(L10n.string("ui.b248cbd9801d3d35")) { [self] in
             try await serviceRepository?.controlDownloadTasks(ids: [task.id], action: action)
             downloadSnapshot = try await serviceRepository?.loadDownloadStation()
         }
     }
 
     func deleteDownload(_ task: DownloadStationTask, removeData: Bool) {
-        perform("下载任务已移除") { [self] in
+        perform(L10n.string("ui.587677949414b292")) { [self] in
             try await serviceRepository?.deleteDownloadTasks(
                 ids: [task.id],
                 removeData: removeData
@@ -414,56 +415,56 @@ final class MobileAppModel {
     }
 
     func controlContainer(_ container: ContainerInstance, action: ContainerAction) {
-        perform("容器状态已更新") { [self] in
+        perform(L10n.string("ui.a1796506f6b895ba")) { [self] in
             try await serviceRepository?.controlContainers(ids: [container.id], action: action)
             containerSnapshot = try await serviceRepository?.loadContainerManager()
         }
     }
 
     func deleteContainer(_ container: ContainerInstance) {
-        perform("容器已删除") { [self] in
+        perform(L10n.string("ui.06af50e11ee1d9a1")) { [self] in
             try await serviceRepository?.deleteContainers(ids: [container.id])
             containerSnapshot = try await serviceRepository?.loadContainerManager()
         }
     }
 
     func deleteContainerImage(_ image: ContainerImage) {
-        perform("映像已删除") { [self] in
+        perform(L10n.string("ui.6328b3fc43303032")) { [self] in
             try await serviceRepository?.deleteContainerImages(ids: [image.id])
             containerSnapshot = try await serviceRepository?.loadContainerManager()
         }
     }
 
     func createContainerNetwork(name: String, driver: String) {
-        perform("网络已创建") { [self] in
+        perform(L10n.string("ui.91891f88242c2db6")) { [self] in
             try await serviceRepository?.createContainerNetwork(name: name, driver: driver)
             containerSnapshot = try await serviceRepository?.loadContainerManager()
         }
     }
 
     func deleteContainerNetwork(_ network: ContainerNetwork) {
-        perform("网络已删除") { [self] in
+        perform(L10n.string("ui.aa7162688ec2a974")) { [self] in
             try await serviceRepository?.deleteContainerNetworks(ids: [network.id])
             containerSnapshot = try await serviceRepository?.loadContainerManager()
         }
     }
 
     func controlVirtualMachine(_ machine: VirtualMachine, action: VirtualMachinePowerAction) {
-        perform("虚拟机状态已更新") { [self] in
+        perform(L10n.string("ui.2b81d7ea339bac1a")) { [self] in
             try await serviceRepository?.controlVirtualMachines(ids: [machine.id], action: action)
             virtualMachineSnapshot = try await serviceRepository?.loadVirtualMachineManager()
         }
     }
 
     func deleteVirtualMachine(_ machine: VirtualMachine) {
-        perform("虚拟机已删除") { [self] in
+        perform(L10n.string("ui.580a481d5e3fa1cb")) { [self] in
             try await serviceRepository?.deleteVirtualMachines(ids: [machine.id])
             virtualMachineSnapshot = try await serviceRepository?.loadVirtualMachineManager()
         }
     }
 
     func updateVirtualMachineNetwork(_ network: VirtualizationResource, name: String) {
-        perform("网络已修改") { [self] in
+        perform(L10n.string("ui.e345b0cfdeddc84a")) { [self] in
             try await serviceRepository?.updateVirtualMachineNetwork(
                 id: network.id,
                 configuration: VirtualMachineNetworkUpdate(name: name)
@@ -473,14 +474,14 @@ final class MobileAppModel {
     }
 
     func deleteVirtualMachineNetwork(_ network: VirtualizationResource) {
-        perform("网络已删除") { [self] in
+        perform(L10n.string("ui.aa7162688ec2a974")) { [self] in
             try await serviceRepository?.deleteVirtualMachineNetworks(ids: [network.id])
             virtualMachineSnapshot = try await serviceRepository?.loadVirtualMachineManager()
         }
     }
 
     func deleteVirtualMachineImage(_ image: VirtualizationResource) {
-        perform("映像已删除") { [self] in
+        perform(L10n.string("ui.6328b3fc43303032")) { [self] in
             try await serviceRepository?.deleteVirtualMachineImages(ids: [image.id])
             virtualMachineSnapshot = try await serviceRepository?.loadVirtualMachineManager()
         }
@@ -589,7 +590,7 @@ final class MobileAppModel {
             )
         }
 
-        connectionStatus = "正在通过 QuickConnect 查找 NAS…"
+        connectionStatus = L10n.string("ui.aa0582cad267718e")
         let endpoints: [QuickConnectEndpoint]
         do {
             endpoints = try await quickConnectResolver.resolve(id: parsedAddress.host)
@@ -600,8 +601,8 @@ final class MobileAppModel {
 
         for endpoint in endpoints {
             connectionStatus = endpoint.kind == .local
-                ? "正在尝试局域网连接…"
-                : "正在尝试外网直接连接…"
+                ? L10n.string("ui.3b38866d76d21239")
+                : L10n.string("ui.307e0c332a164ea1")
             let endpointPort = profile.portOverride ?? endpoint.port
             let connectionProfile = try profile.updating(host: endpoint.host, port: endpointPort)
             do {
@@ -617,7 +618,7 @@ final class MobileAppModel {
             }
         }
 
-        connectionStatus = "正在建立 QuickConnect 中继连接…"
+        connectionStatus = L10n.string("ui.85e5d30ce27fc0e5")
         let relay = try await quickConnectResolver.requestRelay(id: parsedAddress.host)
         let relayProfile = try profile.updating(
             host: relay.host,
@@ -659,7 +660,7 @@ final class MobileAppModel {
             autoLoginEnabled = false
             defaults.set(false, forKey: autoLoginKeyPrefix + profile.id.uuidString)
             loginError = (error as? LocalizedError)?.errorDescription
-                ?? "无法读取已保存的密码，请重新输入。"
+                ?? L10n.string("ui.74ef3d57d3207959")
         }
     }
 
@@ -704,6 +705,6 @@ final class MobileAppModel {
     private func userMessage(_ error: Error) -> String {
         (error as? AppError)?.safeUserMessage
             ?? (error as? LocalizedError)?.errorDescription
-            ?? "没有完成这次操作，请稍后重试。"
+            ?? L10n.string("ui.0c94990463093268")
     }
 }

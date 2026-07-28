@@ -20,6 +20,8 @@ targets:
       - path: Resources
     dependencies:
       - package: DsmShared
+        product: DsmLocalization
+      - package: DsmShared
         product: DsmCore
       - package: DsmShared
         product: DsmNetwork

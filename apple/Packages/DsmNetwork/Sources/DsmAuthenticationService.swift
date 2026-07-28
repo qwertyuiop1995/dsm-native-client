@@ -1,5 +1,6 @@
 import DsmCore
 import Foundation
+import DsmLocalization
 
 private struct LoginPayload: Decodable, Sendable {
     let sid: String
@@ -50,14 +51,14 @@ public struct DsmAuthenticationService: Sendable {
             throw AppError(
                 category: .versionUnsupported,
                 isRetryable: false,
-                safeUserMessage: "这台 NAS 的登录功能暂不受支持，请更新 DSM 后重试。"
+                safeUserMessage: L10n.string("shared.ab67a889a268fb00")
             )
         }
         guard !account.isEmpty, !password.isEmpty else {
             throw AppError(
                 category: .authenticationRequired,
                 isRetryable: false,
-                safeUserMessage: "请输入用户名和密码。"
+                safeUserMessage: L10n.string("shared.53f82a3866fbda42")
             )
         }
 
@@ -89,7 +90,7 @@ public struct DsmAuthenticationService: Sendable {
                 throw AppError(
                     category: .invalidResponse,
                     isRetryable: false,
-                    safeUserMessage: "登录失败，NAS 返回的信息不完整。"
+                    safeUserMessage: L10n.string("shared.613c9aebd1cc383d")
                 )
             }
             return AuthSession(
@@ -115,7 +116,7 @@ public struct DsmAuthenticationService: Sendable {
             throw AppError(
                 category: .versionUnsupported,
                 isRetryable: false,
-                safeUserMessage: "无法通知 NAS 退出登录，但本机登录信息仍会被删除。"
+                safeUserMessage: L10n.string("shared.6ee080ac607b50db")
             )
         }
 

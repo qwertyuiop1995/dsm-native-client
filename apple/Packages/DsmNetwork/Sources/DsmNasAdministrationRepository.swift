@@ -1,5 +1,6 @@
 import DsmCore
 import Foundation
+import DsmLocalization
 
 private enum DsmDynamicJSON: Decodable, Sendable {
     case object([String: DsmDynamicJSON])
@@ -336,7 +337,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
 
         let verified = try await loadFileServiceSettings()
         guard Self.fileServiceSettings(verified, match: settings) else {
-            throw verificationError("NAS 尚未确认文件服务设置已生效，请刷新后重试。")
+            throw verificationError(L10n.string("shared.86dc93229dc74567"))
         }
     }
 
@@ -344,7 +345,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         let value = try await call(DsmAPIName.coreTerminal, method: "get")
         guard let ssh = value.boolean(["enable_ssh"]),
               let telnet = value.boolean(["enable_telnet"]) else {
-            throw verificationError("NAS 返回的远程连接设置不完整，请稍后重试。")
+            throw verificationError(L10n.string("shared.e53ee9190654879c"))
         }
         return NasTerminalSettings(
             isSSHEnabled: ssh,
@@ -375,14 +376,14 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
 
         let verified = try await loadTerminalSettings()
         guard verified == settings else {
-            throw verificationError("NAS 尚未确认远程连接设置已生效，请刷新后重试。")
+            throw verificationError(L10n.string("shared.373e3c888e7ebf52"))
         }
     }
 
     public func loadProxySettings() async throws -> NasProxySettings {
         let value = try await call(DsmAPIName.coreNetworkProxy, method: "get")
         guard let enabled = value.boolean(["enable"]) else {
-            throw verificationError("NAS 返回的代理设置不完整，请稍后重试。")
+            throw verificationError(L10n.string("shared.21598082fdbb7d65"))
         }
         return NasProxySettings(
             isEnabled: enabled,
@@ -395,7 +396,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         let host = settings.host.trimmingCharacters(in: .whitespacesAndNewlines)
         if settings.isEnabled {
             guard !host.isEmpty, let port = settings.port else {
-                throw verificationError("请填写代理服务器地址和端口。")
+                throw verificationError(L10n.string("shared.ee6423ab7d6992c8"))
             }
             try Self.validatePort(port)
         }
@@ -423,7 +424,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         guard verified.isEnabled == normalized.isEnabled,
               !normalized.isEnabled
                 || (verified.host == normalized.host && verified.port == normalized.port) else {
-            throw verificationError("NAS 尚未确认代理设置已生效，请刷新后重试。")
+            throw verificationError(L10n.string("shared.d29407101028f890"))
         }
     }
 
@@ -468,26 +469,26 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                   CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
                       .contains($0)
               }) else {
-            throw verificationError("网卡标识无效，请刷新后重试。")
+            throw verificationError(L10n.string("shared.e08a7f16a91c9932"))
         }
         guard (576...9_000).contains(interface.mtu) else {
-            throw verificationError("MTU 应为 576 到 9000。")
+            throw verificationError(L10n.string("shared.bd04fc72d0e308c0"))
         }
         if interface.isVLANEnabled {
             guard let vlanID = interface.vlanID, (1...4_094).contains(vlanID) else {
-                throw verificationError("VLAN ID 应为 1 到 4094。")
+                throw verificationError(L10n.string("shared.e5be64194f7d7959"))
             }
         }
         if !interface.usesDHCP {
             guard Self.isValidIPv4(interface.address),
                   Self.isValidIPv4(interface.subnetMask),
                   (interface.gateway.isEmpty || Self.isValidIPv4(interface.gateway)) else {
-                throw verificationError("请填写有效的 IPv4 地址、子网掩码和网关。")
+                throw verificationError(L10n.string("shared.e4338b64530bcbcc"))
             }
         }
         let current = try await loadEthernetInterfaces()
         guard let existing = current.first(where: { $0.id == interface.id }) else {
-            throw verificationError("没有找到这张网卡，请刷新后重试。")
+            throw verificationError(L10n.string("shared.f0a75be9d773f2a6"))
         }
         guard existing != interface else { return }
         var config: [String: DsmJSONValue] = [
@@ -523,7 +524,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             fallback: [:],
             id: interface.id
         ), Self.ethernetInterface(verified, matches: interface) else {
-            throw verificationError("NAS 尚未确认网卡设置已生效。当前连接可能已经变化，请重新连接后检查。")
+            throw verificationError(L10n.string("shared.648300d4688b5c30"))
         }
     }
 
@@ -614,7 +615,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         if let brightness = settings.ledBrightness,
            brightness != current.ledBrightness {
             guard let range = current.ledBrightnessRange, range.contains(brightness) else {
-                throw verificationError("请选择这台 NAS 支持的灯光亮度。")
+                throw verificationError(L10n.string("shared.e7bc95903e2c1a21"))
             }
             try await callVoid(
                 DsmAPIName.coreHardwareLEDBrightness,
@@ -637,7 +638,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 "quietstopfan"
             ])
             guard supportedModes.contains(fanMode) else {
-                throw verificationError("请选择这台 NAS 支持的风扇模式。")
+                throw verificationError(L10n.string("shared.f57a2aff1b6f5542"))
             }
             try await callVoid(
                 DsmAPIName.coreHardwareFanSpeed,
@@ -727,23 +728,23 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
            expectedUPS != currentUPS {
             let supportedModes = Set(["USB", "SNMP", "SLAVE"])
             guard supportedModes.contains(expectedUPS.mode) else {
-                throw verificationError("请选择这台 NAS 支持的 UPS 连接方式。")
+                throw verificationError(L10n.string("shared.6c49d4a3c0dca3eb"))
             }
             if let delay = expectedUPS.safeModeDelaySeconds,
                !(0...604_800).contains(delay) {
-                throw verificationError("进入安全模式前的等待时间应为 0 到 604800 秒。")
+                throw verificationError(L10n.string("shared.6fc94869ad264ba7"))
             }
             if expectedUPS.mode == "SLAVE",
                expectedUPS.isEnabled,
                (expectedUPS.networkServerAddress?
                     .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
-                throw verificationError("请填写 UPS 服务器地址。")
+                throw verificationError(L10n.string("shared.47b0ea4e9e53c8c1"))
             }
             if expectedUPS.mode == "SNMP",
                expectedUPS.isEnabled,
                (expectedUPS.snmpServerAddress?
                     .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
-                throw verificationError("请填写 SNMP UPS 地址。")
+                throw verificationError(L10n.string("shared.0ac712a773c6795f"))
             }
             var upsParameters: [String: DsmParameterValue] = [
                 "enable": .boolean(expectedUPS.isEnabled),
@@ -781,7 +782,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             )
         } else if settings.ups != nil || current.ups != nil {
             guard settings.ups != nil, current.ups != nil else {
-                throw verificationError("UPS 设置已经变化，请刷新后重试。")
+                throw verificationError(L10n.string("shared.4b3caf9ebe49fe9e"))
             }
         }
         let verified = try await loadHardwareSettings()
@@ -815,7 +816,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 || verified.isAutomaticPowerOffEnabled
                     == settings.isAutomaticPowerOffEnabled),
               Self.upsSettings(verified.ups, match: settings.ups) else {
-            throw verificationError("NAS 尚未确认硬件设置已生效，请刷新后重试。")
+            throw verificationError(L10n.string("shared.9e2bef35ff2e4491"))
         }
     }
 
@@ -850,7 +851,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .conflict,
                 isRetryable: false,
-                safeUserMessage: "当前连接正在使用远程中继。请先通过局域网或直连地址连接，再关闭中继。"
+                safeUserMessage: L10n.string("shared.0ca30ab13245d805")
             )
         }
         if let enabled = settings.isRelayEnabled,
@@ -876,7 +877,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
               (settings.isRouterConfigurationEnabled == nil
                 || verified.isRouterConfigurationEnabled
                     == settings.isRouterConfigurationEnabled) else {
-            throw verificationError("NAS 尚未确认远程访问设置已生效，请刷新后重试。")
+            throw verificationError(L10n.string("shared.259c1e687815c0a7"))
         }
     }
 
@@ -885,7 +886,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         guard let enabled = value.boolean(["enable"]),
               let attempts = value.number(["attempts"]).map(Int.init),
               let withinMinutes = value.number(["within_mins"]).map(Int.init) else {
-            throw verificationError("NAS 返回的安全防护设置不完整，请稍后重试。")
+            throw verificationError(L10n.string("shared.2ab8b77714bc123d"))
         }
         let rawExpiration = value.number(["expire_day"]).map(Int.init) ?? 0
         var dosProtection: [NasDoSProtectionSetting] = []
@@ -965,13 +966,13 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
 
     public func saveSecuritySettings(_ settings: NasSecuritySettings) async throws {
         guard settings.failedAttempts > 0, settings.failedAttempts <= 9_999 else {
-            throw verificationError("允许失败次数应为 1 到 9999。")
+            throw verificationError(L10n.string("shared.7172e0328c485e2d"))
         }
         guard settings.withinMinutes > 0, settings.withinMinutes <= 9_999_999 else {
-            throw verificationError("统计时间应为有效的分钟数。")
+            throw verificationError(L10n.string("shared.6b3faa04b8983fea"))
         }
         if let days = settings.expirationDays, !(1...999).contains(days) {
-            throw verificationError("自动解除封锁天数应为 1 到 999。")
+            throw verificationError(L10n.string("shared.eb7055df43bef6c1"))
         }
         let current = try await loadSecuritySettings()
         guard current != settings else { return }
@@ -993,7 +994,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         if settings.dosProtection != current.dosProtection {
             let currentIDs = Set(current.dosProtection.map(\.id))
             guard Set(settings.dosProtection.map(\.id)) == currentIDs else {
-                throw verificationError("网卡列表已经变化，请刷新安全设置后重试。")
+                throw verificationError(L10n.string("shared.106655f64c87e191"))
             }
             let configs: [[String: DsmJSONValue]] = settings.dosProtection.map {
                 [
@@ -1020,7 +1021,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
            expected != current.isFirewallEnabled {
             if expected {
                 guard let profile = current.firewallProfileName, !profile.isEmpty else {
-                    throw verificationError("这台 NAS 没有可应用的防火墙配置。")
+                    throw verificationError(L10n.string("shared.816830de0895450c"))
                 }
                 try await applyFirewallProfile(profile)
             } else {
@@ -1042,7 +1043,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
               (settings.isPortScanProtectionEnabled == nil
                 || verified.isPortScanProtectionEnabled
                     == settings.isPortScanProtectionEnabled) else {
-            throw verificationError("NAS 尚未确认安全防护设置已生效，请刷新后重试。")
+            throw verificationError(L10n.string("shared.879eb126a08e1b1c"))
         }
     }
 
@@ -1056,7 +1057,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             ]
         )
         guard let taskID = started.string(["task_id"]), !taskID.isEmpty else {
-            throw verificationError("NAS 没有开始应用防火墙设置，请稍后重试。")
+            throw verificationError(L10n.string("shared.40d8f50f944fb5b6"))
         }
         var completed = false
         for attempt in 0..<30 {
@@ -1074,7 +1075,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                         DsmAPIName.coreSecurityFirewallProfileApply,
                         method: "stop"
                     )
-                    throw verificationError("防火墙设置未能应用。请确认当前连接已被配置允许。")
+                    throw verificationError(L10n.string("shared.672df0d0489dd59a"))
                 }
                 completed = true
                 break
@@ -1085,7 +1086,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .serverBusy,
                 isRetryable: true,
-                safeUserMessage: "防火墙仍在应用中，请稍后刷新状态。"
+                safeUserMessage: L10n.string("shared.41454065abd301f9")
             )
         }
     }
@@ -1105,7 +1106,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
               let timeFormat = value.string(["time_format"]),
               let timeZone = value.string(["timezone"]),
               let rawMode = value.string(["enable_ntp"]) else {
-            throw verificationError("NAS 返回的区域与时间设置不完整，请稍后重试。")
+            throw verificationError(L10n.string("shared.db6b9590023d51f5"))
         }
         let isNetworkTimeEnabled =
             ["ntp", "true", "yes", "1", "enabled"].contains(rawMode.lowercased())
@@ -1143,20 +1144,20 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         let dateFormat = settings.dateFormat.trimmingCharacters(in: .whitespacesAndNewlines)
         let timeFormat = settings.timeFormat.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !dateFormat.isEmpty, !timeFormat.isEmpty else {
-            throw verificationError("日期和时间格式不能为空。")
+            throw verificationError(L10n.string("shared.eabfe94b8908b899"))
         }
         guard settings.timeZones.contains(where: { $0.id == settings.timeZone }) else {
-            throw verificationError("请选择这台 NAS 提供的时区。")
+            throw verificationError(L10n.string("shared.0504b45ed9ebedd1"))
         }
         let servers = settings.timeServers
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard servers.count <= 3 else {
-            throw verificationError("最多可以填写 3 个时间服务器。")
+            throw verificationError(L10n.string("shared.2c6b003fd894a371"))
         }
         if settings.isNetworkTimeEnabled {
             guard !servers.isEmpty, servers.allSatisfy(Self.isValidTimeServer) else {
-                throw verificationError("请填写有效的时间服务器地址。")
+                throw verificationError(L10n.string("shared.915c3cdb096109ad"))
             }
             if !current.isNetworkTimeEnabled || current.timeServers != servers {
                 try await callVoid(
@@ -1177,7 +1178,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         ]
         if !settings.isNetworkTimeEnabled {
             guard let manualDate = settings.manualDate else {
-                throw verificationError("请选择要设置的日期和时间。")
+                throw verificationError(L10n.string("shared.e580ef4793aaf3d6"))
             }
             let calendar = Calendar(identifier: .gregorian)
             let parts = calendar.dateComponents(
@@ -1186,7 +1187,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             )
             guard let year = parts.year, let month = parts.month, let day = parts.day,
                   let hour = parts.hour, let minute = parts.minute, let second = parts.second else {
-                throw verificationError("请选择有效的日期和时间。")
+                throw verificationError(L10n.string("shared.286f4090dc75cccc"))
             }
             parameters["date"] = .string("\(year)/\(month)/\(day)")
             parameters["hour"] = .integer(hour)
@@ -1214,7 +1215,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
               verified.timeZone == settings.timeZone,
               verified.isNetworkTimeEnabled == settings.isNetworkTimeEnabled,
               (!settings.isNetworkTimeEnabled || verified.timeServers == servers) else {
-            throw verificationError("NAS 尚未确认区域与时间设置已生效，请刷新后重试。")
+            throw verificationError(L10n.string("shared.6c186cb11546be49"))
         }
     }
 
@@ -1289,25 +1290,25 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     public func saveDDNS(_ draft: NasDDNSDraft) async throws {
         let directory = try await loadDDNS()
         guard directory.providers.contains(where: { $0.id == draft.providerID }) else {
-            throw verificationError("请选择这台 NAS 提供的 DDNS 服务商。")
+            throw verificationError(L10n.string("shared.1ba0507d4c0c3090"))
         }
         let hostname = draft.hostname.trimmingCharacters(in: .whitespacesAndNewlines)
         let username = draft.username.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.isValidHostname(hostname) else {
-            throw verificationError("请填写有效的主机名称。")
+            throw verificationError(L10n.string("shared.9e1b725d1515431e"))
         }
         guard !username.isEmpty else {
-            throw verificationError("账号不能为空。")
+            throw verificationError(L10n.string("shared.888eb410ef3a01da"))
         }
         if draft.originalProviderID == nil {
             guard draft.providerID == "Synology" || !draft.password.isEmpty else {
-                throw verificationError("新建 DDNS 记录时必须填写密码或密钥。")
+                throw verificationError(L10n.string("shared.bc264628bb87388d"))
             }
             guard !directory.records.contains(where: { $0.providerID == draft.providerID }) else {
                 throw AppError(
                     category: .conflict,
                     isRetryable: false,
-                    safeUserMessage: "这个服务商已经有一条 DDNS 记录，请编辑现有记录。"
+                    safeUserMessage: L10n.string("shared.864f876a4eadf507")
                 )
             }
         }
@@ -1335,7 +1336,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
               saved.hostname == hostname,
               saved.username == username,
               saved.isEnabled == draft.isEnabled else {
-            throw verificationError("NAS 尚未确认 DDNS 记录已保存，请刷新后重试。")
+            throw verificationError(L10n.string("shared.dd472a06a448e1b0"))
         }
     }
 
@@ -1349,7 +1350,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         )
         let verified = try await loadDDNS()
         guard !verified.records.contains(where: { $0.providerID == providerID }) else {
-            throw verificationError("NAS 尚未确认 DDNS 记录已删除，请刷新后重试。")
+            throw verificationError(L10n.string("shared.60be7160962c7372"))
         }
     }
 
@@ -1410,7 +1411,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             return NasDisk(
                 id: id,
                 deviceID: item.string(["device"]) ?? id,
-                name: item.string(["longName", "name", "device"]) ?? "硬盘 \(index + 1)",
+                name: item.string(["longName", "name", "device"]) ?? L10n.string("shared.c89654ab90e80308", String(describing: index + 1)),
                 vendor: item.string(["vendor"]),
                 model: item.string(["model"]),
                 type: item.string(["diskType", "portType"]),
@@ -1447,7 +1448,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             let size = item["size"] ?? .object([:])
             return NasStoragePool(
                 id: id,
-                name: item.string(["desc", "vol_desc"]) ?? "存储池 \(index + 1)",
+                name: item.string(["desc", "vol_desc"]) ?? L10n.string("shared.cecdcf599fc46c06", String(describing: index + 1)),
                 raidType: item.string(["raidType", "device_type"]),
                 status: item.string(["summary_status", "status", "space_status"]),
                 totalBytes: size.integer(["total"]),
@@ -1466,7 +1467,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             let size = item["size"] ?? .object([:])
             return NasVolume(
                 id: id,
-                name: item.string(["vol_desc", "desc", "vol_path"]) ?? "存储空间 \(index + 1)",
+                name: item.string(["vol_desc", "desc", "vol_path"]) ?? L10n.string("shared.e2687545daa50cb0", String(describing: index + 1)),
                 fileSystem: item.string(["fs_type"]),
                 status: item.string(["summary_status", "status", "space_status"]),
                 totalBytes: size.integer(["total"]),
@@ -1492,7 +1493,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .apiUnavailable,
                 isRetryable: false,
-                safeUserMessage: "这块硬盘不支持 S.M.A.R.T. 检测。"
+                safeUserMessage: L10n.string("shared.edb18b7e9cd3b114")
             )
         }
         return try await loadDiskTestStatus(for: disk, includesHistory: true)
@@ -1591,7 +1592,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .apiUnavailable,
                 isRetryable: false,
-                safeUserMessage: "这块硬盘不支持 S.M.A.R.T. 检测。"
+                safeUserMessage: L10n.string("shared.edb18b7e9cd3b114")
             )
         }
         let current = try await loadDiskTestStatus(for: disk, includesHistory: false)
@@ -1599,14 +1600,14 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .conflict,
                 isRetryable: true,
-                safeUserMessage: "这块硬盘正在检测，请等待当前检测完成后再试。"
+                safeUserMessage: L10n.string("shared.0eb619b75fdbcff5")
             )
         }
         guard !current.isBusyWithOtherTest else {
             throw AppError(
                 category: .conflict,
                 isRetryable: true,
-                safeUserMessage: "这块硬盘正在执行其他检测，请等待完成后再试。"
+                safeUserMessage: L10n.string("shared.b8c5b11d9fc2c1f5")
             )
         }
 
@@ -1631,7 +1632,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         throw AppError(
             category: .conflict,
             isRetryable: true,
-            safeUserMessage: "NAS 尚未确认检测已开始，请刷新状态后重试。"
+            safeUserMessage: L10n.string("shared.ddef2b60c5d885df")
         )
     }
 
@@ -1641,7 +1642,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .apiUnavailable,
                 isRetryable: false,
-                safeUserMessage: "这块硬盘不支持 S.M.A.R.T. 检测。"
+                safeUserMessage: L10n.string("shared.edb18b7e9cd3b114")
             )
         }
         let current = try await loadDiskTestStatus(for: disk, includesHistory: false)
@@ -1670,7 +1671,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         throw AppError(
             category: .conflict,
             isRetryable: true,
-            safeUserMessage: "NAS 尚未确认检测已停止，请稍后刷新状态。"
+            safeUserMessage: L10n.string("shared.9681fb468adf10c2")
         )
     }
 
@@ -1804,14 +1805,14 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .notFound,
                 isRetryable: false,
-                safeUserMessage: "没有找到这个套件，请刷新后重试。"
+                safeUserMessage: L10n.string("shared.86d86e549eb9d8ba")
             )
         }
         guard action != .upgrade else {
             throw AppError(
                 category: .apiUnavailable,
                 isRetryable: false,
-                safeUserMessage: "暂不能在这里更新套件，请先在套件中心检查更新。"
+                safeUserMessage: L10n.string("shared.c6caf25d12b5e5da")
             )
         }
 
@@ -1989,7 +1990,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "这个任务的信息不完整，请刷新后重试。"
+                safeUserMessage: L10n.string("shared.06669846e8a043c1")
             )
         }
         let value = try await call(
@@ -2026,7 +2027,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "没有找到这次运行记录，请刷新后重试。"
+                safeUserMessage: L10n.string("shared.e72bfeedb9c72727")
             )
         }
         let value = try await call(
@@ -2050,7 +2051,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "请填写任务名称、运行账号和要执行的命令。"
+                safeUserMessage: L10n.string("shared.56b9ed2bd4038953")
             )
         }
 
@@ -2179,7 +2180,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "请输入账号名称。"
+                safeUserMessage: L10n.string("shared.f4697c2ce8685eba")
             )
         }
         if draft.originalName == nil {
@@ -2188,7 +2189,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 throw AppError(
                     category: .invalidResponse,
                     isRetryable: false,
-                    safeUserMessage: "请填写两次相同的登录密码。"
+                    safeUserMessage: L10n.string("shared.9c544f72c057fa2f")
                 )
             }
         } else if !draft.password.isEmpty,
@@ -2196,7 +2197,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "两次输入的登录密码不一致。"
+                safeUserMessage: L10n.string("shared.e4a4a3382011b139")
             )
         }
 
@@ -2230,7 +2231,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "这个系统账号不能删除。"
+                safeUserMessage: L10n.string("shared.917cb22bc73cc211")
             )
         }
         try await callVoid(
@@ -2246,7 +2247,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "请输入群组名称。"
+                safeUserMessage: L10n.string("shared.56a567d51676e519")
             )
         }
         try await callVoid(
@@ -2266,7 +2267,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "这个系统群组不能删除。"
+                safeUserMessage: L10n.string("shared.966bbfaa2a0d098a")
             )
         }
         try await callVoid(
@@ -2353,7 +2354,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "这个连接不能在这里断开。"
+                safeUserMessage: L10n.string("shared.59ee3335304d8042")
             )
         }
 
@@ -2406,7 +2407,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .conflict,
                 isRetryable: false,
-                safeUserMessage: "找不到这块硬盘，请刷新存储信息后重试。"
+                safeUserMessage: L10n.string("shared.e8513b25080428db")
             )
         }
         return disk
@@ -2518,7 +2519,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 暂不提供此项信息。"
+            safeUserMessage: L10n.string("shared.45f2d65c5f20a7b9")
         )
     }
 
@@ -2535,7 +2536,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "端口应为 1 到 65535 之间的数字。"
+                safeUserMessage: L10n.string("shared.8a6549bde9979b57")
             )
         }
     }
@@ -2863,19 +2864,19 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     private func cleanPackageStatusDescription(status: String?, rawOrigin: String?, rawDesc: String?) -> String {
         let raw = [rawOrigin, rawDesc].compactMap { $0 }.joined(separator: " ").lowercased()
         if raw.contains("script status is not 0 but the unit is active") {
-            return "后台响应中（状态自检异常）"
+            return L10n.string("shared.0c1dfe694215dfd3")
         }
         if raw.contains("retrieve from status script") {
-            return "服务活跃"
+            return L10n.string("shared.bef163e84a4d4676")
         }
         if let status = status?.lowercased() {
-            if status == "running" || status == "active" { return "运行中" }
-            if status == "stop" || status == "stopped" { return "已停用" }
-            if status == "error" || status == "failed" { return "运行异常" }
+            if status == "running" || status == "active" { return L10n.string("shared.1f0eb99b7ed094be") }
+            if status == "stop" || status == "stopped" { return L10n.string("shared.a8c3698b5b8c485d") }
+            if status == "error" || status == "failed" { return L10n.string("shared.65350ffbd5f562ce") }
         }
         if let rawDesc = rawDesc, !rawDesc.isEmpty, !rawDesc.contains("retrieve from status script") {
             return rawDesc
         }
-        return "运行中"
+        return L10n.string("shared.1f0eb99b7ed094be")
     }
 }

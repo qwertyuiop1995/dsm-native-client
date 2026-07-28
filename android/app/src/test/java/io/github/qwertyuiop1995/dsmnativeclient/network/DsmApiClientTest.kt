@@ -1,6 +1,7 @@
 package io.github.qwertyuiop1995.dsmnativeclient.network
 
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -35,7 +36,7 @@ class DsmApiClientTest {
         val failure = assertThrows(DsmFailure::class.java) {
             client.endpoint(profile(address = "https://"))
         }
-        assertEquals("NAS 地址缺少主机名", failure.message)
+        assertEquals(DsmErrorKind.INVALID_ADDRESS, failure.kind)
     }
 
     private fun profile(address: String, port: Int? = null) = NasProfile(

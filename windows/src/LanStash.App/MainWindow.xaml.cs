@@ -1,3 +1,4 @@
+using LanStash.App.Localization;
 using LanStash.App.ViewModels;
 using LanStash.App.Views;
 using Microsoft.UI;
@@ -15,7 +16,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Title = "岚仓";
+        Title = LocalizationService.Current.Get("AppName");
         var windowHandle = WindowNative.GetWindowHandle(this);
         var windowId = Win32Interop.GetWindowIdFromWindow(windowHandle);
         var window = AppWindow.GetFromWindowId(windowId);
@@ -23,8 +24,20 @@ public sealed partial class MainWindow : Window
         window.Resize(new Windows.Graphics.SizeInt32(1280, 820));
 
         _viewModel.ConnectionChanged += OnConnectionChanged;
+        LocalizationService.Current.LanguageChanged += OnLanguageChanged;
         RootFrame.Content = new LoginPage(_viewModel);
         _ = _viewModel.InitializeAsync();
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            Title = LocalizationService.Current.Get("AppName");
+            RootFrame.Content = _viewModel.Repository is null
+                ? new LoginPage(_viewModel)
+                : new ShellPage(_viewModel);
+        });
     }
 
     private void OnConnectionChanged(object? sender, bool connected)

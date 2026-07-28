@@ -1,13 +1,14 @@
 import DsmCore
 import Foundation
 import Observation
+import DsmLocalization
 
 actor UnavailableServiceManagementRepository: ServiceManagementRepository {
     private func unavailable() -> AppError {
         AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 当前无法使用此功能，请确认对应套件已安装并允许当前账号访问。"
+            safeUserMessage: L10n.string("ui.2096260091060844")
         )
     }
 
@@ -132,7 +133,7 @@ final class ServiceManagementModel {
     }
 
     func createDownload(uri: String, destination: String?) async -> Bool {
-        await perform(module: .downloads, success: "下载任务已添加。") {
+        await perform(module: .downloads, success: L10n.string("ui.39d5a540439cf47a")) {
             try await self.repository.createDownloadTask(uri: uri, destination: destination)
         }
     }
@@ -142,7 +143,7 @@ final class ServiceManagementModel {
         destination: String?,
         unzipPassword: String?
     ) async -> Bool {
-        await perform(module: .downloads, success: "下载任务已添加。") {
+        await perform(module: .downloads, success: L10n.string("ui.39d5a540439cf47a")) {
             try await self.repository.createDownloadTask(
                 fileURL: fileURL,
                 destination: destination,
@@ -156,7 +157,7 @@ final class ServiceManagementModel {
     }
 
     func saveDownloadSettings(_ settings: DownloadStationSettings) async -> Bool {
-        await perform(module: .downloads, success: "下载设置已保存。") {
+        await perform(module: .downloads, success: L10n.string("ui.a2d1cb440a90d59f")) {
             try await self.repository.saveDownloadStationSettings(settings)
         }
     }
@@ -166,7 +167,7 @@ final class ServiceManagementModel {
             throw AppError(
                 category: .apiUnavailable,
                 isRetryable: false,
-                safeUserMessage: "暂时无法浏览 NAS 文件夹，请重新连接后再试。"
+                safeUserMessage: L10n.string("ui.5c35b65dfdeab500")
             )
         }
 
@@ -199,7 +200,7 @@ final class ServiceManagementModel {
 
     func deleteDownloads(removeData: Bool) async -> Bool {
         let ids = Array(downloadSelection)
-        return await perform(module: .downloads, success: "下载任务已删除。") {
+        return await perform(module: .downloads, success: L10n.string("ui.c12c2c036eefcf83")) {
             try await self.repository.deleteDownloadTasks(ids: ids, removeData: removeData)
         }
     }
@@ -213,7 +214,7 @@ final class ServiceManagementModel {
 
     func deleteContainers() async -> Bool {
         let ids = Array(containerSelection)
-        return await perform(module: .containers, success: "容器已删除。") {
+        return await perform(module: .containers, success: L10n.string("ui.08f2d625407627c0")) {
             try await self.repository.deleteContainers(ids: ids)
         }
     }
@@ -227,7 +228,7 @@ final class ServiceManagementModel {
     }
 
     func pullImage(repositoryName: String, tag: String) async -> Bool {
-        await perform(module: .containers, success: "已开始下载映像。") {
+        await perform(module: .containers, success: L10n.string("ui.df147517215114fa")) {
             try await self.repository.pullContainerImage(repository: repositoryName, tag: tag)
         }
     }
@@ -239,20 +240,20 @@ final class ServiceManagementModel {
 
     func deleteImages() async -> Bool {
         let ids = Array(imageSelection)
-        return await perform(module: .containers, success: "映像已删除。") {
+        return await perform(module: .containers, success: L10n.string("ui.93fac68704c36472")) {
             try await self.repository.deleteContainerImages(ids: ids)
         }
     }
 
     func createNetwork(name: String, driver: String) async -> Bool {
-        await perform(module: .containers, success: "网络已创建。") {
+        await perform(module: .containers, success: L10n.string("ui.61d332338cf142a9")) {
             try await self.repository.createContainerNetwork(name: name, driver: driver)
         }
     }
 
     func deleteNetworks() async -> Bool {
         let ids = Array(networkSelection)
-        return await perform(module: .containers, success: "网络已删除。") {
+        return await perform(module: .containers, success: L10n.string("ui.9c630b71c45f2b8c")) {
             try await self.repository.deleteContainerNetworks(ids: ids)
         }
     }
@@ -265,7 +266,7 @@ final class ServiceManagementModel {
     }
 
     func createVirtualMachine(_ configuration: VirtualMachineCreation) async -> Bool {
-        await perform(module: .virtualMachines, success: "虚拟机已创建。") {
+        await perform(module: .virtualMachines, success: L10n.string("ui.e85fb3219f35e4d9")) {
             try await self.repository.createVirtualMachine(configuration)
         }
     }
@@ -274,7 +275,7 @@ final class ServiceManagementModel {
         id: String,
         configuration: VirtualMachineUpdate
     ) async -> Bool {
-        await perform(module: .virtualMachines, success: "虚拟机设置已保存。") {
+        await perform(module: .virtualMachines, success: L10n.string("ui.7a5aa7a5b63ab45d")) {
             try await self.repository.updateVirtualMachine(id: id, configuration: configuration)
         }
     }
@@ -296,7 +297,7 @@ final class ServiceManagementModel {
 
     func deleteVirtualMachines() async -> Bool {
         let ids = Array(virtualMachineSelection)
-        return await perform(module: .virtualMachines, success: "虚拟机已删除。") {
+        return await perform(module: .virtualMachines, success: L10n.string("ui.03f2e448dbfc3943")) {
             try await self.repository.deleteVirtualMachines(ids: ids)
         }
     }
@@ -305,7 +306,7 @@ final class ServiceManagementModel {
         id: String,
         configuration: VirtualMachineNetworkUpdate
     ) async -> Bool {
-        await perform(module: .virtualMachines, success: "网络设置已保存。") {
+        await perform(module: .virtualMachines, success: L10n.string("ui.a6f14bc31d9a9865")) {
             try await self.repository.updateVirtualMachineNetwork(
                 id: id,
                 configuration: configuration
@@ -315,7 +316,7 @@ final class ServiceManagementModel {
 
     func deleteVirtualMachineNetworks() async -> Bool {
         let ids = Array(virtualMachineNetworkSelection)
-        let succeeded = await perform(module: .virtualMachines, success: "网络已删除。") {
+        let succeeded = await perform(module: .virtualMachines, success: L10n.string("ui.9c630b71c45f2b8c")) {
             try await self.repository.deleteVirtualMachineNetworks(ids: ids)
         }
         if succeeded { virtualMachineNetworkSelection.removeAll() }
@@ -324,7 +325,7 @@ final class ServiceManagementModel {
 
     func deleteVirtualMachineImages() async -> Bool {
         let ids = Array(virtualMachineImageSelection)
-        let succeeded = await perform(module: .virtualMachines, success: "映像已删除。") {
+        let succeeded = await perform(module: .virtualMachines, success: L10n.string("ui.93fac68704c36472")) {
             try await self.repository.deleteVirtualMachineImages(ids: ids)
         }
         if succeeded { virtualMachineImageSelection.removeAll() }
@@ -357,33 +358,33 @@ final class ServiceManagementModel {
         if let error = error as? AppError {
             message = error.safeUserMessage
         } else {
-            message = "操作未完成，请检查连接后重试。"
+            message = L10n.string("ui.07c3ca42af19db4f")
         }
         messageIsError = true
     }
 
     private func downloadActionMessage(_ action: DownloadStationTaskAction) -> String {
         switch action {
-        case .pause: "下载已暂停。"
-        case .resume: "下载已继续。"
-        case .finish: "已请求结束下载。"
+        case .pause: L10n.string("ui.e92d259b77a73203")
+        case .resume: L10n.string("ui.d2dfb94bf1fdb4e6")
+        case .finish: L10n.string("ui.287d24db8dad0fa3")
         }
     }
 
     private func containerActionMessage(_ action: ContainerAction) -> String {
         switch action {
-        case .start: "容器已启动。"
-        case .stop: "容器已停止。"
-        case .restart: "容器已重新启动。"
+        case .start: L10n.string("ui.6d5c71c2cd7591a3")
+        case .stop: L10n.string("ui.cac5f89795617cfc")
+        case .restart: L10n.string("ui.0e38eb0289861e83")
         }
     }
 
     private func virtualMachineActionMessage(_ action: VirtualMachinePowerAction) -> String {
         switch action {
-        case .powerOn: "虚拟机已启动。"
-        case .shutdown: "已请求虚拟机正常关机。"
-        case .powerOff: "虚拟机已强制断电。"
-        case .restart: "虚拟机已重新启动。"
+        case .powerOn: L10n.string("ui.565b777988041d0d")
+        case .shutdown: L10n.string("ui.f1e72db5333c1d47")
+        case .powerOff: L10n.string("ui.6114112c59e35363")
+        case .restart: L10n.string("ui.5a7ffdba46d8b7b8")
         }
     }
 }

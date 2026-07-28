@@ -4,6 +4,7 @@ import DsmNetwork
 import Foundation
 import Observation
 import SwiftUI
+import DsmLocalization
 
 struct ToastMessage: Identifiable, Sendable {
     enum Style: Sendable {
@@ -312,7 +313,7 @@ final class WorkspaceModel {
         case currentFolder
         case subfolders
         var id: Self { self }
-        var title: String { self == .currentFolder ? "当前文件夹" : "包括子文件夹" }
+        var title: String { self == .currentFolder ? L10n.string("ui.9112e7066855185e") : L10n.string("ui.74c32a0e473dba46") }
     }
 
     enum FolderDownloadMode {
@@ -650,7 +651,7 @@ final class WorkspaceModel {
             _ = try Self.makeSearchRegularExpression(searchText)
             return nil
         } catch {
-            return "搜索表达式有误，请检查括号、方括号或转义符。"
+            return L10n.string("ui.1f7f656abf2ac8c3")
         }
     }
 
@@ -772,7 +773,7 @@ final class WorkspaceModel {
                 await navigate(to: first.path, recordingHistory: false)
             } else {
                 items = []
-                statusMessage = "当前用户没有可访问的共享文件夹。"
+                statusMessage = L10n.string("ui.54febf8015c8e233")
             }
             guard isFileModuleEnabled else { return }
             await loadRemoteLocations()
@@ -949,7 +950,7 @@ final class WorkspaceModel {
             await navigate(to: location.path, recordingHistory: false)
         } catch let error as AppError where error.category == .notFound {
             statusIsError = true
-            statusMessage = "这个目录已不存在，无法跳转。你可以从最近访问中移除这条记录。"
+            statusMessage = L10n.string("ui.9fa4d319f1784294")
         } catch {
             show(error)
         }
@@ -994,7 +995,7 @@ final class WorkspaceModel {
             try await repository.createRemoteMount(configuration)
             try await reloadShares()
             statusIsError = false
-            statusMessage = "远程位置已连接。"
+            statusMessage = L10n.string("ui.14d477b19fa31764")
             return true
         } catch {
             show(error)
@@ -1016,7 +1017,7 @@ final class WorkspaceModel {
             )
             try await reloadShares()
             statusIsError = false
-            statusMessage = "远程位置已更新。"
+            statusMessage = L10n.string("ui.109f075ff40700df")
             return true
         } catch {
             show(error)
@@ -1032,7 +1033,7 @@ final class WorkspaceModel {
             try await repository.removeRemoteMount(mountPoint: item.path)
             try await reloadShares()
             statusIsError = false
-            statusMessage = "远程位置已删除。"
+            statusMessage = L10n.string("ui.0e675b381ad62cd9")
             return true
         } catch {
             show(error)
@@ -1088,11 +1089,11 @@ final class WorkspaceModel {
                 if favorites.contains(where: { $0.path == path }) {
                     try await repository.removeFavorite(path: path)
                     favorites.removeAll { $0.path == path }
-                    statusMessage = "已从收藏中移除。"
+                    statusMessage = L10n.string("ui.25400251730cea8a")
                 } else {
                     try await repository.addFavorite(path: path, name: name)
                     favorites.append(FavoriteLocation(name: name, path: path))
-                    statusMessage = "已添加到收藏。"
+                    statusMessage = L10n.string("ui.f8f147eae9ef4058")
                 }
                 statusIsError = false
             } catch { show(error) }
@@ -1118,7 +1119,7 @@ final class WorkspaceModel {
             shareLinks.removeAll { $0.id == link.id }
             shareLinks.insert(link, at: 0)
             statusIsError = false
-            statusMessage = "分享链接已创建。"
+            statusMessage = L10n.string("ui.5f35da72ac6771cb")
             return link
         } catch {
             show(error)
@@ -1133,7 +1134,7 @@ final class WorkspaceModel {
             let wanted = Set(ids)
             shareLinks.removeAll { wanted.contains($0.id) }
             statusIsError = false
-            statusMessage = "分享已取消。"
+            statusMessage = L10n.string("ui.e277407e7218c8fd")
         } catch { show(error) }
     }
 
@@ -1260,7 +1261,7 @@ final class WorkspaceModel {
            selection != [editingTextItemID] {
             selection = [editingTextItemID]
             textEditingMessageIsError = true
-            textEditingMessage = "请先保存或取消当前修改，再选择其他文件。"
+            textEditingMessage = L10n.string("ui.daa9fbd7d7a79786")
             return false
         }
         if isChangingPreviewImage {
@@ -1376,7 +1377,7 @@ final class WorkspaceModel {
                     let currentItem = try await repository.getInfo(paths: [item.path]).first ?? item
                     updateCachedItem(currentItem)
                     if let size = currentItem.sizeBytes, size > limit {
-                        preview = .unsupported("这个文本文件较大，请下载后打开。")
+                        preview = .unsupported(L10n.string("ui.c1806a32254ff009"))
                         return
                     }
                     if currentItem.sizeBytes == 0 {
@@ -1401,7 +1402,7 @@ final class WorkspaceModel {
                     }
                     try Task.checkCancellation()
                     let data = try Data(contentsOf: url)
-                    let text = Self.decodeText(data) ?? "无法识别文本编码。"
+                    let text = Self.decodeText(data) ?? L10n.string("ui.7323ca45199e5442")
                     previewFileURL = url
                     previewLoadingSpeedBytesPerSecond = nil
                     editableText = text
@@ -1443,7 +1444,7 @@ final class WorkspaceModel {
                     previewLoadingSpeedBytesPerSecond = nil
                     preview = .audio(source)
                 case .unsupported:
-                    preview = .unsupported("此类型不支持应用内预览，可以下载后使用其他应用打开。")
+                    preview = .unsupported(L10n.string("ui.2799b0f2c23a0591"))
                 }
             } catch is CancellationError {
                 return
@@ -1496,7 +1497,7 @@ final class WorkspaceModel {
         }
         let taskID = addTransfer(
             kind: .download,
-            displayName: "\(selectedItems.count) 个项目.zip",
+            displayName: L10n.string("ui.f2a892abb28de531", String(describing: selectedItems.count)),
             remotePath: currentPath,
             totalUnits: nil
         )
@@ -1522,7 +1523,7 @@ final class WorkspaceModel {
                 )
                 finishTransfer(taskID)
                 statusIsError = false
-                statusMessage = "\(items.count) 个项目下载完成。"
+                statusMessage = L10n.string("ui.64b83128a3f0d23e", String(describing: items.count))
             } catch is CancellationError {
                 finishCancellation(taskID)
             } catch {
@@ -1571,7 +1572,7 @@ final class WorkspaceModel {
                 }
                 finishTransfer(taskID)
                 statusIsError = false
-                statusMessage = "“\(item.name)”下载完成。"
+                statusMessage = L10n.string("ui.bc79cf398fac8ad5", String(describing: item.name))
             } catch is CancellationError {
                 finishCancellation(taskID)
             } catch {
@@ -1665,7 +1666,7 @@ final class WorkspaceModel {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "NAS 返回了无法识别的文件路径，文件夹下载已停止。"
+                safeUserMessage: L10n.string("ui.73547f53fd96278c")
             )
         }
         return String(path.dropFirst(prefix.count))
@@ -1678,7 +1679,7 @@ final class WorkspaceModel {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "NAS 返回了不安全的文件名，文件夹下载已停止。"
+                safeUserMessage: L10n.string("ui.f1861e9edaae1967")
             )
         }
         return components.reduce(root) { url, component in
@@ -1727,7 +1728,7 @@ final class WorkspaceModel {
             try await repository.createFolder(parentPath: currentPath, name: name)
             await refresh()
             statusIsError = false
-            statusMessage = "文件夹“\(name)”已创建。"
+            statusMessage = L10n.string("ui.5d7d392e452b94e6", String(describing: name))
         } catch {
             show(error)
         }
@@ -1744,7 +1745,7 @@ final class WorkspaceModel {
                 throw AppError(
                     category: .localStorageFull,
                     isRetryable: false,
-                    safeUserMessage: "无法准备这个空白文件，请检查 Mac 的可用空间。"
+                    safeUserMessage: L10n.string("ui.7c9b8db9c8b82d39")
                 )
             }
             try await repository.upload(
@@ -1754,7 +1755,7 @@ final class WorkspaceModel {
             ) { _, _ in }
             await refresh()
             statusIsError = false
-            statusMessage = "文件“\(name)”已创建。"
+            statusMessage = L10n.string("ui.ca2cc77f49f1ee00", String(describing: name))
         } catch {
             show(error)
         }
@@ -1765,7 +1766,7 @@ final class WorkspaceModel {
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/") else {
             statusIsError = true
-            statusMessage = "名称不能为空，也不能包含“/”。请换一个名称。"
+            statusMessage = L10n.string("ui.75d2c77c80b0ee49")
             return nil
         }
         return name
@@ -1774,8 +1775,8 @@ final class WorkspaceModel {
     var recentDragMoveUndoMessage: String? {
         guard let undo = dragMoveUndo, undo.expiresAt > Date() else { return nil }
         return undo.items.count == 1
-            ? "已将“\(undo.items[0].name)”移到文件夹中"
-            : "已移动 \(undo.items.count) 个项目"
+            ? L10n.string("ui.4e7678988daa231d", String(describing: undo.items[0].name))
+            : L10n.string("ui.f7d9290863c0f6cb", String(describing: undo.items.count))
     }
 
     func rename(_ item: FileItem, to rawName: String) async {
@@ -1786,7 +1787,7 @@ final class WorkspaceModel {
             let existingNames = try await namesInFolder(parentPath)
             guard !existingNames.contains(newName) else {
                 statusIsError = true
-                statusMessage = "这里已经有名为“\(newName)”的项目，请换一个名称。"
+                statusMessage = L10n.string("ui.9c02b5dbfd8c986d", String(describing: newName))
                 return
             }
             try await repository.rename(path: item.path, newName: newName)
@@ -1795,7 +1796,7 @@ final class WorkspaceModel {
                 selection = [renamed.id]
             }
             statusIsError = false
-            statusMessage = "已重命名为“\(newName)”。"
+            statusMessage = L10n.string("ui.8a7f123d3ec9d713", String(describing: newName))
         } catch {
             show(error)
         }
@@ -1806,7 +1807,7 @@ final class WorkspaceModel {
         let sourceFolders = Set(targets.map { ($0.path as NSString).deletingLastPathComponent })
         guard sourceFolders.count == 1, let sourceFolder = sourceFolders.first else {
             statusIsError = true
-            statusMessage = "请从同一个文件夹中选择要移动的项目。"
+            statusMessage = L10n.string("ui.3fd4192c291b19f7")
             return
         }
         guard destination.path != sourceFolder else { return }
@@ -1814,7 +1815,7 @@ final class WorkspaceModel {
             destination.path == $0.path || destination.path.hasPrefix($0.path + "/")
         }) else {
             statusIsError = true
-            statusMessage = "文件夹不能移动到自身或自己的子文件夹中。"
+            statusMessage = L10n.string("ui.08095a2928ae457a")
             return
         }
 
@@ -1826,7 +1827,7 @@ final class WorkspaceModel {
                 let existingNames = try await namesInFolder(destination.path)
                 if let conflict = targets.first(where: { existingNames.contains($0.name) }) {
                     statusIsError = true
-                    statusMessage = "“\(conflict.name)”已存在于目标文件夹，未移动任何项目。"
+                    statusMessage = L10n.string("ui.05efe0c78cbc8a24", String(describing: conflict.name))
                     return
                 }
                 // 列表中的 write 标记在部分 DSM 版本中会缺失或误报。
@@ -1849,13 +1850,13 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: true,
-                        safeUserMessage: "移动任务已结束，但无法确认所有项目都已到达目标文件夹。请刷新后检查。"
+                        safeUserMessage: L10n.string("ui.00b073e405a9166c")
                     )
                 }
                 await refresh()
                 beginDragMoveUndo(items: targets, sourceFolder: sourceFolder, destinationFolder: destination.path)
                 statusIsError = false
-                statusMessage = targets.count == 1 ? "移动完成，可在 10 秒内撤销。" : "已移动 \(targets.count) 个项目，可在 10 秒内撤销。"
+                statusMessage = targets.count == 1 ? L10n.string("ui.83125ab4272866e1") : L10n.string("ui.9f59299bdfdf2f02", String(describing: targets.count))
             } catch {
                 show(error)
             }
@@ -1874,7 +1875,7 @@ final class WorkspaceModel {
                 let existingNames = try await namesInFolder(undo.sourceFolder)
                 if let conflict = undo.items.first(where: { existingNames.contains($0.name) }) {
                     statusIsError = true
-                    statusMessage = "原文件夹中已有“\(conflict.name)”，无法撤销这次移动。"
+                    statusMessage = L10n.string("ui.5b797f56d4623f22", String(describing: conflict.name))
                     return
                 }
                 let movedPaths = undo.items.map {
@@ -1891,12 +1892,12 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: true,
-                        safeUserMessage: "撤销任务已结束，但无法确认所有项目都已返回。请刷新后检查。"
+                        safeUserMessage: L10n.string("ui.e305d0f16f31cac3")
                     )
                 }
                 await refresh()
                 statusIsError = false
-                statusMessage = "已撤销刚才的移动。"
+                statusMessage = L10n.string("ui.72bbeeaf2f7ee268")
             } catch {
                 show(error)
             }
@@ -1917,8 +1918,8 @@ final class WorkspaceModel {
             try? await Task.sleep(for: .seconds(10))
             guard !Task.isCancelled, self?.dragMoveUndo?.id == undo.id else { return }
             self?.dragMoveUndo = nil
-            if self?.statusMessage?.contains("可在 10 秒内撤销") == true {
-                self?.statusMessage = "移动完成。"
+            if self?.statusMessage?.contains(L10n.string("ui.f933e37804930440")) == true {
+                self?.statusMessage = L10n.string("ui.b48f99e79e9f6623")
             }
         }
     }
@@ -1932,7 +1933,7 @@ final class WorkspaceModel {
         guard isFileModuleEnabled, !targets.isEmpty else { return }
         let taskID = addTransfer(
             kind: moveSource ? .move : .copy,
-            displayName: targets.count == 1 ? targets[0].name : "\(targets.count) 个项目",
+            displayName: targets.count == 1 ? targets[0].name : L10n.string("ui.05ec76407f6737d9", String(describing: targets.count)),
             remotePath: destinationFolder,
             totalUnits: Int64(targets.count)
         )
@@ -1951,7 +1952,7 @@ final class WorkspaceModel {
                 guard !operationTargets.isEmpty else {
                     finishTransfer(taskID)
                     statusIsError = false
-                    statusMessage = "所选项目在目标文件夹中已存在，已全部跳过。"
+                    statusMessage = L10n.string("ui.a7d7914278b1f450")
                     return
                 }
                 let operationPaths = operationTargets.map(\.path)
@@ -1973,8 +1974,10 @@ final class WorkspaceModel {
                 finishTransfer(taskID)
                 await refresh()
                 statusIsError = false
-                let completion = moveSource ? "移动完成。" : "复制完成。"
-                statusMessage = skippedCount > 0 ? "\(completion)已跳过 \(skippedCount) 个同名项目。" : completion
+                let completion = moveSource ? L10n.string("ui.b48f99e79e9f6623") : L10n.string("ui.802278b710b019ef")
+                statusMessage = skippedCount > 0
+                    ? L10n.string("operation.skipped_duplicates", completion, String(skippedCount))
+                    : completion
             } catch is CancellationError {
                 setTransferState(taskID, .cancelled)
             } catch {
@@ -2016,7 +2019,7 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: false,
-                        safeUserMessage: "这里已经有名为“\(filename)”的压缩包，请换一个名称。"
+                        safeUserMessage: L10n.string("ui.375e35999ba848ba", String(describing: filename))
                     )
                 }
                 do {
@@ -2029,7 +2032,7 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .permissionDenied,
                         isRetryable: false,
-                        safeUserMessage: "可以查看所选文件，但不能在当前文件夹创建压缩包。管理员身份不会自动绕过个人文件夹或共享文件夹的写入权限；请改到有写入权限的文件夹，或在 NAS 中调整该文件夹权限。",
+                        safeUserMessage: L10n.string("ui.64b1351d57a2ea4f"),
                         dsmCode: error.dsmCode
                     )
                 }
@@ -2046,7 +2049,7 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .permissionDenied,
                         isRetryable: false,
-                        safeUserMessage: "NAS 拒绝创建这个压缩包。请确认当前文件夹允许写入，并确认所选文件允许读取；如果文件位于其他用户的个人文件夹，请先复制到自己的文件夹再试。",
+                        safeUserMessage: L10n.string("ui.8ff5a50a46f95c24"),
                         dsmCode: error.dsmCode
                     )
                 }
@@ -2055,13 +2058,13 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: true,
-                        safeUserMessage: "压缩任务已结束，但没有找到生成的压缩包。请刷新后检查。"
+                        safeUserMessage: L10n.string("ui.6cf7af39661f207b")
                     )
                 }
                 finishTransfer(taskID)
                 await refresh()
                 statusIsError = false
-                statusMessage = "压缩包“\(filename)”已创建。"
+                statusMessage = L10n.string("ui.1b9b6cb0eec9c615", String(describing: filename))
             } catch is CancellationError {
                 setTransferState(taskID, .cancelled)
             } catch {
@@ -2124,7 +2127,7 @@ final class WorkspaceModel {
                 password: password
             )
         } catch let error as AppError where error.dsmCode == 1403 {
-            request.errorMessage = "密码不正确，请重新输入。"
+            request.errorMessage = L10n.string("ui.cff0d6bd7c1d30b9")
             archivePasswordRequest = request
         } catch {
             archivePasswordRequest = nil
@@ -2136,7 +2139,7 @@ final class WorkspaceModel {
         archivePasswordRequest = nil
         isCheckingArchivePassword = false
         statusIsError = false
-        statusMessage = "已取消解压。"
+        statusMessage = L10n.string("ui.6fdd6030dd5a6f67")
     }
 
     private func preferredArchiveCodepage(filePath: String, password: String?) async throws -> String? {
@@ -2214,13 +2217,13 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: true,
-                        safeUserMessage: "解压任务已结束，但没有发现新内容。请刷新后检查压缩包。"
+                        safeUserMessage: L10n.string("ui.5c351e141dbea40b")
                     )
                 }
                 finishTransfer(taskID)
                 if currentPath == destinationFolder { await refresh() }
                 statusIsError = false
-                statusMessage = "“\(item.name)”已解压到当前文件夹。"
+                statusMessage = L10n.string("ui.47963deffe8a1291", String(describing: item.name))
             } catch is CancellationError {
                 setTransferState(taskID, .cancelled)
             } catch {
@@ -2266,7 +2269,7 @@ final class WorkspaceModel {
         let knownTotal = targets.contains(where: \.isDirectory) ? nil : (total > 0 ? total * 2 : nil)
         let taskID = addTransfer(
             kind: moveSource ? .move : .copy,
-            displayName: targets.count == 1 ? targets[0].name : "\(targets.count) 个文件",
+            displayName: targets.count == 1 ? targets[0].name : L10n.string("ui.057c1760db06e516", String(describing: targets.count)),
             remotePath: "\(source.profile.displayName) → \(profile.displayName)\(destinationFolder)",
             fileSizeBytes: targets.contains(where: \.isDirectory) ? nil : total,
             totalUnits: knownTotal
@@ -2286,7 +2289,7 @@ final class WorkspaceModel {
                 guard !operationTargets.isEmpty else {
                     finishTransfer(taskID)
                     statusIsError = false
-                    statusMessage = "所选项目在目标文件夹中已存在，已全部跳过。"
+                    statusMessage = L10n.string("ui.a7d7914278b1f450")
                     return
                 }
                 var completedBeforeFile: Int64 = 0
@@ -2310,8 +2313,10 @@ final class WorkspaceModel {
                 finishTransfer(taskID)
                 await refresh()
                 statusIsError = false
-                let completion = moveSource ? "跨 NAS 移动完成。" : "跨 NAS 复制完成。"
-                statusMessage = skippedCount > 0 ? "\(completion)已跳过 \(skippedCount) 个同名项目。" : completion
+                let completion = moveSource ? L10n.string("ui.a380c90e47459d56") : L10n.string("ui.f4acd4a3b946157a")
+                statusMessage = skippedCount > 0
+                    ? L10n.string("operation.skipped_duplicates", completion, String(skippedCount))
+                    : completion
             } catch is CancellationError {
                 setTransferState(taskID, .cancelled)
             } catch {
@@ -2390,7 +2395,7 @@ final class WorkspaceModel {
         throw AppError(
             category: .invalidResponse,
             isRetryable: false,
-            safeUserMessage: "无法读取这个文件的大小，因此没有开始跨 NAS 传输。请刷新目录后重试。"
+            safeUserMessage: L10n.string("ui.545d92f64ef6cb67")
         )
     }
 
@@ -2422,7 +2427,7 @@ final class WorkspaceModel {
                         await refresh()
                     }
                     statusIsError = false
-                    statusMessage = "“\(url.lastPathComponent)”上传完成。"
+                    statusMessage = L10n.string("ui.c2fc5b99b068fa2b", String(describing: url.lastPathComponent))
                 } catch is CancellationError {
                     finishCancellation(taskID)
                 } catch {
@@ -2440,7 +2445,7 @@ final class WorkspaceModel {
         guard isFileModuleEnabled, !targets.isEmpty else {
             return
         }
-        let displayName = targets.count == 1 ? targets[0].name : "\(targets.count) 个项目"
+        let displayName = targets.count == 1 ? targets[0].name : L10n.string("ui.05ec76407f6737d9", String(describing: targets.count))
         let taskID = addTransfer(
             kind: .delete,
             displayName: displayName,
@@ -2471,13 +2476,13 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: false,
-                        safeUserMessage: "删除任务结束，但部分项目仍然存在。"
+                        safeUserMessage: L10n.string("ui.c2b9f1d82b8cc6b2")
                     )
                 }
                 finishTransfer(taskID)
                 statusIsError = false
-                statusMessage = "删除完成。是否可恢复取决于共享文件夹的回收站设置。"
-                showToast(targets.count == 1 ? "已成功删除 1 个项目" : "已成功删除 \(targets.count) 个项目", icon: "trash.fill")
+                statusMessage = L10n.string("ui.fe83a7f35e45f85e")
+                showToast(targets.count == 1 ? L10n.string("ui.025cce8bdaa86831") : L10n.string("ui.89b32b0e4eb8d36d", String(describing: targets.count)), icon: "trash.fill")
             } catch is CancellationError {
                 setTransferState(taskID, .cancelled)
             } catch {
@@ -2501,7 +2506,7 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: false,
-                        safeUserMessage: "删除任务结束，但部分项目仍然存在。"
+                        safeUserMessage: L10n.string("ui.c2b9f1d82b8cc6b2")
                     )
                 }
             } catch let error as AppError {
@@ -2524,12 +2529,12 @@ final class WorkspaceModel {
         guard isFileModuleEnabled else { return }
         guard allowsVerifiedRestore else {
             statusIsError = true
-            statusMessage = "当前 NAS 尚未确认支持恢复到原位置，请先下载文件。"
+            statusMessage = L10n.string("ui.96ad6681c3a52e78")
             return
         }
         guard let location = RecycleLocation(recyclePath: item.path) else {
             statusIsError = true
-            statusMessage = "找不到这个文件原来的位置。"
+            statusMessage = L10n.string("ui.2ba55f653c1d2342")
             return
         }
 
@@ -2552,7 +2557,7 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .conflict,
                         isRetryable: false,
-                        safeUserMessage: "原位置已有同名项目，已取消恢复。"
+                        safeUserMessage: L10n.string("ui.7da31d7e49907f02")
                     )
                 }
                 try await repository.move(
@@ -2566,7 +2571,7 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: false,
-                        safeUserMessage: "恢复任务结束，但回收站源仍然存在。"
+                        safeUserMessage: L10n.string("ui.cffb0e4a08c8e3a9")
                     )
                 }
                 let verifiedDestination = try await repository.listFolder(
@@ -2578,12 +2583,12 @@ final class WorkspaceModel {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: false,
-                        safeUserMessage: "恢复任务结束，但无法确认原位置文件。"
+                        safeUserMessage: L10n.string("ui.e4b6882838181446")
                     )
                 }
                 finishTransfer(taskID)
                 statusIsError = false
-                statusMessage = "“\(item.name)”已恢复到原位置。"
+                statusMessage = L10n.string("ui.55a7aa44050bf4fe", String(describing: item.name))
             } catch is CancellationError {
                 setTransferState(taskID, .cancelled)
             } catch {
@@ -2797,12 +2802,12 @@ final class WorkspaceModel {
         do {
             editableText = try TextDocumentFormatter.format(editableText, fileExtension: ext)
             textEditingMessageIsError = false
-            textEditingMessage = "内容已整理，保存后才会写入 NAS。"
+            textEditingMessage = L10n.string("ui.edcd411e400a21fa")
         } catch {
             textEditingMessageIsError = true
             textEditingMessage = ext == "xml"
-                ? "无法整理：请检查 XML 标签是否完整。"
-                : "无法整理：请检查 JSON 的括号、引号和逗号。"
+                ? L10n.string("ui.fb87fc9885ea7997")
+                : L10n.string("ui.e0f34707b69f67bd")
         }
     }
 
@@ -2817,7 +2822,7 @@ final class WorkspaceModel {
         let data = Data(editableText.utf8)
         guard data.count <= 5 * 1_024 * 1_024 else {
             textEditingMessageIsError = true
-            textEditingMessage = "文件超过 5 MB，请下载后使用本地编辑器修改。"
+            textEditingMessage = L10n.string("ui.d7f02859f122de6c")
             return
         }
 
@@ -2858,7 +2863,7 @@ final class WorkspaceModel {
                 throw AppError(
                     category: .partialFailure,
                     isRetryable: true,
-                    safeUserMessage: "NAS 已接收保存请求，但无法确认内容是否完整。请保留当前编辑内容并重新保存。"
+                    safeUserMessage: L10n.string("ui.65f08d0357210c91")
                 )
             }
             if let savedItem {
@@ -2868,9 +2873,9 @@ final class WorkspaceModel {
             preview = .text(editableText, truncated: false)
             isEditingText = false
             textEditingMessageIsError = false
-            textEditingMessage = "已保存到 NAS。"
+            textEditingMessage = L10n.string("ui.78488de343f1c541")
             statusIsError = false
-            statusMessage = "“\(item.name)”已保存。"
+            statusMessage = L10n.string("ui.23c8348cbf752612", String(describing: item.name))
         } catch {
             textEditingMessageIsError = true
             textEditingMessage = Self.userMessage(for: error)
@@ -3029,7 +3034,7 @@ final class WorkspaceModel {
         if let error = error as? DsmCertificateTrustError {
             return error.localizedDescription
         }
-        return "操作没有完成，请重试。"
+        return L10n.string("ui.ef299a77b5f7d942")
     }
 
     private static func decodeText(_ data: Data) -> String? {

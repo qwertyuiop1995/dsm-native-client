@@ -20,21 +20,21 @@
                     Source="ms-appx:///Assets/AppIcon.png"
                     Stretch="UniformToFill" />
                 <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="岚仓" Style="{StaticResource TitleTextBlockStyle}" />
+                    <TextBlock x:Uid="BrandTitle" Style="{StaticResource TitleTextBlockStyle}" />
                     <TextBlock
+                        x:Uid="BrandSubtitle"
                         Margin="0,4,0,0"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="管理你的 NAS" />
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
             </StackPanel>
             <Button
+                x:Uid="AddNasButton"
                 HorizontalAlignment="Stretch"
                 Click="NewProfile_Click"
-                Content="添加 NAS"
                 Style="{StaticResource AccentButtonStyle}" />
             <ListView
+                x:Uid="SavedNasList"
                 x:Name="ProfileList"
-                AutomationProperties.Name="已保存的 NAS"
                 ItemsSource="{Binding Profiles}"
                 SelectionChanged="ProfileList_SelectionChanged">
                 <ListView.ItemTemplate>
@@ -58,6 +58,18 @@
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
+            <StackPanel Spacing="6">
+                <TextBlock x:Name="LanguageLabel" FontWeight="SemiBold" />
+                <ComboBox
+                    x:Name="LanguageSelector"
+                    HorizontalAlignment="Stretch"
+                    DisplayMemberPath="DisplayName"
+                    SelectionChanged="LanguageSelector_SelectionChanged" />
+                <TextBlock
+                    x:Name="LanguageNote"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" />
+            </StackPanel>
         </StackPanel>
 
         <Border
@@ -72,50 +84,48 @@
             CornerRadius="16">
             <StackPanel Spacing="18">
                 <StackPanel>
-                    <TextBlock Text="连接 NAS" Style="{StaticResource TitleTextBlockStyle}" />
+                    <TextBlock x:Uid="LoginTitle" Style="{StaticResource TitleTextBlockStyle}" />
                     <TextBlock
+                        x:Uid="LoginSubtitle"
                         Margin="0,6,0,0"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="使用 DSM 账号登录；你可以选择在这台电脑上安全保存密码。" />
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
                 <TextBox
-                    Header="名称"
+                    x:Uid="ProfileNameInput"
                     Text="{Binding DisplayName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                 <TextBox
-                    Header="NAS 地址或 QuickConnect ID"
-                    PlaceholderText="nas.example.com 或你的 QuickConnect ID"
+                    x:Uid="NasAddressInput"
                     Text="{Binding Host, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                 <TextBox
-                    Header="用户名"
+                    x:Uid="UsernameInput"
                     Text="{Binding Username, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                <PasswordBox x:Name="PasswordInput" Header="密码" PasswordRevealMode="Peek" />
-                <PasswordBox x:Name="OtpInput" Header="验证码（如需要）" PasswordRevealMode="Peek" />
+                <PasswordBox x:Uid="PasswordInput" x:Name="PasswordInput" PasswordRevealMode="Peek" />
+                <PasswordBox x:Uid="OtpInput" x:Name="OtpInput" PasswordRevealMode="Peek" />
                 <CheckBox
-                    Content="在这台电脑上记住密码"
+                    x:Uid="RememberPasswordCheckBox"
                     IsChecked="{Binding RememberPassword, Mode=TwoWay}" />
                 <TextBlock
+                    x:Uid="PasswordProtectionNote"
                     Margin="28,-14,0,0"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="密码由 Windows 凭据管理器安全保护。"
                     TextWrapping="Wrap" />
                 <CheckBox
-                    Content="自动登录"
+                    x:Uid="AutoLoginCheckBox"
                     IsChecked="{Binding AutoLogin, Mode=TwoWay}" />
                 <TextBlock
+                    x:Uid="AutoLoginNote"
                     Margin="28,-14,0,0"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="下次打开岚仓时自动连接这台 NAS。"
                     TextWrapping="Wrap" />
-                <Expander Header="高级连接设置">
+                <Expander x:Uid="AdvancedConnectionExpander">
                     <StackPanel Padding="0,10,0,0" Spacing="6">
                         <TextBox
-                            Header="自定义 HTTPS 端口"
+                            x:Uid="CustomPortInput"
                             InputScope="Number"
-                            PlaceholderText="自动选择"
                             Text="{Binding Port, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock
+                            x:Uid="CustomPortNote"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="留空时由岚仓自动选择；填写后优先使用这个端口。"
                             TextWrapping="Wrap" />
                     </StackPanel>
                 </Expander>
@@ -133,11 +143,11 @@
                     Severity="Informational" />
                 <Grid>
                     <Button
+                        x:Uid="ConnectButton"
                         x:Name="ConnectButton"
                         MinWidth="120"
                         HorizontalAlignment="Right"
                         Click="Connect_Click"
-                        Content="连接"
                         Style="{StaticResource AccentButtonStyle}" />
                     <ProgressRing
                         x:Name="BusyIndicator"

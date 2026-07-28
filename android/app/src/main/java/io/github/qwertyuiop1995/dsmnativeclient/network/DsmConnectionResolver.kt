@@ -2,6 +2,7 @@ package io.github.qwertyuiop1995.dsmnativeclient.network
 
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ApiCapability
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import kotlinx.coroutines.CancellationException
 
@@ -9,6 +10,16 @@ internal data class DiscoveredConnection(
     val profile: NasProfile,
     val capabilities: Map<String, ApiCapability>,
 )
+
+enum class ConnectionStatus {
+    PREPARING,
+    CONNECTING_DIRECT,
+    LOOKING_UP_QUICK_CONNECT,
+    TRYING_LOCAL,
+    TRYING_EXTERNAL,
+    ESTABLISHING_RELAY,
+    RESTORING_SESSION,
+}
 
 /**
  * 登录前只使用不含凭据的能力发现探测连接候选。
@@ -20,11 +31,11 @@ internal class DsmConnectionResolver(
 ) {
     suspend fun discover(
         profile: NasProfile,
-        onStatus: (String) -> Unit = {},
+        onStatus: (ConnectionStatus) -> Unit = {},
     ): DiscoveredConnection {
         val parsed = NasAddressParser.parse(profile.address, profile.port)
         if (parsed.kind == NasAddressKind.DIRECT) {
-            onStatus("正在连接 NAS…")
+            onStatus(ConnectionStatus.CONNECTING_DIRECT)
             val connectionProfile = profile.copy(
                 address = "https://${parsed.host}",
                 port = parsed.port,
@@ -32,11 +43,11 @@ internal class DsmConnectionResolver(
             return DiscoveredConnection(connectionProfile, api.discover(connectionProfile))
         }
 
-        onStatus("正在通过 QuickConnect 查找 NAS…")
+        onStatus(ConnectionStatus.LOOKING_UP_QUICK_CONNECT)
         val endpoints = try {
             quickConnect.resolve(parsed.host)
         } catch (error: DsmFailure) {
-            if (error.message == "QuickConnect 没有提供可用的直接连接") {
+            if (error.kind == DsmErrorKind.QUICK_CONNECT_DIRECT_UNAVAILABLE) {
                 emptyList()
             } else {
                 throw error
@@ -46,9 +57,9 @@ internal class DsmConnectionResolver(
         for (endpoint in endpoints) {
             onStatus(
                 if (endpoint.kind == QuickConnectEndpointKind.LOCAL) {
-                    "正在尝试局域网连接…"
+                    ConnectionStatus.TRYING_LOCAL
                 } else {
-                    "正在尝试外网直接连接…"
+                    ConnectionStatus.TRYING_EXTERNAL
                 }
             )
             val connectionProfile = profile.copy(
@@ -64,7 +75,7 @@ internal class DsmConnectionResolver(
             }
         }
 
-        onStatus("正在建立 QuickConnect 安全中继…")
+        onStatus(ConnectionStatus.ESTABLISHING_RELAY)
         return try {
             val relay = quickConnect.requestRelay(parsed.host)
             val connectionProfile = profile.copy(
@@ -75,7 +86,7 @@ internal class DsmConnectionResolver(
         } catch (error: CancellationException) {
             throw error
         } catch (error: DsmFailure) {
-            throw if (error.message == "QuickConnect 暂时无法建立中继连接") {
+            throw if (error.kind == DsmErrorKind.QUICK_CONNECT_RELAY_UNAVAILABLE) {
                 lastDirectFailure ?: error
             } else {
                 error

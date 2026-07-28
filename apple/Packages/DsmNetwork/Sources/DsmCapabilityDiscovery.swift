@@ -1,5 +1,6 @@
 import DsmCore
 import Foundation
+import DsmLocalization
 
 public enum DsmAPIName {
     public static let authentication = "SYNO.API.Auth"
@@ -339,7 +340,7 @@ public struct DsmCapabilityDiscovery: Sendable {
                 throw AppError(
                     category: .invalidResponse,
                     isRetryable: false,
-                    safeUserMessage: "NAS 返回的信息无法读取，请确认 DSM 已更新到受支持版本。"
+                    safeUserMessage: L10n.string("shared.5503b9b2eb669c4e")
                 )
             }
 

@@ -1,5 +1,6 @@
 import DsmCore
 import Foundation
+import DsmLocalization
 
 /// 通过 DSM 登录会话访问 Synology Chat 套件的适配器。
 ///
@@ -210,7 +211,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .notFound,
                 isRetryable: false,
-                safeUserMessage: "没有找到这条消息，请刷新后重试。"
+                safeUserMessage: L10n.string("shared.9a0677d885f715fd")
             )
         }
         try await callVoid(
@@ -225,8 +226,8 @@ public actor DsmChatRepository: ChatRepository {
                 category: .partialFailure,
                 isRetryable: true,
                 safeUserMessage: isPinned
-                    ? "消息暂时没有显示在公告中，请刷新后重试。"
-                    : "消息仍显示在公告中，请刷新后重试。"
+                    ? L10n.string("shared.1d62e7d6335efb1d")
+                    : L10n.string("shared.13594aba892f3da9")
             )
         }
         completedPinChanges.insert(clientRequestID)
@@ -247,7 +248,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .notFound,
                 isRetryable: false,
-                safeUserMessage: "没有找到要转发的消息，请刷新后重试。"
+                safeUserMessage: L10n.string("shared.9c54e8bb76140412")
             )
         }
         guard !targetIDs.isEmpty else { throw ChatContractError.emptyConversationID }
@@ -256,7 +257,7 @@ public actor DsmChatRepository: ChatRepository {
                 throw AppError(
                     category: .invalidResponse,
                     isRetryable: false,
-                    safeUserMessage: "目标会话暂时无法用于转发，请刷新会话列表后重试。"
+                    safeUserMessage: L10n.string("shared.555f70678d804174")
                 )
             }
             return value
@@ -337,7 +338,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .partialFailure,
                 isRetryable: true,
-                safeUserMessage: "聊天可能已经创建，但暂时无法确认。请刷新会话列表后再试。"
+                safeUserMessage: L10n.string("shared.34b76b919bd5bf65")
             )
         }
         completedDirectConversations[clientRequestID] = verified
@@ -347,7 +348,7 @@ public actor DsmChatRepository: ChatRepository {
     public func createGroup(_ draft: ChatGroupDraft) async throws -> ChatConversation {
         if let completed = completedGroups[draft.clientRequestID] { return completed }
         guard !draft.isEncrypted else {
-            throw unsupported("当前版本还不能安全创建加密群聊，请先创建普通群聊。")
+            throw unsupported(L10n.string("shared.deb89bcb1602a4de"))
         }
         let named = try requireCapability(DsmAPIName.chatChannelNamed)
         let existing = try await listConversations().first {
@@ -408,7 +409,7 @@ public actor DsmChatRepository: ChatRepository {
                 throw AppError(
                     category: .partialFailure,
                     isRetryable: false,
-                    safeUserMessage: "群聊已创建，但部分成员可能还没有加入。请在群晖 Chat 中检查成员列表。"
+                    safeUserMessage: L10n.string("shared.f975fe7c14e442cf")
                 )
             }
             completedGroups[draft.clientRequestID] = verified
@@ -426,7 +427,7 @@ public actor DsmChatRepository: ChatRepository {
     ) async throws -> ChatMessage {
         if let completed = completedMessages[draft.clientRequestID] { return completed }
         guard draft.localAttachmentURLs.count <= 1 else {
-            throw unsupported("请一次发送一个附件。当前文件发送完成后，可以继续选择下一个文件。")
+            throw unsupported(L10n.string("shared.fa24cc9d55caa0ef"))
         }
         if let localURL = draft.localAttachmentURLs.first {
             let uploaded = try await uploadAttachment(
@@ -490,13 +491,13 @@ public actor DsmChatRepository: ChatRepository {
         progress: @escaping FileTransferProgress
     ) async throws -> ChatMessage {
         guard supportsAttachmentUpload else {
-            throw unsupported("这台 NAS 当前不能发送附件。请更新 Chat Server 后重试。")
+            throw unsupported(L10n.string("shared.45cf7cd4f9a97d94"))
         }
         guard localURL.isFileURL else {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "只能发送保存在这台 Mac 上的文件。"
+                safeUserMessage: L10n.string("shared.8367989b81565b26")
             )
         }
         let securityScoped = localURL.startAccessingSecurityScopedResource()
@@ -510,14 +511,14 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "无法读取所选文件。请重新选择文件，并确认岚仓有访问权限。"
+                safeUserMessage: L10n.string("shared.8718d3431b4e4db8")
             )
         }
         guard values.isRegularFile == true else {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "请选择一个文件，不要选择文件夹。"
+                safeUserMessage: L10n.string("shared.18c37943b50afde0")
             )
         }
 
@@ -548,13 +549,13 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .localStorageFull,
                 isRetryable: false,
-                safeUserMessage: "准备附件时空间不足。请释放这台 Mac 的存储空间后重试。"
+                safeUserMessage: L10n.string("shared.b08c2bc40f69afca")
             )
         }
         defer { try? FileManager.default.removeItem(at: bodyURL) }
 
         guard let binaryTransport = transport as? any DsmBinaryHTTPTransport else {
-            throw unsupported("当前连接方式不能发送附件，请重新连接后重试。")
+            throw unsupported(L10n.string("shared.75457fae2010a2d6"))
         }
         var uploadURL = apiURL(path: capability.path)
         if var components = URLComponents(url: uploadURL, resolvingAgainstBaseURL: false) {
@@ -630,7 +631,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .partialFailure,
                 isRetryable: false,
-                safeUserMessage: "NAS 已接收附件，但暂时无法确认发送结果。请刷新会话确认后，再决定是否重试。"
+                safeUserMessage: L10n.string("shared.05430b68cf645911")
             )
         }
         return ChatMessage(
@@ -662,7 +663,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .notFound,
                 isRetryable: false,
-                safeUserMessage: "没有找到要删除的消息，请刷新后重试。"
+                safeUserMessage: L10n.string("shared.13d2195deb6baac7")
             )
         }
 
@@ -679,7 +680,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "只能删除自己发送的消息。"
+                safeUserMessage: L10n.string("shared.66a12c2de716c8cf")
             )
         }
 
@@ -698,7 +699,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .partialFailure,
                 isRetryable: true,
-                safeUserMessage: "消息没有从会话中移除，请确认管理员允许删除消息后重试。"
+                safeUserMessage: L10n.string("shared.aacd70e29509b789")
             )
         }
         completedMessageDeletions.insert(clientRequestID)
@@ -728,7 +729,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .partialFailure,
                 isRetryable: true,
-                safeUserMessage: "会话仍然存在，可能没有关闭权限。请刷新后重试。"
+                safeUserMessage: L10n.string("shared.6d5ebb57592ff9fa")
             )
         }
         completedConversationClosures.insert(clientRequestID)
@@ -776,7 +777,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .notFound,
                 isRetryable: false,
-                safeUserMessage: "没有找到这条提醒，请刷新后重试。"
+                safeUserMessage: L10n.string("shared.e2b9e4ad28f0f80f")
             )
         }
         // 内部 API：参数来自当前 Chat Server 官方网页客户端静态契约。
@@ -790,7 +791,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .partialFailure,
                 isRetryable: true,
-                safeUserMessage: "提醒仍然存在，请刷新后重试。"
+                safeUserMessage: L10n.string("shared.1d064651a58beeb6")
             )
         }
         completedReminderDeletions.insert(clientRequestID)
@@ -813,7 +814,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: true,
-                safeUserMessage: "暂时无法显示附件预览，你仍可以尝试下载原文件。"
+                safeUserMessage: L10n.string("shared.eb9c8d1011e2d6ba")
             )
         }
         return response.data
@@ -828,7 +829,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "请选择这台 Mac 上的保存位置。"
+                safeUserMessage: L10n.string("shared.5c8573de7cce9571")
             )
         }
         let request = try attachmentRequest(
@@ -838,7 +839,7 @@ public actor DsmChatRepository: ChatRepository {
             accept: "application/octet-stream"
         )
         guard let binaryTransport = transport as? any DsmBinaryHTTPTransport else {
-            throw unsupported("当前连接方式不能下载聊天附件，请重新连接后重试。")
+            throw unsupported(L10n.string("shared.2f586b376a3ea058"))
         }
         let stagingURL = destinationURL.deletingLastPathComponent()
             .appendingPathComponent(".lanstash-chat-\(UUID().uuidString).download")
@@ -872,7 +873,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "附件已经下载，但无法写入所选位置。请换一个文件夹后重试。"
+                safeUserMessage: L10n.string("shared.7e9dc7f9a89fe205")
             )
         }
     }
@@ -904,7 +905,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "请选择一个将来的发送时间。"
+                safeUserMessage: L10n.string("shared.412848e827fc7e08")
             )
         }
 
@@ -940,7 +941,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .partialFailure,
                 isRetryable: false,
-                safeUserMessage: "定时消息可能已经创建，但暂时无法确认。请打开定时消息列表检查后再决定是否重试。"
+                safeUserMessage: L10n.string("shared.653720b44687243d")
             )
         }
         completedScheduledMessages[clientRequestID] = parsed
@@ -958,7 +959,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .notFound,
                 isRetryable: false,
-                safeUserMessage: "没有找到这条定时消息，请刷新后重试。"
+                safeUserMessage: L10n.string("shared.783c6fb80b2f8038")
             )
         }
         try await callVoid(
@@ -971,7 +972,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .partialFailure,
                 isRetryable: true,
-                safeUserMessage: "定时消息仍然存在，请刷新后重试。"
+                safeUserMessage: L10n.string("shared.ee8e0d0abe0030d9")
             )
         }
         completedScheduledMessageDeletions.insert(clientRequestID)
@@ -1007,7 +1008,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .partialFailure,
                 isRetryable: false,
-                safeUserMessage: "投票可能已经创建，但暂时无法确认。请刷新会话后再决定是否重试。"
+                safeUserMessage: L10n.string("shared.e188f125e55257f2")
             )
         }
         let poll = ChatPoll(
@@ -1041,7 +1042,7 @@ public actor DsmChatRepository: ChatRepository {
 
     private func pollOptionsJSON(for draft: ChatPollDraft) throws -> String {
         guard draft.closesAt == nil else {
-            throw unsupported("当前版本还不能安全设置投票截止时间，请先创建不设截止时间的投票。")
+            throw unsupported(L10n.string("shared.adce1daf145b81a7"))
         }
         let values: [String: Any] = [
             "multiple": draft.allowsMultipleSelection,
@@ -1117,7 +1118,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .notFound,
                 isRetryable: false,
-                safeUserMessage: "没有找到这个附件，请刷新消息后重试。"
+                safeUserMessage: L10n.string("shared.db9c3774706d968a")
             )
         }
         let capability = try requireCapability(DsmAPIName.chatPostFile)
@@ -1257,7 +1258,7 @@ public actor DsmChatRepository: ChatRepository {
         return ChatConversation(
             id: id,
             kind: isDirect ? .direct : .group,
-            title: title.isEmpty ? "聊天" : title,
+            title: title.isEmpty ? L10n.string("shared.4b3510b8d86ea785") : title,
             memberIDs: memberIDs,
             memberCount: declaredMemberCount ?? (memberIDs.isEmpty ? nil : memberIDs.count),
             lastMessageSummary: lastPost?.firstString(for: ["message", "text", "content"])
@@ -1369,7 +1370,7 @@ public actor DsmChatRepository: ChatRepository {
             id: pollObject.firstString(for: ["vote_id", "poll_id", "id"]) ?? messageID,
             question: pollObject.firstNonEmptyString(for: ["message", "question", "title"])
                 ?? object.firstNonEmptyString(for: ["message", "text", "content"])
-                ?? "投票",
+                ?? L10n.string("shared.3c5a0fdbcf55aaa8"),
             allowsMultipleSelection: settings.firstBool(for: ["multiple", "allow_multiple"]) ?? false,
             isAnonymous: settings.firstBool(for: ["anonymous", "is_anonymous"]) ?? false,
             closesAt: Self.date(from: settings.firstDouble(for: ["expire_at", "close_at", "closes_at"])),
@@ -1495,7 +1496,7 @@ public actor DsmChatRepository: ChatRepository {
             ?? profile?.firstNonEmptyString(
                 for: ["nickname", "display_name", "displayname", "name", "username", "user_name", "account"]
             )
-            ?? "用户 \(id)"
+            ?? L10n.string("shared.806312613840681c", String(describing: id))
         let explicitCurrent = object.firstBool(
             for: ["is_login", "is_current", "is_current_user", "is_self", "is_me"]
         )
@@ -1661,7 +1662,7 @@ public actor DsmChatRepository: ChatRepository {
             throw AppError(
                 category: .localStorageFull,
                 isRetryable: false,
-                safeUserMessage: "无法准备附件，请检查这台 Mac 的可用空间。"
+                safeUserMessage: L10n.string("shared.1991ca3be9f3f977")
             )
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bodyURL.path)
@@ -1702,7 +1703,7 @@ public actor DsmChatRepository: ChatRepository {
 
     private func requireCapability(_ name: String) throws -> ApiCapability {
         guard let capability = capabilities[name], capability.selectedVersion != nil else {
-            throw unsupported("这台 NAS 没有启用所需的消息功能，请检查 Chat Server 和当前用户的应用权限。")
+            throw unsupported(L10n.string("shared.6b69d0465e549886"))
         }
         return capability
     }
@@ -1714,12 +1715,12 @@ public actor DsmChatRepository: ChatRepository {
         if let requiredVersion {
             guard capability.minVersion <= requiredVersion,
                   capability.maxVersion >= requiredVersion else {
-                throw unsupported("这台 NAS 的消息服务版本暂不支持此操作。")
+                throw unsupported(L10n.string("shared.b83cd19b612731fc"))
             }
             return requiredVersion
         }
         guard let version = capability.selectedVersion else {
-            throw unsupported("这台 NAS 的消息服务版本暂不受支持。")
+            throw unsupported(L10n.string("shared.adc2581886c52925"))
         }
         return version
     }
@@ -1729,7 +1730,7 @@ public actor DsmChatRepository: ChatRepository {
             return AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "当前用户没有使用群晖 Chat 的权限，请让管理员在 DSM 中开启应用权限。",
+                safeUserMessage: L10n.string("shared.75b08cdfd652ff42"),
                 dsmCode: code,
                 requestID: requestID
             )
@@ -1745,7 +1746,7 @@ public actor DsmChatRepository: ChatRepository {
         AppError(
             category: .invalidResponse,
             isRetryable: false,
-            safeUserMessage: "消息内容暂时无法读取。请退出后重新连接；如果仍然出现，请反馈发生问题的操作步骤。"
+            safeUserMessage: L10n.string("shared.cee51e4469010a94")
         )
     }
 }
@@ -1767,7 +1768,7 @@ private indirect enum ChatJSON: Decodable, Sendable {
         else if let value = try? container.decode(Bool.self) { self = .boolean(value) }
         else if let value = try? container.decode(Double.self) { self = .number(value) }
         else if let value = try? container.decode(String.self) { self = .string(value) }
-        else { throw DecodingError.dataCorruptedError(in: container, debugDescription: "无法解析 Chat 返回值。") }
+        else { throw DecodingError.dataCorruptedError(in: container, debugDescription: L10n.string("shared.8181f74b8a7bf4dc")) }
     }
 
     var objectValue: [String: ChatJSON]? {

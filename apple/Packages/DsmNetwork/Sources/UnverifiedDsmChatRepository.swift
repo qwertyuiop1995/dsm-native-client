@@ -1,5 +1,6 @@
 import DsmCore
 import Foundation
+import DsmLocalization
 
 /// 完整用户聊天协议尚未通过脱敏实机验证时使用的关闭型适配器。
 /// 它不会发送任何 Chat 请求，避免把公开 Bot 接口或猜测的内部接口用于普通用户会话。
@@ -148,7 +149,7 @@ public actor UnverifiedDsmChatRepository: ChatRepository {
         AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 的消息功能暂时还不能在岚仓中使用。你仍可以继续使用文件和照片功能。"
+            safeUserMessage: L10n.string("shared.499d81eaee1fbaa9")
         )
     }
 }

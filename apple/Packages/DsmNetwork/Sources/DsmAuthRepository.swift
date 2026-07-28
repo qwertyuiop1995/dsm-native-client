@@ -1,5 +1,6 @@
 import DsmCore
 import Foundation
+import DsmLocalization
 
 public actor DsmAuthRepository: AuthRepository {
     private let sessionStore: any SessionSecureStoring
@@ -37,7 +38,7 @@ public actor DsmAuthRepository: AuthRepository {
             throw AppError(
                 category: .apiUnavailable,
                 isRetryable: false,
-                safeUserMessage: "这台 NAS 暂时无法使用岚仓登录，请确认 DSM 和 File Station 已启用并更新。"
+                safeUserMessage: L10n.string("shared.c9fdaa50f318a255")
             )
         }
 
@@ -55,7 +56,7 @@ public actor DsmAuthRepository: AuthRepository {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "无法在这台 Mac 上保存登录状态。"
+                safeUserMessage: L10n.string("shared.138cb3321aeec22f")
             )
         }
         return session
@@ -75,7 +76,7 @@ public actor DsmAuthRepository: AuthRepository {
             throw AppError(
                 category: .authenticationRequired,
                 isRetryable: false,
-                safeUserMessage: "无法读取已保存的登录状态，请重新登录。"
+                safeUserMessage: L10n.string("shared.18e15bfc47d389cd")
             )
         }
     }
@@ -87,7 +88,7 @@ public actor DsmAuthRepository: AuthRepository {
             throw AppError(
                 category: .unknown,
                 isRetryable: false,
-                safeUserMessage: "无法删除这台 Mac 上保存的登录状态。"
+                safeUserMessage: L10n.string("shared.4b88e52d11ac0435")
             )
         }
     }
@@ -126,7 +127,7 @@ public actor DsmAuthRepository: AuthRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "NAS 地址或端口不正确，请检查后重试。"
+                safeUserMessage: L10n.string("shared.fef12d46ae67039c")
             )
         }
     }

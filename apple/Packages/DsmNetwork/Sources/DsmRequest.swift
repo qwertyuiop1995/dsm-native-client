@@ -1,5 +1,6 @@
 import DsmCore
 import Foundation
+import DsmLocalization
 
 public enum DsmParameterValue: Equatable, Sendable {
     case string(String)
@@ -50,7 +51,7 @@ public enum DsmParameterValue: Equatable, Sendable {
                 value,
                 EncodingError.Context(
                     codingPath: [],
-                    debugDescription: "无法生成 UTF-8 参数。"
+                    debugDescription: L10n.string("shared.b30fd06e3632c63a")
                 )
             )
         }

@@ -3,6 +3,7 @@ import DsmCore
 import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
+import DsmLocalization
 
 struct ServiceManagementView: View {
     let module: ServiceManagementModel.Module
@@ -71,10 +72,10 @@ private struct ServiceHeader: View {
             }
             Spacer()
             if isLoading {
-                ProgressView().controlSize(.small).accessibilityLabel("正在刷新")
+                ProgressView().controlSize(.small).accessibilityLabel(L10n.string("ui.30fa385526238641"))
             }
             Button(action: refresh) {
-                Label("刷新", systemImage: "arrow.clockwise")
+                Label(L10n.string("ui.aee88743413144a2"), systemImage: "arrow.clockwise")
             }
             .disabled(isLoading)
             .keyboardShortcut("r", modifiers: .command)
@@ -153,10 +154,10 @@ private struct DownloadStationView: View {
         var id: Self { self }
         var title: String {
             switch self {
-            case .all: "全部"
-            case .active: "进行中"
-            case .finished: "已完成"
-            case .paused: "已暂停"
+            case .all: L10n.string("ui.5c55a67935af8f45")
+            case .active: L10n.string("ui.dc9591e56d502b43")
+            case .finished: L10n.string("ui.f28461bb49c85647")
+            case .paused: L10n.string("ui.eb0c326b60ae897a")
             }
         }
     }
@@ -193,7 +194,7 @@ private struct DownloadStationView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ServiceHeader(
-                title: "下载管理",
+                title: L10n.string("ui.5248507df52ff455"),
                 subtitle: speedSummary,
                 icon: "arrow.down.circle.fill",
                 tint: .green,
@@ -211,36 +212,36 @@ private struct DownloadStationView: View {
                 Button {
                     Task { await model.controlDownloads(.resume) }
                 } label: {
-                    Label("继续", systemImage: "play.fill")
+                    Label(L10n.string("ui.7c9691192f1b7340"), systemImage: "play.fill")
                 }
                 .disabled(model.downloadSelection.isEmpty || model.isPerformingAction)
                 Button {
                     Task { await model.controlDownloads(.pause) }
                 } label: {
-                    Label("暂停", systemImage: "pause.fill")
+                    Label(L10n.string("ui.8d12fc0d4eb26021"), systemImage: "pause.fill")
                 }
                 .disabled(model.downloadSelection.isEmpty || model.isPerformingAction)
                 Menu {
-                    Button("仅移除任务", role: .destructive) {
+                    Button(L10n.string("ui.3a72267129185266"), role: .destructive) {
                         deleteChoice = .taskOnly
                     }
-                    Button("移除任务和已下载数据", role: .destructive) {
+                    Button(L10n.string("ui.810ad53a1c16de5d"), role: .destructive) {
                         deleteChoice = .taskAndData
                     }
                 } label: {
-                    Label("移除", systemImage: "trash")
+                    Label(L10n.string("ui.6135d4159e892541"), systemImage: "trash")
                 }
                 .disabled(model.downloadSelection.isEmpty || model.isPerformingAction)
                 Button {
                     showsSettings = true
                 } label: {
-                    Label("设置", systemImage: "gearshape")
+                    Label(L10n.string("ui.df3d58c7d84b85f2"), systemImage: "gearshape")
                 }
                 .disabled(model.isPerformingAction)
                 Button {
                     showsCreate = true
                 } label: {
-                    Label("添加下载", systemImage: "plus")
+                    Label(L10n.string("ui.52b312406b04b9a7"), systemImage: "plus")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isPerformingAction)
@@ -248,8 +249,8 @@ private struct DownloadStationView: View {
 
             if tasks.isEmpty, !model.isLoading {
                 EmptyServiceState(
-                    title: filter == .all ? "还没有下载任务" : "没有符合条件的任务",
-                    message: "你可以选择任务文件，或输入下载网址。",
+                    title: filter == .all ? L10n.string("ui.1640d50f8dbf6fa3") : L10n.string("ui.1c125edbf975b9ba"),
+                    message: L10n.string("ui.dbf81937e698b1dc"),
                     icon: "arrow.down.doc"
                 )
             } else {
@@ -257,11 +258,11 @@ private struct DownloadStationView: View {
                     DownloadTaskRow(task: task)
                         .tag(task.id)
                         .contextMenu {
-                            Button("继续") {
+                            Button(L10n.string("ui.7c9691192f1b7340")) {
                                 model.downloadSelection = [task.id]
                                 Task { await model.controlDownloads(.resume) }
                             }
-                            Button("暂停") {
+                            Button(L10n.string("ui.8d12fc0d4eb26021")) {
                                 model.downloadSelection = [task.id]
                                 Task { await model.controlDownloads(.pause) }
                             }
@@ -309,26 +310,26 @@ private struct DownloadStationView: View {
             )
         }
         .confirmationDialog(
-            "移除所选下载任务？",
+            L10n.string("ui.f0b382eeac27d246"),
             isPresented: Binding(
                 get: { deleteChoice != nil },
                 set: { if !$0 { deleteChoice = nil } }
             )
         ) {
             Button(
-                deleteChoice == .taskAndData ? "移除任务和数据" : "仅移除任务",
+                deleteChoice == .taskAndData ? L10n.string("ui.631851c80f615dc3") : L10n.string("ui.3a72267129185266"),
                 role: .destructive
             ) {
                 let removeData = deleteChoice == .taskAndData
                 deleteChoice = nil
                 Task { await model.deleteDownloads(removeData: removeData) }
             }
-            Button("取消", role: .cancel) { deleteChoice = nil }
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { deleteChoice = nil }
         } message: {
             Text(
                 deleteChoice == .taskAndData
-                    ? "这会同时删除 NAS 上已经下载的数据，无法撤销。"
-                    : "已下载的数据会保留在 NAS 上。"
+                    ? L10n.string("ui.7ee4c98525fb52f7")
+                    : L10n.string("ui.3719b045e8772446")
             )
         }
     }
@@ -336,7 +337,7 @@ private struct DownloadStationView: View {
     private var speedSummary: String {
         let down = ServiceFormat.speed(model.downloads?.downloadBytesPerSecond ?? 0)
         let up = ServiceFormat.speed(model.downloads?.uploadBytesPerSecond ?? 0)
-        return "下载 \(down) · 上传 \(up)"
+        return L10n.string("ui.22779f62aa21a7ad", String(describing: down), String(describing: up))
     }
 }
 
@@ -380,7 +381,7 @@ private struct DownloadTaskRow: View {
     }
 
     private var sizeSummary: String {
-        guard let total = task.sizeBytes else { return "大小未知" }
+        guard let total = task.sizeBytes else { return L10n.string("ui.f8f5f153c20d00b9") }
         let completed = ServiceFormat.bytes(task.downloadedBytes ?? 0)
         return "\(completed) / \(ServiceFormat.bytes(total))"
     }
@@ -412,8 +413,8 @@ private struct CreateDownloadSheet: View {
         var id: Self { self }
         var title: String {
             switch self {
-            case .file: "打开文件"
-            case .url: "输入网址"
+            case .file: L10n.string("ui.4c8a4e3da39e5c2a")
+            case .url: L10n.string("ui.abb7b877109a1746")
             }
         }
     }
@@ -433,8 +434,8 @@ private struct CreateDownloadSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("添加下载").font(.title2.weight(.semibold))
-            Picker("任务来源", selection: $source) {
+            Text(L10n.string("ui.52b312406b04b9a7")).font(.title2.weight(.semibold))
+            Picker(L10n.string("ui.1f39096f50fcbc99"), selection: $source) {
                 ForEach(Source.allCases) { source in
                     Text(source.title).tag(source)
                 }
@@ -443,36 +444,36 @@ private struct CreateDownloadSheet: View {
             .labelsHidden()
             Form {
                 if source == .file {
-                    LabeledContent("任务文件") {
+                    LabeledContent(L10n.string("ui.00a38e1c717a7a03")) {
                         HStack(spacing: 8) {
                             Label(
-                                selectedFileURL?.lastPathComponent ?? "尚未选择文件",
+                                selectedFileURL?.lastPathComponent ?? L10n.string("ui.a96f374e86bc73e4"),
                                 systemImage: "doc.badge.plus"
                             )
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            Button("选择文件…", action: chooseTaskFile)
+                            Button(L10n.string("ui.29d75b8eb8866bb4"), action: chooseTaskFile)
                         }
                     }
-                    SecureField("解压密码（可选）", text: $unzipPassword)
+                    SecureField(L10n.string("ui.c2a29d7321f21fa1"), text: $unzipPassword)
                 } else {
-                    TextField("下载网址或磁力链接", text: $uri, axis: .vertical)
+                    TextField(L10n.string("ui.5518511f5b5add04"), text: $uri, axis: .vertical)
                         .lineLimit(3...6)
                 }
-                LabeledContent("保存位置") {
+                LabeledContent(L10n.string("ui.0b7e2876922e4662")) {
                     HStack(spacing: 8) {
                         Label(destinationDisplay, systemImage: "folder")
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityLabel("当前保存位置：\(destinationDisplay)")
+                            .accessibilityLabel(L10n.string("ui.27978521d005ac46", String(describing: destinationDisplay)))
                         if destination != normalizedDefaultDestination {
-                            Button("恢复默认") {
+                            Button(L10n.string("ui.ba2e93e73037c71e")) {
                                 destination = normalizedDefaultDestination
                             }
                         }
-                        Button("选择…") {
+                        Button(L10n.string("ui.4aea6b5ff7a5857c")) {
                             showsDestinationPicker = true
                         }
                     }
@@ -483,8 +484,8 @@ private struct CreateDownloadSheet: View {
                 .foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                Button("取消", role: .cancel) { dismiss() }
-                Button("添加下载") {
+                Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { dismiss() }
+                Button(L10n.string("ui.52b312406b04b9a7")) {
                     isSubmitting = true
                     Task {
                         let selectedDestination =
@@ -533,7 +534,7 @@ private struct CreateDownloadSheet: View {
     }
 
     private var destinationDisplay: String {
-        destination.isEmpty ? "使用 Download Station 默认位置" : "/\(destination)"
+        destination.isEmpty ? L10n.string("ui.113d2c57a282180f") : "/\(destination)"
     }
 
     private var canSubmit: Bool {
@@ -548,16 +549,16 @@ private struct CreateDownloadSheet: View {
     private var helpText: String {
         switch source {
         case .file:
-            "支持 .torrent、.nzb 和包含下载网址的 .txt 文件。文件只会发送到当前 NAS。"
+            L10n.string("ui.c879b7fd860d70d4")
         case .url:
-            "支持 HTTP、HTTPS、FTP 和磁力链接；网址仅用于本次提交，不会写入应用日志。"
+            L10n.string("ui.9dc5f2124edb52cc")
         }
     }
 
     private func chooseTaskFile() {
         let panel = NSOpenPanel()
-        panel.title = "选择下载任务文件"
-        panel.prompt = "选择"
+        panel.title = L10n.string("ui.525bd66f339aafa2")
+        panel.prompt = L10n.string("ui.c11330b85234f9c0")
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = ["torrent", "nzb", "txt"].compactMap {
@@ -587,7 +588,7 @@ private struct DownloadSettingsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("下载设置").font(.title2.weight(.semibold))
+                Text(L10n.string("ui.f988df886e7d7e73")).font(.title2.weight(.semibold))
                 Spacer()
                 if isLoading || isSaving {
                     ProgressView().controlSize(.small)
@@ -596,8 +597,8 @@ private struct DownloadSettingsSheet: View {
 
             if let settingsBinding {
                 Form {
-                    Section("常规") {
-                        LabeledContent("默认保存位置") {
+                    Section(L10n.string("ui.40fae00b7c6d8ac0")) {
+                        LabeledContent(L10n.string("ui.22939a4ebb0b8d00")) {
                             HStack(spacing: 8) {
                                 Label(
                                     destinationDisplay(settingsBinding.wrappedValue),
@@ -606,37 +607,37 @@ private struct DownloadSettingsSheet: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                Button("选择…") {
+                                Button(L10n.string("ui.4aea6b5ff7a5857c")) {
                                     showsDestinationPicker = true
                                 }
                             }
                         }
-                        Toggle("启用 eMule 下载", isOn: settingsBinding.isEMuleEnabled)
-                        Toggle("允许自动解压缩", isOn: settingsBinding.isAutoExtractEnabled)
+                        Toggle(L10n.string("ui.36ec0018d6d2e3cf"), isOn: settingsBinding.isEMuleEnabled)
+                        Toggle(L10n.string("ui.1ec1e57766d7769a"), isOn: settingsBinding.isAutoExtractEnabled)
                     }
 
-                    Section("速度限制") {
-                        speedField("BT 下载", value: settingsBinding.btDownloadLimit)
-                        speedField("BT 上传", value: settingsBinding.btUploadLimit)
-                        speedField("网页与 FTP 下载", value: webLimitBinding(settingsBinding))
-                        speedField("NZB 下载", value: settingsBinding.nzbDownloadLimit)
-                        speedField("eMule 下载", value: settingsBinding.emuleDownloadLimit)
-                        speedField("eMule 上传", value: settingsBinding.emuleUploadLimit)
-                        Text("填写 0 表示不限速。速度单位为 KB/s。")
+                    Section(L10n.string("ui.b4b2fe2e349f95a5")) {
+                        speedField(L10n.string("ui.72f4d786f20ef7d0"), value: settingsBinding.btDownloadLimit)
+                        speedField(L10n.string("ui.4475d765a50bb50e"), value: settingsBinding.btUploadLimit)
+                        speedField(L10n.string("ui.6669be0cf447b7bc"), value: webLimitBinding(settingsBinding))
+                        speedField(L10n.string("ui.810040fd1925dbd0"), value: settingsBinding.nzbDownloadLimit)
+                        speedField(L10n.string("ui.9d6bf94d4704e700"), value: settingsBinding.emuleDownloadLimit)
+                        speedField(L10n.string("ui.6c4096f61b5a084f"), value: settingsBinding.emuleUploadLimit)
+                        Text(L10n.string("ui.4b7f80b866336348"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
 
-                    Section("下载计划") {
-                        Toggle("启用下载计划", isOn: settingsBinding.isScheduleEnabled)
-                        Toggle("将计划用于 eMule", isOn: settingsBinding.isEMuleScheduleEnabled)
+                    Section(L10n.string("ui.d2375298b39b3c94")) {
+                        Toggle(L10n.string("ui.f6075112320525c0"), isOn: settingsBinding.isScheduleEnabled)
+                        Toggle(L10n.string("ui.c24278e3a16b4c52"), isOn: settingsBinding.isEMuleScheduleEnabled)
                             .disabled(!settingsBinding.wrappedValue.isScheduleEnabled)
                     }
                 }
                 .formStyle(.grouped)
             } else if let errorMessage {
                 ContentUnavailableView(
-                    "无法读取下载设置",
+                    L10n.string("ui.7fdd539ffbe65c3f"),
                     systemImage: "gearshape.fill",
                     description: Text(errorMessage)
                 )
@@ -647,8 +648,8 @@ private struct DownloadSettingsSheet: View {
 
             HStack {
                 Spacer()
-                Button("取消", role: .cancel) { dismiss() }
-                Button("保存") {
+                Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { dismiss() }
+                Button(L10n.string("ui.a3030bf8f16dc63c")) {
                     guard let settings else { return }
                     isSaving = true
                     Task {
@@ -668,7 +669,7 @@ private struct DownloadSettingsSheet: View {
             } catch let error as AppError {
                 errorMessage = error.safeUserMessage
             } catch {
-                errorMessage = "请确认当前账号拥有 Download Station 管理权限，然后重试。"
+                errorMessage = L10n.string("ui.ab820ed96cf327c2")
             }
             isLoading = false
         }
@@ -701,7 +702,7 @@ private struct DownloadSettingsSheet: View {
                 TextField("0", value: value, format: .number)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 110)
-                Text("KB/s").foregroundStyle(.secondary)
+                Text(L10n.string("unit.kilobytes_per_second")).foregroundStyle(.secondary)
             }
         }
     }
@@ -722,7 +723,7 @@ private struct DownloadSettingsSheet: View {
         let path = settings.defaultDestination.trimmingCharacters(
             in: CharacterSet(charactersIn: "/")
         )
-        return path.isEmpty ? "尚未设置" : "/\(path)"
+        return path.isEmpty ? L10n.string("ui.88f6fc489aa185af") : "/\(path)"
     }
 }
 
@@ -746,10 +747,10 @@ private struct DownloadDestinationPicker: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("选择 NAS 文件夹")
+                Text(L10n.string("ui.9ee6e08b1f3e18a1"))
                     .font(.headline)
                 Spacer()
-                Button("取消") { onCancel() }
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { onCancel() }
                     .keyboardShortcut(.cancelAction)
             }
             .padding(.horizontal, 16)
@@ -761,21 +762,21 @@ private struct DownloadDestinationPicker: View {
                 Button {
                     Task { await goBack() }
                 } label: {
-                    Label("返回", systemImage: "chevron.backward")
+                    Label(L10n.string("ui.572cf45ba43634b3"), systemImage: "chevron.backward")
                 }
                 .labelStyle(.iconOnly)
                 .disabled(history.isEmpty || isLoading)
-                .help("返回上一级")
+                .help(L10n.string("ui.2bab713fde4ebc53"))
                 Text(locationTitle)
                     .font(.subheadline)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .accessibilityLabel("当前位置：\(locationTitle)")
+                    .accessibilityLabel(L10n.string("ui.4b8e2df221ec32ef", String(describing: locationTitle)))
                 Spacer()
                 if isLoading {
                     ProgressView()
                         .controlSize(.small)
-                        .accessibilityLabel("正在载入文件夹")
+                        .accessibilityLabel(L10n.string("ui.6b47f90bd6bd7cce"))
                 }
             }
             .padding(.horizontal, 16)
@@ -783,27 +784,27 @@ private struct DownloadDestinationPicker: View {
 
             Group {
                 if isLoading && folders.isEmpty {
-                    ProgressView("正在载入文件夹…")
+                    ProgressView(L10n.string("ui.038b9263cfd8c1a8"))
                         .fillsAvailableContentArea()
                 } else if let errorMessage {
                     ContentUnavailableView {
-                        Label("无法读取文件夹", systemImage: "exclamationmark.triangle")
+                        Label(L10n.string("ui.c7046f4c767b4d60"), systemImage: "exclamationmark.triangle")
                     } description: {
                         Text(errorMessage)
                     } actions: {
-                        Button("重新载入") {
+                        Button(L10n.string("ui.35588dcb9be3dc8e")) {
                             Task { await reload() }
                         }
                     }
                     .fillsAvailableContentArea()
                 } else if folders.isEmpty {
                     ContentUnavailableView(
-                        "这里没有子文件夹",
+                        L10n.string("ui.2e3012c9f8d17867"),
                         systemImage: "folder",
                         description: Text(
                             location.path == nil
-                                ? "当前账号没有可用的共享文件夹。"
-                                : "可以选择当前文件夹，或返回上一级继续查找。"
+                                ? L10n.string("ui.e5181b73526b80b5")
+                                : L10n.string("ui.8ed1c0e8bd363f97")
                         )
                     )
                     .fillsAvailableContentArea()
@@ -820,8 +821,8 @@ private struct DownloadDestinationPicker: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                 Spacer()
-                Button("取消") { onCancel() }
-                Button("选择此文件夹") {
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { onCancel() }
+                Button(L10n.string("ui.1ab259e4d2286371")) {
                     guard let path = location.path else { return }
                     onSelect(Self.downloadStationPath(from: path))
                 }
@@ -848,7 +849,7 @@ private struct DownloadDestinationPicker: View {
                     Text(folder.name)
                         .lineLimit(1)
                     if Self.downloadStationPath(from: folder.path) == selectedDestination {
-                        Text("当前选择")
+                        Text(L10n.string("ui.8d30e0eb426fee8f"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -864,24 +865,24 @@ private struct DownloadDestinationPicker: View {
             .disabled(isLoading)
             .accessibilityHint(
                 canWrite
-                    ? "打开文件夹"
-                    : "打开文件夹；此文件夹本身不可作为保存位置"
+                    ? L10n.string("ui.fcf8b4bff0df782d")
+                    : L10n.string("ui.32566e1138fc4714")
             )
         }
         .listStyle(.inset)
     }
 
     private var locationTitle: String {
-        location.path ?? "共享文件夹"
+        location.path ?? L10n.string("ui.8df2fa80a06c49b5")
     }
 
     private var selectionHint: String {
         guard location.path != nil else {
-            return "请选择一个共享文件夹。"
+            return L10n.string("ui.1d6e8d61f9bf0615")
         }
         return location.canWrite
-            ? "下载内容将保存到当前文件夹。"
-            : "当前账号不能写入这个文件夹，请选择其他位置。"
+            ? L10n.string("ui.4678a2e85ab192f0")
+            : L10n.string("ui.3160b68f56978d8b")
     }
 
     private func open(_ folder: FileItem) async {
@@ -909,7 +910,7 @@ private struct DownloadDestinationPicker: View {
         } catch {
             folders = []
             errorMessage = (error as? AppError)?.safeUserMessage
-                ?? "NAS 没有返回文件夹列表，请检查连接后重试。"
+                ?? L10n.string("ui.44a58a5148d0b6dd")
             isLoading = false
         }
     }
@@ -931,12 +932,12 @@ private struct ContainerManagerView: View {
         var id: Self { self }
         var title: String {
             switch self {
-            case .overview: "总览"
-            case .containers: "容器"
-            case .images: "映像"
-            case .networks: "网络"
-            case .projects: "项目"
-            case .events: "活动记录"
+            case .overview: L10n.string("ui.a33db573055626c5")
+            case .containers: L10n.string("ui.6d23f04b26967d64")
+            case .images: L10n.string("ui.ceb4432ba2356217")
+            case .networks: L10n.string("ui.97b31b5d63f57e51")
+            case .projects: L10n.string("ui.79f326be4409d51f")
+            case .events: L10n.string("ui.f98dfe0b4d543087")
             }
         }
     }
@@ -952,7 +953,7 @@ private struct ContainerManagerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ServiceHeader(
-                title: "容器管理",
+                title: L10n.string("ui.aaf778d85ce5c2ed"),
                 subtitle: containerSummary,
                 icon: "shippingbox.fill",
                 tint: .blue,
@@ -976,29 +977,29 @@ private struct ContainerManagerView: View {
             }
         }
         .padding(20)
-        .confirmationDialog("删除所选容器？", isPresented: $confirmsContainerDelete) {
-            Button("删除容器", role: .destructive) {
+        .confirmationDialog(L10n.string("ui.e63f7b537862f807"), isPresented: $confirmsContainerDelete) {
+            Button(L10n.string("ui.60fc3386091b5647"), role: .destructive) {
                 Task { await model.deleteContainers() }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("容器会从 NAS 移除。映像和共享文件夹中的数据不会自动删除。")
+            Text(L10n.string("ui.d146f8b315800ce5"))
         }
-        .confirmationDialog("删除所选映像？", isPresented: $confirmsImageDelete) {
-            Button("删除映像", role: .destructive) {
+        .confirmationDialog(L10n.string("ui.08e648b8e120039f"), isPresented: $confirmsImageDelete) {
+            Button(L10n.string("ui.17f38b5ced278466"), role: .destructive) {
                 Task { await model.deleteImages() }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("正在使用的映像不会被删除；请先停止并移除相关容器。")
+            Text(L10n.string("ui.0b16ae28e158fd97"))
         }
-        .confirmationDialog("删除所选网络？", isPresented: $confirmsNetworkDelete) {
-            Button("删除网络", role: .destructive) {
+        .confirmationDialog(L10n.string("ui.ee4929b66715cd3c"), isPresented: $confirmsNetworkDelete) {
+            Button(L10n.string("ui.8e3a6be52ed69dde"), role: .destructive) {
                 Task { await model.deleteNetworks() }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("请先确认没有容器仍连接到这些网络。")
+            Text(L10n.string("ui.cd8a980b07eec901"))
         }
         .sheet(isPresented: $showsPullImage) {
             PullImageSheet(
@@ -1010,7 +1011,7 @@ private struct ContainerManagerView: View {
                         showsPullImage = false
                         return nil
                     }
-                    return model.message ?? "映像下载未能开始，请检查连接后重试。"
+                    return model.message ?? L10n.string("ui.181d86c6f58ca795")
                 }
             )
         }
@@ -1028,7 +1029,7 @@ private struct ContainerManagerView: View {
         let running = containers.filter {
             ["running", "started", "up"].contains($0.status.lowercased())
         }.count
-        return "\(running) 个正在运行 · 共 \(containers.count) 个"
+        return L10n.string("ui.0bd7c9fa74d70720", String(describing: running), String(describing: containers.count))
     }
 
     private var overview: some View {
@@ -1037,10 +1038,10 @@ private struct ContainerManagerView: View {
             columns: [GridItem(.adaptive(minimum: 180), spacing: 14)],
             spacing: 14
         ) {
-            SummaryCard(title: "容器", value: "\(snapshot?.containers.count ?? 0)", icon: "shippingbox", tint: .blue)
-            SummaryCard(title: "映像", value: "\(snapshot?.images.count ?? 0)", icon: "square.stack.3d.up", tint: .purple)
-            SummaryCard(title: "网络", value: "\(snapshot?.networks.count ?? 0)", icon: "network", tint: .green)
-            SummaryCard(title: "项目", value: "\(snapshot?.projects.count ?? 0)", icon: "square.grid.2x2", tint: .orange)
+            SummaryCard(title: L10n.string("ui.6d23f04b26967d64"), value: "\(snapshot?.containers.count ?? 0)", icon: "shippingbox", tint: .blue)
+            SummaryCard(title: L10n.string("ui.ceb4432ba2356217"), value: "\(snapshot?.images.count ?? 0)", icon: "square.stack.3d.up", tint: .purple)
+            SummaryCard(title: L10n.string("ui.97b31b5d63f57e51"), value: "\(snapshot?.networks.count ?? 0)", icon: "network", tint: .green)
+            SummaryCard(title: L10n.string("ui.79f326be4409d51f"), value: "\(snapshot?.projects.count ?? 0)", icon: "square.grid.2x2", tint: .orange)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.top, 8)
@@ -1049,11 +1050,11 @@ private struct ContainerManagerView: View {
     private var containerList: some View {
         VStack(spacing: 10) {
             HStack {
-                Button("启动") { Task { await model.controlContainers(.start) } }
-                Button("停止") { Task { await model.controlContainers(.stop) } }
-                Button("重新启动") { Task { await model.controlContainers(.restart) } }
+                Button(L10n.string("ui.56410fc65314dfb5")) { Task { await model.controlContainers(.start) } }
+                Button(L10n.string("ui.ca4d973c0b006b75")) { Task { await model.controlContainers(.stop) } }
+                Button(L10n.string("ui.4c7c6cc2eb16ec30")) { Task { await model.controlContainers(.restart) } }
                 Spacer()
-                Button("删除", role: .destructive) { confirmsContainerDelete = true }
+                Button(L10n.string("ui.2f9daa828907b93f"), role: .destructive) { confirmsContainerDelete = true }
             }
             .disabled(model.containerSelection.isEmpty || model.isPerformingAction)
             List(model.containers?.containers ?? [], selection: $model.containerSelection) { item in
@@ -1065,7 +1066,7 @@ private struct ContainerManagerView: View {
                     }
                     Spacer()
                     if let cpu = item.cpuUsage {
-                        Text("处理器 \(cpu, specifier: "%.1f")%")
+                        Text(L10n.string("processor.usage.percent", String(format: "%.1f", cpu)))
                     }
                     if let memory = item.memoryBytes {
                         Text(ServiceFormat.bytes(memory))
@@ -1085,13 +1086,13 @@ private struct ContainerManagerView: View {
         VStack(spacing: 10) {
             HStack {
                 Spacer()
-                Button("删除", role: .destructive) { confirmsImageDelete = true }
+                Button(L10n.string("ui.2f9daa828907b93f"), role: .destructive) { confirmsImageDelete = true }
                     .disabled(model.imageSelection.isEmpty || model.isPerformingAction)
                 Button {
                     model.clearMessage()
                     showsPullImage = true
                 } label: {
-                    Label("搜索并下载", systemImage: "magnifyingglass")
+                    Label(L10n.string("ui.54c566409f4d5f69"), systemImage: "magnifyingglass")
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -1103,7 +1104,7 @@ private struct ContainerManagerView: View {
                     Spacer()
                     Text(ServiceFormat.bytes(image.sizeBytes ?? 0)).foregroundStyle(.secondary)
                     if image.isInUse {
-                        Text("使用中")
+                        Text(L10n.string("ui.fa48e89389404e60"))
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.green)
                     }
@@ -1119,12 +1120,12 @@ private struct ContainerManagerView: View {
         VStack(spacing: 10) {
             HStack {
                 Spacer()
-                Button("删除", role: .destructive) { confirmsNetworkDelete = true }
+                Button(L10n.string("ui.2f9daa828907b93f"), role: .destructive) { confirmsNetworkDelete = true }
                     .disabled(model.networkSelection.isEmpty || model.isPerformingAction)
                 Button {
                     showsCreateNetwork = true
                 } label: {
-                    Label("新建网络", systemImage: "plus")
+                    Label(L10n.string("ui.bbb95fc4344b8391"), systemImage: "plus")
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -1134,7 +1135,7 @@ private struct ContainerManagerView: View {
                     Text(network.name).fontWeight(.medium)
                     Text(network.driver).foregroundStyle(.secondary)
                     Spacer()
-                    Text("\(network.connectedContainerCount) 个容器")
+                    Text(L10n.string("ui.9e93c07975ef7973", String(describing: network.connectedContainerCount)))
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
@@ -1150,7 +1151,7 @@ private struct ContainerManagerView: View {
                 StatusDot(status: project.status)
                 Text(project.name).fontWeight(.medium)
                 Spacer()
-                Text("\(project.containerCount) 个容器").foregroundStyle(.secondary)
+                Text(L10n.string("ui.9e93c07975ef7973", String(describing: project.containerCount))).foregroundStyle(.secondary)
                 Text(ServiceFormat.status(project.status)).foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
@@ -1187,13 +1188,13 @@ private struct VirtualMachineManagerView: View {
         var id: Self { self }
         var title: String {
             switch self {
-            case .machines: "虚拟机"
-            case .hosts: "主机"
-            case .storages: "存储"
-            case .networks: "网络"
-            case .images: "映像"
-            case .protection: "保护"
-            case .events: "日志"
+            case .machines: L10n.string("ui.f3fb4b3a41570007")
+            case .hosts: L10n.string("ui.e87d9f23a3f5a830")
+            case .storages: L10n.string("ui.a3434acddb75d8fb")
+            case .networks: L10n.string("ui.97b31b5d63f57e51")
+            case .images: L10n.string("ui.ceb4432ba2356217")
+            case .protection: L10n.string("ui.0f810a7901cf0422")
+            case .events: L10n.string("ui.7dbac1c20f237bd4")
             }
         }
     }
@@ -1206,9 +1207,9 @@ private struct VirtualMachineManagerView: View {
         var id: Self { self }
         var title: String {
             switch self {
-            case .plans: "保护计划"
-            case .schedules: "计划策略"
-            case .retentions: "保留策略"
+            case .plans: L10n.string("ui.677050193f34702b")
+            case .schedules: L10n.string("ui.457b5e7e319ab16a")
+            case .retentions: L10n.string("ui.00213c7f272b9a59")
             }
         }
     }
@@ -1225,14 +1226,14 @@ private struct VirtualMachineManagerView: View {
     @State private var editingMachine: VirtualMachine?
     @State private var editingNetwork: VirtualizationResource?
     @State private var logSearch = ""
-    @State private var logLevel = "全部"
+    @State private var logLevel: String?
     @State private var consoleWindowController: VirtualMachineConsoleWindowController?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ServiceHeader(
-                title: "虚拟机管理",
-                subtitle: "\(model.virtualMachines?.machines.count ?? 0) 台虚拟机",
+                title: L10n.string("ui.80c43bd2481c9580"),
+                subtitle: L10n.string("ui.c7892f3db4ba87d6", String(describing: model.virtualMachines?.machines.count ?? 0)),
                 icon: "desktopcomputer",
                 tint: .indigo,
                 isLoading: model.isLoading
@@ -1276,34 +1277,36 @@ private struct VirtualMachineManagerView: View {
                 pendingPowerAction = nil
                 Task { await model.controlVirtualMachines(action) }
             }
-            Button("取消", role: .cancel) { pendingPowerAction = nil }
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { pendingPowerAction = nil }
         } message: {
             Text(powerConfirmationMessage)
         }
-        .confirmationDialog("删除所选虚拟机？", isPresented: $confirmsDelete) {
-            Button("删除虚拟机", role: .destructive) {
+        .confirmationDialog(L10n.string("ui.ad40eb8a01cc6468"), isPresented: $confirmsDelete) {
+            Button(L10n.string("ui.09c9bbb37a697b22"), role: .destructive) {
                 Task { await model.deleteVirtualMachines() }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("虚拟机及其配置会被移除。请先确认重要数据已有备份。")
+            Text(L10n.string("ui.67d3d2f7145c7bb6"))
         }
-        .confirmationDialog("删除所选网络？", isPresented: $confirmsNetworkDelete) {
-            Button("删除网络", role: .destructive) {
+        .confirmationDialog(L10n.string("ui.ee4929b66715cd3c"), isPresented: $confirmsNetworkDelete) {
+            Button(L10n.string("ui.8e3a6be52ed69dde"), role: .destructive) {
                 Task { await model.deleteVirtualMachineNetworks() }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
-            Text("使用中的网络可能无法删除。删除后，连接到该网络的虚拟机可能无法正常通信。")
+            Text(L10n.string("ui.1f42dd983ef3248f"))
         }
         .confirmationDialog(
-            deletingImage != nil ? "确定要删除映像“\(deletingImage?.name ?? "")”吗？" : "删除所选映像？",
+            deletingImage != nil
+                ? L10n.string("image.delete.confirm", deletingImage?.name ?? "")
+                : L10n.string("ui.08e648b8e120039f"),
             isPresented: Binding(
                 get: { confirmsImageDelete || deletingImage != nil },
                 set: { if !$0 { confirmsImageDelete = false; deletingImage = nil } }
             )
         ) {
-            Button("删除映像", role: .destructive) {
+            Button(L10n.string("ui.17f38b5ced278466"), role: .destructive) {
                 if let image = deletingImage {
                     model.virtualMachineImageSelection = [image.id]
                 }
@@ -1311,15 +1314,15 @@ private struct VirtualMachineManagerView: View {
                 confirmsImageDelete = false
                 Task { await model.deleteVirtualMachineImages() }
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 deletingImage = nil
                 confirmsImageDelete = false
             }
         } message: {
             if let image = deletingImage {
-                Text("映像“\(image.name)”将会从这台 NAS 移除。已使用此映像安装的虚拟机不会被删除。")
+                Text(L10n.string("ui.1ac52411484d9eb2", String(describing: image.name)))
             } else {
-                Text("映像会从这台 NAS 移除。已使用此映像安装的虚拟机不会被删除。")
+                Text(L10n.string("ui.44af5924ab3698a1"))
             }
         }
         .sheet(isPresented: $showsCreation) {
@@ -1353,7 +1356,7 @@ private struct VirtualMachineManagerView: View {
                 Button {
                     showsCreation = true
                 } label: {
-                    Label("新建", systemImage: "plus")
+                    Label(L10n.string("ui.50ef2f4cf6a46924"), systemImage: "plus")
                 }
                 .keyboardShortcut("n", modifiers: .command)
                 .disabled(
@@ -1364,7 +1367,7 @@ private struct VirtualMachineManagerView: View {
                 Button {
                     editingMachine = selectedMachine
                 } label: {
-                    Label("修改", systemImage: "slider.horizontal.3")
+                    Label(L10n.string("ui.37090f45651676fc"), systemImage: "slider.horizontal.3")
                 }
                 .disabled(selectedMachine == nil || model.isPerformingAction)
                 Button {
@@ -1388,7 +1391,7 @@ private struct VirtualMachineManagerView: View {
                         controller.show()
                     }
                 } label: {
-                    Label("远程连接", systemImage: "display")
+                    Label(L10n.string("ui.678b783fb578172b"), systemImage: "display")
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(
@@ -1397,15 +1400,15 @@ private struct VirtualMachineManagerView: View {
                         || model.isPerformingAction
                 )
                 Divider().frame(height: 18)
-                Button("启动") { pendingPowerAction = .powerOn }
-                Button("正常关机") { pendingPowerAction = .shutdown }
-                Menu("更多") {
-                    Button("重新启动") { pendingPowerAction = .restart }
+                Button(L10n.string("ui.56410fc65314dfb5")) { pendingPowerAction = .powerOn }
+                Button(L10n.string("ui.0c6d079c4c60bcf5")) { pendingPowerAction = .shutdown }
+                Menu(L10n.string("ui.38844b135cf70dfc")) {
+                    Button(L10n.string("ui.4c7c6cc2eb16ec30")) { pendingPowerAction = .restart }
                     Divider()
-                    Button("强制断电…", role: .destructive) {
+                    Button(L10n.string("ui.b775502757e1b262"), role: .destructive) {
                         pendingPowerAction = .powerOff
                     }
-                    Button("删除…", role: .destructive) { confirmsDelete = true }
+                    Button(L10n.string("ui.0552e329ccf875fb"), role: .destructive) { confirmsDelete = true }
                 }
                 Spacer()
             }
@@ -1414,8 +1417,8 @@ private struct VirtualMachineManagerView: View {
             let machines = model.virtualMachines?.machines ?? []
             if machines.isEmpty, !model.isLoading {
                 EmptyServiceState(
-                    title: "还没有虚拟机",
-                    message: "选择“新建”即可配置处理器、内存、存储、网络和安装映像。",
+                    title: L10n.string("ui.7c1ae9a0ba0f3e91"),
+                    message: L10n.string("ui.49e52b056f9720b2"),
                     icon: "desktopcomputer"
                 )
             } else {
@@ -1424,12 +1427,12 @@ private struct VirtualMachineManagerView: View {
                         StatusDot(status: machine.status)
                         VStack(alignment: .leading, spacing: 3) {
                             Text(machine.name).fontWeight(.medium)
-                            Text(machine.host ?? "未分配主机")
+                            Text(machine.host ?? L10n.string("ui.1f7269533836a148"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if let cpu = machine.cpuCount { Text("\(cpu) 核") }
+                        if let cpu = machine.cpuCount { Text(L10n.string("ui.4e1409633e0962fd", String(describing: cpu))) }
                         if let memory = machine.memoryBytes { Text(ServiceFormat.bytes(memory)) }
                         Text(ServiceFormat.status(machine.status)).foregroundStyle(.secondary)
                     }
@@ -1464,8 +1467,8 @@ private struct VirtualMachineManagerView: View {
                 unavailableState(icon: icon)
             } else if resources.isEmpty, !model.isLoading {
                 EmptyServiceState(
-                    title: "没有可显示的项目",
-                    message: "这台 NAS 没有返回当前类别的内容。",
+                    title: L10n.string("ui.193f5172b1a610e3"),
+                    message: L10n.string("ui.eb8c045aa9ca1324"),
                     icon: icon
                 )
             } else {
@@ -1496,13 +1499,13 @@ private struct VirtualMachineManagerView: View {
                 Button {
                     editingNetwork = selectedNetwork
                 } label: {
-                    Label("修改", systemImage: "pencil")
+                    Label(L10n.string("ui.37090f45651676fc"), systemImage: "pencil")
                 }
                 .disabled(selectedNetwork == nil || model.isPerformingAction)
                 Button(role: .destructive) {
                     confirmsNetworkDelete = true
                 } label: {
-                    Label("删除", systemImage: "trash")
+                    Label(L10n.string("ui.2f9daa828907b93f"), systemImage: "trash")
                 }
                 .disabled(
                     model.virtualMachineNetworkSelection.isEmpty
@@ -1518,7 +1521,7 @@ private struct VirtualMachineManagerView: View {
                     model.virtualMachines?.networks ?? [],
                     selection: $model.virtualMachineNetworkSelection,
                     icon: "network",
-                    emptyMessage: "这台 NAS 还没有可管理的虚拟网络。"
+                    emptyMessage: L10n.string("ui.61feec1ad1dfaeaa")
                 )
             }
         }
@@ -1533,7 +1536,7 @@ private struct VirtualMachineManagerView: View {
                     model.virtualMachines?.images ?? [],
                     selection: $model.virtualMachineImageSelection,
                     icon: "opticaldisc",
-                    emptyMessage: "这台 NAS 还没有可管理的安装映像。",
+                    emptyMessage: L10n.string("ui.1f0117cd8f4f1c48"),
                     onDelete: { resource in
                         deletingImage = resource
                         model.virtualMachineImageSelection = [resource.id]
@@ -1554,7 +1557,7 @@ private struct VirtualMachineManagerView: View {
         Group {
             if resources.isEmpty, !model.isLoading {
                 EmptyServiceState(
-                    title: "没有可显示的项目",
+                    title: L10n.string("ui.193f5172b1a610e3"),
                     message: emptyMessage,
                     icon: icon
                 )
@@ -1581,11 +1584,11 @@ private struct VirtualMachineManagerView: View {
                             Button(role: .destructive) {
                                 onDelete(resource)
                             } label: {
-                                Label("删除", systemImage: "trash")
+                                Label(L10n.string("ui.2f9daa828907b93f"), systemImage: "trash")
                             }
                             .buttonStyle(.borderless)
                             .disabled(model.isPerformingAction)
-                            .help("删除此项目")
+                            .help(L10n.string("ui.917a7a94b8712191"))
                         }
                     }
                     .font(.callout)
@@ -1596,7 +1599,7 @@ private struct VirtualMachineManagerView: View {
                             Button(role: .destructive) {
                                 onDelete(resource)
                             } label: {
-                                Label("删除", systemImage: "trash")
+                                Label(L10n.string("ui.2f9daa828907b93f"), systemImage: "trash")
                             }
                         }
                     }
@@ -1616,7 +1619,7 @@ private struct VirtualMachineManagerView: View {
 
     private var protectionView: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("保护内容", selection: $protectionPane) {
+            Picker(L10n.string("ui.9bae22005848084c"), selection: $protectionPane) {
                 ForEach(ProtectionPane.allCases) { item in
                     Text(item.title).tag(item)
                 }
@@ -1652,28 +1655,31 @@ private struct VirtualMachineManagerView: View {
     private var eventList: some View {
         VStack(spacing: 10) {
             HStack {
-                Picker("级别", selection: $logLevel) {
-                    ForEach(logLevels, id: \.self) { Text($0).tag($0) }
+                Picker(L10n.string("ui.3d9d02e83d396eb7"), selection: $logLevel) {
+                    Text(L10n.string("ui.5c55a67935af8f45")).tag(String?.none)
+                    ForEach(logLevels, id: \.self) { level in
+                        Text(level).tag(Optional(level))
+                    }
                 }
                 .labelsHidden()
                 .frame(width: 150)
-                TextField("搜索日志", text: $logSearch)
+                TextField(L10n.string("ui.1b9b75f51d2061d7"), text: $logSearch)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 280)
                 Spacer()
-                Text("\(filteredEvents.count) 条")
+                Text(L10n.string("ui.08f9603e78071336", String(describing: filteredEvents.count)))
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("共 \(filteredEvents.count) 条日志")
+                    .accessibilityLabel(L10n.string("ui.0c920203a10756c5", String(describing: filteredEvents.count)))
             }
 
             if isUnavailable(.logs) {
                 unavailableState(icon: "list.bullet.rectangle")
             } else if filteredEvents.isEmpty, !model.isLoading {
                 EmptyServiceState(
-                    title: logSearch.isEmpty && logLevel == "全部" ? "还没有日志" : "没有匹配的日志",
-                    message: logSearch.isEmpty && logLevel == "全部"
-                        ? "这台 NAS 暂时没有返回虚拟机管理日志。"
-                        : "请尝试其他关键词或级别。",
+                    title: logSearch.isEmpty && logLevel == nil ? L10n.string("ui.dcb3b8dbca4fe140") : L10n.string("ui.865c08a7984a645c"),
+                    message: logSearch.isEmpty && logLevel == nil
+                        ? L10n.string("ui.ecf80647b8e4391b")
+                        : L10n.string("ui.3304fa471bdc74d4"),
                     icon: "list.bullet.rectangle"
                 )
             } else {
@@ -1702,12 +1708,12 @@ private struct VirtualMachineManagerView: View {
 
     private var logLevels: [String] {
         let levels = Set((model.virtualMachines?.events ?? []).map(\.level))
-        return ["全部"] + levels.sorted()
+        return levels.sorted()
     }
 
     private var filteredEvents: [ServiceEvent] {
         (model.virtualMachines?.events ?? []).filter { event in
-            let matchesLevel = logLevel == "全部" || event.level == logLevel
+            let matchesLevel = logLevel == nil || event.level == logLevel
             let query = logSearch.trimmingCharacters(in: .whitespacesAndNewlines)
             guard matchesLevel, !query.isEmpty else { return matchesLevel }
             return event.message.localizedCaseInsensitiveContains(query)
@@ -1718,8 +1724,8 @@ private struct VirtualMachineManagerView: View {
 
     private func logColor(_ level: String) -> Color {
         let normalized = level.lowercased()
-        if normalized.contains("error") || level.contains("错误") { return .red }
-        if normalized.contains("warn") || level.contains("警告") { return .orange }
+        if normalized.contains("error") || level.contains(L10n.string("ui.0bc1fb72ae1be5c5")) { return .red }
+        if normalized.contains("warn") || level.contains(L10n.string("ui.a8b7a4480407ac8a")) { return .orange }
         return .primary
     }
 
@@ -1730,11 +1736,11 @@ private struct VirtualMachineManagerView: View {
     private func unavailableState(icon: String) -> some View {
         VStack(spacing: 12) {
             EmptyServiceState(
-                title: "暂时无法读取",
-                message: "这台 NAS 没有返回当前内容。请刷新；如果仍然失败，请确认账号有虚拟机管理权限。",
+                title: L10n.string("ui.109cd48ec39191ef"),
+                message: L10n.string("ui.c092d7f7594f314f"),
                 icon: icon
             )
-            Button("重新加载") {
+            Button(L10n.string("ui.7bdd5ce1e298a972")) {
                 Task { await model.activate(.virtualMachines, force: true) }
             }
             .disabled(model.isLoading)
@@ -1743,28 +1749,28 @@ private struct VirtualMachineManagerView: View {
 
     private var powerConfirmationTitle: String {
         switch pendingPowerAction {
-        case .powerOn: "启动所选虚拟机？"
-        case .shutdown: "让所选虚拟机正常关机？"
-        case .powerOff: "强制断电？"
-        case .restart: "重新启动所选虚拟机？"
+        case .powerOn: L10n.string("ui.5999db1c5bcd59ea")
+        case .shutdown: L10n.string("ui.77e0d3de8918fc1e")
+        case .powerOff: L10n.string("ui.755b142b5e3f542b")
+        case .restart: L10n.string("ui.88568c6d970bcb8c")
         case nil: ""
         }
     }
 
     private var powerConfirmationButton: String {
         switch pendingPowerAction {
-        case .powerOn: "启动"
-        case .shutdown: "正常关机"
-        case .powerOff: "强制断电"
-        case .restart: "重新启动"
+        case .powerOn: L10n.string("ui.56410fc65314dfb5")
+        case .shutdown: L10n.string("ui.0c6d079c4c60bcf5")
+        case .powerOff: L10n.string("ui.95e6d4dab18115c2")
+        case .restart: L10n.string("ui.4c7c6cc2eb16ec30")
         case nil: ""
         }
     }
 
     private var powerConfirmationMessage: String {
         pendingPowerAction == .powerOff
-            ? "强制断电可能导致虚拟机内尚未保存的数据丢失。优先使用“正常关机”。"
-            : "请确认虚拟机中的工作已妥善保存。"
+            ? L10n.string("ui.5657849d1aaa3d79")
+            : L10n.string("ui.105effc619602b8b")
     }
 }
 
@@ -1786,20 +1792,20 @@ private struct EditVirtualMachineNetworkSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("修改网络")
+            Text(L10n.string("ui.d1650277320baac5"))
                 .font(.title2.bold())
             Form {
-                TextField("名称", text: $name)
+                TextField(L10n.string("ui.d44e9b3d3b31d37b"), text: $name)
                     .textFieldStyle(.roundedBorder)
             }
-            Text("修改名称不会改变虚拟机当前的网络连接。")
+            Text(L10n.string("ui.cfef0ea3f7b9cf6a"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                Button("取消", role: .cancel) { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(isSaving ? "正在保存…" : "保存") {
+                Button(isSaving ? L10n.string("ui.6bdb4435095e5d28") : L10n.string("ui.a3030bf8f16dc63c")) {
                     isSaving = true
                     Task {
                         let succeeded = await submit(
@@ -1844,22 +1850,22 @@ private struct CreateVirtualMachineSheet: View {
     @State private var confirmsCreation = false
     @State private var isSubmitting = false
 
-    private let stepTitles = ["基本信息", "计算资源", "存储与启动"]
+    private let stepTitles = [L10n.string("ui.e8df058725699a17"), L10n.string("ui.2c37d50911e8f6fa"), L10n.string("ui.3933d78a8f0d2181")]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("新建虚拟机").font(.title2.weight(.semibold))
-                    Text("第 \(step + 1) 步，共 \(stepTitles.count) 步 · \(stepTitles[step])")
+                    Text(L10n.string("ui.5f2c0e533b04bbb4")).font(.title2.weight(.semibold))
+                    Text(L10n.string("ui.823c07fbeb2b65e1", String(describing: step + 1), String(describing: stepTitles.count), String(describing: stepTitles[step])))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 ProgressView(value: Double(step + 1), total: Double(stepTitles.count))
                     .frame(width: 180)
-                    .accessibilityLabel("创建进度")
-                    .accessibilityValue("第 \(step + 1) 步，共 \(stepTitles.count) 步")
+                    .accessibilityLabel(L10n.string("ui.a7bed16ef55763e1"))
+                    .accessibilityValue(L10n.string("ui.161a76ddf252f824", String(describing: step + 1), String(describing: stepTitles.count)))
             }
             .padding(20)
 
@@ -1868,52 +1874,52 @@ private struct CreateVirtualMachineSheet: View {
             Form {
                 switch step {
                 case 0:
-                    Section("虚拟机") {
-                        TextField("名称", text: $name)
-                            .accessibilityHint("输入一个不与现有虚拟机重复的名称")
-                        Picker("操作系统", selection: $operatingSystem) {
-                            Text("Microsoft Windows").tag(VirtualMachineOperatingSystem.windows)
-                            Text("Linux").tag(VirtualMachineOperatingSystem.linux)
-                            Text("其他").tag(VirtualMachineOperatingSystem.other)
+                    Section(L10n.string("ui.f3fb4b3a41570007")) {
+                        TextField(L10n.string("ui.d44e9b3d3b31d37b"), text: $name)
+                            .accessibilityHint(L10n.string("ui.90461e9bf1e3bc09"))
+                        Picker(L10n.string("ui.360480034cc3e9d3"), selection: $operatingSystem) {
+                            Text(L10n.string("operating_system.windows")).tag(VirtualMachineOperatingSystem.windows)
+                            Text(L10n.string("operating_system.linux")).tag(VirtualMachineOperatingSystem.linux)
+                            Text(L10n.string("ui.d2909f1647e7c891")).tag(VirtualMachineOperatingSystem.other)
                         }
-                        TextField("描述（可选）", text: $description, axis: .vertical)
+                        TextField(L10n.string("ui.19ad97a6aca8b249"), text: $description, axis: .vertical)
                             .lineLimit(2...4)
                     }
                 case 1:
-                    Section("处理器与内存") {
-                        Stepper("处理器：\(cpuCount) 核", value: $cpuCount, in: 1...64)
-                        Stepper("内存：\(memoryGiB) GB", value: $memoryGiB, in: 1...1_024)
-                        Text("请为 NAS 和其他虚拟机保留足够资源。")
+                    Section(L10n.string("ui.7f5cc0a851ac4208")) {
+                        Stepper(L10n.string("ui.bb5b9e48a5da55ca", String(describing: cpuCount)), value: $cpuCount, in: 1...64)
+                        Stepper(L10n.string("ui.66c70ccb2d262130", String(describing: memoryGiB)), value: $memoryGiB, in: 1...1_024)
+                        Text(L10n.string("ui.67ade39ec6c1f46b"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 default:
-                    Section("存储与网络") {
-                        Picker("存储空间", selection: $storageID) {
+                    Section(L10n.string("ui.8abdc8d4e6d8a103")) {
+                        Picker(L10n.string("ui.26de3dd933ce00e3"), selection: $storageID) {
                             ForEach(snapshot?.storages ?? []) { resource in
                                 Text(resource.name).tag(resource.id)
                             }
                         }
-                        Stepper("虚拟磁盘：\(diskGiB) GB", value: $diskGiB, in: 1...1_048_576)
-                        Picker("网络", selection: $networkID) {
+                        Stepper(L10n.string("ui.7c6d6431eee3c5ee", String(describing: diskGiB)), value: $diskGiB, in: 1...1_048_576)
+                        Picker(L10n.string("ui.97b31b5d63f57e51"), selection: $networkID) {
                             ForEach(snapshot?.networks ?? []) { resource in
                                 Text(resource.name).tag(resource.id)
                             }
                         }
                     }
-                    Section("启动") {
-                        Picker("安装映像", selection: $imageID) {
-                            Text("暂不挂载").tag("")
+                    Section(L10n.string("ui.56410fc65314dfb5")) {
+                        Picker(L10n.string("ui.7aa6fa597cb79db4"), selection: $imageID) {
+                            Text(L10n.string("ui.7edc5052876d6c37")).tag("")
                             ForEach(snapshot?.images ?? []) { resource in
                                 Text(resource.name).tag(resource.id)
                             }
                         }
-                        Picker("固件", selection: $firmware) {
-                            Text("Legacy BIOS").tag(VirtualMachineFirmware.legacy)
-                            Text("UEFI").tag(VirtualMachineFirmware.uefi)
+                        Picker(L10n.string("ui.a981c51cd86afd77"), selection: $firmware) {
+                            Text(L10n.string("firmware.legacy_bios")).tag(VirtualMachineFirmware.legacy)
+                            Text(L10n.string("firmware.uefi")).tag(VirtualMachineFirmware.uefi)
                         }
-                        Toggle("NAS 启动后自动启动这台虚拟机", isOn: $autoStart)
-                        Toggle("创建完成后立即启动", isOn: $powerOnAfterCreation)
+                        Toggle(L10n.string("ui.3c399a5b5ecdd522"), isOn: $autoStart)
+                        Toggle(L10n.string("ui.e6f251f0421991aa"), isOn: $powerOnAfterCreation)
                     }
                 }
             }
@@ -1923,15 +1929,15 @@ private struct CreateVirtualMachineSheet: View {
             Divider()
 
             HStack {
-                Button("取消", role: .cancel) { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 if step > 0 {
-                    Button("上一步") { step -= 1 }
+                    Button(L10n.string("ui.da336fdc0dbd1818")) { step -= 1 }
                         .disabled(isSubmitting)
                 }
                 if step < stepTitles.count - 1 {
-                    Button("下一步") { step += 1 }
+                    Button(L10n.string("ui.acfc4e74a650e7df")) { step += 1 }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)
                         .disabled(!canContinue || isSubmitting)
@@ -1942,7 +1948,7 @@ private struct CreateVirtualMachineSheet: View {
                         if isSubmitting {
                             ProgressView().controlSize(.small)
                         } else {
-                            Text("创建虚拟机…")
+                            Text(L10n.string("ui.0dcae6dc6ec16060"))
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -1958,8 +1964,8 @@ private struct CreateVirtualMachineSheet: View {
             networkID = networkID.isEmpty ? snapshot?.networks.first?.id ?? "" : networkID
         }
         .interactiveDismissDisabled(isSubmitting)
-        .confirmationDialog("创建这台虚拟机？", isPresented: $confirmsCreation) {
-            Button("创建虚拟机") {
+        .confirmationDialog(L10n.string("ui.e654f7902a1c46f1"), isPresented: $confirmsCreation) {
+            Button(L10n.string("ui.cf9fb1d68001bd37")) {
                 Task {
                     isSubmitting = true
                     let succeeded = await submit(configuration)
@@ -1967,9 +1973,9 @@ private struct CreateVirtualMachineSheet: View {
                     if succeeded { dismiss() }
                 }
             }
-            Button("返回检查", role: .cancel) {}
+            Button(L10n.string("ui.84eef12f27a433d7"), role: .cancel) {}
         } message: {
-            Text("将占用 \(cpuCount) 核处理器、\(memoryGiB) GB 内存和 \(diskGiB) GB 存储空间。创建过程中请勿关闭 NAS。")
+            Text(L10n.string("ui.15261cbb837fb193", String(describing: cpuCount), String(describing: memoryGiB), String(describing: diskGiB)))
         }
     }
 
@@ -2042,7 +2048,7 @@ private struct EditVirtualMachineSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("修改虚拟机").font(.title2.weight(.semibold))
+                Text(L10n.string("ui.3f4bfb5bd8fc2b38")).font(.title2.weight(.semibold))
                 Text(machine.name).font(.callout).foregroundStyle(.secondary)
             }
             .padding(20)
@@ -2050,25 +2056,25 @@ private struct EditVirtualMachineSheet: View {
             Divider()
 
             Form {
-                Section("常规") {
-                    TextField("名称", text: $name)
-                    TextField("描述（可选）", text: $description, axis: .vertical)
+                Section(L10n.string("ui.40fae00b7c6d8ac0")) {
+                    TextField(L10n.string("ui.d44e9b3d3b31d37b"), text: $name)
+                    TextField(L10n.string("ui.19ad97a6aca8b249"), text: $description, axis: .vertical)
                         .lineLimit(2...4)
-                    Picker("运行优先级", selection: $priority) {
-                        Text("较低").tag(128)
-                        Text("标准").tag(256)
-                        Text("较高").tag(512)
+                    Picker(L10n.string("ui.74e92edaaa85d6a3"), selection: $priority) {
+                        Text(L10n.string("ui.552f8f8b1402dc6d")).tag(128)
+                        Text(L10n.string("ui.6bea77acefb364ac")).tag(256)
+                        Text(L10n.string("ui.dfbad24e7f4a9cb8")).tag(512)
                     }
-                    Toggle("NAS 启动后自动启动这台虚拟机", isOn: $autoStart)
+                    Toggle(L10n.string("ui.3c399a5b5ecdd522"), isOn: $autoStart)
                 }
-                Section("处理器与内存") {
-                    Stepper("处理器：\(cpuCount) 核", value: $cpuCount, in: 1...64)
+                Section(L10n.string("ui.7f5cc0a851ac4208")) {
+                    Stepper(L10n.string("ui.bb5b9e48a5da55ca", String(describing: cpuCount)), value: $cpuCount, in: 1...64)
                         .disabled(isRunning)
-                    Stepper("内存：\(memoryGiB) GB", value: $memoryGiB, in: 1...1_024)
+                    Stepper(L10n.string("ui.66c70ccb2d262130", String(describing: memoryGiB)), value: $memoryGiB, in: 1...1_024)
                         .disabled(isRunning)
                     if isRunning {
                         Label(
-                            "虚拟机正在运行。名称、描述、优先级和自动启动可以立即保存；处理器和内存需先正常关机。",
+                            L10n.string("ui.b622d3a704e293d5"),
                             systemImage: "info.circle"
                         )
                         .font(.caption)
@@ -2082,10 +2088,10 @@ private struct EditVirtualMachineSheet: View {
             Divider()
 
             HStack {
-                Button("取消", role: .cancel) { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("保存修改…") { confirmsSave = true }
+                Button(L10n.string("ui.5eaaf3264a3f652d")) { confirmsSave = true }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!isValid || !hasChanges || isSubmitting)
@@ -2094,8 +2100,8 @@ private struct EditVirtualMachineSheet: View {
         }
         .frame(minWidth: 560, idealWidth: 620, minHeight: 460, idealHeight: 520)
         .interactiveDismissDisabled(isSubmitting)
-        .confirmationDialog("保存这些修改？", isPresented: $confirmsSave) {
-            Button("保存修改") {
+        .confirmationDialog(L10n.string("ui.ae182336517d15ef"), isPresented: $confirmsSave) {
+            Button(L10n.string("ui.991bb7cfe5a81550")) {
                 Task {
                     isSubmitting = true
                     let succeeded = await submit(update)
@@ -2103,9 +2109,9 @@ private struct EditVirtualMachineSheet: View {
                     if succeeded { dismiss() }
                 }
             }
-            Button("返回检查", role: .cancel) {}
+            Button(L10n.string("ui.84eef12f27a433d7"), role: .cancel) {}
         } message: {
-            Text(isRunning ? "在线可修改的设置会立即生效。" : "新的处理器和内存配置将在下次启动时使用。")
+            Text(isRunning ? L10n.string("ui.d0fcf04434f861fb") : L10n.string("ui.4e02a5a907afb67a"))
         }
     }
 
@@ -2159,7 +2165,7 @@ private final class VirtualMachineConsoleWindowController: NSWindowController, N
             backing: .buffered,
             defer: false
         )
-        window.title = "\(machineName) — 远程控制台"
+        window.title = L10n.string("ui.cc15f5e62327b120", String(describing: machineName))
         window.minSize = NSSize(width: 720, height: 480)
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.tabbingMode = .disallowed
@@ -2183,7 +2189,7 @@ private final class VirtualMachineConsoleWindowController: NSWindowController, N
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("不支持从归档创建远程控制台窗口。")
+        fatalError(L10n.string("ui.d9a88c8c1cc92db6"))
     }
 
     func show() {
@@ -2213,24 +2219,24 @@ private struct VirtualMachineConsoleWindowView: View {
                 Label(machineName, systemImage: "display")
                     .font(.headline)
                 Spacer()
-                Text("远程控制台")
+                Text(L10n.string("ui.4f9880bb8182fd14"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Button {
                     toggleFullScreen()
                 } label: {
-                    Label("切换全屏", systemImage: "arrow.up.left.and.arrow.down.right")
+                    Label(L10n.string("ui.aa8b6477c2ce1916"), systemImage: "arrow.up.left.and.arrow.down.right")
                 }
                 .keyboardShortcut("f", modifiers: [.command, .control])
-                .help("进入或退出全屏（Control–Command–F）")
-                .accessibilityHint("进入或退出全屏显示")
-                Button("关闭") { close() }
+                .help(L10n.string("ui.8f0b51770d50edbd"))
+                .accessibilityHint(L10n.string("ui.1b99651d3233525a"))
+                Button(L10n.string("ui.3fd47edce45b3603")) { close() }
                     .keyboardShortcut("w", modifiers: .command)
             }
             .padding(12)
             Divider()
             VirtualMachineConsoleWebView(session: session)
-                .accessibilityLabel("\(machineName) 的远程控制台")
+                .accessibilityLabel(L10n.string("ui.c3247acb301cfeb0", String(describing: machineName)))
         }
         .frame(minWidth: 720, idealWidth: 1_100, minHeight: 480, idealHeight: 760)
     }
@@ -2349,21 +2355,21 @@ private struct PullImageSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             // 顶部 Header
             VStack(alignment: .leading, spacing: 12) {
-                Text("下载映像")
+                Text(L10n.string("ui.ca0af0bbf50d2b45"))
                     .font(.title2.weight(.semibold))
 
                 HStack(spacing: 8) {
-                    TextField("搜索 Docker Hub 映像（例如 aliyunpan、nginx）", text: $query)
+                    TextField(L10n.string("ui.41b3f0900cf8fd0f"), text: $query)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { Task { await performSearch() } }
-                        .accessibilityHint("输入映像名称后按回车搜索")
+                        .accessibilityHint(L10n.string("ui.cf00ba193f6977fa"))
                     Button {
                         Task { await performSearch() }
                     } label: {
                         if isSearching {
                             ProgressView().controlSize(.small)
                         } else {
-                            Label("搜索", systemImage: "magnifyingglass")
+                            Label(L10n.string("ui.44ce7ae909bbb28b"), systemImage: "magnifyingglass")
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -2384,23 +2390,23 @@ private struct PullImageSheet: View {
                 if isSearching {
                     VStack(spacing: 12) {
                         ProgressView()
-                        Text("正在搜索 Docker Hub 镜像…")
+                        Text(L10n.string("ui.326539c4b5681140"))
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if hasSearched && results.isEmpty {
                     ContentUnavailableView(
-                        "没有找到相关映像",
+                        L10n.string("ui.fd4d26c833ae1a5f"),
                         systemImage: "magnifyingglass",
-                        description: Text("请尝试缩短关键词，或输入具体的仓库名称。")
+                        description: Text(L10n.string("ui.492a18ca73e90820"))
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if results.isEmpty {
                     ContentUnavailableView(
-                        "搜索镜像仓库",
+                        L10n.string("ui.0526a189f40b7360"),
                         systemImage: "shippingbox",
-                        description: Text("在上方输入关键词搜索 Docker Hub 映像，然后选择标签下载。")
+                        description: Text(L10n.string("ui.1ef15e3b65ff17cd"))
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -2418,7 +2424,7 @@ private struct PullImageSheet: View {
                                 HStack(spacing: 8) {
                                     Text(image.name).fontWeight(.medium)
                                     if image.isOfficial {
-                                        Text("官方")
+                                        Text(L10n.string("ui.e73e38c1f65d0326"))
                                             .font(.caption2.weight(.semibold))
                                             .foregroundStyle(.blue)
                                             .padding(.horizontal, 6)
@@ -2453,23 +2459,23 @@ private struct PullImageSheet: View {
             if !repository.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Label("已选择 \(repository)", systemImage: "checkmark.circle.fill")
+                        Label(L10n.string("ui.389d1756df651b7c", String(describing: repository)), systemImage: "checkmark.circle.fill")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(Color.accentColor)
                         Spacer()
                         if isLoadingTags {
                             ProgressView().controlSize(.small)
-                                .accessibilityLabel("正在读取标签")
+                                .accessibilityLabel(L10n.string("ui.f060a7a7228db374"))
                         }
                     }
                     HStack(spacing: 8) {
-                        Text("标签:")
+                        Text(L10n.string("ui.596e85c0537dd625"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TextField("例如 latest", text: $tag)
+                        TextField(L10n.string("ui.50df581521d18cc1"), text: $tag)
                             .textFieldStyle(.roundedBorder)
                             .disabled(isLoadingTags || isSubmitting)
-                            .accessibilityHint("输入标签名称，或从下方建议中选择")
+                            .accessibilityHint(L10n.string("ui.3827d10546d97ed3"))
                     }
                     if !tagSuggestions.isEmpty && !isLoadingTags {
                         ScrollView(.horizontal) {
@@ -2504,9 +2510,9 @@ private struct PullImageSheet: View {
             // 固底 Footer 操作栏
             HStack {
                 Spacer()
-                Button("取消", role: .cancel) { dismiss() }
+                Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("下载映像") {
+                Button(L10n.string("ui.ca0af0bbf50d2b45")) {
                     isSubmitting = true
                     errorMessage = nil
                     Task {
@@ -2554,7 +2560,7 @@ private struct PullImageSheet: View {
         } catch {
             results = []
             hasSearched = true
-            errorMessage = userMessage(for: error, fallback: "搜索失败，请检查连接后重试。")
+            errorMessage = userMessage(for: error, fallback: L10n.string("ui.7b2f11d094f2a9b9"))
         }
         isSearching = false
     }
@@ -2571,14 +2577,14 @@ private struct PullImageSheet: View {
                 tag = first
             }
             if tags.isEmpty {
-                errorMessage = "这个映像没有可下载的标签，请选择其他映像。"
+                errorMessage = L10n.string("ui.394350058428e0ad")
             }
         } catch {
             guard self.repository == repository else { return }
             tags = []
             errorMessage = userMessage(
                 for: error,
-                fallback: "标签读取失败，请重新选择映像后重试。"
+                fallback: L10n.string("ui.29a0c35e68c4ba5a")
             )
         }
         if self.repository == repository {
@@ -2600,18 +2606,18 @@ private struct CreateNetworkSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("新建容器网络").font(.title2.weight(.semibold))
+            Text(L10n.string("ui.49fe5148286aa7f8")).font(.title2.weight(.semibold))
             Form {
-                TextField("网络名称", text: $name)
-                Picker("网络类型", selection: $driver) {
-                    Text("桥接").tag("bridge")
-                    Text("主机").tag("host")
+                TextField(L10n.string("ui.ac8d90dfa36e5134"), text: $name)
+                Picker(L10n.string("ui.fefbff4b349c9621"), selection: $driver) {
+                    Text(L10n.string("ui.441caa6812c4d683")).tag("bridge")
+                    Text(L10n.string("ui.e87d9f23a3f5a830")).tag("host")
                 }
             }
             HStack {
                 Spacer()
-                Button("取消", role: .cancel) { dismiss() }
-                Button("创建网络") {
+                Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) { dismiss() }
+                Button(L10n.string("ui.c03b2ae791fe7fa1")) {
                     isSubmitting = true
                     Task {
                         _ = await submit(name, driver)
@@ -2633,22 +2639,22 @@ private enum ServiceFormat {
     }
 
     static func speed(_ value: Int64) -> String {
-        "\(bytes(value))/秒"
+        L10n.string("ui.3b14d1af77ab3e3e", String(describing: bytes(value)))
     }
 
     static func status(_ raw: String) -> String {
         switch raw.lowercased() {
-        case "running", "started", "up": "正在运行"
-        case "stopped", "shutdown", "offline": "已停止"
-        case "paused": "已暂停"
-        case "waiting": "正在等待"
-        case "downloading": "正在下载"
-        case "uploading", "seeding": "正在上传"
-        case "finished", "completed": "已完成"
-        case "error", "failed": "需要处理"
-        case "healthy", "online": "正常"
-        case "unhealthy": "状态异常"
-        default: raw.isEmpty ? "未知状态" : raw
+        case "running", "started", "up": L10n.string("ui.9273b8cc8f40fabd")
+        case "stopped", "shutdown", "offline": L10n.string("ui.f006455e3baf2b0b")
+        case "paused": L10n.string("ui.eb0c326b60ae897a")
+        case "waiting": L10n.string("ui.7a287e16547c1189")
+        case "downloading": L10n.string("ui.06b2117d58cc6295")
+        case "uploading", "seeding": L10n.string("ui.acad4927ac1c4ecd")
+        case "finished", "completed": L10n.string("ui.f28461bb49c85647")
+        case "error", "failed": L10n.string("ui.b7e3e715f18b9bac")
+        case "healthy", "online": L10n.string("ui.296de0e31f8c22d9")
+        case "unhealthy": L10n.string("ui.34c01d4e4769a3bc")
+        default: raw.isEmpty ? L10n.string("ui.ec0d9bdb00a4a8f6") : raw
         }
     }
 }

@@ -1,3 +1,4 @@
+using LanStash.App.Localization;
 using LanStash.App.ViewModels;
 using LanStash.Domain;
 using Microsoft.UI.Xaml;
@@ -8,6 +9,7 @@ namespace LanStash.App.Views;
 public sealed partial class WorkspacePage : Page
 {
     private readonly WorkspaceViewModel _viewModel;
+    private static LocalizationService L => LocalizationService.Current;
 
     public WorkspacePage(AppViewModel app)
     {
@@ -30,9 +32,9 @@ public sealed partial class WorkspacePage : Page
 
     private async void CategoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (CategoryList.SelectedItem is string category)
+        if (CategoryList.SelectedItem is WorkspaceCategoryOption category)
         {
-            _viewModel.SelectedCategory = category;
+            _viewModel.SelectedCategory = category.Id;
             await Task.CompletedTask;
         }
     }
@@ -58,12 +60,18 @@ public sealed partial class WorkspacePage : Page
         var isNetwork = _viewModel.Module == AppModule.Containers;
         var input = new TextBox
         {
-            Header = isDownload ? "下载地址" : isNetwork ? "网络名称" : "文件夹名称",
+            Header = isDownload
+                ? L.Get("FieldDownloadAddress")
+                : isNetwork
+                    ? L.Get("FieldNetworkName")
+                    : L.Get("FieldFolderName"),
             PlaceholderText = isDownload ? "https://…" : string.Empty,
         };
         var secondary = new TextBox
         {
-            Header = isDownload ? "保存位置（可选）" : "网络类型",
+            Header = isDownload
+                ? L.Get("FieldSaveLocationOptional")
+                : L.Get("FieldNetworkType"),
             Text = isNetwork ? "bridge" : string.Empty,
             Visibility = isDownload || isNetwork ? Visibility.Visible : Visibility.Collapsed,
         };
@@ -71,9 +79,13 @@ public sealed partial class WorkspacePage : Page
         panel.Children.Add(input);
         panel.Children.Add(secondary);
         var dialog = CreateDialog(
-            isDownload ? "新增下载任务" : isNetwork ? "新增网络" : "新建文件夹",
+            isDownload
+                ? L.Get("DialogNewDownload")
+                : isNetwork
+                    ? L.Get("DialogNewNetwork")
+                    : L.Get("DialogNewFolder"),
             panel,
-            "新增");
+            L.Get("ActionAdd"));
         if (await dialog.ShowAsync() == ContentDialogResult.Primary &&
             !string.IsNullOrWhiteSpace(input.Text))
         {
@@ -89,12 +101,12 @@ public sealed partial class WorkspacePage : Page
         }
         var input = new TextBox
         {
-            Header = "新名称",
+            Header = L.Get("FieldNewName"),
             Text = _viewModel.SelectedItem.Title,
             SelectionStart = 0,
             SelectionLength = _viewModel.SelectedItem.Title.Length,
         };
-        var dialog = CreateDialog("重命名", input, "保存");
+        var dialog = CreateDialog(L.Get("DialogRename"), input, L.Get("ActionSave"));
         if (await dialog.ShowAsync() == ContentDialogResult.Primary &&
             !string.IsNullOrWhiteSpace(input.Text))
         {
@@ -118,7 +130,7 @@ public sealed partial class WorkspacePage : Page
         }
         var removeData = new CheckBox
         {
-            Content = "同时删除已经下载的文件",
+            Content = L.Get("DeleteDownloadedFiles"),
             Visibility = _viewModel.Module == AppModule.Downloads
                 ? Visibility.Visible
                 : Visibility.Collapsed,
@@ -126,11 +138,14 @@ public sealed partial class WorkspacePage : Page
         var panel = new StackPanel { Spacing = 12 };
         panel.Children.Add(new TextBlock
         {
-            Text = $"“{_viewModel.SelectedItem.Title}”删除后无法恢复。",
+            Text = L.Format("DeleteItemWarning", _viewModel.SelectedItem.Title),
             TextWrapping = TextWrapping.Wrap,
         });
         panel.Children.Add(removeData);
-        var dialog = CreateDialog("确认删除？", panel, "删除");
+        var dialog = CreateDialog(
+            L.Get("DialogConfirmDelete"),
+            panel,
+            L.Get("ActionDelete"));
         dialog.DefaultButton = ContentDialogButton.Close;
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {
@@ -145,7 +160,7 @@ public sealed partial class WorkspacePage : Page
             Title = title,
             Content = content,
             PrimaryButtonText = primaryText,
-            CloseButtonText = "取消",
+            CloseButtonText = L.Get("ActionCancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
 
@@ -157,11 +172,11 @@ public sealed partial class WorkspacePage : Page
         }
         catch (DsmException error)
         {
-            await ShowErrorAsync($"{error.Message} {error.Recovery}");
+            await ShowErrorAsync(L.ErrorMessage(error));
         }
         catch
         {
-            await ShowErrorAsync("操作没有完成，请刷新后重试。");
+            await ShowErrorAsync(L.Get("ErrorOperationIncomplete"));
         }
         UpdateState();
     }
@@ -171,9 +186,9 @@ public sealed partial class WorkspacePage : Page
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = "操作没有完成",
+            Title = L.Get("ErrorOperationTitle"),
             Content = message,
-            CloseButtonText = "知道了",
+            CloseButtonText = L.Get("ActionAcknowledge"),
         };
         await dialog.ShowAsync();
     }

@@ -1,3 +1,4 @@
+using LanStash.App.Localization;
 using Microsoft.UI.Xaml;
 
 namespace LanStash.App;
@@ -8,6 +9,7 @@ public partial class App : Application
 
     public App()
     {
+        LocalizationService.Current.Initialize();
         InitializeComponent();
     }
 

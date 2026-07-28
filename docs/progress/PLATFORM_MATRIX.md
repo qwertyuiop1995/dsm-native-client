@@ -15,6 +15,9 @@
 | 能力 | macOS | iPhone | iPad | Android | Windows |
 | --- | --- | --- | --- | --- | --- |
 | 原生 UI | 已实现，待实机验收 | SwiftUI 导航栈已实现，待真机验收 | SwiftUI 分栏已实现，待真机验收 | Compose 自适应导航已实现，待设备验收 | WinUI NavigationView 已实现，待 Windows 验收 |
+| 英语与简体中文 | 共享资源层、系统语言解析、App 内选择和本机持久化已实现 | 复用 Apple 共享资源层与语言选择 | 同 iPhone | `values` / `values-zh-rCN`、AppCompat 语言选择和本机持久化已实现 | `en-US` / `zh-CN` `.resw`、语言选择和本机持久化已实现 |
+| 不支持语言回退英语 | 已实现并有解析测试 | 已实现并有解析测试 | 已实现并有解析测试 | 已实现并有解析测试 | 已实现并有解析测试 |
+| 本地化质量门禁 | 双语键、格式参数、资源引用和可见文案硬编码由仓库检查统一验证 | 同 macOS | 同 macOS | 同一仓库检查，并由 Android 构建验证资源 | 同一仓库检查；完整 XAML 编译由 Windows CI 验证 |
 | 每台 NAS 自动登录 | 已实现，待实机验收 | 可选 Keychain 密码与自动登录已接入，QuickConnect 恢复会重新安全解析连接 | 同 iPhone，并共用冷启动恢复测试 | 可选 Keystore 密码与自动登录已接入，QuickConnect 恢复会重新安全解析连接 | 可选 Credential Locker 密码与自动登录已接入，QuickConnect 恢复会重新安全解析连接 |
 | 划掉应用后恢复登录资料 | 已实现 | 名称、原始地址和账号恢复；密码仅按用户选择从 Keychain 读取 | 同 iPhone | 名称、原始地址和账号恢复；密码仅按用户选择从 Keystore 加密存储读取 | 名称、原始地址和账号恢复；密码仅按用户选择从凭据管理器读取 |
 | 可选 HTTPS 端口 | 高级连接设置，默认收起 | 高级连接设置，默认收起 | 高级连接设置，默认收起 | 高级连接设置，默认收起 | WinUI Expander，默认收起 |

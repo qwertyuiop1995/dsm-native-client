@@ -1,6 +1,7 @@
 import DsmCore
 import Foundation
 import Observation
+import DsmLocalization
 
 enum NasSettingsPage: String, CaseIterable, Identifiable {
     case overview
@@ -133,7 +134,7 @@ private actor StorageAnalysisEngine {
             try Task.checkCancellation()
             await progress(
                 StorageAnalysisProgress(
-                    title: "正在分析“\(share.name)”",
+                    title: L10n.string("ui.8cbbfd3cde8b7d20", String(describing: share.name)),
                     completed: index,
                     total: shares.count
                 )
@@ -154,7 +155,7 @@ private actor StorageAnalysisEngine {
 
         await progress(
             StorageAnalysisProgress(
-                title: "正在核对重复文件",
+                title: L10n.string("ui.428cdf164eefc170"),
                 completed: 0,
                 total: 1
             )
@@ -167,7 +168,7 @@ private actor StorageAnalysisEngine {
         for file in allFiles {
             let size = max(file.sizeBytes ?? 0, 0)
             categories[Self.category(for: file), default: Usage()].add(size)
-            owners[file.owner?.isEmpty == false ? file.owner! : "未标明所有者", default: Usage()].add(size)
+            owners[file.owner?.isEmpty == false ? file.owner! : L10n.string("ui.c8b0ccfade8f4591"), default: Usage()].add(size)
         }
 
         let categoryRows = categories.map {
@@ -196,7 +197,7 @@ private actor StorageAnalysisEngine {
 
         await progress(
             StorageAnalysisProgress(
-                title: "分析完成",
+                title: L10n.string("ui.0ff9cc7e060ea234"),
                 completed: 1,
                 total: 1
             )
@@ -237,7 +238,7 @@ private actor StorageAnalysisEngine {
             try Task.checkCancellation()
             await progress(
                 StorageAnalysisProgress(
-                    title: "正在核对重复文件",
+                    title: L10n.string("ui.428cdf164eefc170"),
                     completed: index,
                     total: candidates.count
                 )
@@ -270,21 +271,21 @@ private actor StorageAnalysisEngine {
     private static func category(for file: FileItem) -> String {
         let ext = file.fileExtension?.lowercased() ?? ""
         if ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp", "raw"].contains(ext) {
-            return "图片"
+            return L10n.string("ui.d24c10d37db0feea")
         }
         if ["mp4", "m4v", "mov", "avi", "mkv", "webm", "mpeg", "mpg", "ts", "m2ts"].contains(ext) {
-            return "视频"
+            return L10n.string("ui.c20f7618d330a854")
         }
         if ["mp3", "m4a", "aac", "flac", "wav", "ogg", "ape", "alac"].contains(ext) {
-            return "音频"
+            return L10n.string("ui.296c632ec857a0ba")
         }
         if ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf", "pages", "numbers", "key"].contains(ext) {
-            return "文档"
+            return L10n.string("ui.2687ccdbb1d2288a")
         }
         if ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "dmg", "iso"].contains(ext) {
-            return "压缩包与镜像"
+            return L10n.string("ui.e3a3e47360e24f0b")
         }
-        return ext.isEmpty ? "无扩展名" : "其他"
+        return ext.isEmpty ? L10n.string("ui.905ace3177aa8af8") : L10n.string("ui.d2909f1647e7c891")
     }
 }
 
@@ -293,7 +294,7 @@ actor UnavailableNasAdministrationRepository: NasSettingsRepository {
         AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 暂不提供此项信息。"
+            safeUserMessage: L10n.string("ui.45f2d65c5f20a7b9")
         )
     }
 
@@ -490,13 +491,13 @@ final class NasSettingsModel {
     func beginStorageAnalysis() {
         guard isModuleEnabled, !isAnalyzingStorage else { return }
         guard let storageAnalysisEngine else {
-            storageAnalysisError = "当前连接暂不能分析文件占用，请重新连接后重试。"
+            storageAnalysisError = L10n.string("ui.53cce0f955826240")
             return
         }
         storageAnalysisError = nil
         isAnalyzingStorage = true
         storageAnalysisProgress = StorageAnalysisProgress(
-            title: "正在准备分析",
+            title: L10n.string("ui.9e316eddfe3b16cd"),
             completed: 0,
             total: 0
         )
@@ -513,7 +514,7 @@ final class NasSettingsModel {
             } catch let error as AppError {
                 storageAnalysisError = error.safeUserMessage
             } catch {
-                storageAnalysisError = "分析没有完成，请检查连接后重试。"
+                storageAnalysisError = L10n.string("ui.ebf27fffde487252")
             }
             isAnalyzingStorage = false
             storageAnalysisProgress = nil
@@ -590,7 +591,7 @@ final class NasSettingsModel {
             guard isModuleEnabled, generation == performanceGeneration else { return }
             performanceIsLoading = false
             if overview == nil {
-                errors[.overview] = userMessage(for: error, fallback: "暂时无法读取运行状态，请稍后重试。")
+                errors[.overview] = userMessage(for: error, fallback: L10n.string("ui.243c3342118e97c5"))
             }
         }
     }
@@ -623,7 +624,7 @@ final class NasSettingsModel {
         } catch {
             guard isCurrent(page, generation) else { return }
             loadingPages.remove(page)
-            errors[page] = userMessage(for: error, fallback: "暂时无法读取 NAS 信息，请稍后重试。")
+            errors[page] = userMessage(for: error, fallback: L10n.string("ui.f1217f463299df23"))
         }
     }
 
@@ -644,7 +645,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .serverBusy,
                 isRetryable: true,
-                safeUserMessage: "这块硬盘正在处理中，请稍候。"
+                safeUserMessage: L10n.string("ui.15311c0dd9419f7e")
             )
         }
         defer { diskOperationIDs.remove(diskID) }
@@ -652,14 +653,14 @@ final class NasSettingsModel {
             throw AppError(
                 category: .notFound,
                 isRetryable: true,
-                safeUserMessage: "没有找到这块硬盘，请刷新后重试。"
+                safeUserMessage: L10n.string("ui.75f623dd62397b99")
             )
         }
         guard disk.supportsSmartTest else {
             throw AppError(
                 category: .apiUnavailable,
                 isRetryable: false,
-                safeUserMessage: "这块硬盘不支持 S.M.A.R.T. 检测。"
+                safeUserMessage: L10n.string("ui.edb18b7e9cd3b114")
             )
         }
 
@@ -668,7 +669,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: true,
-                safeUserMessage: "NAS 尚未确认检测已开始，请刷新状态后重试。"
+                safeUserMessage: L10n.string("ui.ddef2b60c5d885df")
             )
         }
         diskTestStatuses[diskID] = status
@@ -679,7 +680,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .serverBusy,
                 isRetryable: true,
-                safeUserMessage: "这块硬盘正在处理中，请稍候。"
+                safeUserMessage: L10n.string("ui.15311c0dd9419f7e")
             )
         }
         defer { diskOperationIDs.remove(diskID) }
@@ -687,7 +688,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .conflict,
                 isRetryable: true,
-                safeUserMessage: "这块硬盘当前没有正在进行的检测。"
+                safeUserMessage: L10n.string("ui.1022d6b5423a7d10")
             )
         }
         let status = try await repository.stopDiskTest(diskID: diskID)
@@ -695,7 +696,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: true,
-                safeUserMessage: "NAS 尚未确认检测已停止，请稍后刷新状态。"
+                safeUserMessage: L10n.string("ui.9681fb468adf10c2")
             )
         }
         diskTestStatuses[diskID] = status
@@ -706,7 +707,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .serverBusy,
                 isRetryable: true,
-                safeUserMessage: "这个套件正在处理中，请稍候。"
+                safeUserMessage: L10n.string("ui.313fb64bd1a8f846")
             )
         }
         defer { packageOperationIDs.remove(id) }
@@ -715,18 +716,18 @@ final class NasSettingsModel {
             throw AppError(
                 category: .notFound,
                 isRetryable: true,
-                safeUserMessage: "没有找到这个套件，请刷新后重试。"
+                safeUserMessage: L10n.string("ui.86d86e549eb9d8ba")
             )
         }
         switch action {
         case .start where !package.canStart:
-            throw unavailablePackageAction("这个套件当前不能启动。")
+            throw unavailablePackageAction(L10n.string("ui.8763bd51641c4851"))
         case .stop where !package.canStop:
-            throw unavailablePackageAction("这个套件当前不能暂停。")
+            throw unavailablePackageAction(L10n.string("ui.377e24aef22f6f7c"))
         case .uninstall where !package.canUninstall:
-            throw unavailablePackageAction("这个套件由系统管理，不能在这里卸载。")
+            throw unavailablePackageAction(L10n.string("ui.8e3cf87f70acf631"))
         case .upgrade where !package.canUpgrade:
-            throw unavailablePackageAction("这个套件暂不能在这里更新。")
+            throw unavailablePackageAction(L10n.string("ui.40a27587a6302b95"))
         default:
             break
         }
@@ -744,7 +745,7 @@ final class NasSettingsModel {
         throw AppError(
             category: .invalidResponse,
             isRetryable: true,
-            safeUserMessage: "NAS 已收到请求，但还没有确认结果。请刷新套件列表后再试。"
+            safeUserMessage: L10n.string("ui.3b66d9f42d866bf0")
         )
     }
 
@@ -757,7 +758,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .serverBusy,
                 isRetryable: true,
-                safeUserMessage: "这个连接正在处理中，请稍候。"
+                safeUserMessage: L10n.string("ui.8f73f45bdcbee2b3")
             )
         }
         defer { connectionOperationIDs.remove(connection.id) }
@@ -775,7 +776,7 @@ final class NasSettingsModel {
         throw AppError(
             category: .invalidResponse,
             isRetryable: true,
-            safeUserMessage: "NAS 已收到请求，但这个连接仍在列表中。请稍后刷新后再试。"
+            safeUserMessage: L10n.string("ui.f0b77bcbb861e723")
         )
     }
 
@@ -785,7 +786,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: true,
-                safeUserMessage: "这个任务的信息不完整，请刷新后重试。"
+                safeUserMessage: L10n.string("ui.06669846e8a043c1")
             )
         }
         return try await repository.loadScheduledTaskDraft(
@@ -880,7 +881,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "这个系统账号不能删除。"
+                safeUserMessage: L10n.string("ui.917cb22bc73cc211")
             )
         }
         guard accountOperationIDs.insert(account.id).inserted else {
@@ -912,7 +913,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "这个系统群组不能删除。"
+                safeUserMessage: L10n.string("ui.966bbfaa2a0d098a")
             )
         }
         guard accountOperationIDs.insert(group.id).inserted else {
@@ -930,7 +931,7 @@ final class NasSettingsModel {
         AppError(
             category: .serverBusy,
             isRetryable: true,
-            safeUserMessage: "这个账号正在处理中，请稍候。"
+            safeUserMessage: L10n.string("ui.588822329fcd7bbd")
         )
     }
 
@@ -938,7 +939,7 @@ final class NasSettingsModel {
         AppError(
             category: .invalidResponse,
             isRetryable: true,
-            safeUserMessage: "NAS 已收到请求，但还没有确认结果。请刷新账号列表后再试。"
+            safeUserMessage: L10n.string("ui.188f52a0f8ffb8c9")
         )
     }
 
@@ -947,7 +948,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .serverBusy,
                 isRetryable: true,
-                safeUserMessage: "这个任务正在处理中，请稍候。"
+                safeUserMessage: L10n.string("ui.7fc7c12d022f5692")
             )
         }
     }
@@ -957,7 +958,7 @@ final class NasSettingsModel {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: true,
-                safeUserMessage: "这个任务的信息不完整，请刷新后重试。"
+                safeUserMessage: L10n.string("ui.06669846e8a043c1")
             )
         }
         return id
@@ -967,7 +968,7 @@ final class NasSettingsModel {
         AppError(
             category: .invalidResponse,
             isRetryable: true,
-            safeUserMessage: "NAS 已收到请求，但还没有确认结果。请刷新任务列表后再试。"
+            safeUserMessage: L10n.string("ui.ca959824992ffae0")
         )
     }
 
@@ -1115,7 +1116,7 @@ final class NasSettingsModel {
         AppError(
             category: .serverBusy,
             isRetryable: true,
-            safeUserMessage: "另一项设置正在保存，请稍候。"
+            safeUserMessage: L10n.string("ui.ba90314384daf833")
         )
     }
 
@@ -1123,7 +1124,7 @@ final class NasSettingsModel {
         AppError(
             category: .invalidResponse,
             isRetryable: true,
-            safeUserMessage: "NAS 尚未确认设置已生效，请刷新后重试。"
+            safeUserMessage: L10n.string("ui.981825780cae2565")
         )
     }
 

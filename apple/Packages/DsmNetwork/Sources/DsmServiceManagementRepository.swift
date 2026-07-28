@@ -1,5 +1,6 @@
 import DsmCore
 import Foundation
+import DsmLocalization
 
 private enum ServiceJSON: Decodable, Sendable {
     case object([String: ServiceJSON])
@@ -224,7 +225,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         let normalized = uri.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: normalized),
               ["http", "https", "ftp", "magnet"].contains(url.scheme?.lowercased() ?? "") else {
-            throw validationError("请输入有效的下载链接或磁力链接。")
+            throw validationError(L10n.string("shared.ee9bd6266a536859"))
         }
         let api = preferredDownloadTaskAPI()
         var parameters: [String: DsmParameterValue] = ["uri": .string(normalized)]
@@ -243,7 +244,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
             throw AppError(
                 category: .apiUnavailable,
                 isRetryable: false,
-                safeUserMessage: "这台 NAS 暂时不能从 Mac 上传下载任务文件，请改用网址添加。"
+                safeUserMessage: L10n.string("shared.8308afa6a7f31906")
             )
         }
         guard let binaryTransport = transport as? any DsmBinaryHTTPTransport else {
@@ -254,7 +255,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         let allowedExtensions = ["torrent", "nzb", "txt"]
         guard normalizedURL.isFileURL,
               allowedExtensions.contains(normalizedURL.pathExtension.lowercased()) else {
-            throw validationError("请选择 .torrent、.nzb 或包含下载网址的 .txt 文件。")
+            throw validationError(L10n.string("shared.14f852b3c59ec0c8"))
         }
 
         let accessed = normalizedURL.startAccessingSecurityScopedResource()
@@ -267,10 +268,10 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
             forKeys: [.isRegularFileKey, .isReadableKey, .fileSizeKey]
         )
         guard values.isRegularFile == true, values.isReadable != false else {
-            throw validationError("无法读取所选文件，请重新选择。")
+            throw validationError(L10n.string("shared.51bdbefbc0c88421"))
         }
         guard (values.fileSize ?? 0) <= 100 * 1_024 * 1_024 else {
-            throw validationError("任务文件不能超过 100 MB。")
+            throw validationError(L10n.string("shared.799f04c59bdac5e7"))
         }
 
         guard let capability = capabilities[DsmAPIName.downloadStationTask],
@@ -294,7 +295,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
 
         var endpoint = apiURL(path: capability.path)
         guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
-            throw validationError("无法准备下载任务。")
+            throw validationError(L10n.string("shared.6a5dbf096a38ba4f"))
         }
         let queryItems = [
             URLQueryItem(name: "api", value: capability.name),
@@ -303,7 +304,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         ]
         components.queryItems = queryItems
         guard let resolvedEndpoint = components.url else {
-            throw validationError("无法准备下载任务。")
+            throw validationError(L10n.string("shared.6a5dbf096a38ba4f"))
         }
         endpoint = resolvedEndpoint
 
@@ -329,7 +330,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: true,
-                safeUserMessage: "任务文件没有上传成功，请稍后重试。"
+                safeUserMessage: L10n.string("shared.847fe982ab6f5ef7")
             )
         }
         if let code = envelope.error?.code {
@@ -339,7 +340,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
             throw AppError(
                 category: .invalidResponse,
                 isRetryable: true,
-                safeUserMessage: "任务文件没有上传成功，请稍后重试。"
+                safeUserMessage: L10n.string("shared.847fe982ab6f5ef7")
             )
         }
     }
@@ -361,7 +362,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
             settings.emuleUploadLimit
         ]
         guard limits.allSatisfy({ $0 >= 0 && $0 <= 1_000_000 }) else {
-            throw validationError("速度限制必须是 0 到 1,000,000 KB/s 之间的整数。")
+            throw validationError(L10n.string("shared.2a1456d8267f62b5"))
         }
 
         try await callVoid(
@@ -397,7 +398,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
 
         let confirmed = try await loadDownloadStationSettings()
         guard confirmed == settings else {
-            throw verificationError("NAS 返回的设置与本次保存不一致，请刷新后检查。")
+            throw verificationError(L10n.string("shared.59b0fabe649e326a"))
         }
     }
 
@@ -425,7 +426,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         )
         let remaining = try await loadDownloadStation().tasks.map(\.id)
         guard ids.allSatisfy({ !remaining.contains($0) }) else {
-            throw verificationError("NAS 尚未确认下载任务已删除，请刷新后重试。")
+            throw verificationError(L10n.string("shared.7ca744fb7c598d20"))
         }
     }
 
@@ -488,12 +489,12 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
         let remaining = try await loadContainerManager().containers.map(\.id)
         guard ids.allSatisfy({ !remaining.contains($0) }) else {
-            throw verificationError("NAS 尚未确认容器已删除，请刷新后重试。")
+            throw verificationError(L10n.string("shared.830e41a22a4f104d"))
         }
     }
 
     public func searchContainerImages(query: String) async throws -> [ContainerRegistryImage] {
-        let query = try validatedName(query, message: "请输入要搜索的映像名称。")
+        let query = try validatedName(query, message: L10n.string("shared.7031852e2ed8042f"))
         let value = try await call(
             DsmAPIName.dockerRegistry,
             method: "search",
@@ -509,7 +510,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
     }
 
     public func loadContainerImageTags(repository: String) async throws -> [String] {
-        let repository = try validatedName(repository, message: "请先选择一个映像。")
+        let repository = try validatedName(repository, message: L10n.string("shared.73537393048d9596"))
         let value = try await call(
             DsmAPIName.dockerRegistry,
             method: "tags",
@@ -525,8 +526,8 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
     }
 
     public func pullContainerImage(repository: String, tag: String) async throws {
-        let repository = try validatedName(repository, message: "请输入映像名称。")
-        let tag = try validatedName(tag, message: "请输入映像标签。")
+        let repository = try validatedName(repository, message: L10n.string("shared.0c6ce91d30f67594"))
+        let tag = try validatedName(tag, message: L10n.string("shared.6a2c72fe709bf1e8"))
         try await callVoid(
             DsmAPIName.dockerImage,
             method: "pull_start",
@@ -538,7 +539,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         let ids = try validatedIDs(ids)
         let currentIDs = Set(try await loadContainerManager().images.map(\.id))
         guard ids.allSatisfy(currentIDs.contains) else {
-            throw validationError("部分映像已不存在，请刷新后重新选择。")
+            throw validationError(L10n.string("shared.892f2476d57b950b"))
         }
         for id in ids {
             try await callVoid(
@@ -549,13 +550,13 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
         let remaining = Set(try await loadContainerManager().images.map(\.id))
         guard ids.allSatisfy({ !remaining.contains($0) }) else {
-            throw verificationError("NAS 尚未确认映像已删除，请刷新后重试。")
+            throw verificationError(L10n.string("shared.298bd4a069695e72"))
         }
     }
 
     public func createContainerNetwork(name: String, driver: String) async throws {
-        let name = try validatedName(name, message: "请输入网络名称。")
-        let driver = try validatedName(driver, message: "请选择网络类型。")
+        let name = try validatedName(name, message: L10n.string("shared.1750af3117ab4301"))
+        let driver = try validatedName(driver, message: L10n.string("shared.a3a649e40dd55868"))
         try await callVoid(
             DsmAPIName.dockerNetwork,
             method: "create",
@@ -563,7 +564,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         )
         let networks = try await loadContainerManager().networks
         guard networks.contains(where: { $0.name == name }) else {
-            throw verificationError("NAS 尚未确认网络已创建，请刷新后重试。")
+            throw verificationError(L10n.string("shared.ab9474d0616d3198"))
         }
     }
 
@@ -571,7 +572,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         let ids = try validatedIDs(ids)
         let currentIDs = Set(try await loadContainerManager().networks.map(\.id))
         guard ids.allSatisfy(currentIDs.contains) else {
-            throw validationError("部分网络已不存在，请刷新后重新选择。")
+            throw validationError(L10n.string("shared.d7cae8f9ca59d2d3"))
         }
         for id in ids {
             try await callVoid(
@@ -582,7 +583,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
         let remaining = Set(try await loadContainerManager().networks.map(\.id))
         guard ids.allSatisfy({ !remaining.contains($0) }) else {
-            throw verificationError("NAS 尚未确认网络已删除，请刷新后重试。")
+            throw verificationError(L10n.string("shared.3f7da50cab7bd49a"))
         }
     }
 
@@ -674,45 +675,45 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
 
     /// VMM 官方界面使用的内部创建契约；只有能力发现明确返回该接口时才启用。
     public func createVirtualMachine(_ configuration: VirtualMachineCreation) async throws {
-        let name = try validatedName(configuration.name, message: "请输入虚拟机名称。")
+        let name = try validatedName(configuration.name, message: L10n.string("shared.5350a51d42c2c339"))
         guard (1...64).contains(configuration.cpuCount) else {
-            throw validationError("处理器数量应在 1 到 64 之间。")
+            throw validationError(L10n.string("shared.f41be5e7aec143e3"))
         }
         guard (128...1_048_576).contains(configuration.memoryMiB) else {
-            throw validationError("内存容量应在 128 MB 到 1 TB 之间。")
+            throw validationError(L10n.string("shared.4d40041e1ad34be1"))
         }
         guard (1...1_048_576).contains(configuration.diskGiB) else {
-            throw validationError("虚拟磁盘容量应在 1 GB 到 1 PB 之间。")
+            throw validationError(L10n.string("shared.2b4d322a593abfbb"))
         }
         let storageID = try validatedName(
             configuration.storageID,
-            message: "请选择存储空间。"
+            message: L10n.string("shared.90d0c55da0db0537")
         )
         let networkID = try validatedName(
             configuration.networkID,
-            message: "请选择网络。"
+            message: L10n.string("shared.2b03964bdff5a681")
         )
         guard capabilities[DsmAPIName.virtualizationGuest]?.selectedVersion != nil else {
             throw unavailableError()
         }
         let snapshot = try await loadVirtualMachineManager()
         guard !snapshot.machines.contains(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
-            throw validationError("已有同名虚拟机，请换一个名称。")
+            throw validationError(L10n.string("shared.433935ad21c1d3da"))
         }
         guard let storage = snapshot.storages.first(where: { $0.id == storageID }) else {
-            throw validationError("所选存储空间已不可用，请刷新后重新选择。")
+            throw validationError(L10n.string("shared.893d2afe816fc362"))
         }
         guard let hostID = Self.nonEmpty(storage.hostID),
               let hostName = Self.nonEmpty(storage.hostName) else {
             throw unavailableError()
         }
         guard snapshot.networks.contains(where: { $0.id == networkID }) else {
-            throw validationError("所选网络已不可用，请刷新后重新选择。")
+            throw validationError(L10n.string("shared.6f6895462cc6e8ed"))
         }
         if let imageID = configuration.bootImageID,
            !imageID.isEmpty,
            !snapshot.images.contains(where: { $0.id == imageID }) {
-            throw validationError("所选安装映像已不可用，请刷新后重新选择。")
+            throw validationError(L10n.string("shared.015a36c415279fb5"))
         }
 
         let isWindows = configuration.operatingSystem == .windows
@@ -721,7 +722,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         let disk: [String: DsmJSONValue] = [
             "type": .string("add"),
             "vdisk_mode": .integer(1),
-            "name": .string("虚拟盘 1"),
+            "name": .string(L10n.string("shared.41781e3b2a5ef2db")),
             "unmap": .boolean(false),
             "iops_enable": .boolean(false),
             "dev_limit": .integer(0),
@@ -784,7 +785,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         )
         let updated = try await loadVirtualMachineManager()
         guard updated.machines.contains(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
-            throw verificationError("NAS 尚未确认虚拟机已创建，请刷新后重试。")
+            throw verificationError(L10n.string("shared.9d66b1d56aebefdb"))
         }
     }
 
@@ -799,30 +800,30 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
         let snapshot = try await loadVirtualMachineManager()
         guard let current = snapshot.machines.first(where: { $0.id == id }) else {
-            throw validationError("找不到这台虚拟机，请刷新后重试。")
+            throw validationError(L10n.string("shared.706d4bbb975fcdc6"))
         }
         var parameters: [String: DsmParameterValue] = [
             "guest_id": .string(id),
             "synovmm_ui_id": .string(UUID().uuidString.lowercased())
         ]
         if let name = configuration.name {
-            let name = try validatedName(name, message: "请输入虚拟机名称。")
+            let name = try validatedName(name, message: L10n.string("shared.5350a51d42c2c339"))
             guard !snapshot.machines.contains(where: {
                 $0.id != id && $0.name.caseInsensitiveCompare(name) == .orderedSame
             }) else {
-                throw validationError("已有同名虚拟机，请换一个名称。")
+                throw validationError(L10n.string("shared.433935ad21c1d3da"))
             }
             parameters["name"] = .string(name)
         }
         if let description = configuration.description {
             guard description.count <= 1_024 else {
-                throw validationError("描述不能超过 1024 个字符。")
+                throw validationError(L10n.string("shared.f9112198a60b7d70"))
             }
             parameters["desc"] = .string(description)
         }
         if let cpuWeight = configuration.cpuWeight {
             guard (1...512).contains(cpuWeight) else {
-                throw validationError("虚拟机优先级设置无效，请重新选择。")
+                throw validationError(L10n.string("shared.4f060f32743040c5"))
             }
             parameters["cpu_weight"] = .integer(cpuWeight)
         }
@@ -833,23 +834,23 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         let isRunning = Self.isVirtualMachineRunning(current.status)
         if configuration.cpuCount != nil || configuration.memoryMiB != nil {
             guard !isRunning else {
-                throw validationError("请先正常关机，再修改处理器或内存。")
+                throw validationError(L10n.string("shared.b67ec1a7e6173fed"))
             }
             if let cpuCount = configuration.cpuCount {
                 guard (1...64).contains(cpuCount) else {
-                    throw validationError("处理器数量应在 1 到 64 之间。")
+                    throw validationError(L10n.string("shared.f41be5e7aec143e3"))
                 }
                 parameters["vcpu_num"] = .integer(cpuCount)
             }
             if let memoryMiB = configuration.memoryMiB {
                 guard (128...1_048_576).contains(memoryMiB) else {
-                    throw validationError("内存容量应在 128 MB 到 1 TB 之间。")
+                    throw validationError(L10n.string("shared.4d40041e1ad34be1"))
                 }
                 parameters["vram_size"] = .integer(memoryMiB)
             }
         }
         guard parameters.count > 2 else {
-            throw validationError("没有需要保存的修改。")
+            throw validationError(L10n.string("shared.c01558c4918833c0"))
         }
 
         try await callVoid(
@@ -864,7 +865,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
               configuration.memoryMiB.map({
                   verified.memoryBytes == Int64($0) * 1_024 * 1_024
               }) ?? true else {
-            throw verificationError("NAS 尚未确认设置已保存，请刷新后重试。")
+            throw verificationError(L10n.string("shared.f7c1562e7a9e3cd8"))
         }
     }
 
@@ -872,10 +873,10 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         let id = try validatedIDs([id])[0]
         let snapshot = try await loadVirtualMachineManager()
         guard let machine = snapshot.machines.first(where: { $0.id == id }) else {
-            throw validationError("找不到这台虚拟机，请刷新后重试。")
+            throw validationError(L10n.string("shared.706d4bbb975fcdc6"))
         }
         guard Self.isVirtualMachineRunning(machine.status) else {
-            throw validationError("请先启动虚拟机，再打开远程控制台。")
+            throw validationError(L10n.string("shared.7047a09e87d95943"))
         }
         var components = URLComponents(
             url: baseURL
@@ -901,7 +902,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
             URLQueryItem(name: "app_alias", value: "")
         ]
         guard let url = components?.url else {
-            throw verificationError("无法准备远程控制台，请刷新后重试。")
+            throw verificationError(L10n.string("shared.59faeb679e4861af"))
         }
         return VirtualMachineConsoleSession(
             url: url,
@@ -955,7 +956,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         )
         let remaining = try await loadVirtualMachineManager().machines.map(\.id)
         guard ids.allSatisfy({ !remaining.contains($0) }) else {
-            throw verificationError("NAS 尚未确认虚拟机已删除，请刷新后重试。")
+            throw verificationError(L10n.string("shared.bf17ba5ccdef0c83"))
         }
     }
 
@@ -967,16 +968,16 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         guard capabilities[DsmAPIName.virtualizationNetwork]?.selectedVersion != nil else {
             throw unavailableError()
         }
-        let id = try validatedName(id, message: "请先选择要修改的网络。")
-        let name = try validatedName(configuration.name, message: "请输入网络名称。")
+        let id = try validatedName(id, message: L10n.string("shared.ca7aaa6738684c9c"))
+        let name = try validatedName(configuration.name, message: L10n.string("shared.1750af3117ab4301"))
         let current = try await loadVirtualMachineManager()
         guard current.networks.contains(where: { $0.id == id }) else {
-            throw validationError("这个网络已不存在，请刷新后重试。")
+            throw validationError(L10n.string("shared.27a4ede65c142b84"))
         }
         guard !current.networks.contains(where: {
             $0.id != id && $0.name.caseInsensitiveCompare(name) == .orderedSame
         }) else {
-            throw validationError("已有同名网络，请换一个名称。")
+            throw validationError(L10n.string("shared.ec86275315f695af"))
         }
 
         try await callVoid(
@@ -989,7 +990,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         )
         let updated = try await loadVirtualMachineManager()
         guard updated.networks.contains(where: { $0.id == id && $0.name == name }) else {
-            throw verificationError("NAS 尚未确认网络设置已保存，请刷新后重试。")
+            throw verificationError(L10n.string("shared.35129033ee98c3ee"))
         }
     }
 
@@ -1001,7 +1002,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         let ids = try validatedIDs(ids)
         let currentIDs = Set(try await loadVirtualMachineManager().networks.map(\.id))
         guard ids.allSatisfy(currentIDs.contains) else {
-            throw validationError("部分网络已不存在，请刷新后重新选择。")
+            throw validationError(L10n.string("shared.d7cae8f9ca59d2d3"))
         }
         for id in ids {
             try await callVoid(
@@ -1012,7 +1013,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
         let remaining = Set(try await loadVirtualMachineManager().networks.map(\.id))
         guard ids.allSatisfy({ !remaining.contains($0) }) else {
-            throw verificationError("NAS 尚未确认网络已删除，请刷新后重试。")
+            throw verificationError(L10n.string("shared.3f7da50cab7bd49a"))
         }
     }
 
@@ -1027,7 +1028,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
         let currentIDs = Set(try await loadVirtualMachineManager().images.map(\.id))
         guard ids.allSatisfy(currentIDs.contains) else {
-            throw validationError("部分映像已不存在，请刷新后重新选择。")
+            throw validationError(L10n.string("shared.892f2476d57b950b"))
         }
         for id in ids {
             if api == DsmAPIName.virtualizationAPIGuestImage {
@@ -1049,7 +1050,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
         let remaining = Set(try await loadVirtualMachineManager().images.map(\.id))
         guard ids.allSatisfy({ !remaining.contains($0) }) else {
-            throw verificationError("NAS 尚未确认映像已删除，请刷新后重试。")
+            throw verificationError(L10n.string("shared.298bd4a069695e72"))
         }
     }
 
@@ -1069,11 +1070,11 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
                 return
             }
             if ["failed", "error", "cancelled", "canceled"].contains(status) {
-                throw verificationError("NAS 未能完成映像删除，请刷新后重试。")
+                throw verificationError(L10n.string("shared.71f5972b6a39b58a"))
             }
             try await Task.sleep(for: .seconds(1))
         }
-        throw verificationError("映像仍在处理中，请稍后刷新查看结果。")
+        throw verificationError(L10n.string("shared.fad38b1708c3a0f5"))
     }
 
     private func preferredDownloadTaskAPI() -> String {
@@ -1101,7 +1102,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
             throw AppError(
                 category: .localStorageFull,
                 isRetryable: false,
-                safeUserMessage: "无法准备任务文件，请检查这台 Mac 的可用空间。"
+                safeUserMessage: L10n.string("shared.25e1b230ae17e73b")
             )
         }
         try FileManager.default.setAttributes(
@@ -1291,7 +1292,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
     private func validatedIDs(_ values: [String]) throws -> [String] {
         let ids = values.compactMap(Self.nonEmpty)
         guard ids.count == values.count, !ids.isEmpty else {
-            throw validationError("请先选择要操作的项目。")
+            throw validationError(L10n.string("shared.e594e487c681e714"))
         }
         return Array(Set(ids)).sorted()
     }
@@ -1307,7 +1308,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 当前无法使用此功能，请确认对应套件已安装并允许当前账号访问。"
+            safeUserMessage: L10n.string("shared.2096260091060844")
         )
     }
 
@@ -1351,7 +1352,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         let transfer = value["additional"]?["transfer"] ?? value["transfer"]
         return DownloadStationTask(
             id: id,
-            title: value.firstString(["title", "name", "filename"]) ?? "未命名下载",
+            title: value.firstString(["title", "name", "filename"]) ?? L10n.string("shared.e2106376a5ce15af"),
             status: value.firstString(["status", "state"]) ?? "unknown",
             sizeBytes: value.firstInteger(["size", "total_size"]),
             downloadedBytes: transfer?.firstInteger(["size_downloaded", "downloaded", "completed"])
@@ -1525,7 +1526,7 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
             id: value.firstString(["id", "log_id"])
                 ?? "\(timestamp?.timeIntervalSince1970 ?? 0)-\(offset)-\(message.hashValue)",
             timestamp: timestamp,
-            level: value.firstString(["level", "severity", "type", "priority"]) ?? "信息",
+            level: value.firstString(["level", "severity", "type", "priority"]) ?? L10n.string("shared.e7028601e7da793d"),
             user: value.firstString(["user", "username", "owner", "account", "user_name"]),
             message: message
         )

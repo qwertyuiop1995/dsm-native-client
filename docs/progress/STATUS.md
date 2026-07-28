@@ -8,6 +8,7 @@
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | 单仓库与文档 | 已完成 | 契约、架构、安全、兼容和平台目录已经建立 |
+| 五端双语本地化 | 已实现 | 英语与简体中文资源、跟随系统、英语回退、用户指定语言、本机持久化和跨端资源校验已接入 |
 | API 参考 | 进行中 | 官方与内部 API 已分类；随实机差异继续补充 |
 | Apple 共享工程 | 进行中 | Swift Package、macOS App、iPhone/iPad 通用 SwiftUI App 和 Apple CI 已建立 |
 | macOS 文件客户端 | 需要验证 | 主要功能已实现并通过自动化测试，正在收集真实 NAS 兼容证据 |
@@ -76,7 +77,8 @@
 - `DsmMobile` iPhone/iPad 通用目标已通过 5 项测试（含冷启动资料恢复与自动登录）、无签名 Release 模拟器构建、iPhone 测试启动和 iPad Release 安装启动。
 - Android Debug/Release APK、19 项单元测试、仪器测试编译、Android 14 真机 Release 冷启动和 QuickConnect 真实能力发现已通过。
 - Windows Domain、Infrastructure 和 14 项测试已使用 .NET 10 Release 验证，QuickConnect 真实能力发现通过；WinUI XAML 编译器只能在 Windows 运行，完整 App 仍由 Windows CI/设备验证。
-- 本地化文件和 Git 差异格式检查通过。
+- 本地化检查覆盖 Apple、Android、Windows 的双语键、格式参数、资源引用、英语资源残留中文和生产界面硬编码；当前统计为 Apple 2,151 个、Android 246 个、Windows 184 个双语资源键。
+- Apple 共享包 239 项测试通过（1 项按条件跳过）；Android 单元测试与 Debug APK 构建通过。Windows 资源静态校验通过，完整 WinUI 编译继续由 Windows CI 执行。
 - 自动化通过不替代真实 NAS 权限、网络、套件版本和回收站行为验证。
 
 ## 照片管理进度

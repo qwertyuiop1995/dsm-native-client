@@ -67,8 +67,8 @@ public sealed class DsmQuickConnectResolver(HttpClient httpClient)
                 return descriptor.Endpoint;
             }
             catch (DsmException error) when (
-                error.Message is not "这台 NAS 没有开启 QuickConnect 中继" and
-                not "QuickConnect 返回的连接无法确认属于这台 NAS")
+                error.Kind is not DsmErrorKind.QuickConnectRelayDisabled and
+                not DsmErrorKind.QuickConnectIdentityMismatch)
             {
                 lastError = error;
                 if (attempt < 2)
@@ -87,8 +87,9 @@ public sealed class DsmQuickConnectResolver(HttpClient httpClient)
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new DsmException(
-                "QuickConnect 找到了这台 NAS，但设备目前不在线",
-                "确认 NAS 已开机并联网后重试。");
+                UserText.Key("WinSharede32c368700e2b141"),
+                UserText.Key("WinSharede0abefcec6920022"),
+                kind: DsmErrorKind.QuickConnectOffline);
         }
         var port = response["service"]?["port"]?.GetValue<int>() ?? 0;
         var smartDns = response["smartdns"] as JsonObject;
@@ -220,13 +221,14 @@ public sealed class DsmQuickConnectResolver(HttpClient httpClient)
                 if (!string.Equals(json["ezid"]?.GetValue<string>(), expectedId, StringComparison.OrdinalIgnoreCase))
                 {
                     throw new DsmException(
-                        "QuickConnect 返回的连接无法确认属于这台 NAS",
-                        "为保护登录信息，岚仓已停止连接。");
+                        UserText.Key("WinShared408b64a41c09d2a0"),
+                        UserText.Key("WinShared51f93605004a3258"),
+                        kind: DsmErrorKind.QuickConnectIdentityMismatch);
                 }
                 return;
             }
             catch (DsmException error) when (
-                error.Message != "QuickConnect 返回的连接无法确认属于这台 NAS" && attempt < 5)
+                error.Kind != DsmErrorKind.QuickConnectIdentityMismatch && attempt < 5)
             {
                 await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
             }
@@ -243,8 +245,9 @@ public sealed class DsmQuickConnectResolver(HttpClient httpClient)
         if (responses.OfType<JsonObject>().Any(item => item["errno"]?.GetValue<int>() == 19))
         {
             throw new DsmException(
-                "这台 NAS 没有开启 QuickConnect 中继",
-                "请在 DSM 的 QuickConnect 高级设置中开启中继后重试。");
+                UserText.Key("WinSharedd11595c8e583c9ea"),
+                UserText.Key("WinShared6730f03f8272b1f9"),
+                kind: DsmErrorKind.QuickConnectRelayDisabled);
         }
         var response = SuccessfulResponse(responses);
         var service = response["service"] as JsonObject;
@@ -288,8 +291,9 @@ public sealed class DsmQuickConnectResolver(HttpClient httpClient)
     private static JsonObject SuccessfulResponse(JsonArray responses) =>
         responses.OfType<JsonObject>().FirstOrDefault(item => item["errno"]?.GetValue<int>() == 0)
         ?? throw new DsmException(
-            "没有找到这个 QuickConnect ID",
-            "请检查拼写和 NAS 中的 QuickConnect 设置。");
+            UserText.Key("WinShared35964d160c6c4b32"),
+            UserText.Key("WinShared36d42da6d6cea95f"),
+            kind: DsmErrorKind.QuickConnectNotFound);
 
     private static void AddTrustedDirect(
         ICollection<QuickConnectEndpoint> endpoints,
@@ -331,7 +335,10 @@ public sealed class DsmQuickConnectResolver(HttpClient httpClient)
     {
         if (!NasAddressParser.IsPotentialQuickConnectId(id))
         {
-            throw new DsmException("无法识别这个 QuickConnect ID", "请检查拼写后重试。");
+            throw new DsmException(
+                UserText.Key("WinShared03b4e19bbedaaf48"),
+                UserText.Key("WinShared89c44574bbf9988a"),
+                kind: DsmErrorKind.InvalidQuickConnectId);
         }
     }
 
@@ -380,17 +387,21 @@ public sealed class DsmQuickConnectResolver(HttpClient httpClient)
     }
 
     private static DsmException NoDirectRoute() => new(
-        "QuickConnect 没有提供可用的直接连接",
-        "岚仓将继续尝试安全中继。");
+        UserText.Key("WinShared2185bc1f61ec5011"),
+        UserText.Key("WinSharedc157df0fa964b080"),
+        kind: DsmErrorKind.QuickConnectDirectUnavailable);
     private static DsmException ServiceUnavailable() => new(
-        "QuickConnect 暂时没有响应",
-        "请稍后重试。");
+        UserText.Key("WinShared5634da8d0d5a2089"),
+        UserText.Key("WinSharedefc81ced18eb3bb0"),
+        kind: DsmErrorKind.QuickConnectServiceUnavailable);
     private static DsmException InvalidResponse() => new(
-        "QuickConnect 返回的信息无法读取",
-        "请稍后重试。");
+        UserText.Key("WinSharedda35e58bcad31766"),
+        UserText.Key("WinSharedefc81ced18eb3bb0"),
+        kind: DsmErrorKind.QuickConnectInvalidResponse);
     private static DsmException RelayUnavailable() => new(
-        "QuickConnect 暂时无法建立中继连接",
-        "请稍后重试。");
+        UserText.Key("WinShared165059223c7f83c1"),
+        UserText.Key("WinSharedefc81ced18eb3bb0"),
+        kind: DsmErrorKind.QuickConnectRelayUnavailable);
 
     private sealed record RelayDescriptor(
         QuickConnectEndpoint Endpoint,

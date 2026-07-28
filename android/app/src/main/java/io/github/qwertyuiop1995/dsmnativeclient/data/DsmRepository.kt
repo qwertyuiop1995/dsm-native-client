@@ -14,8 +14,11 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.FilePage
 import io.github.qwertyuiop1995.dsmnativeclient.domain.LogEntry
 import io.github.qwertyuiop1995.dsmnativeclient.domain.LogLevel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ManagedResource
+import io.github.qwertyuiop1995.dsmnativeclient.domain.ManagedResourceLabel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ModuleAvailability
+import io.github.qwertyuiop1995.dsmnativeclient.domain.ModuleUnavailableReason
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasAccount
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasGroup
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
@@ -52,22 +55,22 @@ class DsmRepository(
         ModuleAvailability(
             Module.CHAT,
             supports("SYNO.Chat.Channel"),
-            "当前 NAS 未提供可用的 Synology Chat 服务。",
+            ModuleUnavailableReason.CHAT_SERVICE,
         ),
         ModuleAvailability(
             Module.DOWNLOADS,
             supports("SYNO.DownloadStation.Task") || supports("SYNO.DownloadStation2.Task"),
-            "当前 NAS 未安装或未启用 Download Station。",
+            ModuleUnavailableReason.DOWNLOAD_STATION,
         ),
         ModuleAvailability(
             Module.CONTAINERS,
             supports("SYNO.Docker.Container"),
-            "当前 NAS 未安装或未启用 Container Manager。",
+            ModuleUnavailableReason.CONTAINER_MANAGER,
         ),
         ModuleAvailability(
             Module.VIRTUAL_MACHINES,
             supports("SYNO.Virtualization.Guest") || supports("SYNO.Virtualization.API.Guest"),
-            "当前 NAS 未安装或未启用 Virtual Machine Manager。",
+            ModuleUnavailableReason.VIRTUAL_MACHINE_MANAGER,
         ),
         ModuleAvailability(Module.NAS_SETTINGS, supports("SYNO.Core.System")),
         ModuleAvailability(Module.TRANSFERS, true),
@@ -117,7 +120,12 @@ class DsmRepository(
             ),
         )
         val taskId = start.string("taskid")
-            ?: throw DsmFailure(null, "NAS 没有开始搜索", "请稍后重试。")
+            ?: throw DsmFailure(
+                null,
+                "The NAS did not start the search",
+                "Try again later.",
+                kind = DsmErrorKind.SEARCH_NOT_STARTED,
+            )
         return try {
             val result = call(
                 "SYNO.FileStation.Search",
@@ -138,7 +146,7 @@ class DsmRepository(
     }
 
     suspend fun createFolder(parent: String, name: String) {
-        require(name.isNotBlank() && '/' !in name) { "文件夹名称无效" }
+        require(name.isNotBlank() && '/' !in name) { "Invalid folder name" }
         call(
             "SYNO.FileStation.CreateFolder",
             "create",
@@ -152,7 +160,7 @@ class DsmRepository(
     }
 
     suspend fun rename(path: String, newName: String) {
-        require(newName.isNotBlank() && '/' !in newName) { "名称无效" }
+        require(newName.isNotBlank() && '/' !in newName) { "Invalid name" }
         call(
             "SYNO.FileStation.Rename",
             "rename",
@@ -162,7 +170,7 @@ class DsmRepository(
     }
 
     suspend fun delete(paths: List<String>) {
-        require(paths.isNotEmpty()) { "没有选择要删除的项目" }
+        require(paths.isNotEmpty()) { "No item selected" }
         call(
             "SYNO.FileStation.Delete",
             "start",
@@ -171,15 +179,20 @@ class DsmRepository(
                 "recursive" to "true",
             ),
         )
-        waitUntil("NAS 尚未确认项目已删除，请刷新后重试。") {
+        waitUntil {
             paths.none { pathExists(it) }
         }
     }
 
     suspend fun createEmptyFile(parent: String, name: String) {
-        require(name.isNotBlank() && '/' !in name) { "文件名无效" }
+        require(name.isNotBlank() && '/' !in name) { "Invalid file name" }
         // File Station 没有独立的空文件接口；该能力由 multipart 上传层实现。
-        throw DsmFailure(null, "当前版本暂时不能直接新建空文件", "请先在本机创建文件后上传。")
+        throw DsmFailure(
+            null,
+            "Creating an empty file directly is not supported",
+            "Create the file on this device first, then upload it.",
+            kind = DsmErrorKind.EMPTY_FILE_UNSUPPORTED,
+        )
     }
 
     suspend fun listDownloads(): List<DownloadTask> {
@@ -200,7 +213,7 @@ class DsmRepository(
             val detail = additional?.objectValue("detail")
             DownloadTask(
                 id = item.string("id") ?: return@mapNotNull null,
-                title = item.string("title") ?: "未命名任务",
+                title = item.string("title").orEmpty(),
                 status = state(item.string("status")),
                 size = item.long("size"),
                 transferred = item.long("size_downloaded") ?: transfer?.long("size_downloaded"),
@@ -213,7 +226,7 @@ class DsmRepository(
     }
 
     suspend fun createDownload(uri: String, destination: String?) {
-        require(uri.isNotBlank()) { "下载地址不能为空" }
+        require(uri.isNotBlank()) { "Download address is required" }
         val apiName = preferred("SYNO.DownloadStation2.Task", "SYNO.DownloadStation.Task")
         call(
             apiName,
@@ -226,7 +239,7 @@ class DsmRepository(
     }
 
     suspend fun controlDownloads(ids: List<String>, action: String, deleteFiles: Boolean = false) {
-        require(action in setOf("pause", "resume", "delete")) { "不支持的下载操作" }
+        require(action in setOf("pause", "resume", "delete")) { "Unsupported download action" }
         val apiName = preferred("SYNO.DownloadStation2.Task", "SYNO.DownloadStation.Task")
         call(
             apiName,
@@ -237,7 +250,7 @@ class DsmRepository(
             },
         )
         if (action == "delete") {
-            waitUntil("NAS 尚未确认下载任务已删除，请刷新后重试。") {
+            waitUntil {
                 val remaining = listDownloads().map(DownloadTask::id).toSet()
                 ids.none(remaining::contains)
             }
@@ -253,7 +266,7 @@ class DsmRepository(
     }
 
     suspend fun controlContainer(id: String, action: String) {
-        require(action in setOf("start", "stop", "restart")) { "不支持的容器操作" }
+        require(action in setOf("start", "stop", "restart")) { "Unsupported container action" }
         call("SYNO.Docker.Container", action, mapOf("id" to id))
     }
 
@@ -268,13 +281,13 @@ class DsmRepository(
     }
 
     suspend fun createContainerNetwork(name: String, driver: String) {
-        require(name.isNotBlank()) { "网络名称不能为空" }
+        require(name.isNotBlank()) { "Network name is required" }
         call(
             "SYNO.Docker.Network",
             "create",
             mapOf("name" to name.trim(), "driver" to driver),
         )
-        waitUntil("NAS 尚未确认网络已创建，请刷新后重试。") {
+        waitUntil {
             containerOverview().networks.any { it.name.equals(name.trim(), ignoreCase = true) }
         }
     }
@@ -348,7 +361,7 @@ class DsmRepository(
 
     suspend fun controlVirtualMachine(id: String, action: String) {
         require(action in setOf("poweron", "poweroff", "shutdown", "reboot", "pause", "resume")) {
-            "不支持的虚拟机操作"
+            "Unsupported virtual machine action"
         }
         val actionApi = preferred(
             "SYNO.Virtualization.Guest.Action",
@@ -373,14 +386,14 @@ class DsmRepository(
     }
 
     suspend fun renameVirtualMachineNetwork(id: String, name: String) {
-        require(name.isNotBlank()) { "网络名称不能为空" }
+        require(name.isNotBlank()) { "Network name is required" }
         val networkApi = preferred(
             "SYNO.Virtualization.Network",
             "SYNO.Virtualization.API.Network",
         )
         // 内部、实验性契约：网页端在已核对的 VMM 版本使用 set。
         call(networkApi, "set", mapOf("network_id" to id, "id" to id, "name" to name.trim()))
-        waitUntil("NAS 尚未确认网络设置已保存，请刷新后重试。") {
+        waitUntil {
             virtualMachineOverview().networks.any { it.id == id && it.name == name.trim() }
         }
     }
@@ -427,7 +440,7 @@ class DsmRepository(
                 val id = item.long("channel_id") ?: item.long("id") ?: return@mapNotNull null
                 ChatConversation(
                     id = id,
-                    title = item.string("name") ?: item.string("channel_name") ?: "会话",
+                    title = item.string("name") ?: item.string("channel_name") ?: "",
                     kind = if ((item.string("type") ?: "").contains("direct", true)) {
                         ConversationKind.DIRECT
                     } else {
@@ -503,24 +516,21 @@ class DsmRepository(
 
     private suspend fun securityResources(): List<ManagedResource> {
         val apis = listOf(
-            "SYNO.Core.Security.AutoBlock" to "自动封锁",
-            "SYNO.Core.Security.DoS" to "DoS 防护",
-            "SYNO.Core.Security.Firewall" to "防火墙",
+            "SYNO.Core.Security.AutoBlock" to ManagedResourceLabel.SECURITY_AUTO_BLOCK,
+            "SYNO.Core.Security.DoS" to ManagedResourceLabel.SECURITY_DOS_PROTECTION,
+            "SYNO.Core.Security.Firewall" to ManagedResourceLabel.SECURITY_FIREWALL,
         )
-        return apis.mapNotNull { (apiName, title) ->
+        return apis.mapNotNull { (apiName, label) ->
             if (!supports(apiName)) return@mapNotNull null
             val data = runCatching { firstSuccessful(apiName, listOf("get", "list")) }.getOrNull()
                 ?: return@mapNotNull null
             val enabled = data.bool("enable") ?: data.bool("enabled")
             ManagedResource(
                 id = apiName,
-                name = title,
-                detail = when (enabled) {
-                    true -> "已开启"
-                    false -> "已关闭"
-                    null -> "可用"
-                },
+                name = "",
+                detail = "",
                 state = if (enabled == false) ResourceState.WARNING else ResourceState.HEALTHY,
+                localizedLabel = label,
             )
         }
     }
@@ -580,7 +590,12 @@ class DsmRepository(
                 if (error.code !in setOf(102, 103)) throw error
             }
         }
-        throw last ?: DsmFailure(null, "当前 NAS 不支持这项功能", "请更新相关套件。")
+        throw last ?: DsmFailure(
+            null,
+            "Feature unsupported",
+            "Update the related package.",
+            kind = DsmErrorKind.FEATURE_UNSUPPORTED,
+        )
     }
 
     private suspend fun call(
@@ -589,7 +604,12 @@ class DsmRepository(
         parameters: Map<String, String> = emptyMap(),
     ): JsonObject {
         val capability = capabilities[apiName]
-            ?: throw DsmFailure(102, "当前 NAS 不支持这项功能", "请更新 DSM 或相关套件。")
+            ?: throw DsmFailure(
+                102,
+                "Feature unsupported",
+                "Update DSM or the related package.",
+                kind = DsmErrorKind.FEATURE_UNSUPPORTED,
+            )
         return api.call(profile, session, capability, method, parameters)
     }
 
@@ -601,12 +621,17 @@ class DsmRepository(
         val name = path.substringAfterLast('/')
         val exists = listDirectory(if (parent.isBlank()) "/" else parent).items.any { it.name == name }
         if (!exists) {
-            throw DsmFailure(null, "NAS 没有确认这次更改", "请刷新列表并检查结果。")
+            throw DsmFailure(
+                null,
+                "The NAS did not confirm the change",
+                "Refresh the list and check the result.",
+                kind = DsmErrorKind.CHANGE_NOT_CONFIRMED,
+            )
         }
     }
 
     private suspend fun verifyResourceMissing(apiName: String, root: String, id: String) {
-        waitUntil("NAS 尚未确认删除结果，请刷新后检查项目状态。") {
+        waitUntil {
             resourceList(apiName, listOf("list", "get"), root).none { it.id == id }
         }
     }
@@ -621,15 +646,16 @@ class DsmRepository(
         return items.any { it.path == path }
     }
 
-    private suspend fun waitUntil(message: String, condition: suspend () -> Boolean) {
+    private suspend fun waitUntil(condition: suspend () -> Boolean) {
         repeat(8) {
             if (condition()) return
             delay(500)
         }
         throw DsmFailure(
             null,
-            message,
-            "请刷新列表；如果项目仍存在，请确认没有其他任务正在使用它。",
+            "The NAS did not confirm the change",
+            "Refresh the list and check the result.",
+            kind = DsmErrorKind.CHANGE_NOT_CONFIRMED,
         )
     }
 
@@ -641,7 +667,7 @@ class DsmRepository(
             val permission = additional?.objectValue("perm")
             FileItem(
                 path = item.string("path") ?: return@mapNotNull null,
-                name = item.string("name") ?: item.string("path")?.substringAfterLast('/') ?: "项目",
+                name = item.string("name") ?: item.string("path")?.substringAfterLast('/').orEmpty(),
                 isDirectory = item.bool("isdir") ?: false,
                 size = item.long("size") ?: additional?.long("size") ?: 0,
                 modifiedAtEpochSeconds = time?.long("mtime") ?: item.long("mtime"),
@@ -678,7 +704,7 @@ class DsmRepository(
                     ?: (total - (item.long("size_free") ?: total))
                 CapacitySummary(
                     id = item.string("id") ?: item.string("volume_path") ?: "volume",
-                    name = item.string("display_name") ?: item.string("volume_path") ?: "存储空间",
+                    name = item.string("display_name") ?: item.string("volume_path").orEmpty(),
                     totalBytes = total,
                     usedBytes = used,
                     status = state(item.string("status")),
@@ -746,9 +772,9 @@ class DsmRepository(
                 val item = element as? JsonObject ?: return@mapIndexedNotNull null
                 ActiveConnection(
                     id = item.string("id") ?: item.string("connection_id") ?: "connection-$index",
-                    user = item.string("user") ?: item.string("username") ?: "未知账号",
+                    user = item.string("user") ?: item.string("username") ?: "",
                     service = item.string("service") ?: item.string("type") ?: "DSM",
-                    client = item.string("client") ?: item.string("ip") ?: "未知设备",
+                    client = item.string("client") ?: item.string("ip") ?: "",
                     connectedAtEpochSeconds = item.long("time") ?: item.long("connected_at"),
                     isCurrent = item.bool("current") ?: false,
                 )
@@ -784,7 +810,12 @@ class DsmRepository(
 
     private fun preferred(vararg names: String): String =
         names.firstOrNull(::supports)
-            ?: throw DsmFailure(102, "当前 NAS 不支持这项功能", "请更新 DSM 或相关套件。")
+            ?: throw DsmFailure(
+                102,
+                "Feature unsupported",
+                "Update DSM or the related package.",
+                kind = DsmErrorKind.FEATURE_UNSUPPORTED,
+            )
 
     private fun jsonStrings(values: List<String>): String =
         JsonArray(values.map(::JsonPrimitive)).toString()

@@ -1,6 +1,7 @@
 package io.github.qwertyuiop1995.dsmnativeclient.network
 
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import java.io.IOException
 import java.security.MessageDigest
 import java.util.Locale
@@ -99,8 +100,8 @@ internal class DsmQuickConnectResolver(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: DsmFailure) {
-                if (error.message == RELAY_DISABLED_MESSAGE ||
-                    error.message == RELAY_IDENTITY_MISMATCH_MESSAGE
+                if (error.kind == DsmErrorKind.QUICK_CONNECT_RELAY_DISABLED ||
+                    error.kind == DsmErrorKind.QUICK_CONNECT_IDENTITY_MISMATCH
                 ) {
                     throw error
                 }
@@ -210,7 +211,7 @@ internal class DsmQuickConnectResolver(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: DsmFailure) {
-                if (error.message == RELAY_IDENTITY_MISMATCH_MESSAGE) throw error
+                if (error.kind == DsmErrorKind.QUICK_CONNECT_IDENTITY_MISMATCH) throw error
                 if (attempt < 5) delay(1_000L)
             }
         }
@@ -222,8 +223,9 @@ internal class DsmQuickConnectResolver(
         if (response.objectValue("server")?.string("ds_state")?.uppercase() != "CONNECTED") {
             throw DsmFailure(
                 null,
-                "QuickConnect 找到了这台 NAS，但设备目前不在线",
-                "确认 NAS 已开机并联网后重试。",
+                "QuickConnect found the NAS, but it is offline",
+                "Make sure the NAS is powered on and online.",
+                kind = DsmErrorKind.QUICK_CONNECT_OFFLINE,
             )
         }
         val service = response.objectValue("service") ?: throw noDirectRoute()
@@ -263,7 +265,8 @@ internal class DsmQuickConnectResolver(
             throw DsmFailure(
                 null,
                 RELAY_DISABLED_MESSAGE,
-                "请在 DSM 的 QuickConnect 高级设置中开启中继后重试。",
+                "Enable relay in DSM QuickConnect advanced settings.",
+                kind = DsmErrorKind.QUICK_CONNECT_RELAY_DISABLED,
             )
         }
         val response = successfulResponse(responses)
@@ -296,8 +299,9 @@ internal class DsmQuickConnectResolver(
             .firstOrNull { it.int("errno") == 0 }
             ?: throw DsmFailure(
                 null,
-                "没有找到这个 QuickConnect ID",
-                "请检查拼写和 NAS 中的 QuickConnect 设置。",
+                "QuickConnect ID was not found",
+                "Check the spelling and QuickConnect settings on the NAS.",
+                kind = DsmErrorKind.QUICK_CONNECT_NOT_FOUND,
             )
 
     private fun trustedDirectEndpoint(
@@ -315,8 +319,9 @@ internal class DsmQuickConnectResolver(
         if (!NasAddressParser.isPotentialQuickConnectId(id)) {
             throw DsmFailure(
                 null,
-                "无法识别这个 QuickConnect ID",
-                "请检查拼写后重试。",
+                "QuickConnect ID is invalid",
+                "Check the spelling and try again.",
+                kind = DsmErrorKind.INVALID_QUICK_CONNECT_ID,
             )
         }
     }
@@ -356,32 +361,37 @@ internal class DsmQuickConnectResolver(
 
     private fun noDirectRoute() = DsmFailure(
         null,
-        "QuickConnect 没有提供可用的直接连接",
-        "岚仓将继续尝试安全中继。",
+        "QuickConnect did not provide a direct connection",
+        "LanStash will try a secure relay.",
+        kind = DsmErrorKind.QUICK_CONNECT_DIRECT_UNAVAILABLE,
     )
 
     private fun serviceUnavailable() = DsmFailure(
         null,
-        "QuickConnect 暂时没有响应",
-        "请稍后重试。",
+        "QuickConnect is not responding",
+        "Try again later.",
+        kind = DsmErrorKind.QUICK_CONNECT_SERVICE_UNAVAILABLE,
     )
 
     private fun invalidResponse() = DsmFailure(
         null,
-        "QuickConnect 返回的信息无法读取",
-        "请稍后重试。",
+        "QuickConnect returned an invalid response",
+        "Try again later.",
+        kind = DsmErrorKind.QUICK_CONNECT_INVALID_RESPONSE,
     )
 
     private fun relayUnavailable() = DsmFailure(
         null,
-        "QuickConnect 暂时无法建立中继连接",
-        "请稍后重试。",
+        "QuickConnect relay is unavailable",
+        "Try again later.",
+        kind = DsmErrorKind.QUICK_CONNECT_RELAY_UNAVAILABLE,
     )
 
     private fun relayIdentityMismatch() = DsmFailure(
         null,
         RELAY_IDENTITY_MISMATCH_MESSAGE,
-        "为保护登录信息，岚仓已停止连接。",
+        "LanStash stopped the connection to protect sign-in information.",
+        kind = DsmErrorKind.QUICK_CONNECT_IDENTITY_MISMATCH,
     )
 
     private fun Response.readBoundedBody(failure: () -> DsmFailure): ByteArray {
@@ -422,8 +432,8 @@ internal class DsmQuickConnectResolver(
         const val MAXIMUM_RESPONSE_BYTES = 1_024 * 1_024L
         const val GLOBAL_CONTROL_URL = "https://global.quickconnect.to/Serv.php"
         const val CHINA_CONTROL_URL = "https://global.quickconnect.cn/Serv.php"
-        const val RELAY_DISABLED_MESSAGE = "这台 NAS 没有开启 QuickConnect 中继"
-        const val RELAY_IDENTITY_MISMATCH_MESSAGE = "QuickConnect 返回的连接无法确认属于这台 NAS"
+        const val RELAY_DISABLED_MESSAGE = "QuickConnect relay is disabled on this NAS"
+        const val RELAY_IDENTITY_MISMATCH_MESSAGE = "QuickConnect relay identity could not be verified"
         val JSON_MEDIA_TYPE = "application/json".toMediaType()
     }
 }

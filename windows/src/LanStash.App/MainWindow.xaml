@@ -1,8 +1,7 @@
 <Window
     x:Class="LanStash.App.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="岚仓">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid>
         <Frame x:Name="RootFrame" />
     </Grid>

@@ -2,6 +2,7 @@ import DsmCore
 import DsmNetwork
 import Foundation
 import Observation
+import DsmLocalization
 
 struct NASFileClipboard {
     let id = UUID()
@@ -93,9 +94,9 @@ final class AppModel {
 
         var title: String {
             switch self {
-            case .local: "局域网连接"
-            case .external: "外网连接"
-            case .quickConnect: "QuickConnect 连接"
+            case .local: L10n.string("ui.30a5ce03914854b9")
+            case .external: L10n.string("ui.e4a4560e3836dbf8")
+            case .quickConnect: L10n.string("ui.157865e0ff66e717")
             }
         }
 
@@ -136,7 +137,7 @@ final class AppModel {
     var selectedProfileID: UUID?
     var workspace: WorkspaceModel?
 
-    var displayName = "我的 NAS"
+    var displayName = L10n.string("ui.b457fa7f7764aef5")
     var host = ""
     var port = ""
     var account = ""
@@ -146,7 +147,7 @@ final class AppModel {
     var otpCode = ""
     var requiresOTP = false
     var isBusy = false
-    var statusMessage = "添加一台 NAS，然后输入账号和密码连接。"
+    var statusMessage = L10n.string("ui.f8f70bd7266e12d3")
     var statusIsError = false
     var pendingCertificate: CertificatePrompt?
     var fileClipboard: NASFileClipboard?
@@ -206,7 +207,7 @@ final class AppModel {
         closeCurrentWorkspace()
         selectedProfileID = nil
         selectedProfile = nil
-        displayName = "我的 NAS"
+        displayName = L10n.string("ui.b457fa7f7764aef5")
         host = ""
         port = ""
         account = ""
@@ -216,7 +217,7 @@ final class AppModel {
         otpCode = ""
         requiresOTP = false
         statusIsError = false
-        statusMessage = "请输入 NAS 地址和登录信息。"
+        statusMessage = L10n.string("ui.0da5f74db2060eae")
     }
 
     func selectProfile(id: UUID?) {
@@ -261,8 +262,8 @@ final class AppModel {
         )
         workspace?.statusIsError = false
         workspace?.statusMessage = moveSource
-            ? "已准备移动 \(items.count) 个项目。请打开目标目录后选择“粘贴”。"
-            : "已复制 \(items.count) 个项目。请打开目标目录后选择“粘贴”。"
+            ? L10n.string("ui.6392bdd08cbd3403", String(describing: items.count))
+            : L10n.string("ui.86ab33b725f7f141", String(describing: items.count))
     }
 
     func pasteClipboardIntoCurrentFolder() {
@@ -276,7 +277,7 @@ final class AppModel {
         }
         isPreparingPaste = true
         destination.statusIsError = false
-        destination.statusMessage = "正在检查目标文件夹…"
+        destination.statusMessage = L10n.string("ui.091db372930e24ba")
         let destinationPath = destination.currentPath
         Task { [weak self] in
             guard let self else { return }
@@ -295,7 +296,7 @@ final class AppModel {
             if conflictingNames.isEmpty {
                 executePaste(clipboard, into: destination, overwrite: false)
             } else {
-                destination.statusMessage = "发现同名项目，请选择处理方式。"
+                destination.statusMessage = L10n.string("ui.536505780664c530")
                 pendingPasteConflict = PasteConflictPrompt(
                     clipboardID: clipboard.id,
                     destinationProfileID: destination.profile.id,
@@ -319,7 +320,7 @@ final class AppModel {
               destination.profile.id == prompt.destinationProfileID,
               destination.currentPath == prompt.destinationPath else {
             workspace?.statusIsError = true
-            workspace?.statusMessage = "粘贴位置已经改变，请在目标文件夹中重新选择“粘贴”。"
+            workspace?.statusMessage = L10n.string("ui.9911bf606b555d2c")
             return
         }
         executePaste(clipboard, into: destination, overwrite: replaceExisting)
@@ -354,7 +355,7 @@ final class AppModel {
 
     func renameCurrentNAS(to newName: String) -> String? {
         guard let profile = selectedProfile else {
-            return "当前没有可修改的 NAS。"
+            return L10n.string("ui.0c6ae7a01e05577b")
         }
         do {
             let updated = try profile.updating(displayName: newName)
@@ -380,12 +381,12 @@ final class AppModel {
             }
             upsertProfile(updated)
             statusIsError = false
-            statusMessage = "NAS 名称已修改为“\(updated.displayName)”。"
+            statusMessage = L10n.string("ui.e2e911b17243c335", String(describing: updated.displayName))
             return nil
         } catch let error as NasProfileValidationError {
             return error.localizedDescription
         } catch {
-            return "无法修改 NAS 名称，请重试。"
+            return L10n.string("ui.df0571287b74aa73")
         }
     }
 
@@ -394,7 +395,7 @@ final class AppModel {
         loginTask = nil
         isBusy = false
         statusIsError = false
-        statusMessage = "已取消登录。"
+        statusMessage = L10n.string("ui.56b2a6f3710aedb2")
     }
 
     func connect() async {
@@ -412,7 +413,7 @@ final class AppModel {
         guard !isBusy else { return }
         isBusy = true
         statusIsError = false
-        statusMessage = "正在检查 NAS…"
+        statusMessage = L10n.string("ui.a50211f01216a878")
         defer { isBusy = false }
 
         do {
@@ -426,7 +427,7 @@ final class AppModel {
 
             let connection = try await discoverConnection(for: profile)
             capabilities = connection.capabilities
-            statusMessage = "已找到 NAS，正在登录…"
+            statusMessage = L10n.string("ui.1bdcf10e68a6e8f3")
 
             let authenticated = try await authRepository.login(
                 profile: connection.profile,
@@ -469,7 +470,7 @@ final class AppModel {
                 route: connection.route
             )
             if passwordStorageFailed {
-                statusMessage = "已连接，但无法在这台 Mac 上保存密码。下次需要重新输入。"
+                statusMessage = L10n.string("ui.963767a559c9fde3")
             }
         } catch is CancellationError {
             return
@@ -500,7 +501,7 @@ final class AppModel {
             otpCode = ""
         } catch {
             statusIsError = true
-            statusMessage = "连接失败，请检查地址和网络后重试。"
+            statusMessage = L10n.string("ui.94c254feea426d90")
             password = ""
             otpCode = ""
         }
@@ -528,7 +529,7 @@ final class AppModel {
             }
         } catch {
             statusIsError = true
-            statusMessage = "无法保存这台 NAS 的安全信息，请重试。"
+            statusMessage = L10n.string("ui.95cb4ccae2af816e")
         }
     }
 
@@ -574,7 +575,7 @@ final class AppModel {
         guard let profile else {
             password = ""
             rememberPassword = false
-            statusMessage = "已退出。"
+            statusMessage = L10n.string("ui.6e827a1b34d124ce")
             return
         }
 
@@ -584,7 +585,7 @@ final class AppModel {
         await loadSavedPassword(for: profile)
 
         guard let discovered, let authenticated else {
-            statusMessage = "已退出。"
+            statusMessage = L10n.string("ui.6e827a1b34d124ce")
             return
         }
         do {
@@ -594,10 +595,10 @@ final class AppModel {
                 session: authenticated
             )
             statusIsError = false
-            statusMessage = "已退出登录。"
+            statusMessage = L10n.string("ui.5a6ab4b41b819931")
         } catch {
             statusIsError = true
-            statusMessage = "已在这台 Mac 上退出；NAS 暂时没有响应。"
+            statusMessage = L10n.string("ui.848c36deccd7c1bf")
         }
     }
 
@@ -643,7 +644,7 @@ final class AppModel {
         otpCode = ""
         requiresOTP = false
         statusIsError = false
-        statusMessage = "已选择 \(profile.displayName)，请输入密码后连接。"
+        statusMessage = L10n.string("ui.7ac3fe739c83e02d", String(describing: profile.displayName))
 
         if let cachedWorkspace = workspacesByProfileID[profile.id],
            let context = connectionContextsByProfileID[profile.id] {
@@ -651,7 +652,7 @@ final class AppModel {
             activeConnectionProfile = context.connectionProfile
             capabilities = context.capabilities
             session = context.session
-            statusMessage = "已切换到 \(profile.displayName)。"
+            statusMessage = L10n.string("ui.679c2f48d4790cf6", String(describing: profile.displayName))
             Task { await loadSavedPassword(for: profile) }
             return
         }
@@ -712,11 +713,11 @@ final class AppModel {
             return .stopped
         }
         isBusy = true
-        statusMessage = "正在恢复上次连接…"
+        statusMessage = L10n.string("ui.39887059b5ec8c20")
         defer { isBusy = false }
         do {
             guard let restored = try await authRepository.restoreSession(for: profile.id) else {
-                statusMessage = "请输入密码以连接。"
+                statusMessage = L10n.string("ui.7eb96b663a116103")
                 return .credentialsNeeded
             }
             let connection = try await discoverConnection(for: profile)
@@ -730,7 +731,7 @@ final class AppModel {
             )) {
                 try? await authRepository.clearSession(for: profile.id)
                 statusIsError = true
-                statusMessage = "上次登录已失效，请重新输入密码。"
+                statusMessage = L10n.string("ui.5cdb81f9cb8e5cd7")
                 return .credentialsNeeded
             }
 
@@ -761,7 +762,7 @@ final class AppModel {
             return .stopped
         } catch {
             statusIsError = true
-            statusMessage = "上次登录已失效，请重新输入密码。"
+            statusMessage = L10n.string("ui.5cdb81f9cb8e5cd7")
             try? await authRepository.clearSession(for: profile.id)
             return .credentialsNeeded
         }
@@ -829,7 +830,7 @@ final class AppModel {
         )
         workspace = openedWorkspace
         statusIsError = false
-        statusMessage = "已连接到 \(profile.displayName)。"
+        statusMessage = L10n.string("ui.49263fcae6b8dce3", String(describing: profile.displayName))
     }
 
     private func makeProfile() throws -> NasProfile {
@@ -874,7 +875,7 @@ final class AppModel {
             )
         }
 
-        statusMessage = "正在通过 QuickConnect 查找 NAS…"
+        statusMessage = L10n.string("ui.aa0582cad267718e")
         let endpoints: [QuickConnectEndpoint]
         do {
             endpoints = try await quickConnectResolver.resolve(id: parsedAddress.host)
@@ -886,8 +887,8 @@ final class AppModel {
 
         for endpoint in endpoints {
             statusMessage = endpoint.kind == .local
-                ? "正在尝试局域网连接…"
-                : "正在尝试外网直接连接…"
+                ? L10n.string("ui.3b38866d76d21239")
+                : L10n.string("ui.307e0c332a164ea1")
             let endpointPort = profile.portOverride ?? endpoint.port
             let connectionProfile = try profile.updating(host: endpoint.host, port: endpointPort)
             do {
@@ -907,7 +908,7 @@ final class AppModel {
             }
         }
 
-        statusMessage = "正在建立 QuickConnect 中继连接…"
+        statusMessage = L10n.string("ui.85e5d30ce27fc0e5")
         do {
             let relay = try await quickConnectResolver.requestRelay(id: parsedAddress.host)
             let relayProfile = try profile.updating(
@@ -963,7 +964,7 @@ final class AppModel {
             try profileStore.save(profiles)
         } catch {
             statusIsError = true
-            statusMessage = "无法保存 NAS 排序，请重试。"
+            statusMessage = L10n.string("ui.933bbb986cd6fbe8")
         }
     }
 
@@ -978,7 +979,7 @@ final class AppModel {
             try profileStore.save(profiles)
         } catch {
             statusIsError = true
-            statusMessage = "无法保存这台 NAS，请重试。"
+            statusMessage = L10n.string("ui.d17c4b8ff0247530")
         }
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import DsmLocalization
 
 public struct NasSystemOverview: Equatable, Sendable {
     public let serverName: String
@@ -1182,7 +1183,7 @@ public extension NasSettingsRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 暂不能读取硬盘检测状态。"
+            safeUserMessage: L10n.string("shared.dfb40c98654f42a7")
         )
     }
     func startDiskTest(
@@ -1192,14 +1193,14 @@ public extension NasSettingsRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 暂不能启动硬盘检测。"
+            safeUserMessage: L10n.string("shared.8f8772f1d7a97b10")
         )
     }
     func stopDiskTest(diskID: String) async throws -> NasDiskTestStatus {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 暂不能停止硬盘检测。"
+            safeUserMessage: L10n.string("shared.0863df49f654262b")
         )
     }
     func controlPackage(id: String, action: NasPackageAction) async throws {
@@ -1209,7 +1210,7 @@ public extension NasSettingsRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 暂不能管理计划任务。"
+            safeUserMessage: L10n.string("shared.f305c4e6f6daf1fa")
         )
     }
     func loadScheduledTaskResults(taskName: String) async throws -> [NasScheduledTaskResult] {
@@ -1319,7 +1320,7 @@ public extension NasSettingsRepository {
         AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 暂不能完成此操作。"
+            safeUserMessage: L10n.string("shared.89527fd77aba1533")
         )
     }
 }

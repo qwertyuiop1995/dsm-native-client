@@ -1,5 +1,5 @@
 <resources>
-    <style name="Theme.LanStash" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.LanStash" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:statusBarColor">@android:color/transparent</item>

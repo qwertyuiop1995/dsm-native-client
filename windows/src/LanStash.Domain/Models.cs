@@ -25,15 +25,40 @@ public sealed record ApiCapability(
     public int SelectVersion(int preferred) => Math.Clamp(preferred, MinVersion, MaxVersion);
 }
 
+public enum DsmErrorKind
+{
+    Unknown,
+    InvalidAddress,
+    InsecureAddress,
+    InvalidQuickConnectId,
+    QuickConnectNotFound,
+    QuickConnectOffline,
+    QuickConnectDirectUnavailable,
+    QuickConnectServiceUnavailable,
+    QuickConnectInvalidResponse,
+    QuickConnectRelayDisabled,
+    QuickConnectRelayUnavailable,
+    QuickConnectIdentityMismatch,
+}
+
+public static class UserText
+{
+    public const string ResourcePrefix = "loc:";
+
+    public static string Key(string resourceKey) => $"{ResourcePrefix}{resourceKey}";
+}
+
 public sealed class DsmException(
     string message,
     string recovery,
     int? code = null,
-    bool authenticationFailure = false) : Exception(message)
+    bool authenticationFailure = false,
+    DsmErrorKind kind = DsmErrorKind.Unknown) : Exception(message)
 {
     public string Recovery { get; } = recovery;
     public int? Code { get; } = code;
     public bool AuthenticationFailure { get; } = authenticationFailure;
+    public DsmErrorKind Kind { get; } = kind;
 }
 
 public enum AppModule
@@ -49,22 +74,66 @@ public enum AppModule
     Settings,
 }
 
+public enum AppLanguageSelection
+{
+    System,
+    English,
+    SimplifiedChinese,
+}
+
+public static class AppLanguageResolver
+{
+    public static string Resolve(
+        AppLanguageSelection selection,
+        string? primaryPreferredLanguage)
+    {
+        return selection switch
+        {
+            AppLanguageSelection.English => "en-US",
+            AppLanguageSelection.SimplifiedChinese => "zh-CN",
+            _ => ResolveSystemLanguage(primaryPreferredLanguage),
+        };
+    }
+
+    public static string ResolveSystemLanguage(string? identifier)
+    {
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            return "en-US";
+        }
+        var parts = identifier.Replace('_', '-')
+            .Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+        {
+            return "en-US";
+        }
+        if (string.Equals(parts[0], "en", StringComparison.OrdinalIgnoreCase))
+        {
+            return "en-US";
+        }
+        if (!string.Equals(parts[0], "zh", StringComparison.OrdinalIgnoreCase))
+        {
+            return "en-US";
+        }
+        if (parts.Any(part =>
+                part.Equals("Hant", StringComparison.OrdinalIgnoreCase) ||
+                part.Equals("TW", StringComparison.OrdinalIgnoreCase) ||
+                part.Equals("HK", StringComparison.OrdinalIgnoreCase) ||
+                part.Equals("MO", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "en-US";
+        }
+        return parts.Any(part =>
+                part.Equals("Hans", StringComparison.OrdinalIgnoreCase) ||
+                part.Equals("CN", StringComparison.OrdinalIgnoreCase) ||
+                part.Equals("SG", StringComparison.OrdinalIgnoreCase))
+            ? "zh-CN"
+            : "en-US";
+    }
+}
+
 public static class AppModuleExtensions
 {
-    public static string Title(this AppModule module) => module switch
-    {
-        AppModule.Files => "文件浏览器",
-        AppModule.Photos => "照片",
-        AppModule.Chat => "消息",
-        AppModule.Downloads => "下载管理",
-        AppModule.Containers => "容器管理",
-        AppModule.VirtualMachines => "虚拟机管理",
-        AppModule.NasSettings => "NAS 设置",
-        AppModule.Transfers => "传输中心",
-        AppModule.Settings => "设置",
-        _ => throw new ArgumentOutOfRangeException(nameof(module)),
-    };
-
     public static string Glyph(this AppModule module) => module switch
     {
         AppModule.Files => "\uE8B7",

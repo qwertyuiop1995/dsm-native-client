@@ -1,4 +1,5 @@
 import DsmCore
+import DsmLocalization
 import SwiftUI
 
 struct RootView: View {
@@ -39,17 +40,17 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 980, minHeight: 640)
-        .alert("发现同名项目", isPresented: Binding(
+        .alert(L10n.string("ui.ca990601036ccf0f"), isPresented: Binding(
             get: { model.pendingPasteConflict != nil },
             set: { if !$0 { model.cancelPendingPaste() } }
         )) {
-            Button("取消", role: .cancel) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 model.cancelPendingPaste()
             }
-            Button("跳过同名项目") {
+            Button(L10n.string("ui.d4641f3877665e85")) {
                 model.resolvePendingPaste(replaceExisting: false)
             }
-            Button("替换同名项目", role: .destructive) {
+            Button(L10n.string("ui.0da1fcb3db46922e"), role: .destructive) {
                 model.resolvePendingPaste(replaceExisting: true)
             }
         } message: {
@@ -62,8 +63,10 @@ struct RootView: View {
     private func pasteConflictMessage(_ prompt: PasteConflictPrompt) -> String {
         let count = prompt.conflictingNames.count
         let examples = prompt.conflictingNames.prefix(3).map { "“\($0)”" }.joined(separator: "、")
-        let suffix = count > 3 ? "等，共 \(count) 个项目" : ""
-        return "目标文件夹中已有同名项目：\(examples)\(suffix)。你可以跳过这些项目，或用正在粘贴的项目替换它们。"
+        let suffix = count > 3
+            ? L10n.string("items.more_total", String(count))
+            : ""
+        return L10n.string("ui.d135edaf7bff82c2", String(describing: examples), String(describing: suffix))
     }
 }
 
@@ -99,13 +102,13 @@ struct LoginView: View {
                 }
             )
         }
-        .alert("移除这台 NAS？", isPresented: $confirmsProfileDeletion) {
-            Button("取消", role: .cancel) {}
-            Button("移除", role: .destructive) {
+        .alert(L10n.string("ui.2f97b2d9801263d5"), isPresented: $confirmsProfileDeletion) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
+            Button(L10n.string("ui.6135d4159e892541"), role: .destructive) {
                 Task { await model.deleteSelectedProfile() }
             }
         } message: {
-            Text("这会删除本机保存的地址和登录信息，不会删除 NAS 上的任何文件。")
+            Text(L10n.string("ui.1a6ef7d4ed0db37d"))
         }
         .onChange(of: model.requiresOTP) { _, required in
             if required {
@@ -132,7 +135,7 @@ struct LoginView: View {
                         }
                         .tag(profile.id)
                         .contextMenu {
-                            Button("移除这台 NAS", role: .destructive) {
+                            Button(L10n.string("ui.937455cd6b3ade37"), role: .destructive) {
                                 model.selectedProfileID = profile.id
                                 model.selectProfile(id: profile.id)
                                 confirmsProfileDeletion = true
@@ -166,10 +169,14 @@ struct LoginView: View {
                     model.newProfile()
                     focusedField = .displayName
                 } label: {
-                    Label("添加 NAS", systemImage: "plus")
+                    Label(L10n.string("ui.8249cd04be30c505"), systemImage: "plus")
                 }
                 .buttonStyle(.borderless)
                 Spacer()
+                AppLanguagePicker()
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 130)
             }
             .padding(12)
         }
@@ -187,9 +194,9 @@ struct LoginView: View {
                             .clipShape(.rect(cornerRadius: 12))
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("岚仓")
+                            Text(L10n.string("ui.4aeb6d92cbbff699"))
                                 .font(.largeTitle.weight(.semibold))
-                            Text("安全地浏览和管理 Synology NAS 中的文件")
+                            Text(L10n.string("ui.ef34bfa7f4e92480"))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -198,59 +205,59 @@ struct LoginView: View {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 14) {
                         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
-                            formRow("设备名称") {
-                                TextField("例如：家里的 NAS", text: $model.displayName)
+                            formRow(L10n.string("ui.65d8f92232ae77b0")) {
+                                TextField(L10n.string("ui.f7fbaa6885cef77f"), text: $model.displayName)
                                     .focused($focusedField, equals: .displayName)
                             }
-                            formRow("NAS 地址") {
+                            formRow(L10n.string("ui.43556f7a25fa8a40")) {
                                 TextField(
-                                    "使用 QuickConnect 时会自动优先尝试直接连接；也可以粘贴完整的 HTTPS 地址。",
+                                    L10n.string("ui.69134ccb69402771"),
                                     text: $model.host
                                 )
                                 .textContentType(.URL)
-                                .accessibilityLabel("NAS 地址")
-                                .accessibilityHint("可以输入 QuickConnect ID、IP、域名或完整的 HTTPS 地址")
+                                .accessibilityLabel(L10n.string("ui.43556f7a25fa8a40"))
+                                .accessibilityHint(L10n.string("ui.dbafdf9f504024ca"))
                                 .focused($focusedField, equals: .host)
                             }
-                            formRow("用户名") {
-                                TextField("NAS 登录用户名", text: $model.account)
+                            formRow(L10n.string("ui.1a3f0617d6de8e52")) {
+                                TextField(L10n.string("ui.f15e1db7f812e8f6"), text: $model.account)
                                     .textContentType(.username)
                                     .focused($focusedField, equals: .account)
                             }
-                            formRow("密码") {
+                            formRow(L10n.string("ui.a621ab606db2a11f")) {
                                 VStack(alignment: .leading, spacing: 6) {
                                     SecureField(
-                                        model.rememberPassword ? "已安全保存在这台 Mac 上" : "密码不会保存",
+                                        model.rememberPassword ? L10n.string("ui.54d0d38482318246") : L10n.string("ui.9582b20c3033f7e7"),
                                         text: $model.password
                                     )
                                     .textContentType(.password)
                                     .focused($focusedField, equals: .password)
                                     HStack(spacing: 18) {
                                         Toggle(
-                                            "在这台 Mac 上记住密码",
+                                            L10n.string("ui.bdc9de6d5b27252a"),
                                             isOn: Binding(
                                                 get: { model.rememberPassword },
                                                 set: { model.setRememberPassword($0) }
                                             )
                                         )
-                                        .help("使用应用内加密存储保存密码")
+                                        .help(L10n.string("ui.9160329adfe46deb"))
 
                                         Toggle(
-                                            "自动登录",
+                                            L10n.string("ui.afe5b2261f44779b"),
                                             isOn: Binding(
                                                 get: { model.autoLoginEnabled },
                                                 set: { model.setAutoLoginEnabled($0) }
                                             )
                                         )
-                                        .help("下次打开岚仓时自动连接这台 NAS")
+                                        .help(L10n.string("ui.de77ca440f384385"))
                                     }
                                     .toggleStyle(.checkbox)
                                     .font(.callout)
                                 }
                             }
                             if model.requiresOTP {
-                                formRow("验证码") {
-                                    SecureField("输入 6 位验证码", text: $model.otpCode)
+                                formRow(L10n.string("ui.bb015c60bafc8a96")) {
+                                    SecureField(L10n.string("ui.a8d7dd5511095e27"), text: $model.otpCode)
                                         .textContentType(.oneTimeCode)
                                         .focused($focusedField, equals: .otp)
                                 }
@@ -261,12 +268,12 @@ struct LoginView: View {
 
                         DisclosureGroup(isExpanded: $showsAdvancedConnectionSettings) {
                             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
-                                formRow("自定义端口") {
+                                formRow(L10n.string("ui.7f7683678a7b89c7")) {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        TextField("自动", text: $model.port)
+                                        TextField(L10n.string("ui.7eb336e42cb5076b"), text: $model.port)
                                             .frame(maxWidth: 140)
                                             .focused($focusedField, equals: .port)
-                                        Text("留空时由岚仓自动选择；填写后将优先使用这个端口。")
+                                        Text(L10n.string("ui.2f7cc5bbb9a3e968"))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -274,14 +281,14 @@ struct LoginView: View {
                             }
                             .padding(.top, 10)
                         } label: {
-                            Label("高级连接设置", systemImage: "gearshape")
+                            Label(L10n.string("ui.c6d9285846a8f1b4"), systemImage: "gearshape")
                         }
                     }
                     .textFieldStyle(.roundedBorder)
                     .disabled(model.isBusy)
                     .padding(8)
                 } label: {
-                    Label("连接到 NAS", systemImage: "lock.shield")
+                    Label(L10n.string("ui.878a54914634ff30"), systemImage: "lock.shield")
                 }
 
                 StatusBanner(
@@ -292,7 +299,7 @@ struct LoginView: View {
 
                 HStack(spacing: 12) {
                     if model.isBusy {
-                        Button("取消登录", role: .cancel) {
+                        Button(L10n.string("ui.531c764f9b4eea01"), role: .cancel) {
                             model.cancelLogin()
                         }
                         .keyboardShortcut(.cancelAction)
@@ -304,7 +311,7 @@ struct LoginView: View {
                             Task { await model.connect() }
                         } label: {
                             Label(
-                                model.requiresOTP ? "验证并连接" : "连接",
+                                model.requiresOTP ? L10n.string("ui.f7b3ea5623b03787") : L10n.string("ui.a5574109f0208e89"),
                                 systemImage: "arrow.right.circle.fill"
                             )
                             .frame(minWidth: 112)
@@ -320,7 +327,7 @@ struct LoginView: View {
                         Spacer()
 
                         if model.selectedProfileID != nil {
-                            Button("移除这台 NAS", role: .destructive) {
+                            Button(L10n.string("ui.937455cd6b3ade37"), role: .destructive) {
                                 confirmsProfileDeletion = true
                             }
                         }
@@ -328,7 +335,7 @@ struct LoginView: View {
                 }
 
                 Label(
-                    "首次连接时可能需要核对这台 NAS 的安全信息；如果以后发生变化，岚仓会立即提醒你。",
+                    L10n.string("ui.3659936f4893e4e0"),
                     systemImage: "checkmark.shield"
                 )
                 .font(.callout)
@@ -377,7 +384,13 @@ private struct StatusBanner: View {
         .background(isError ? Color.red.opacity(0.08) : Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(isBusy ? "连接状态" : isError ? "连接失败" : "提示")：\(message)"
+            L10n.string(
+                "status.accessibility",
+                isBusy
+                    ? L10n.string("status.connection")
+                    : (isError ? L10n.string("status.connection_failed") : L10n.string("status.notice")),
+                message
+            )
         )
     }
 }
@@ -394,7 +407,7 @@ private struct CertificateReviewView: View {
                     .font(.system(size: 36))
                     .foregroundStyle(prompt.isCertificateChange ? .red : .orange)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(prompt.isCertificateChange ? "安全信息发生变化" : "确认这台 NAS")
+                    Text(prompt.isCertificateChange ? L10n.string("ui.df63652c91aaa224") : L10n.string("ui.fe279c5bb7ff4c0e"))
                         .font(.title2.weight(.semibold))
                     Text(prompt.review.host)
                         .foregroundStyle(.secondary)
@@ -403,14 +416,14 @@ private struct CertificateReviewView: View {
 
             Text(
                 prompt.isCertificateChange
-                    ? "这台 NAS 提供的安全信息与上次不同。如果你没有刚刚更新过 NAS 证书，请取消并检查设备。"
-                    : "系统无法自动确认这台 NAS 的身份。请在 DSM 控制面板或浏览器中核对下面的安全指纹，一致后再继续。"
+                    ? L10n.string("ui.5eb8087116363084")
+                    : L10n.string("ui.e0ce767ce95e74bd")
             )
 
-            GroupBox("本次连接") {
-                LabeledContent("设备地址", value: prompt.review.host)
-                LabeledContent("证书名称", value: prompt.review.subjectSummary)
-                LabeledContent("安全指纹") {
+            GroupBox(L10n.string("ui.a248168e2ac8ff7f")) {
+                LabeledContent(L10n.string("ui.8b858fd6348847c3"), value: prompt.review.host)
+                LabeledContent(L10n.string("ui.42f5efe784424e46"), value: prompt.review.subjectSummary)
+                LabeledContent(L10n.string("ui.3f8ac393c2bd409d")) {
                     Text(prompt.review.formattedFingerprint)
                         .font(.system(.body, design: .monospaced))
                         .textSelection(.enabled)
@@ -418,7 +431,7 @@ private struct CertificateReviewView: View {
             }
 
             if let previous = prompt.formattedPreviousFingerprint, prompt.isCertificateChange {
-                GroupBox("上次连接使用的安全指纹") {
+                GroupBox(L10n.string("ui.ea17b7b4598882f4")) {
                     Text(previous)
                         .font(.system(.callout, design: .monospaced))
                         .textSelection(.enabled)
@@ -426,16 +439,16 @@ private struct CertificateReviewView: View {
             }
 
             if !prompt.review.canBePinned {
-                Label("这份证书已过期或无法用于安全连接，请先在 NAS 中更新证书。", systemImage: "xmark.octagon.fill")
+                Label(L10n.string("ui.59d36149bb6463e0"), systemImage: "xmark.octagon.fill")
                     .foregroundStyle(.red)
             }
 
             HStack {
                 Spacer()
-                Button("取消", action: onCancel)
+                Button(L10n.string("ui.2cd0f3be8738a86c"), action: onCancel)
                     .keyboardShortcut(.cancelAction)
                 if prompt.review.canBePinned {
-                    Button(prompt.isCertificateChange ? "确认更换并继续" : "我已核对，继续连接", action: onTrust)
+                    Button(prompt.isCertificateChange ? L10n.string("ui.ad322e611f3195f0") : L10n.string("ui.1f30f490b6eb4a19"), action: onTrust)
                         .buttonStyle(.borderedProminent)
                 }
             }

@@ -1,4 +1,5 @@
 import DsmCore
+import DsmLocalization
 import SwiftUI
 
 struct MobileRootView: View {
@@ -48,28 +49,38 @@ private struct MobileLoginView: View {
                 }
                 .scrollDismissesKeyboard(.interactively)
             }
-            .navigationTitle("岚仓")
+            .navigationTitle(L10n.string("ui.4aeb6d92cbbff699"))
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    AppLanguagePicker()
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                }
+            }
         }
         .confirmationDialog(
-            "移除“\(profileToRemove?.displayName ?? "")”？",
+            L10n.string(
+                "profile.remove.confirm",
+                profileToRemove?.displayName ?? ""
+            ),
             isPresented: Binding(
                 get: { profileToRemove != nil },
                 set: { if !$0 { profileToRemove = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("移除", role: .destructive) {
+            Button(L10n.string("ui.6135d4159e892541"), role: .destructive) {
                 if let profileToRemove {
                     model.removeProfile(profileToRemove)
                 }
                 profileToRemove = nil
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 profileToRemove = nil
             }
         } message: {
-            Text("这会删除本机保存的地址和登录信息，不会删除 NAS 上的任何文件。")
+            Text(L10n.string("ui.1a6ef7d4ed0db37d"))
         }
     }
 
@@ -82,9 +93,9 @@ private struct MobileLoginView: View {
                 .clipShape(.rect(cornerRadius: 18))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text("岚仓")
+                Text(L10n.string("ui.4aeb6d92cbbff699"))
                     .font(.largeTitle.bold())
-                Text("LanStash")
+                Text(L10n.string("app.name"))
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -98,13 +109,13 @@ private struct MobileLoginView: View {
                     .padding(.bottom, 8)
             }
             HStack {
-                Text("已保存的 NAS")
+                Text(L10n.string("ui.df2b9b2dc2e69cf5"))
                     .font(.headline)
                 Spacer()
                 Button {
                     model.newProfile()
                 } label: {
-                    Label("添加", systemImage: "plus")
+                    Label(L10n.string("ui.7a8a11ead50742a2"), systemImage: "plus")
                 }
             }
             ForEach(model.profiles) { profile in
@@ -131,7 +142,7 @@ private struct MobileLoginView: View {
                                 .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("使用保存的登录连接")
+                        .accessibilityLabel(L10n.string("ui.d2bf10e7bab2699a"))
                         Button(role: .destructive) {
                             profileToRemove = profile
                         } label: {
@@ -139,7 +150,7 @@ private struct MobileLoginView: View {
                                 .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("移除保存的 NAS")
+                        .accessibilityLabel(L10n.string("ui.06a972a9c2683c33"))
                     }
                     .padding(12)
                     .background(
@@ -156,39 +167,39 @@ private struct MobileLoginView: View {
 
     private var loginForm: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("连接 Synology NAS")
+            Text(L10n.string("ui.3b0927418e9ca90b"))
                 .font(.title2.bold())
                 .accessibilityAddTraits(.isHeader)
-            TextField("显示名称", text: $model.displayName)
+            TextField(L10n.string("ui.a98585871c5313ff"), text: $model.displayName)
                 .textContentType(.organizationName)
                 .textFieldStyle(.roundedBorder)
             TextField(
-                "NAS 地址或 QuickConnect ID",
+                L10n.string("ui.add3d846c43e6f54"),
                 text: $model.host,
-                prompt: Text("例如 nas.example.com 或你的 QuickConnect ID")
+                prompt: Text(L10n.string("ui.0eb5bf18b9814bd1"))
             )
                 .textContentType(.URL)
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
-            TextField("账号", text: $model.username)
+            TextField(L10n.string("ui.311bb313fdeca6aa"), text: $model.username)
                 .textContentType(.username)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
-            SecureField("密码", text: $model.password)
+            SecureField(L10n.string("ui.a621ab606db2a11f"), text: $model.password)
                 .textContentType(.password)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { model.connect() }
             if model.needsOTP || !model.otpCode.isEmpty {
-                TextField("双重验证代码", text: $model.otpCode)
+                TextField(L10n.string("ui.0c00c2f57088c5fa"), text: $model.otpCode)
                     .textContentType(.oneTimeCode)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
             }
             Toggle(
-                "在这台设备上记住密码",
+                L10n.string("ui.9327bc0813de581c"),
                 isOn: Binding(
                     get: { model.rememberPassword },
                     set: { enabled in
@@ -199,11 +210,11 @@ private struct MobileLoginView: View {
                     }
                 )
             )
-            Text("密码由系统钥匙串安全保护。")
+            Text(L10n.string("ui.b7a6112dd90ce389"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Toggle(
-                "自动登录",
+                L10n.string("ui.afe5b2261f44779b"),
                 isOn: Binding(
                     get: { model.autoLoginEnabled },
                     set: { enabled in
@@ -214,23 +225,23 @@ private struct MobileLoginView: View {
                     }
                 )
             )
-            Text("下次打开岚仓时自动连接这台 NAS。")
+            Text(L10n.string("ui.4eb0633bb44abe01"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             DisclosureGroup(
                 isExpanded: $showsAdvancedConnectionSettings
             ) {
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("自定义 HTTPS 端口", text: $model.port)
+                    TextField(L10n.string("ui.9aa2d5f46c68bf78"), text: $model.port)
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
-                    Text("留空时由岚仓自动选择；填写后优先使用这个端口。")
+                    Text(L10n.string("ui.7ea0491272acd294"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 .padding(.top, 8)
             } label: {
-                Label("高级连接设置", systemImage: "gearshape")
+                Label(L10n.string("ui.c6d9285846a8f1b4"), systemImage: "gearshape")
             }
             if let connectionStatus = model.connectionStatus {
                 Label(connectionStatus, systemImage: "network")
@@ -255,7 +266,7 @@ private struct MobileLoginView: View {
                         ProgressView()
                             .tint(.white)
                     }
-                    Text(model.isConnecting ? "正在连接…" : "连接")
+                    Text(model.isConnecting ? L10n.string("ui.8be0ea36a9bba286") : L10n.string("ui.a5574109f0208e89"))
                         .fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity, minHeight: 32)
@@ -279,7 +290,7 @@ private struct MobileWorkspaceView: View {
             if horizontalSizeClass == .regular {
                 NavigationSplitView {
                     moduleList
-                        .navigationTitle(model.activeProfile?.displayName ?? "岚仓")
+                        .navigationTitle(model.activeProfile?.displayName ?? L10n.string("ui.4aeb6d92cbbff699"))
                 } detail: {
                     moduleDetail
                 }
@@ -287,7 +298,7 @@ private struct MobileWorkspaceView: View {
             } else {
                 NavigationStack(path: $path) {
                     moduleList
-                        .navigationTitle(model.activeProfile?.displayName ?? "岚仓")
+                        .navigationTitle(model.activeProfile?.displayName ?? L10n.string("ui.4aeb6d92cbbff699"))
                         .navigationDestination(for: MobileModule.self) { module in
                             moduleDetail
                                 .navigationTitle(module.title)
@@ -303,17 +314,17 @@ private struct MobileWorkspaceView: View {
                     .padding(10)
                     .background(.regularMaterial, in: .capsule)
                     .padding(.top, 8)
-                    .accessibilityLabel("正在处理操作")
+                    .accessibilityLabel(L10n.string("ui.36b7dfe53cf9b5df"))
             }
         }
         .alert(
-            "提示",
+            L10n.string("ui.f56c6c82203b33f6"),
             isPresented: Binding(
                 get: { model.message != nil },
                 set: { if !$0 { model.message = nil } }
             )
         ) {
-            Button("好") {
+            Button(L10n.string("ui.f867f34178594f89")) {
                 model.message = nil
             }
         } message: {
@@ -323,14 +334,14 @@ private struct MobileWorkspaceView: View {
 
     private var moduleList: some View {
         List {
-            Section("文件管理") {
+            Section(L10n.string("ui.b3bd5ac7cc4d668b")) {
                 moduleRow(.files)
                 moduleRow(.photos)
             }
-            Section("沟通") {
+            Section(L10n.string("ui.aadb2d9d805f9164")) {
                 moduleRow(.chat)
             }
-            Section("套件管理") {
+            Section(L10n.string("ui.d7617d7b3b1fa180")) {
                 moduleRow(.downloads)
                 moduleRow(.containers)
                 moduleRow(.virtualMachines)
@@ -344,7 +355,7 @@ private struct MobileWorkspaceView: View {
                 Button(role: .destructive) {
                     model.logout()
                 } label: {
-                    Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
+                    Label(L10n.string("ui.3ab8cc15939f3b5c"), systemImage: "rectangle.portrait.and.arrow.right")
                 }
             }
         }
@@ -390,15 +401,15 @@ private struct MobileWorkspaceView: View {
                 MobileNasSettingsView(model: model)
             case .transfers:
                 MobileEmptyView(
-                    title: "没有传输任务",
-                    message: "上传、下载和 NAS 后台任务会显示在这里。",
+                    title: L10n.string("ui.025279f9c408a51b"),
+                    message: L10n.string("ui.c8066901cae15044"),
                     systemImage: "arrow.up.arrow.down"
                 )
             case .settings:
                 MobileSettingsView(model: model)
             }
             if model.isLoading {
-                ProgressView("正在读取…")
+                ProgressView(L10n.string("ui.86b6d0d63062ba81"))
                     .padding(20)
                     .background(.regularMaterial, in: .rect(cornerRadius: 16))
             }
@@ -410,7 +421,7 @@ private struct MobileWorkspaceView: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .accessibilityLabel("刷新")
+                .accessibilityLabel(L10n.string("ui.aee88743413144a2"))
             }
         }
     }
@@ -428,8 +439,8 @@ private struct MobileFileBrowser: View {
         Group {
             if model.files.isEmpty && !model.isLoading {
                 MobileEmptyView(
-                    title: "这个位置是空的",
-                    message: "这里还没有文件或文件夹。",
+                    title: L10n.string("ui.45d5c590513a6fdc"),
+                    message: L10n.string("ui.6aabdc2485f34c84"),
                     systemImage: "folder"
                 )
             } else {
@@ -449,7 +460,7 @@ private struct MobileFileBrowser: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(item.name)
                                     .lineLimit(1)
-                                Text(item.isDirectory ? "文件夹" : ByteCountFormatter.string(
+                                Text(item.isDirectory ? L10n.string("ui.7c7802d8adaed72e") : ByteCountFormatter.string(
                                     fromByteCount: item.sizeBytes ?? 0,
                                     countStyle: .file
                                 ))
@@ -464,14 +475,14 @@ private struct MobileFileBrowser: View {
                                     .frame(width: 44, height: 44)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("更多操作")
+                            .accessibilityLabel(L10n.string("ui.9f07d2ce4115f575"))
                         }
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .searchable(text: $search, prompt: "搜索文件")
+        .searchable(text: $search, prompt: L10n.string("ui.9c8bd1565def7849"))
         .onSubmit(of: .search) {
             model.searchFiles(search)
         }
@@ -483,14 +494,14 @@ private struct MobileFileBrowser: View {
                     } label: {
                         Image(systemName: "arrow.up")
                     }
-                    .accessibilityLabel("返回上一级")
+                    .accessibilityLabel(L10n.string("ui.2bab713fde4ebc53"))
                 }
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     isCreatingFolder = true
                 } label: {
-                    Label("新建文件夹", systemImage: "folder.badge.plus")
+                    Label(L10n.string("ui.84244abc71de03ac"), systemImage: "folder.badge.plus")
                 }
             }
         }
@@ -503,30 +514,30 @@ private struct MobileFileBrowser: View {
             titleVisibility: .visible
         ) {
             if itemForActions?.isDirectory == true {
-                Button("打开") {
+                Button(L10n.string("ui.c771248e511fbf93")) {
                     if let itemForActions {
                         model.openDirectory(itemForActions)
                     }
                     itemForActions = nil
                 }
             }
-            Button("重命名") {
+            Button(L10n.string("ui.0d0cbac2eee54113")) {
                 itemToRename = itemForActions
                 itemForActions = nil
             }
-            Button("删除", role: .destructive) {
+            Button(L10n.string("ui.2f9daa828907b93f"), role: .destructive) {
                 itemToDelete = itemForActions
                 itemForActions = nil
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 itemForActions = nil
             }
         }
         .sheet(isPresented: $isCreatingFolder) {
             MobileTextInputSheet(
-                title: "新建文件夹",
-                label: "文件夹名称",
-                actionTitle: "创建"
+                title: L10n.string("ui.84244abc71de03ac"),
+                label: L10n.string("ui.bacf701908d8cf45"),
+                actionTitle: L10n.string("ui.cde2cd071d25bbab")
             ) { name in
                 model.createFolder(name: name)
                 isCreatingFolder = false
@@ -535,10 +546,10 @@ private struct MobileFileBrowser: View {
         }
         .sheet(item: $itemToRename) { item in
             MobileTextInputSheet(
-                title: "重命名",
-                label: "新名称",
+                title: L10n.string("ui.0d0cbac2eee54113"),
+                label: L10n.string("ui.92ddb51db6c45cf7"),
                 initialValue: item.name,
-                actionTitle: "保存"
+                actionTitle: L10n.string("ui.a3030bf8f16dc63c")
             ) { name in
                 model.rename(item, to: name)
                 itemToRename = nil
@@ -546,24 +557,27 @@ private struct MobileFileBrowser: View {
             .presentationDetents([.medium])
         }
         .confirmationDialog(
-            "删除“\(itemToDelete?.name ?? "")”？",
+            L10n.string(
+                "file.delete.confirm",
+                itemToDelete?.name ?? ""
+            ),
             isPresented: Binding(
                 get: { itemToDelete != nil },
                 set: { if !$0 { itemToDelete = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
+            Button(L10n.string("ui.2f9daa828907b93f"), role: .destructive) {
                 if let itemToDelete {
                     model.delete([itemToDelete])
                 }
                 itemToDelete = nil
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 itemToDelete = nil
             }
         } message: {
-            Text("删除后能否恢复取决于共享文件夹的回收站设置。")
+            Text(L10n.string("ui.01c3021b19039967"))
         }
     }
 }
@@ -580,8 +594,8 @@ private struct MobilePhotosView: View {
     var body: some View {
         if media.isEmpty && !model.isLoading {
             MobileEmptyView(
-                title: "没有找到照片",
-                message: "当前目录没有可显示的照片或视频。",
+                title: L10n.string("ui.7ac5626d1ad8df4e"),
+                message: L10n.string("ui.69e9a23473708e14"),
                 systemImage: "photo.on.rectangle.angled"
             )
         } else {
@@ -624,8 +638,8 @@ private struct MobileChatView: View {
     var body: some View {
         if model.conversations.isEmpty && !model.isLoading {
             MobileEmptyView(
-                title: "还没有会话",
-                message: "在 Synology Chat 中开始会话后会显示在这里。",
+                title: L10n.string("ui.6c5e17bc9823f3b3"),
+                message: L10n.string("ui.e779d9db48c695e6"),
                 systemImage: "bubble.left.and.bubble.right"
             )
         } else {
@@ -637,7 +651,7 @@ private struct MobileChatView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(conversation.title)
                             .fontWeight(.semibold)
-                        Text(conversation.lastMessageSummary ?? "\(conversation.memberCount ?? 0) 位成员")
+                        Text(conversation.lastMessageSummary ?? L10n.string("ui.edc93fc6672e581a", String(describing: conversation.memberCount ?? 0)))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -650,7 +664,7 @@ private struct MobileChatView: View {
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
                             .background(.blue, in: .capsule)
-                            .accessibilityLabel("\(conversation.unreadCount) 条未读消息")
+                            .accessibilityLabel(L10n.string("ui.d03793ec01fb7aee", String(describing: conversation.unreadCount)))
                     }
                 }
                 .padding(.vertical, 4)
@@ -670,8 +684,8 @@ private struct MobileDownloadsView: View {
             let tasks = model.downloadSnapshot?.tasks ?? []
             if tasks.isEmpty && !model.isLoading {
                 MobileEmptyView(
-                    title: "没有下载任务",
-                    message: "添加网址或磁力链接开始下载。",
+                    title: L10n.string("ui.e0c9f46a0d2db5c0"),
+                    message: L10n.string("ui.2b2a88ea06320786"),
                     systemImage: "arrow.down.circle"
                 )
             } else {
@@ -704,7 +718,7 @@ private struct MobileDownloadsView: View {
                 Button {
                     isCreating = true
                 } label: {
-                    Label("添加下载", systemImage: "plus")
+                    Label(L10n.string("ui.52b312406b04b9a7"), systemImage: "plus")
                 }
             }
         }
@@ -719,47 +733,47 @@ private struct MobileDownloadsView: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("暂停") {
+            Button(L10n.string("ui.8d12fc0d4eb26021")) {
                 if let selectedTask {
                     model.controlDownload(selectedTask, action: .pause)
                 }
                 selectedTask = nil
             }
-            Button("继续") {
+            Button(L10n.string("ui.7c9691192f1b7340")) {
                 if let selectedTask {
                     model.controlDownload(selectedTask, action: .resume)
                 }
                 selectedTask = nil
             }
-            Button("移除任务", role: .destructive) {
+            Button(L10n.string("ui.629aa1d4eb56d351"), role: .destructive) {
                 taskToDelete = selectedTask
                 selectedTask = nil
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 selectedTask = nil
             }
         }
         .confirmationDialog(
-            "移除下载任务？",
+            L10n.string("ui.55fcd31b99791e0a"),
             isPresented: Binding(
                 get: { taskToDelete != nil },
                 set: { if !$0 { taskToDelete = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("只移除任务", role: .destructive) {
+            Button(L10n.string("ui.219d13da55a2a9dd"), role: .destructive) {
                 if let taskToDelete {
                     model.deleteDownload(taskToDelete, removeData: false)
                 }
                 taskToDelete = nil
             }
-            Button("移除任务和已下载文件", role: .destructive) {
+            Button(L10n.string("ui.5297eed6982a576a"), role: .destructive) {
                 if let taskToDelete {
                     model.deleteDownload(taskToDelete, removeData: true)
                 }
                 taskToDelete = nil
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 taskToDelete = nil
             }
         }
@@ -775,26 +789,26 @@ private struct MobileDownloadSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("下载来源") {
-                    TextField("网址或磁力链接", text: $uri, axis: .vertical)
+                Section(L10n.string("ui.e2f01c220af7045b")) {
+                    TextField(L10n.string("ui.ef4b8ad47f1e998e"), text: $uri, axis: .vertical)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
                 }
-                Section("保存位置") {
-                    TextField("NAS 文件夹（可选）", text: $destination)
+                Section(L10n.string("ui.0b7e2876922e4662")) {
+                    TextField(L10n.string("ui.c4cabe337e8400f7"), text: $destination)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
             }
-            .navigationTitle("添加下载")
+            .navigationTitle(L10n.string("ui.52b312406b04b9a7"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { isPresented = false }
+                    Button(L10n.string("ui.2cd0f3be8738a86c")) { isPresented = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("创建") {
+                    Button(L10n.string("ui.cde2cd071d25bbab")) {
                         model.createDownload(
                             uri: uri,
                             destination: destination.isEmpty ? nil : destination
@@ -821,10 +835,10 @@ private struct MobileContainersView: View {
     var body: some View {
         VStack(spacing: 0) {
             Picker("", selection: $tab) {
-                Text("容器").tag(0)
-                Text("映像").tag(1)
-                Text("网络").tag(2)
-                Text("项目").tag(3)
+                Text(L10n.string("ui.6d23f04b26967d64")).tag(0)
+                Text(L10n.string("ui.ceb4432ba2356217")).tag(1)
+                Text(L10n.string("ui.97b31b5d63f57e51")).tag(2)
+                Text(L10n.string("ui.79f326be4409d51f")).tag(3)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -838,7 +852,7 @@ private struct MobileContainersView: View {
                 resourceList(model.containerSnapshot?.images ?? []) { item in
                     imageToDelete = item
                 } title: { "\($0.repository):\($0.tag)" } detail: {
-                    $0.isInUse ? "使用中" : ByteCountFormatter.string(
+                    $0.isInUse ? L10n.string("ui.fa48e89389404e60") : ByteCountFormatter.string(
                         fromByteCount: $0.sizeBytes ?? 0,
                         countStyle: .file
                     )
@@ -847,11 +861,11 @@ private struct MobileContainersView: View {
                 resourceList(model.containerSnapshot?.networks ?? []) { item in
                     networkToDelete = item
                 } title: { $0.name } detail: {
-                    "\($0.driver) · \($0.connectedContainerCount) 个容器"
+                    L10n.string("ui.0b8b8f8e7062c3de", String(describing: $0.driver), String(describing: $0.connectedContainerCount))
                 }
             default:
                 resourceList(model.containerSnapshot?.projects ?? []) { _ in
-                } title: { $0.name } detail: { "\($0.status) · \($0.containerCount) 个容器" }
+                } title: { $0.name } detail: { L10n.string("ui.0b8b8f8e7062c3de", String(describing: $0.status), String(describing: $0.containerCount)) }
             }
         }
         .toolbar {
@@ -860,7 +874,7 @@ private struct MobileContainersView: View {
                     Button {
                         isCreatingNetwork = true
                     } label: {
-                        Label("新建网络", systemImage: "plus")
+                        Label(L10n.string("ui.bbb95fc4344b8391"), systemImage: "plus")
                     }
                 }
             }
@@ -873,55 +887,55 @@ private struct MobileContainersView: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("启动") {
+            Button(L10n.string("ui.56410fc65314dfb5")) {
                 if let selectedContainer {
                     model.controlContainer(selectedContainer, action: .start)
                 }
                 selectedContainer = nil
             }
-            Button("停止") {
+            Button(L10n.string("ui.ca4d973c0b006b75")) {
                 if let selectedContainer {
                     model.controlContainer(selectedContainer, action: .stop)
                 }
                 selectedContainer = nil
             }
-            Button("重新启动") {
+            Button(L10n.string("ui.4c7c6cc2eb16ec30")) {
                 if let selectedContainer {
                     model.controlContainer(selectedContainer, action: .restart)
                 }
                 selectedContainer = nil
             }
-            Button("删除", role: .destructive) {
+            Button(L10n.string("ui.2f9daa828907b93f"), role: .destructive) {
                 containerToDelete = selectedContainer
                 selectedContainer = nil
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 selectedContainer = nil
             }
         }
         .deleteConfirmation(
-            title: containerToDelete.map { "删除“\($0.name)”？" } ?? "",
-            message: "容器会从 NAS 移除。映像和共享文件夹中的数据不会自动删除。",
+            title: containerToDelete.map { L10n.string("ui.58e4c3955dcfae87", String(describing: $0.name)) } ?? "",
+            message: L10n.string("ui.d146f8b315800ce5"),
             item: $containerToDelete,
             action: model.deleteContainer
         )
         .deleteConfirmation(
-            title: imageToDelete.map { "删除“\($0.repository):\($0.tag)”？" } ?? "",
-            message: "正在使用的映像无法删除，请先移除相关容器。",
+            title: imageToDelete.map { L10n.string("ui.bbbd5f8974e6dbfa", String(describing: $0.repository), String(describing: $0.tag)) } ?? "",
+            message: L10n.string("ui.80da3b4aa4e0bc1d"),
             item: $imageToDelete,
             action: model.deleteContainerImage
         )
         .deleteConfirmation(
-            title: networkToDelete.map { "删除“\($0.name)”？" } ?? "",
-            message: "请先确认没有容器仍连接到这个网络。",
+            title: networkToDelete.map { L10n.string("ui.58e4c3955dcfae87", String(describing: $0.name)) } ?? "",
+            message: L10n.string("ui.caa80c90b89fc069"),
             item: $networkToDelete,
             action: model.deleteContainerNetwork
         )
         .sheet(isPresented: $isCreatingNetwork) {
             MobileTextInputSheet(
-                title: "新建容器网络",
-                label: "网络名称",
-                actionTitle: "创建"
+                title: L10n.string("ui.49fe5148286aa7f8"),
+                label: L10n.string("ui.ac8d90dfa36e5134"),
+                actionTitle: L10n.string("ui.cde2cd071d25bbab")
             ) { name in
                 model.createContainerNetwork(name: name, driver: "bridge")
                 isCreatingNetwork = false
@@ -943,7 +957,7 @@ private struct MobileVirtualMachinesView: View {
     @State private var logLevel = ""
     @State private var logSearch = ""
 
-    private let tabs = ["虚拟机", "主机", "存储", "网络", "映像", "保护", "日志"]
+    private let tabs = [L10n.string("ui.f3fb4b3a41570007"), L10n.string("ui.e87d9f23a3f5a830"), L10n.string("ui.a3434acddb75d8fb"), L10n.string("ui.97b31b5d63f57e51"), L10n.string("ui.ceb4432ba2356217"), L10n.string("ui.0f810a7901cf0422"), L10n.string("ui.7dbac1c20f237bd4")]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -997,56 +1011,56 @@ private struct MobileVirtualMachinesView: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("启动") {
+            Button(L10n.string("ui.56410fc65314dfb5")) {
                 if let selectedMachine {
                     model.controlVirtualMachine(selectedMachine, action: .powerOn)
                 }
                 selectedMachine = nil
             }
-            Button("正常关机") {
+            Button(L10n.string("ui.0c6d079c4c60bcf5")) {
                 if let selectedMachine {
                     model.controlVirtualMachine(selectedMachine, action: .shutdown)
                 }
                 selectedMachine = nil
             }
-            Button("强制关机", role: .destructive) {
+            Button(L10n.string("ui.63cd126ae15f4036"), role: .destructive) {
                 if let selectedMachine {
                     model.controlVirtualMachine(selectedMachine, action: .powerOff)
                 }
                 selectedMachine = nil
             }
-            Button("删除", role: .destructive) {
+            Button(L10n.string("ui.2f9daa828907b93f"), role: .destructive) {
                 machineToDelete = selectedMachine
                 selectedMachine = nil
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 selectedMachine = nil
             }
         }
         .deleteConfirmation(
-            title: machineToDelete.map { "删除“\($0.name)”？" } ?? "",
-            message: "虚拟机及其配置会被移除。请先确认重要数据已有备份。",
+            title: machineToDelete.map { L10n.string("ui.58e4c3955dcfae87", String(describing: $0.name)) } ?? "",
+            message: L10n.string("ui.67d3d2f7145c7bb6"),
             item: $machineToDelete,
             action: model.deleteVirtualMachine
         )
         .deleteConfirmation(
-            title: networkToDelete.map { "删除“\($0.name)”？" } ?? "",
-            message: "删除后，连接到这个网络的虚拟机可能无法正常通信。",
+            title: networkToDelete.map { L10n.string("ui.58e4c3955dcfae87", String(describing: $0.name)) } ?? "",
+            message: L10n.string("ui.e022c53aee84c353"),
             item: $networkToDelete,
             action: model.deleteVirtualMachineNetwork
         )
         .deleteConfirmation(
-            title: imageToDelete.map { "删除“\($0.name)”？" } ?? "",
-            message: "映像会从 NAS 移除，已安装的虚拟机不会被删除。",
+            title: imageToDelete.map { L10n.string("ui.58e4c3955dcfae87", String(describing: $0.name)) } ?? "",
+            message: L10n.string("ui.e4520afef33a9eaa"),
             item: $imageToDelete,
             action: model.deleteVirtualMachineImage
         )
         .sheet(item: $networkToEdit) { network in
             MobileTextInputSheet(
-                title: "修改网络",
-                label: "网络名称",
+                title: L10n.string("ui.d1650277320baac5"),
+                label: L10n.string("ui.ac8d90dfa36e5134"),
                 initialValue: network.name,
-                actionTitle: "保存"
+                actionTitle: L10n.string("ui.a3030bf8f16dc63c")
             ) { name in
                 model.updateVirtualMachineNetwork(network, name: name)
                 networkToEdit = nil
@@ -1058,9 +1072,9 @@ private struct MobileVirtualMachinesView: View {
     private var protectionView: some View {
         VStack(spacing: 0) {
             Picker("", selection: $protectionTab) {
-                Text("保护计划").tag(0)
-                Text("计划策略").tag(1)
-                Text("保留策略").tag(2)
+                Text(L10n.string("ui.677050193f34702b")).tag(0)
+                Text(L10n.string("ui.457b5e7e319ab16a")).tag(1)
+                Text(L10n.string("ui.00213c7f272b9a59")).tag(2)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -1084,21 +1098,21 @@ private struct MobileVirtualMachinesView: View {
         return VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Picker("", selection: $logLevel) {
-                    Text("全部").tag("")
-                    Text("信息").tag("info")
-                    Text("警告").tag("warning")
-                    Text("错误").tag("error")
+                    Text(L10n.string("ui.5c55a67935af8f45")).tag("")
+                    Text(L10n.string("ui.e7028601e7da793d")).tag("info")
+                    Text(L10n.string("ui.a8b7a4480407ac8a")).tag("warning")
+                    Text(L10n.string("ui.0bc1fb72ae1be5c5")).tag("error")
                 }
                 .labelsHidden()
                 .frame(maxWidth: 150)
-                TextField("搜索日志", text: $logSearch)
+                TextField(L10n.string("ui.1b9b75f51d2061d7"), text: $logSearch)
                     .textFieldStyle(.roundedBorder)
             }
             .padding()
             if events.isEmpty {
                 MobileEmptyView(
-                    title: "没有日志",
-                    message: "当前筛选条件下没有可显示的记录。",
+                    title: L10n.string("ui.da494cd706341a64"),
+                    message: L10n.string("ui.fccab2a7972c8817"),
                     systemImage: "list.bullet.rectangle"
                 )
             } else {
@@ -1130,8 +1144,8 @@ private struct MobileVirtualMachinesView: View {
     ) -> some View {
         if resources.isEmpty && !model.isLoading {
             MobileEmptyView(
-                title: "没有可显示的项目",
-                message: "当前 NAS 没有返回这个分类的内容。",
+                title: L10n.string("ui.193f5172b1a610e3"),
+                message: L10n.string("ui.8a5055f70e40226c"),
                 systemImage: "shield"
             )
         } else {
@@ -1152,7 +1166,7 @@ private struct MobileVirtualMachinesView: View {
                                 .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("编辑")
+                        .accessibilityLabel(L10n.string("ui.051836569928a9f9"))
                     }
                     if let delete {
                         Button(role: .destructive) {
@@ -1162,7 +1176,7 @@ private struct MobileVirtualMachinesView: View {
                                 .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("删除")
+                        .accessibilityLabel(L10n.string("ui.2f9daa828907b93f"))
                     }
                 }
             }
@@ -1173,7 +1187,7 @@ private struct MobileVirtualMachinesView: View {
 private struct MobileNasSettingsView: View {
     @Bindable var model: MobileAppModel
     @State private var tab = 0
-    private let tabs = ["概览", "存储", "套件", "账号", "日志", "连接"]
+    private let tabs = [L10n.string("ui.fea405f9b01d1416"), L10n.string("ui.a3434acddb75d8fb"), L10n.string("ui.58be5abb3cf57752"), L10n.string("ui.311bb313fdeca6aa"), L10n.string("ui.7dbac1c20f237bd4"), L10n.string("ui.a5574109f0208e89")]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1212,13 +1226,13 @@ private struct MobileNasSettingsView: View {
         ScrollView {
             VStack(spacing: 14) {
                 if let overview = model.systemOverview {
-                    MobileSummaryCard(title: "系统", systemImage: "server.rack") {
-                        summaryLine("设备名称", overview.serverName)
-                        summaryLine("型号", overview.model ?? "—")
+                    MobileSummaryCard(title: L10n.string("ui.5b50d7c4b5950dc5"), systemImage: "server.rack") {
+                        summaryLine(L10n.string("ui.65d8f92232ae77b0"), overview.serverName)
+                        summaryLine(L10n.string("ui.322408c53beda26b"), overview.model ?? "—")
                         summaryLine("DSM", overview.version ?? "—")
-                        summaryLine("处理器", overview.cpuModel ?? "—")
+                        summaryLine(L10n.string("ui.43b8de30fe4bab74"), overview.cpuModel ?? "—")
                         summaryLine(
-                            "内存",
+                            L10n.string("ui.7d8f8c37ec7885bc"),
                             ByteCountFormatter.string(
                                 fromByteCount: overview.memoryBytes ?? 0,
                                 countStyle: .memory
@@ -1227,17 +1241,17 @@ private struct MobileNasSettingsView: View {
                     }
                 }
                 HStack(spacing: 12) {
-                    metricCard("存储空间", "\(model.storageSnapshot?.volumes.count ?? 0)", "externaldrive")
-                    metricCard("套件", "\(model.packages.count)", "shippingbox")
+                    metricCard(L10n.string("ui.26de3dd933ce00e3"), "\(model.storageSnapshot?.volumes.count ?? 0)", "externaldrive")
+                    metricCard(L10n.string("ui.58be5abb3cf57752"), "\(model.packages.count)", "shippingbox")
                 }
                 HStack(spacing: 12) {
                     metricCard(
-                        "账号",
+                        L10n.string("ui.311bb313fdeca6aa"),
                         "\(model.accountsAndGroups?.users.count ?? 0)",
                         "person.2"
                     )
                     metricCard(
-                        "活动连接",
+                        L10n.string("ui.3726bcb6903fa086"),
                         "\(model.connections?.connections.count ?? 0)",
                         "network"
                     )
@@ -1249,7 +1263,7 @@ private struct MobileNasSettingsView: View {
 
     private var storage: some View {
         List {
-            Section("存储空间") {
+            Section(L10n.string("ui.26de3dd933ce00e3")) {
                 ForEach(model.storageSnapshot?.volumes ?? []) { volume in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(volume.name)
@@ -1259,7 +1273,7 @@ private struct MobileNasSettingsView: View {
                     }
                 }
             }
-            Section("存储池") {
+            Section(L10n.string("ui.ba380b79ff47c4c2")) {
                 ForEach(model.storageSnapshot?.pools ?? []) { pool in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(pool.name)
@@ -1269,7 +1283,7 @@ private struct MobileNasSettingsView: View {
                     }
                 }
             }
-            Section("硬盘") {
+            Section(L10n.string("ui.1e7098fe0f6eaae2")) {
                 ForEach(model.storageSnapshot?.disks ?? []) { disk in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(disk.name)
@@ -1299,12 +1313,12 @@ private struct MobileNasSettingsView: View {
 
     private var accounts: some View {
         List {
-            Section("账号") {
+            Section(L10n.string("ui.311bb313fdeca6aa")) {
                 ForEach(model.accountsAndGroups?.users ?? []) { account in
                     accountRow(account)
                 }
             }
-            Section("群组") {
+            Section(L10n.string("ui.f3f8bcf3f57de41f")) {
                 ForEach(model.accountsAndGroups?.groups ?? []) { account in
                     accountRow(account)
                 }
@@ -1330,8 +1344,14 @@ private struct MobileNasSettingsView: View {
     private var connectionEntries: some View {
         List(model.connections?.connections ?? []) { connection in
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(connection.account) · \(connection.protocolName ?? "DSM")")
-                Text(connection.source ?? connection.location ?? "未知设备")
+                Text(
+                    L10n.string(
+                        "connection.account_protocol",
+                        connection.account,
+                        connection.protocolName ?? L10n.string("protocol.dsm")
+                    )
+                )
+                Text(connection.source ?? connection.location ?? L10n.string("ui.8ca01a9ba438675d"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1370,25 +1390,31 @@ private struct MobileSettingsView: View {
 
     var body: some View {
         List {
-            Section("功能模块") {
+            Section(L10n.string("settings.language.title")) {
+                AppLanguagePicker()
+                Text(L10n.string("settings.language.footer"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section(L10n.string("ui.7785a5282f543671")) {
                 ForEach(MobileModule.allCases) { module in
                     HStack {
                         Label(module.title, systemImage: module.systemImage)
                         Spacer()
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
-                            .accessibilityLabel("已启用")
+                            .accessibilityLabel(L10n.string("ui.dfb802238b38fbd4"))
                     }
                 }
             }
-            Section("安全") {
+            Section(L10n.string("ui.afb63a620bdcff15")) {
                 Label(
-                    "只有开启“记住密码”后，密码才会由系统钥匙串安全保护。",
+                    L10n.string("ui.fd5992f83ae2e9a9"),
                     systemImage: "lock.shield"
                 )
             }
             Section {
-                Button("退出登录", role: .destructive) {
+                Button(L10n.string("ui.3ab8cc15939f3b5c"), role: .destructive) {
                     model.logout()
                 }
             }
@@ -1429,7 +1455,7 @@ private struct MobileTextInputSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button(L10n.string("ui.2cd0f3be8738a86c")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(actionTitle) {
@@ -1495,13 +1521,13 @@ private extension View {
             ),
             titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
+            Button(L10n.string("ui.2f9daa828907b93f"), role: .destructive) {
                 if let value = item.wrappedValue {
                     action(value)
                 }
                 item.wrappedValue = nil
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
                 item.wrappedValue = nil
             }
         } message: {
@@ -1520,8 +1546,8 @@ private func resourceList<Item: Identifiable>(
     Group {
         if items.isEmpty {
             MobileEmptyView(
-                title: "没有可显示的项目",
-                message: "当前 NAS 没有返回这个分类的内容。",
+                title: L10n.string("ui.193f5172b1a610e3"),
+                message: L10n.string("ui.8a5055f70e40226c"),
                 systemImage: "tray"
             )
         } else {

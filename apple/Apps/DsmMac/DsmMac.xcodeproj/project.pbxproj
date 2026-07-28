@@ -8,12 +8,13 @@
 
 /* Begin PBXBuildFile section */
 		04BF49113047E6A5BFDD0565 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = CB5D2FCD484E6C915A3AF4BB /* Localizable.strings */; };
+		0BF65A78DC3488741ACAA862 /* DsmNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = 6A578FB6D5B34A59438162B6 /* DsmNetwork */; };
 		15984B33D2FC6DC271096E4A /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D43383FD609AFA6A0605CEA /* WorkspaceView.swift */; };
 		1E07976CF65B26FF6DCC92F7 /* AppContentLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAA28F9CA875E65C60C3B1FE /* AppContentLayout.swift */; };
 		3679216DDA49A20D83B8411A /* NasAdministrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F276AF6EC0C343DF594E76B /* NasAdministrationView.swift */; };
 		3F7B3902FFF181AEC9D25BEE /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 55636F64951E9DD6841A1586 /* InfoPlist.strings */; };
 		3FCADE45FE1B6CE377E360BA /* DsmMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */; };
-		4440F05E83E5ED0F48DAC304 /* DsmNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = 6A578FB6D5B34A59438162B6 /* DsmNetwork */; };
+		4440F05E83E5ED0F48DAC304 /* DsmCore in Frameworks */ = {isa = PBXBuildFile; productRef = CDFB3D25D6035AB51E143261 /* DsmCore */; };
 		46CE97C3D80547D7061224F2 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE9DB7D94AFC947DE39DF8D1 /* LoginView.swift */; };
 		4991FA2CB347811AEB834677 /* PhotoLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F424D8AB691E25447A263E5 /* PhotoLibraryModel.swift */; };
 		59C06DE7124461270B9173C6 /* ChatWorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE2A90B20C76F1C8B23067D1 /* ChatWorkspaceModel.swift */; };
@@ -21,7 +22,7 @@
 		756071EA5D77E4C53C9FCF75 /* AppIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = 903CFF29712CF8E5FC9DAB8F /* AppIcon.png */; };
 		7DED1007E77ED31FE27F7E62 /* ServiceManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC9DA1CDE1FC236E9AC8DEDB /* ServiceManagementView.swift */; };
 		836B31D0C4FF095E4FC1EFCF /* PhotoFolderDestinationPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE8A84A73C0B512AF504E7AD /* PhotoFolderDestinationPicker.swift */; };
-		A8947CF70F1CC5F62D83C33C /* DsmCore in Frameworks */ = {isa = PBXBuildFile; productRef = CDFB3D25D6035AB51E143261 /* DsmCore */; };
+		A8947CF70F1CC5F62D83C33C /* DsmLocalization in Frameworks */ = {isa = PBXBuildFile; productRef = 068B0CB217B93D2E04F6CB21 /* DsmLocalization */; };
 		AB278A90DA574E3C49D06481 /* ServiceManagementModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2578503BB6C863138963CE6B /* ServiceManagementModel.swift */; };
 		AC6936BB386C9A829A221F34 /* WorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6DF22565675FC82D7CC686 /* WorkspaceModel.swift */; };
 		B6FA5CB7DA8790CA0A105940 /* NasAdministrationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF05BE448D0653B1A065559A /* NasAdministrationModel.swift */; };
@@ -65,8 +66,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A8947CF70F1CC5F62D83C33C /* DsmCore in Frameworks */,
-				4440F05E83E5ED0F48DAC304 /* DsmNetwork in Frameworks */,
+				A8947CF70F1CC5F62D83C33C /* DsmLocalization in Frameworks */,
+				4440F05E83E5ED0F48DAC304 /* DsmCore in Frameworks */,
+				0BF65A78DC3488741ACAA862 /* DsmNetwork in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -151,6 +153,7 @@
 			);
 			name = DsmMac;
 			packageProductDependencies = (
+				068B0CB217B93D2E04F6CB21 /* DsmLocalization */,
 				CDFB3D25D6035AB51E143261 /* DsmCore */,
 				6A578FB6D5B34A59438162B6 /* DsmNetwork */,
 			);
@@ -454,6 +457,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		068B0CB217B93D2E04F6CB21 /* DsmLocalization */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DsmLocalization;
+		};
 		6A578FB6D5B34A59438162B6 /* DsmNetwork */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DsmNetwork;

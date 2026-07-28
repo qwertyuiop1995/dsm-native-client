@@ -1,4 +1,5 @@
 import Foundation
+import DsmLocalization
 
 public enum FileKind: String, Codable, Sendable {
     case file
@@ -427,7 +428,7 @@ public extension FileRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "暂时无法识别这个文件的内容。"
+            safeUserMessage: L10n.string("shared.3350074ec48130fc")
         )
     }
 
@@ -435,7 +436,7 @@ public extension FileRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 暂不能校验重复文件。"
+            safeUserMessage: L10n.string("shared.f9672d024946937d")
         )
     }
 
@@ -443,7 +444,7 @@ public extension FileRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "当前连接暂不支持重命名，请更新 DSM 后重试。"
+            safeUserMessage: L10n.string("shared.fac438462e2f0a41")
         )
     }
 
@@ -458,7 +459,7 @@ public extension FileRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "当前连接暂不支持压缩，请更新 DSM 后重试。"
+            safeUserMessage: L10n.string("shared.ac6ef8446266ccf7")
         )
     }
 
@@ -475,7 +476,7 @@ public extension FileRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "当前连接暂不支持解压缩，请更新 DSM 后重试。"
+            safeUserMessage: L10n.string("shared.f124b9115a6e0be4")
         )
     }
 
@@ -483,7 +484,7 @@ public extension FileRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "当前连接暂不支持读取压缩包内容，请更新 DSM 后重试。"
+            safeUserMessage: L10n.string("shared.a94bf064d8799444")
         )
     }
 
@@ -493,7 +494,7 @@ public extension FileRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 暂不支持创建远程位置。"
+            safeUserMessage: L10n.string("shared.cb48bca536580be8")
         )
     }
 
@@ -504,7 +505,7 @@ public extension FileRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 暂不支持修改远程位置。"
+            safeUserMessage: L10n.string("shared.6745ef07c779b7e4")
         )
     }
 
@@ -512,7 +513,7 @@ public extension FileRepository {
         throw AppError(
             category: .apiUnavailable,
             isRetryable: false,
-            safeUserMessage: "这台 NAS 暂不支持删除远程位置。"
+            safeUserMessage: L10n.string("shared.b43c378e71c2c62f")
         )
     }
 }

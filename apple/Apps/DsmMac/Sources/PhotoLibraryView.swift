@@ -1,6 +1,7 @@
 import AppKit
 import DsmCore
 import SwiftUI
+import DsmLocalization
 
 struct PhotoLibraryView: View {
     @Bindable var model: PhotoLibraryModel
@@ -31,10 +32,13 @@ struct PhotoLibraryView: View {
         let sorted = grouped.values.compactMap { sections -> YearMonth? in
             let sortedSections = sections.sorted { $0.date < $1.date }
             guard let first = sortedSections.first else { return nil }
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy 年 M 月"
-            formatter.locale = Locale(identifier: "zh_CN")
-            return YearMonth(id: first.date, title: formatter.string(from: first.date))
+            let title = first.date.formatted(
+                Date.FormatStyle()
+                    .year()
+                    .month(.wide)
+                    .locale(L10n.locale)
+            )
+            return YearMonth(id: first.date, title: title)
         }
         return sorted.sorted { $0.id < $1.id }
     }
@@ -76,9 +80,9 @@ struct PhotoLibraryView: View {
             .font(.headline)
             .lineLimit(1)
 
-            Picker("浏览方式", selection: browseModeSelection) {
-                Label("时间线", systemImage: "clock").tag(PhotoBrowseMode.timeline)
-                Label("相册", systemImage: "rectangle.stack").tag(PhotoBrowseMode.albums)
+            Picker(L10n.string("ui.fe2663358fdbc7f3"), selection: browseModeSelection) {
+                Label(L10n.string("ui.f1241a97b0821a99"), systemImage: "clock").tag(PhotoBrowseMode.timeline)
+                Label(L10n.string("ui.38793c1c1c23437e"), systemImage: "rectangle.stack").tag(PhotoBrowseMode.albums)
             }
             .pickerStyle(.segmented)
             .fixedSize()
@@ -93,9 +97,9 @@ struct PhotoLibraryView: View {
                         }
                     }
                 } label: {
-                    Label("日期", systemImage: "calendar")
+                    Label(L10n.string("ui.70d0c1b33626ba4b"), systemImage: "calendar")
                 }
-                .help("跳到指定年月的照片")
+                .help(L10n.string("ui.5473ed3722c21e8c"))
             }
 
             Spacer()
@@ -103,11 +107,11 @@ struct PhotoLibraryView: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("搜索照片或视频", text: $model.searchText)
+                TextField(L10n.string("ui.02fd538b5510e8ba"), text: $model.searchText)
                     .textFieldStyle(.plain)
                     .frame(width: 180)
                 if !model.searchText.isEmpty {
-                    Button("清除搜索", systemImage: "xmark.circle.fill") {
+                    Button(L10n.string("ui.ee32f25f70508f9c"), systemImage: "xmark.circle.fill") {
                         model.searchText = ""
                     }
                     .labelStyle(.iconOnly)
@@ -120,25 +124,25 @@ struct PhotoLibraryView: View {
             .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 7))
 
             Menu {
-                Picker("媒体类型", selection: $model.mediaFilter) {
-                    Label("全部", systemImage: "photo.on.rectangle.angled").tag(PhotoMediaFilter.all)
-                    Label("照片", systemImage: "photo").tag(PhotoMediaFilter.images)
-                    Label("视频", systemImage: "video").tag(PhotoMediaFilter.videos)
+                Picker(L10n.string("ui.296225a8ac50bbe9"), selection: $model.mediaFilter) {
+                    Label(L10n.string("ui.5c55a67935af8f45"), systemImage: "photo.on.rectangle.angled").tag(PhotoMediaFilter.all)
+                    Label(L10n.string("ui.7b50017ae47eca32"), systemImage: "photo").tag(PhotoMediaFilter.images)
+                    Label(L10n.string("ui.c20f7618d330a854"), systemImage: "video").tag(PhotoMediaFilter.videos)
                 }
             } label: {
                 Label(mediaFilterTitle, systemImage: "line.3.horizontal.decrease.circle")
             }
-            .help("按照片或视频筛选")
+            .help(L10n.string("ui.9577c61b76be01e6"))
 
             if model.spaces.count > 1 {
-                Picker("照片空间", selection: spaceSelection) {
+                Picker(L10n.string("ui.afbc722b9ad55bef"), selection: spaceSelection) {
                     ForEach(model.spaces) { space in
                         Text(space.title).tag(Optional(space.id))
                     }
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
-                .accessibilityHint("切换个人照片和共享照片")
+                .accessibilityHint(L10n.string("ui.3e5a89a799968aab"))
             } else if let space = model.selectedSpace {
                 Text(space.title)
                     .font(.subheadline)
@@ -184,7 +188,11 @@ struct PhotoLibraryView: View {
         .padding(.vertical, 5)
         .background(.quaternary.opacity(0.55), in: Capsule())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(isAlbumsRoot ? "共有 \(stats.total) 个相册" : "媒体库共计 \(stats.total) 项，包含 \(stats.images) 张照片，\(stats.videos) 个视频")
+        .accessibilityLabel(
+            isAlbumsRoot
+                ? L10n.string("photo.albums.count", String(stats.total))
+                : L10n.string("ui.7629e90c4abacf06", String(describing: stats.total), String(describing: stats.images), String(describing: stats.videos))
+        )
     }
 
     private static func formattedNumber(_ number: Int) -> String {
@@ -208,11 +216,11 @@ struct PhotoLibraryView: View {
             VStack(spacing: 0) {
                 Spacer().frame(height: 36)
                 ContentUnavailableView {
-                    Label("没有可浏览的照片空间", systemImage: "photo.badge.exclamationmark")
+                    Label(L10n.string("ui.8c1040ae852de1b8"), systemImage: "photo.badge.exclamationmark")
                 } description: {
-                    Text(model.errorMessage ?? "请确认个人照片空间或共享照片空间已在 NAS 中启用，并允许当前账号访问。")
+                    Text(model.errorMessage ?? L10n.string("ui.c9e8421e4283b968"))
                 } actions: {
-                    Button("重新检查") { Task { await model.reloadSpaces() } }
+                    Button(L10n.string("ui.c25fb86b1e96e063")) { Task { await model.reloadSpaces() } }
                 }
                 Spacer()
             }
@@ -221,11 +229,11 @@ struct PhotoLibraryView: View {
             VStack(spacing: 0) {
                 Spacer().frame(height: 36)
                 ContentUnavailableView {
-                    Label("照片暂时无法显示", systemImage: "exclamationmark.triangle")
+                    Label(L10n.string("ui.6d0edd7c46b17a50"), systemImage: "exclamationmark.triangle")
                 } description: {
                     Text(errorMessage)
                 } actions: {
-                    Button("重新扫描全部照片") { Task { await model.refreshAll() } }
+                    Button(L10n.string("ui.049019b1718726b4")) { Task { await model.refreshAll() } }
                 }
                 Spacer()
             }
@@ -239,12 +247,12 @@ struct PhotoLibraryView: View {
                     Text(emptyDescription)
                 } actions: {
                     if !model.searchText.isEmpty || model.mediaFilter != .all {
-                        Button("清除筛选") {
+                        Button(L10n.string("ui.657d9cbf45ec9e6a")) {
                             model.searchText = ""
                             model.mediaFilter = .all
                         }
                     } else {
-                        Button("重新扫描全部照片") { Task { await model.refreshAll() } }
+                        Button(L10n.string("ui.049019b1718726b4")) { Task { await model.refreshAll() } }
                     }
                 }
                 Spacer()
@@ -280,7 +288,7 @@ struct PhotoLibraryView: View {
                     }
 
                     if model.isLoadingMore {
-                        ProgressView("正在载入更多照片…")
+                        ProgressView(L10n.string("ui.b88bf6169458eaa4"))
                             .controlSize(.small)
                             .padding(.bottom, 20)
                     }
@@ -306,25 +314,25 @@ struct PhotoLibraryView: View {
             ProgressView()
                 .controlSize(.small)
                 .accessibilityLabel(
-                    "正在检查照片变更，已载入 \(model.timelineItems.count) 项，已检查 \(model.timelineScannedFolderCount) 个文件夹"
+                    L10n.string("ui.6185e0d22d3da633", String(describing: model.timelineItems.count), String(describing: model.timelineScannedFolderCount))
                 )
 
-            Text("正在检查照片变更")
+            Text(L10n.string("ui.23779fefc94e1de7"))
                 .font(.callout.weight(.medium))
                 .accessibilityHidden(true)
 
-            Text("已载入 \(model.timelineItems.count) 项 · 已检查 \(model.timelineScannedFolderCount) 个文件夹")
+            Text(L10n.string("ui.a538265360dc44d0", String(describing: model.timelineItems.count), String(describing: model.timelineScannedFolderCount)))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
 
             Spacer(minLength: 8)
 
-            Button("改用相册浏览") {
+            Button(L10n.string("ui.e2aeadd63577f274")) {
                 Task { await model.setBrowseMode(.albums) }
             }
             .buttonStyle(.borderless)
-            .accessibilityHint("停止当前时间线扫描并切换到相册浏览")
+            .accessibilityHint(L10n.string("ui.7d6a5cb47b1fa8e5"))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -335,16 +343,16 @@ struct PhotoLibraryView: View {
         ContentUnavailableView {
             ProgressView()
                 .controlSize(.large)
-                .accessibilityLabel("正在建立照片时间线")
+                .accessibilityLabel(L10n.string("ui.ebb0d72d354707bf"))
         } description: {
             VStack(spacing: 6) {
-                Text("正在建立照片时间线…")
+                Text(L10n.string("ui.3f3cf898ac905890"))
                     .font(.headline)
                     .foregroundStyle(.primary)
-                Text("已扫描 \(model.timelineScannedFolderCount) 个文件夹。首次打开会花一些时间，之后仍可切换到相册浏览。")
+                Text(L10n.string("ui.bdb069423b2a44ce", String(describing: model.timelineScannedFolderCount)))
             }
         } actions: {
-            Button("改用相册浏览") {
+            Button(L10n.string("ui.e2aeadd63577f274")) {
                 Task { await model.setBrowseMode(.albums) }
             }
         }
@@ -389,9 +397,9 @@ struct PhotoLibraryView: View {
             Label {
                 VStack(alignment: .leading, spacing: 2) {
                     if model.isRetryingTimelineFolders {
-                        Text("正在重试未读取的文件夹…")
+                        Text(L10n.string("ui.c3415704fad83ce7"))
                     } else {
-                        Text("有 \(model.timelineSkippedFolderCount) 个文件夹本次未能读取，其他照片已正常显示。")
+                        Text(L10n.string("ui.e6e3e7422369a608", String(describing: model.timelineSkippedFolderCount)))
                     }
                     if let message = model.timelineRetryMessage {
                         Text(message)
@@ -406,12 +414,12 @@ struct PhotoLibraryView: View {
 
             Spacer(minLength: 8)
 
-            Button("重试这些文件夹") {
+            Button(L10n.string("ui.52a6338d9a37348e")) {
                 Task { await model.retrySkippedTimelineFolders() }
             }
             .buttonStyle(.bordered)
             .disabled(model.isRetryingTimelineFolders)
-            .accessibilityHint("只重新读取本次失败的文件夹，不会重新扫描整个照片库")
+            .accessibilityHint(L10n.string("ui.917b504cc03432a8"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -438,7 +446,7 @@ struct PhotoLibraryView: View {
             }
             .padding(16)
         }
-        .accessibilityLabel("正在读取照片")
+        .accessibilityLabel(L10n.string("ui.bc7c663bcaa80f54"))
     }
 
     private var isAlbumsRoot: Bool {
@@ -447,8 +455,8 @@ struct PhotoLibraryView: View {
 
     private var titleText: String {
         switch model.browseMode {
-        case .timeline: "时间线"
-        case .albums: isAlbumsRoot ? "相册" : model.locationTitle
+        case .timeline: L10n.string("ui.f1241a97b0821a99")
+        case .albums: isAlbumsRoot ? L10n.string("ui.38793c1c1c23437e") : model.locationTitle
         }
     }
 
@@ -478,41 +486,26 @@ struct PhotoLibraryView: View {
 
     private var mediaFilterTitle: String {
         switch model.mediaFilter {
-        case .all: "全部"
-        case .images: "照片"
-        case .videos: "视频"
+        case .all: L10n.string("ui.5c55a67935af8f45")
+        case .images: L10n.string("ui.7b50017ae47eca32")
+        case .videos: L10n.string("ui.c20f7618d330a854")
         }
     }
 
     private var emptyTitle: String {
-        if !model.searchText.isEmpty { return "没有找到匹配项目" }
-        if model.mediaFilter != .all { return "没有符合筛选条件的项目" }
-        if isAlbumsRoot { return "这里还没有相册" }
-        return "这里还没有照片"
+        if !model.searchText.isEmpty { return L10n.string("ui.c61a0643dcd67af9") }
+        if model.mediaFilter != .all { return L10n.string("ui.85a5f6069fcb6530") }
+        if isAlbumsRoot { return L10n.string("ui.0c349a4e26f357d7") }
+        return L10n.string("ui.b4e2170ec781bf89")
     }
 
     private var emptyDescription: String {
         if !model.searchText.isEmpty || model.mediaFilter != .all {
-            return "换一个关键词或清除筛选后再试。"
+            return L10n.string("ui.504665f05c0d4218")
         }
-        if isAlbumsRoot { return "当前照片空间中尚无文件夹。" }
-        return "使用工具栏的“上传”把照片或视频添加到当前位置。"
+        if isAlbumsRoot { return L10n.string("ui.0c132f8c1951432b") }
+        return L10n.string("ui.14b0d9cf43643b93")
     }
-
-    private static let dayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.dateStyle = .long
-        formatter.timeStyle = .none
-        return formatter
-    }()
-}
-
-private struct PhotoTimelineSection: Identifiable {
-    let date: Date
-    let title: String
-    let items: [PhotoLibraryItem]
-    var id: Date { date }
 }
 
 private struct PhotoLibraryCell: View {
@@ -548,9 +541,9 @@ private struct PhotoLibraryCell: View {
         )
         .contextMenu {
             if item.isFolder {
-                Button(model.browseMode == .albums ? "打开相册" : "打开文件夹") { Task { await model.open(item) } }
+                Button(model.browseMode == .albums ? L10n.string("ui.2a6babd672171738") : L10n.string("ui.fcf8b4bff0df782d")) { Task { await model.open(item) } }
             } else {
-                Button("打开预览") { onPreview(item) }
+                Button(L10n.string("ui.fbae1674bbbe17d9")) { onPreview(item) }
             }
 
             Divider()
@@ -558,31 +551,41 @@ private struct PhotoLibraryCell: View {
             Button {
                 onDownload(contextTargets)
             } label: {
-                Label(contextTargets.count > 1 ? "下载 \(contextTargets.count) 项" : "下载", systemImage: "square.and.arrow.down")
+                Label(
+                    contextTargets.count > 1
+                        ? L10n.string("items.download.count", String(contextTargets.count))
+                        : L10n.string("ui.4673a23061656125"),
+                    systemImage: "square.and.arrow.down"
+                )
             }
 
             if isRecyclePath {
                 Button {
                     onRestore(item)
                 } label: {
-                    Label("恢复到原位置", systemImage: "arrow.uturn.backward.circle")
+                    Label(L10n.string("ui.571cbba6210117a0"), systemImage: "arrow.uturn.backward.circle")
                 }
             } else {
                 Button {
                     onMove(item)
                 } label: {
-                    Label("移动到…", systemImage: "folder.badge.arrow.right")
+                    Label(L10n.string("ui.0bee1672c6d4a3a9"), systemImage: "folder.badge.arrow.right")
                 }
 
                 Button(role: .destructive) {
                     onDelete(contextTargets)
                 } label: {
-                    Label(contextTargets.count > 1 ? "删除 \(contextTargets.count) 项…" : "删除…", systemImage: "trash")
+                    Label(
+                        contextTargets.count > 1
+                            ? L10n.string("items.delete.count", String(contextTargets.count))
+                            : L10n.string("ui.0552e329ccf875fb"),
+                        systemImage: "trash"
+                    )
                 }
             }
         }
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint(item.isFolder ? (model.browseMode == .albums ? "打开这个相册" : "打开这个照片文件夹") : "单击选择，双击打开预览")
+        .accessibilityHint(item.isFolder ? (model.browseMode == .albums ? L10n.string("ui.624be41f0ec5751b") : L10n.string("ui.192e635718834fc0")) : L10n.string("ui.87e0cc516a580a29"))
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
@@ -613,7 +616,7 @@ private struct PhotoLibraryCell: View {
                                     HStack(spacing: 3) {
                                         Image(systemName: "livephoto")
                                             .font(.caption2.weight(.bold))
-                                        Text("LIVE")
+                                        Text(L10n.string("photo.live"))
                                             .font(.system(size: 9, weight: .bold))
                                     }
                                     .padding(.horizontal, 5)
@@ -663,8 +666,18 @@ private struct PhotoLibraryCell: View {
     }
 
     private var accessibilityLabel: String {
-        if item.isFolder { return "\(model.browseMode == .albums ? "相册" : "文件夹")，\(item.name)" }
-        return "\(item.kind == .video ? "视频" : "照片")，\(item.name)\(isSelected ? "，已选择" : "")"
+        if item.isFolder {
+            return L10n.string(
+                "photo.item.accessibility",
+                model.browseMode == .albums ? L10n.string("photo.type.album") : L10n.string("photo.type.folder"),
+                item.name
+            )
+        }
+        return L10n.string(
+            "photo.item.accessibility",
+            item.kind == .video ? L10n.string("photo.type.video") : L10n.string("photo.type.photo"),
+            item.name + (isSelected ? L10n.string("selection.selected_suffix") : "")
+        )
     }
 
     private var contextTargets: [PhotoLibraryItem] {

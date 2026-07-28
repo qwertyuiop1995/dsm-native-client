@@ -1,5 +1,6 @@
 import AppKit
 import DsmCore
+import DsmLocalization
 import Foundation
 import SwiftUI
 import UserNotifications
@@ -81,24 +82,26 @@ final class SystemTransferNotifier: TransferNotifying {
     private func notificationTitle(for task: ActivityTask) -> String {
         let operation: String
         switch task.kind {
-        case .download: operation = "下载"
-        case .upload: operation = "上传"
-        case .copy: operation = "复制"
-        case .move: operation = "移动"
-        case .delete: operation = "删除"
-        case .restore: operation = "恢复"
-        case .compress: operation = "压缩"
-        case .extract: operation = "解压"
+        case .download: operation = L10n.string("ui.4673a23061656125")
+        case .upload: operation = L10n.string("ui.9e07e3c0532d4976")
+        case .copy: operation = L10n.string("ui.63d90d977348ab1f")
+        case .move: operation = L10n.string("ui.fc6bb436b8caf08b")
+        case .delete: operation = L10n.string("ui.2f9daa828907b93f")
+        case .restore: operation = L10n.string("ui.e0534b8a4e46a0cb")
+        case .compress: operation = L10n.string("ui.a22879cda61a8da0")
+        case .extract: operation = L10n.string("ui.a147ebf3581ab1ee")
         }
-        return task.state == .succeeded ? "\(operation)完成" : "\(operation)未完成"
+        return task.state == .succeeded
+            ? L10n.string("operation.completed", operation)
+            : L10n.string("operation.not_completed", operation)
     }
 
     private func notificationBody(for task: ActivityTask, profileName: String) -> String {
         if task.state == .succeeded {
-            return "“\(task.displayName)”已在 \(profileName) 完成。"
+            return L10n.string("ui.3175795e4bb280b2", String(describing: task.displayName), String(describing: profileName))
         }
-        let reason = task.failureMessage ?? "连接或权限出现问题"
-        return "“\(task.displayName)”未完成：\(reason) 可在传输中心重试。"
+        let reason = task.failureMessage ?? L10n.string("ui.954110b2ccd1bacb")
+        return L10n.string("ui.3721cf05827b270f", String(describing: task.displayName), String(describing: reason))
     }
 
     private static var isRunningTests: Bool {
@@ -140,10 +143,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 struct DsmMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
+    @State private var language = AppLanguageStore.shared
 
     var body: some Scene {
-        WindowGroup("app.window.title") {
+        WindowGroup(language.string("app.name")) {
             RootView(model: model)
+                .environment(language)
+                .environment(\.locale, language.locale)
                 .task {
                     model.load()
                 }

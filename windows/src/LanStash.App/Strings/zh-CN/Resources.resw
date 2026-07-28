@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="AppName" xml:space="preserve"><value>岚仓</value></data>
+  <data name="LanguageTitle" xml:space="preserve"><value>语言</value></data>
+  <data name="LanguageFollowSystem" xml:space="preserve"><value>跟随系统</value></data>
+  <data name="LanguageEnglish" xml:space="preserve"><value>English</value></data>
+  <data name="LanguageSimplifiedChinese" xml:space="preserve"><value>简体中文</value></data>
+  <data name="LanguageFallbackNote" xml:space="preserve"><value>系统语言不受支持时，岚仓会使用英语。</value></data>
+  <data name="ModuleFiles" xml:space="preserve"><value>文件浏览器</value></data>
+  <data name="ModulePhotos" xml:space="preserve"><value>照片</value></data>
+  <data name="ModuleChat" xml:space="preserve"><value>消息</value></data>
+  <data name="ModuleDownloads" xml:space="preserve"><value>下载管理</value></data>
+  <data name="ModuleContainers" xml:space="preserve"><value>容器管理</value></data>
+  <data name="ModuleVirtualMachines" xml:space="preserve"><value>虚拟机管理</value></data>
+  <data name="ModuleNasSettings" xml:space="preserve"><value>NAS 设置</value></data>
+  <data name="ModuleTransfers" xml:space="preserve"><value>传输中心</value></data>
+  <data name="ModuleSettings" xml:space="preserve"><value>设置</value></data>
+  <data name="ActionSignOut" xml:space="preserve"><value>退出登录</value></data>
+  <data name="CategoryOverview" xml:space="preserve"><value>概览</value></data>
+  <data name="CategoryContainers" xml:space="preserve"><value>容器</value></data>
+  <data name="CategoryVirtualMachines" xml:space="preserve"><value>虚拟机</value></data>
+  <data name="CategoryHosts" xml:space="preserve"><value>主机</value></data>
+  <data name="CategoryStorage" xml:space="preserve"><value>存储</value></data>
+  <data name="CategoryPackages" xml:space="preserve"><value>套件</value></data>
+  <data name="CategoryAccounts" xml:space="preserve"><value>账号</value></data>
+  <data name="CategoryLogs" xml:space="preserve"><value>日志</value></data>
+  <data name="CategoryConnections" xml:space="preserve"><value>连接</value></data>
+  <data name="CategoryNetworks" xml:space="preserve"><value>网络</value></data>
+  <data name="CategoryImages" xml:space="preserve"><value>映像</value></data>
+  <data name="CategoryProjects" xml:space="preserve"><value>项目</value></data>
+  <data name="CategoryProtection" xml:space="preserve"><value>保护</value></data>
+  <data name="CategorySecurity" xml:space="preserve"><value>安全</value></data>
+  <data name="BrandTitle.Text" xml:space="preserve"><value>岚仓</value></data>
+  <data name="BrandSubtitle.Text" xml:space="preserve"><value>管理你的 NAS</value></data>
+  <data name="AddNasButton.Content" xml:space="preserve"><value>添加 NAS</value></data>
+  <data name="SavedNasList.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>已保存的 NAS</value></data>
+  <data name="LoginTitle.Text" xml:space="preserve"><value>连接 NAS</value></data>
+  <data name="LoginSubtitle.Text" xml:space="preserve"><value>使用 DSM 账号登录；你可以选择在这台电脑上安全保存密码。</value></data>
+  <data name="ProfileNameInput.Header" xml:space="preserve"><value>名称</value></data>
+  <data name="NasAddressInput.Header" xml:space="preserve"><value>NAS 地址或 QuickConnect ID</value></data>
+  <data name="NasAddressInput.PlaceholderText" xml:space="preserve"><value>nas.example.com 或你的 QuickConnect ID</value></data>
+  <data name="UsernameInput.Header" xml:space="preserve"><value>用户名</value></data>
+  <data name="PasswordInput.Header" xml:space="preserve"><value>密码</value></data>
+  <data name="OtpInput.Header" xml:space="preserve"><value>验证码（如需要）</value></data>
+  <data name="RememberPasswordCheckBox.Content" xml:space="preserve"><value>在这台电脑上记住密码</value></data>
+  <data name="PasswordProtectionNote.Text" xml:space="preserve"><value>密码由 Windows 凭据管理器安全保护。</value></data>
+  <data name="AutoLoginCheckBox.Content" xml:space="preserve"><value>自动登录</value></data>
+  <data name="AutoLoginNote.Text" xml:space="preserve"><value>下次打开岚仓时自动连接这台 NAS。</value></data>
+  <data name="AdvancedConnectionExpander.Header" xml:space="preserve"><value>高级连接设置</value></data>
+  <data name="CustomPortInput.Header" xml:space="preserve"><value>自定义 HTTPS 端口</value></data>
+  <data name="CustomPortInput.PlaceholderText" xml:space="preserve"><value>自动选择</value></data>
+  <data name="CustomPortNote.Text" xml:space="preserve"><value>留空时由岚仓自动选择；填写后优先使用这个端口。</value></data>
+  <data name="ConnectButton.Content" xml:space="preserve"><value>连接</value></data>
+  <data name="WorkspaceSearchBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>搜索</value></data>
+  <data name="WorkspaceSearchBox.PlaceholderText" xml:space="preserve"><value>搜索</value></data>
+  <data name="ActionCreate.Label" xml:space="preserve"><value>新增</value></data>
+  <data name="ActionUp.Label" xml:space="preserve"><value>上一级</value></data>
+  <data name="ActionRename.Label" xml:space="preserve"><value>重命名</value></data>
+  <data name="ActionStart.Label" xml:space="preserve"><value>启动</value></data>
+  <data name="ActionStop.Label" xml:space="preserve"><value>停止</value></data>
+  <data name="ActionDelete.Label" xml:space="preserve"><value>删除</value></data>
+  <data name="ActionDelete" xml:space="preserve"><value>删除</value></data>
+  <data name="ActionRefresh.Label" xml:space="preserve"><value>刷新</value></data>
+  <data name="WorkspaceResourceList.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>项目</value></data>
+  <data name="ActionReload.Content" xml:space="preserve"><value>重新加载</value></data>
+  <data name="DefaultNasName" xml:space="preserve"><value>我的 NAS</value></data>
+  <data name="StatusCheckingNas" xml:space="preserve"><value>正在检查 NAS…</value></data>
+  <data name="StatusNasFoundSigningIn" xml:space="preserve"><value>已找到 NAS，正在登录…</value></data>
+  <data name="StatusRestoringLogin" xml:space="preserve"><value>正在恢复登录…</value></data>
+  <data name="ErrorConnectGeneric" xml:space="preserve"><value>无法连接到 NAS，请检查地址和登录信息后重试。</value></data>
+  <data name="ErrorSavedLoginExpired" xml:space="preserve"><value>保存的登录已失效。</value></data>
+  <data name="RecoverySignInAgain" xml:space="preserve"><value>请重新登录。</value></data>
+  <data name="RecoveryEnterPasswordAgain" xml:space="preserve"><value>请输入密码重新登录。</value></data>
+  <data name="RecoveryPasswordReady" xml:space="preserve"><value>密码已为你填好，请重新连接。</value></data>
+  <data name="ErrorLoadProfiles" xml:space="preserve"><value>无法读取本机保存的 NAS，请重新添加。</value></data>
+  <data name="EmptyNoItems" xml:space="preserve"><value>没有可显示的项目。</value></data>
+  <data name="ErrorLoadWorkspace" xml:space="preserve"><value>暂时无法读取，请检查连接后重试。</value></data>
+  <data name="ChatNoNewMessages" xml:space="preserve"><value>暂无新消息</value></data>
+  <data name="ChatUnreadCount" xml:space="preserve"><value>{0} 条未读</value></data>
+  <data name="DownloadTaskFallback" xml:space="preserve"><value>下载任务</value></data>
+  <data name="StatusConnected" xml:space="preserve"><value>已连接</value></data>
+  <data name="UnknownValue" xml:space="preserve"><value>未知</value></data>
+  <data name="StatusRunning" xml:space="preserve"><value>运行中</value></data>
+  <data name="ItemFolder" xml:space="preserve"><value>文件夹</value></data>
+  <data name="SystemUser" xml:space="preserve"><value>系统</value></data>
+  <data name="StatusNormal" xml:space="preserve"><value>正常</value></data>
+  <data name="StatusStopped" xml:space="preserve"><value>已停止</value></data>
+  <data name="StatusPaused" xml:space="preserve"><value>已暂停</value></data>
+  <data name="StatusWaiting" xml:space="preserve"><value>等待中</value></data>
+  <data name="StatusWarning" xml:space="preserve"><value>需要注意</value></data>
+  <data name="StatusError" xml:space="preserve"><value>异常</value></data>
+  <data name="DialogSignOutTitle" xml:space="preserve"><value>退出登录？</value></data>
+  <data name="DialogSignOutMessage" xml:space="preserve"><value>将退出当前连接并关闭自动登录；已保存的 NAS 信息和密码会保留。</value></data>
+  <data name="DialogSignOutAction" xml:space="preserve"><value>退出登录</value></data>
+  <data name="ActionCancel" xml:space="preserve"><value>取消</value></data>
+  <data name="FieldDownloadAddress" xml:space="preserve"><value>下载地址</value></data>
+  <data name="FieldNetworkName" xml:space="preserve"><value>网络名称</value></data>
+  <data name="FieldFolderName" xml:space="preserve"><value>文件夹名称</value></data>
+  <data name="FieldSaveLocationOptional" xml:space="preserve"><value>保存位置（可选）</value></data>
+  <data name="FieldNetworkType" xml:space="preserve"><value>网络类型</value></data>
+  <data name="DialogNewDownload" xml:space="preserve"><value>新增下载任务</value></data>
+  <data name="DialogNewNetwork" xml:space="preserve"><value>新增网络</value></data>
+  <data name="DialogNewFolder" xml:space="preserve"><value>新建文件夹</value></data>
+  <data name="ActionAdd" xml:space="preserve"><value>新增</value></data>
+  <data name="FieldNewName" xml:space="preserve"><value>新名称</value></data>
+  <data name="DialogRename" xml:space="preserve"><value>重命名</value></data>
+  <data name="ActionSave" xml:space="preserve"><value>保存</value></data>
+  <data name="DeleteDownloadedFiles" xml:space="preserve"><value>同时删除已经下载的文件</value></data>
+  <data name="DeleteItemWarning" xml:space="preserve"><value>“{0}”删除后无法恢复。</value></data>
+  <data name="DialogConfirmDelete" xml:space="preserve"><value>确认删除？</value></data>
+  <data name="ErrorOperationIncomplete" xml:space="preserve"><value>操作没有完成，请刷新后重试。</value></data>
+  <data name="ErrorOperationTitle" xml:space="preserve"><value>操作没有完成</value></data>
+  <data name="ActionAcknowledge" xml:space="preserve"><value>知道了</value></data>
+  <data name="WinShared03b4e19bbedaaf48" xml:space="preserve"><value>无法识别这个 QuickConnect ID</value></data>
+  <data name="WinShared07e42c78bef61378" xml:space="preserve"><value>请输入 QuickConnect ID、NAS 的 IP、域名或完整 HTTPS 地址。</value></data>
+  <data name="WinShared09f262a53ad074ca" xml:space="preserve"><value>请确认地址指向 DSM 后重试。</value></data>
+  <data name="WinShared0addf7c060c570ce" xml:space="preserve"><value>NAS 没有完成这次操作</value></data>
+  <data name="WinShared0dc50225eea5c275" xml:space="preserve"><value>NAS 没有确认这次更改</value></data>
+  <data name="WinShared11a208e43c34b77c" xml:space="preserve"><value>当前 NAS 不支持这项功能</value></data>
+  <data name="WinShared12188668a1d4cff1" xml:space="preserve"><value>当前账号没有权限</value></data>
+  <data name="WinShared165059223c7f83c1" xml:space="preserve"><value>QuickConnect 暂时无法建立中继连接</value></data>
+  <data name="WinShared17bab1054ab28010" xml:space="preserve"><value>NAS 没有开始搜索</value></data>
+  <data name="WinShared189ee06b7da78f3f" xml:space="preserve"><value>当前套件版本不支持这项操作</value></data>
+  <data name="WinShared199c5367bae9682d" xml:space="preserve"><value>请检查网络和地址后重试。</value></data>
+  <data name="WinShared2185bc1f61ec5011" xml:space="preserve"><value>QuickConnect 没有提供可用的直接连接</value></data>
+  <data name="WinShared23ac67f1f673dd23" xml:space="preserve"><value>NAS 地址格式不正确</value></data>
+  <data name="WinShared2580b8992c005ea7" xml:space="preserve"><value>请更新相关套件。</value></data>
+  <data name="WinShared2608798758baa746" xml:space="preserve"><value>填写后重新连接。</value></data>
+  <data name="WinShared2ad42c7573d49cbc" xml:space="preserve"><value>请使用最新代码重试。</value></data>
+  <data name="WinShared2d790edfcf9d3321" xml:space="preserve"><value>请输入 NAS 地址或 QuickConnect ID</value></data>
+  <data name="WinShared2f7ffa8e29481728" xml:space="preserve"><value>请核对账号、密码和验证码。</value></data>
+  <data name="WinShared307e0c332a164ea1" xml:space="preserve"><value>正在尝试外网直接连接…</value></data>
+  <data name="WinShared35129033ee98c3ee" xml:space="preserve"><value>NAS 尚未确认网络设置已保存，请刷新后重试。</value></data>
+  <data name="WinShared35964d160c6c4b32" xml:space="preserve"><value>没有找到这个 QuickConnect ID</value></data>
+  <data name="WinShared36d42da6d6cea95f" xml:space="preserve"><value>请检查拼写和 NAS 中的 QuickConnect 设置。</value></data>
+  <data name="WinShared371d84f48836296f" xml:space="preserve"><value>请更新 DSM 或相关套件。</value></data>
+  <data name="WinShared3b38866d76d21239" xml:space="preserve"><value>正在尝试局域网连接…</value></data>
+  <data name="WinShared3cd43f3a371513e2" xml:space="preserve"><value>需要输入双重验证代码</value></data>
+  <data name="WinShared3f7da50cab7bd49a" xml:space="preserve"><value>NAS 尚未确认网络已删除，请刷新后重试。</value></data>
+  <data name="WinShared408b64a41c09d2a0" xml:space="preserve"><value>QuickConnect 返回的连接无法确认属于这台 NAS</value></data>
+  <data name="WinShared4234d503af1c54d5" xml:space="preserve"><value>为了保护登录信息，请使用 HTTPS 地址。</value></data>
+  <data name="WinShared4470548cdf9d51c2" xml:space="preserve"><value>请刷新列表；如果项目仍存在，请确认没有其他任务正在使用它。</value></data>
+  <data name="WinShared46e3e4901826eb40" xml:space="preserve"><value>请输入验证器中的当前代码。</value></data>
+  <data name="WinShared4a1330714c58b25d" xml:space="preserve"><value>请使用具备相应权限的账号。</value></data>
+  <data name="WinShared51f93605004a3258" xml:space="preserve"><value>为保护登录信息，岚仓已停止连接。</value></data>
+  <data name="WinShared5448ceb91a80e260" xml:space="preserve"><value>请刷新后重试。</value></data>
+  <data name="WinShared5634da8d0d5a2089" xml:space="preserve"><value>QuickConnect 暂时没有响应</value></data>
+  <data name="WinShared5a870c4775a4ef6b" xml:space="preserve"><value>连接 NAS 超时</value></data>
+  <data name="WinShared6730f03f8272b1f9" xml:space="preserve"><value>请在 DSM 的 QuickConnect 高级设置中开启中继后重试。</value></data>
+  <data name="WinShared6744b4c6a9aa0038" xml:space="preserve"><value>已关闭</value></data>
+  <data name="WinShared6e75c1fff5138b30" xml:space="preserve"><value>请刷新列表并检查结果。</value></data>
+  <data name="WinShared6edbda7d2a81743a" xml:space="preserve"><value>正在建立 QuickConnect 安全中继…</value></data>
+  <data name="WinShared73a4d6d9c92df71c" xml:space="preserve"><value>请先选择要删除的项目。</value></data>
+  <data name="WinShared78eee40d2f30576e" xml:space="preserve"><value>账号或登录信息不正确</value></data>
+  <data name="WinShared79c4d60046afa3ff" xml:space="preserve"><value>请检查网络、地址和证书后重试。</value></data>
+  <data name="WinShared79f326be4409d51f" xml:space="preserve"><value>项目</value></data>
+  <data name="WinShared7ca744fb7c598d20" xml:space="preserve"><value>NAS 尚未确认下载任务已删除，请刷新后重试。</value></data>
+  <data name="WinShared89c44574bbf9988a" xml:space="preserve"><value>请检查拼写后重试。</value></data>
+  <data name="WinShared8a4ef3e48e4e8a5a" xml:space="preserve"><value>已开启</value></data>
+  <data name="WinShared90a556f6814be8fb" xml:space="preserve"><value>NAS 尚未确认删除结果，请刷新后检查项目状态。</value></data>
+  <data name="WinShared9cb9ec075b03b6cb" xml:space="preserve"><value>NAS 返回了无法识别的内容</value></data>
+  <data name="WinShareda167a95b73b968b4" xml:space="preserve"><value>DoS 防护</value></data>
+  <data name="WinShareda63280253f17d440" xml:space="preserve"><value>会话</value></data>
+  <data name="WinShareda6d7b48863714f5e" xml:space="preserve"><value>正在连接 NAS…</value></data>
+  <data name="WinSharedaa0582cad267718e" xml:space="preserve"><value>正在通过 QuickConnect 查找 NAS…</value></data>
+  <data name="WinSharedab4ce8cd180797fc" xml:space="preserve"><value>NAS 没有返回登录会话</value></data>
+  <data name="WinSharedab9474d0616d3198" xml:space="preserve"><value>NAS 尚未确认网络已创建，请刷新后重试。</value></data>
+  <data name="WinSharedb4ffcaefff280faf" xml:space="preserve"><value>自动封锁</value></data>
+  <data name="WinSharedb5641013fbf13d8b" xml:space="preserve"><value>请更新套件后重试。</value></data>
+  <data name="WinSharedba22fbf3f7f63943" xml:space="preserve"><value>这个地址不是安全连接</value></data>
+  <data name="WinSharedc144a2dc9ace5c1f" xml:space="preserve"><value>请重新登录。</value></data>
+  <data name="WinSharedc157df0fa964b080" xml:space="preserve"><value>岚仓将继续尝试安全中继。</value></data>
+  <data name="WinSharedd11595c8e583c9ea" xml:space="preserve"><value>这台 NAS 没有开启 QuickConnect 中继</value></data>
+  <data name="WinSharedd69866d5c54d766d" xml:space="preserve"><value>无法识别这个地址</value></data>
+  <data name="WinSharedd727aa9e0a8cff65" xml:space="preserve"><value>登录会话已失效</value></data>
+  <data name="WinSharedda35e58bcad31766" xml:space="preserve"><value>QuickConnect 返回的信息无法读取</value></data>
+  <data name="WinShareddcac071c2cf16346" xml:space="preserve"><value>请输入有效的 HTTPS 地址后重试。</value></data>
+  <data name="WinSharede0abefcec6920022" xml:space="preserve"><value>确认 NAS 已开机并联网后重试。</value></data>
+  <data name="WinSharede23ff8b80f6200c5" xml:space="preserve"><value>未命名任务</value></data>
+  <data name="WinSharede32c368700e2b141" xml:space="preserve"><value>QuickConnect 找到了这台 NAS，但设备目前不在线</value></data>
+  <data name="WinSharedeee30e9d97ca1e61" xml:space="preserve"><value>防火墙</value></data>
+  <data name="WinSharedef0eed96e1f28ed8" xml:space="preserve"><value>双重验证代码不正确</value></data>
+  <data name="WinSharedefc81ced18eb3bb0" xml:space="preserve"><value>请稍后重试。</value></data>
+  <data name="WinSharedf91eef8a1cf7b01c" xml:space="preserve"><value>无法连接到 NAS</value></data>
+  <data name="WinSharedfa9066ff052e7270" xml:space="preserve"><value>名称不能包含路径分隔符。</value></data>
+  <data name="WinSharedfea22978bfdec072" xml:space="preserve"><value>NAS 尚未确认项目已删除，请刷新后重试。</value></data>
+</root>

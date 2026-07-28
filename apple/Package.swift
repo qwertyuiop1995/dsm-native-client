@@ -4,6 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "DsmShared",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14),
         .iOS(.v17)
@@ -11,16 +12,25 @@ let package = Package(
     products: [
         .library(name: "DsmCore", targets: ["DsmCore"]),
         .library(name: "DsmNetwork", targets: ["DsmNetwork"]),
+        .library(name: "DsmLocalization", targets: ["DsmLocalization"]),
         .executable(name: "LanStash", targets: ["DsmMacExecutable"])
     ],
     targets: [
         .target(
+            name: "DsmLocalization",
+            path: "Packages/DsmLocalization/Sources",
+            resources: [
+                .process("Resources")
+            ]
+        ),
+        .target(
             name: "DsmCore",
+            dependencies: ["DsmLocalization"],
             path: "Packages/DsmCore/Sources"
         ),
         .target(
             name: "DsmNetwork",
-            dependencies: ["DsmCore"],
+            dependencies: ["DsmCore", "DsmLocalization"],
             path: "Packages/DsmNetwork/Sources",
             linkerSettings: [
                 .linkedFramework("Security")
@@ -28,7 +38,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "DsmMacExecutable",
-            dependencies: ["DsmCore", "DsmNetwork"],
+            dependencies: ["DsmCore", "DsmNetwork", "DsmLocalization"],
             path: "Apps/DsmMac/Sources",
             linkerSettings: [
                 .linkedFramework("AppKit"),
@@ -47,6 +57,11 @@ let package = Package(
             name: "DsmNetworkTests",
             dependencies: ["DsmCore", "DsmNetwork"],
             path: "Packages/DsmNetwork/Tests"
+        ),
+        .testTarget(
+            name: "DsmLocalizationTests",
+            dependencies: ["DsmLocalization"],
+            path: "Packages/DsmLocalization/Tests"
         ),
         .testTarget(
             name: "DsmMacTests",

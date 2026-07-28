@@ -8,6 +8,7 @@
 schemas/             JSON Schema
 error-codes/         DSM 通用错误映射
 fixtures-redacted/   彻底脱敏的响应样本
+localization/        客户端语言注册表与回退规则
 ```
 
 照片基础契约包括 `photo-space.schema.json`、`photo-item.schema.json` 和 `photo-page.schema.json`。其中照片页面的分页位置基于 NAS 原始目录项目计算，即使客户端过滤了非媒体文件，也必须使用 `nextOffset` 继续读取，避免重复或遗漏。

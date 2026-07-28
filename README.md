@@ -1,84 +1,143 @@
 # 岚仓（LanStash）
 
-岚仓（LanStash）是面向 Windows、macOS、Android、iPhone 和 iPad 的 Synology DSM 原生客户端项目。
+[简体中文](README.md) · [English](README.en.md)
 
-项目坚持平台原生实现：
+岚仓是面向 Synology DSM 的开源原生客户端项目，覆盖 macOS、iPhone、iPad、Android 和 Windows 五种设备形态。项目不使用跨平台 UI 运行时：Apple 端使用 Swift 与 SwiftUI，Android 使用 Kotlin 与 Jetpack Compose，Windows 使用 C# 与 WinUI 3。
 
-- macOS、iPhone、iPad：Swift、SwiftUI；共享 Apple 原生 Swift Package。
-- Android：Kotlin、Jetpack Compose。
-- Windows：C#、WinUI 3。
-- 三套技术栈共享 API 契约、脱敏样本、错误语义和验收标准，不共享跨平台 UI 运行时。
+三个技术栈共享 DSM API 契约、错误语义、语言契约、脱敏样本和验收标准，但分别遵循各平台的导航、窗口、触控、键盘、辅助功能和安全存储习惯。
 
-## 当前阶段
+## 项目状态
 
-当前里程碑：`五种设备形态的原生客户端对齐与实机验收`。
+当前里程碑是“五端原生客户端对齐与实机验收”。
 
-当前重点：
+| 客户端 | 技术栈 | 当前状态 |
+| --- | --- | --- |
+| macOS | Swift 6、SwiftUI、Swift Package Manager | 完成度最高；文件、照片、消息、下载、容器、虚拟机和 NAS 管理主流程已建立 |
+| iPhone | Swift 6、SwiftUI | 通用移动工程可构建，已接入登录、模块导航、语言选择和第一批管理页面 |
+| iPad | Swift 6、SwiftUI | 与 iPhone 共用通用工程，并针对大屏布局和多栏体验适配 |
+| Android | Kotlin、Jetpack Compose | 原生工程可构建，已接入登录、模块导航、管理骨架和双语资源 |
+| Windows | C#、WinUI 3 | 原生工程可构建，已接入登录、模块导航、管理骨架和双语资源 |
 
-1. 分别验证 macOS、iPhone、iPad、Android 和 Windows 的原生工程与自适应界面。
-2. 对齐文件、照片、消息、下载、容器、虚拟机和 NAS 设置的公共契约。
-3. 在专用测试 NAS 上验证权限、套件版本、网络切换和危险写操作。
-4. 将每个平台的真实结果同步到兼容矩阵。
+“已建立”表示源码路径和自动化测试存在，不等于所有 DSM 型号、系统版本和套件版本都已完成实机兼容验证。高影响写操作仍需能力发现、权限检查、用户确认、重复提交保护和结果校验。
 
-## 文档
+## 主要能力
 
-- [DSM Web API 参考](docs/api/DSM_WEB_API_REFERENCE_ZH.md)
-- [当前开发与验收计划](docs/development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)
-- [Synology Chat 原生聊天功能开发计划](docs/development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)
-- [DSM 套件管理三端实现计划](docs/development/NATIVE_DSM_SERVICE_MANAGEMENT_PLAN_ZH.md)
-- [“统一存储管理”新功能三端实现计划](docs/development/NATIVE_DSM_STORAGE_MANAGEMENT_PLAN_ZH.md)
-- [第一阶段开发文档归档](docs/archive/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_V1_ARCHIVE_ZH.md)
-- [当前进度](docs/progress/STATUS.md)
-- [产品路线图](docs/progress/ROADMAP.md)
-- [平台功能矩阵](docs/progress/PLATFORM_MATRIX.md)
-- [总体架构](docs/architecture/ARCHITECTURE.md)
-- [DSM 兼容矩阵](docs/compatibility/DSM_COMPATIBILITY_MATRIX.md)
-- [安全基线](docs/security/SECURITY_BASELINE.md)
+- 多 NAS 配置、HTTPS 地址和 QuickConnect ID。
+- DSM 登录、双重验证、会话恢复和平台安全存储。
+- 文件与共享文件夹浏览、搜索、上传、下载、复制、移动、重命名、压缩、解压和分享。
+- 照片空间、缩略图、时间线和常见媒体预览。
+- Synology Chat 会话、附件、提醒、投票和定时消息能力。
+- Download Station、Container Manager、Virtual Machine Manager 和 NAS 设置入口。
+- 存储、套件、账号、日志、连接、网络和安全状态的原生管理界面。
+- 浅色/深色模式、键盘、触控、动态文字、屏幕阅读器和降低动态效果适配。
 
-## 目录
+部分能力依赖 DSM 或套件版本。项目优先使用 Synology 官方公开 API；必须使用内部 API 时，会在实现与兼容文档中明确标注并通过能力探测隔离。
 
-```text
-apple/       macOS 与通用 iPhone/iPad 原生工程
-android/     Android 原生工程
-windows/     Windows 原生工程
-contracts/   三端共同遵循的协议契约与脱敏样本
-docs/        API、开发、架构、进度、安全和兼容文档
-tools/       契约校验和样本脱敏工具
+## 语言与本地化
+
+初期支持：
+
+- 英语（`en`）
+- 简体中文（`zh-Hans`）
+
+首次启动默认跟随系统首选语言。英语及其地区变体使用英语；简体中文、中国大陆和新加坡中文使用简体中文；繁体中文和其他尚未支持的语言回退英语。用户可以在 App 内固定选择英语或简体中文，选择仅保存在本机，不与 NAS、账号、密码或会话绑定。
+
+统一语言契约位于 [`contracts/localization/supported-locales.json`](contracts/localization/supported-locales.json)。新增语言必须同时更新 Apple、Android、Windows 资源、语言选择器、测试、README 和平台矩阵。运行以下命令可检查资源缺失、参数不一致、无效引用和用户界面硬编码：
+
+```bash
+python3 tools/localization/check_localization.py
 ```
 
-## 开发原则
+## 仓库结构
 
-- 官方 API 优先，内部 API 必须经过能力探测、抓包验证和版本隔离。
-- 密码默认不保存；macOS 仅在用户明确选择后使用应用沙盒内的 AES-GCM 加密文件保存密码和会话，其他平台使用各自的系统安全存储。
-- Release 构建只允许 HTTPS，不提供全局忽略证书错误的选项。
-- 删除和恢复必须有确认、冲突保护和结果校验。
-- 仓库禁止提交真实 NAS 地址、账号、文件路径、SID、抓包和用户文件。
+```text
+apple/
+  Apps/DsmMac/             macOS SwiftUI 应用
+  Apps/DsmMobile/          iPhone/iPad 通用 SwiftUI 应用
+  Packages/                Apple 共享领域、网络和本地化包
+android/                   Android Jetpack Compose 应用
+windows/                   Windows WinUI 3 应用
+contracts/                 API、错误和语言等跨端契约
+docs/                      架构、开发计划、进度、安全和兼容文档
+tools/                     本地化、契约和仓库校验工具
+```
 
-## 构建状态
+## 构建与测试
 
-macOS 参考工程已形成完整的文件客户端源码闭环，包含多 NAS 与 QuickConnect、安全登录、目录浏览与搜索、账号可见空间、收藏和最近访问、SMB/NFS 远程位置管理、缩略图和多格式预览、文本编辑、上传下载、文件夹 ZIP 下载、复制移动、拖拽、压缩解压、分享链接、传输中心、系统通知以及应用存储管理。远程位置、删除和回收站恢复等高影响能力仍受能力发现、确认、结果校验和兼容开关保护。
+### Apple
 
-macOS 新增“统一存储管理”功能：它不是群晖现有的单一官方套件，而是把“存储管理器”的容量、存储池、卷与硬盘健康能力，和“存储空间分析器”的文件占用、类型、大文件、时间、所有者及重复内容分析合并到同一个原生入口。
-
-上述状态表示代码路径和自动化测试已经建立；尚未完成兼容矩阵记录的能力仍需在真实 NAS 上验收。
-iPhone/iPad 通用 SwiftUI、Android Compose 与 Windows WinUI 工程已经初始化，并接入第一批可运行的管理主流程。
-
-Apple 本地验证：
+需要当前稳定版 Xcode 和 XcodeGen。
 
 ```bash
 swift test --package-path apple
+
+cd apple/Apps/DsmMac
+xcodegen generate
 xcodebuild \
-  -workspace apple/DsmNativeClient.xcworkspace \
+  -project DsmMac.xcodeproj \
   -scheme DsmMac \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+
+cd ../DsmMobile
+xcodegen generate
+xcodebuild \
+  -project DsmMobile.xcodeproj \
+  -scheme DsmMobile \
+  -sdk iphonesimulator \
   -configuration Debug \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
 
-Android 与 Windows 的构建命令分别记录在各自目录的 README，并由独立 CI 工作流验证。
+### Android
 
-所有 DSM 行为仍需在记录了 DSM build、File Station 版本和证书类型的专用测试 NAS 上完成实机验证。未通过兼容验证时，正式连接不会开放“恢复到原位置”。
+需要 JDK 17 和 Android SDK。
 
-## 许可证
+```bash
+cd android
+./gradlew test assembleDebug
+```
 
-本项目及其所有历史提交均采用 [Apache License 2.0](LICENSE) 许可证开源。
+### Windows
+
+需要 Windows、.NET 10 SDK 和 WinUI 3 构建环境。
+
+```powershell
+cd windows
+dotnet restore LanStash.slnx
+dotnet test tests/LanStash.Tests/LanStash.Tests.csproj --configuration Release --no-restore
+dotnet build src/LanStash.App/LanStash.App.csproj --configuration Release --runtime win-x64 --no-restore
+```
+
+各平台的补充环境说明见 [`apple/README.md`](apple/README.md)、[`android/README.md`](android/README.md) 和 [`windows/README.md`](windows/README.md)。GitHub Actions 会分别验证 Apple、Android、Windows 和仓库级契约。
+
+## 安全与隐私
+
+- 不提交密码、OTP、SID、SynoToken、Cookie、DID、证书私钥或真实用户数据。
+- 不提交未脱敏的 HAR、PCAP、DSM 响应、文件路径或主机地址。
+- Release 构建只允许 HTTPS，不提供全局忽略证书错误的选项。
+- 密码和会话只使用平台安全存储，并由用户明确决定是否保存。
+- 删除、恢复、网络设置等危险写操作必须确认权限、避免重复提交并校验结果。
+- 真实 DSM 行为只在专用测试 NAS 上验证，并记录 DSM build、套件版本和证书类型。
+
+安全问题请遵循 [`SECURITY.md`](SECURITY.md)，不要在公开 Issue 中附带真实环境数据。
+
+## 文档入口
+
+- [当前开发与验收计划](docs/development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)
+- [当前进度](docs/progress/STATUS.md)
+- [产品路线图](docs/progress/ROADMAP.md)
+- [平台功能矩阵](docs/progress/PLATFORM_MATRIX.md)
+- [DSM 兼容矩阵](docs/compatibility/DSM_COMPATIBILITY_MATRIX.md)
+- [总体架构](docs/architecture/ARCHITECTURE.md)
+- [安全基线](docs/security/SECURITY_BASELINE.md)
+- [DSM Web API 参考](docs/api/DSM_WEB_API_REFERENCE_ZH.md)
+- [语言契约说明](contracts/localization/README.md)
+
+## 参与开发
+
+开始修改前请阅读 [`AGENTS.md`](AGENTS.md) 和 [`CONTRIBUTING.md`](CONTRIBUTING.md)。所有新增或修改的用户可见文案必须同时提供英语和简体中文资源；翻译后的字符串不得参与业务判断、导航、筛选、持久化或 API 参数。
+
+本项目及其所有历史提交均采用 [Apache License 2.0](LICENSE)。

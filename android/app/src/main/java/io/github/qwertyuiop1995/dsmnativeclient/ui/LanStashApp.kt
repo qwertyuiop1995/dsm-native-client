@@ -57,6 +57,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.ListAlt
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.NetworkCheck
@@ -123,7 +124,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -137,6 +141,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.annotation.StringRes
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import io.github.qwertyuiop1995.dsmnativeclient.AppViewModel
 import io.github.qwertyuiop1995.dsmnativeclient.Loadable
 import io.github.qwertyuiop1995.dsmnativeclient.LoginState
@@ -148,11 +155,14 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
 import io.github.qwertyuiop1995.dsmnativeclient.domain.LogEntry
 import io.github.qwertyuiop1995.dsmnativeclient.domain.LogLevel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ManagedResource
+import io.github.qwertyuiop1995.dsmnativeclient.domain.ManagedResourceLabel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasSettingsSnapshot
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ResourceState
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineOverview
+import io.github.qwertyuiop1995.dsmnativeclient.network.ConnectionStatus
+import io.github.qwertyuiop1995.dsmnativeclient.localization.localize
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.launch
@@ -191,6 +201,7 @@ private fun LoginScreen(state: LoginState, model: AppViewModel) {
     }
     var profileToRemove by remember { mutableStateOf<NasProfile?>(null) }
     val focusManager = LocalFocusManager.current
+    val localizedLoginError = state.error?.localize(LocalContext.current)?.combined
 
     LaunchedEffect(selectedProfileId, state.savedPassword) {
         password = state.savedPassword
@@ -223,7 +234,7 @@ private fun LoginScreen(state: LoginState, model: AppViewModel) {
                         BrandHeader(large = true)
                         if (state.profiles.isNotEmpty()) {
                             Text(
-                                "已保存的 NAS 设备",
+                                stringResource(R.string.saved_nas_devices),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -261,7 +272,7 @@ private fun LoginScreen(state: LoginState, model: AppViewModel) {
                     needsOtp = state.needsOtp,
                     isConnecting = state.isConnecting,
                     connectionStatus = state.connectionStatus,
-                    error = state.error?.let { "${it.message} ${it.recovery}" },
+                    error = localizedLoginError,
                     onName = { name = it },
                     onAddress = { address = it },
                     onPort = { port = it.filter(Char::isDigit) },
@@ -293,13 +304,18 @@ private fun LoginScreen(state: LoginState, model: AppViewModel) {
                 )
             }
         }
+        LanguageMenu(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp),
+        )
     }
 
     profileToRemove?.let { profile ->
         ConfirmDialog(
-            title = "移除“${profile.name}”？",
-            message = "这会删除本机保存的地址和登录信息，不会删除 NAS 上的任何文件。",
-            confirm = "移除",
+            title = stringResource(R.string.remove_profile_title, profile.name),
+            message = stringResource(R.string.remove_profile_message),
+            confirm = stringResource(R.string.remove),
             destructive = true,
             onConfirm = {
                 model.removeProfile(profile)
@@ -325,13 +341,13 @@ private fun BrandHeader(large: Boolean = false) {
         )
         Column {
             Text(
-                "岚仓",
+                stringResource(R.string.app_name),
                 style = if (large) MaterialTheme.typography.headlineLarge else MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onBackground,
             )
             Text(
-                "LanStash · Synology Client",
+                stringResource(R.string.brand_tagline),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Medium,
@@ -354,7 +370,7 @@ private fun LoginForm(
     autoLoginEnabled: Boolean,
     needsOtp: Boolean,
     isConnecting: Boolean,
-    connectionStatus: String?,
+    connectionStatus: ConnectionStatus?,
     error: String?,
     onName: (String) -> Unit,
     onAddress: (String) -> Unit,
@@ -387,7 +403,7 @@ private fun LoginForm(
                 Spacer(Modifier.height(4.dp))
             }
             Text(
-                "连接 Synology NAS",
+                stringResource(R.string.connect_synology_nas),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -396,7 +412,7 @@ private fun LoginForm(
             OutlinedTextField(
                 value = name,
                 onValueChange = onName,
-                label = { Text("显示名称") },
+                label = { Text(stringResource(R.string.display_name)) },
                 singleLine = true,
                 shape = MaterialTheme.shapes.small,
                 modifier = Modifier.fillMaxWidth(),
@@ -404,9 +420,9 @@ private fun LoginForm(
             OutlinedTextField(
                 value = address,
                 onValueChange = onAddress,
-                label = { Text("NAS 地址或 QuickConnect ID") },
+                label = { Text(stringResource(R.string.nas_address_or_quickconnect)) },
                 supportingText = {
-                    Text("例如 QuickConnect ID、192.168.1.10 或完整 HTTPS 地址")
+                    Text(stringResource(R.string.nas_address_example))
                 },
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Uri,
@@ -419,7 +435,7 @@ private fun LoginForm(
             OutlinedTextField(
                 value = username,
                 onValueChange = onUsername,
-                label = { Text("账号") },
+                label = { Text(stringResource(R.string.account)) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 singleLine = true,
                 shape = MaterialTheme.shapes.small,
@@ -428,7 +444,7 @@ private fun LoginForm(
             OutlinedTextField(
                 value = password,
                 onValueChange = onPassword,
-                label = { Text("密码") },
+                label = { Text(stringResource(R.string.password)) },
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
@@ -443,7 +459,7 @@ private fun LoginForm(
                 OutlinedTextField(
                     value = otp,
                     onValueChange = onOtp,
-                    label = { Text("双重验证代码") },
+                    label = { Text(stringResource(R.string.two_factor_code)) },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.NumberPassword,
                         imeAction = ImeAction.Done,
@@ -475,9 +491,9 @@ private fun LoginForm(
                         Switch(checked = rememberPassword, onCheckedChange = onRememberPassword)
                         Spacer(Modifier.width(12.dp))
                         Column {
-                            Text("记住密码", fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.remember_password), fontWeight = FontWeight.Medium)
                             Text(
-                                "密码由系统 Keystore 安全加密保护",
+                                stringResource(R.string.password_keystore_note),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -495,9 +511,9 @@ private fun LoginForm(
                         Switch(checked = autoLoginEnabled, onCheckedChange = onAutoLogin)
                         Spacer(Modifier.width(12.dp))
                         Column {
-                            Text("自动登录", fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.auto_login), fontWeight = FontWeight.Medium)
                             Text(
-                                "打开应用时自动连接此设备",
+                                stringResource(R.string.auto_login_note),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -512,14 +528,14 @@ private fun LoginForm(
             ) {
                 Icon(Icons.Outlined.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(if (showsAdvancedSettings) "收起高级连接设置" else "高级连接设置")
+                Text(if (showsAdvancedSettings) stringResource(R.string.collapse_advanced_connection_settings) else stringResource(R.string.advanced_connection_settings))
             }
             if (showsAdvancedSettings) {
                 OutlinedTextField(
                     value = port,
                     onValueChange = onPort,
-                    label = { Text("自定义 HTTPS 端口") },
-                    supportingText = { Text("留空时由岚仓自动选择；填写后优先使用这个端口") },
+                    label = { Text(stringResource(R.string.custom_https_port)) },
+                    supportingText = { Text(stringResource(R.string.custom_https_port_note)) },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
                         imeAction = ImeAction.Next,
@@ -542,7 +558,7 @@ private fun LoginForm(
                         color = MaterialTheme.colorScheme.primary,
                     )
                     Text(
-                        connectionStatus,
+                        connectionStatus.displayText(),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.semantics {
@@ -568,7 +584,7 @@ private fun LoginForm(
                     Spacer(Modifier.width(10.dp))
                 }
                 Text(
-                    if (isConnecting) "正在连接…" else "连接",
+                    if (isConnecting) stringResource(R.string.connecting) else stringResource(R.string.connect),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -576,6 +592,19 @@ private fun LoginForm(
         }
     }
 }
+
+@Composable
+private fun ConnectionStatus.displayText(): String = stringResource(
+    when (this) {
+        ConnectionStatus.PREPARING -> R.string.status_preparing_connection
+        ConnectionStatus.CONNECTING_DIRECT -> R.string.status_connecting_nas
+        ConnectionStatus.LOOKING_UP_QUICK_CONNECT -> R.string.status_looking_up_quickconnect
+        ConnectionStatus.TRYING_LOCAL -> R.string.status_trying_local
+        ConnectionStatus.TRYING_EXTERNAL -> R.string.status_trying_external
+        ConnectionStatus.ESTABLISHING_RELAY -> R.string.status_establishing_relay
+        ConnectionStatus.RESTORING_SESSION -> R.string.status_restoring_session
+    }
+)
 
 @Composable
 private fun SavedProfileCard(
@@ -640,14 +669,14 @@ private fun SavedProfileCard(
             IconButton(onClick = onConnect) {
                 Icon(
                     Icons.Outlined.PlayArrow,
-                    contentDescription = "使用保存的登录连接",
+                    contentDescription = stringResource(R.string.connect_saved_login),
                     tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             IconButton(onClick = onRemove) {
                 Icon(
                     Icons.Outlined.DeleteOutline,
-                    contentDescription = "移除保存的 NAS",
+                    contentDescription = stringResource(R.string.remove_saved_nas),
                     tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
                 )
             }
@@ -670,6 +699,7 @@ private fun WorkspaceScreen(state: WorkspaceState, model: AppViewModel) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val expanded = maxWidth >= 840.dp
         val content: @Composable () -> Unit = {
+            val processingDescription = stringResource(R.string.processing_action)
             Scaffold(
                 contentWindowInsets = WindowInsets(0),
                 topBar = {
@@ -680,7 +710,7 @@ private fun WorkspaceScreen(state: WorkspaceState, model: AppViewModel) {
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 Text(
-                                    state.selectedModule.title,
+                                    stringResource(state.selectedModule.titleResource()),
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold,
                                 )
@@ -702,13 +732,13 @@ private fun WorkspaceScreen(state: WorkspaceState, model: AppViewModel) {
                         navigationIcon = {
                             if (!expanded) {
                                 IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Outlined.Menu, contentDescription = "打开导航")
+                                    Icon(Icons.Outlined.Menu, contentDescription = stringResource(R.string.open_navigation))
                                 }
                             }
                         },
                         actions = {
                             IconButton(onClick = { model.load() }) {
-                                Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
+                                Icon(Icons.Outlined.Refresh, contentDescription = stringResource(R.string.refresh))
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
@@ -731,7 +761,7 @@ private fun WorkspaceScreen(state: WorkspaceState, model: AppViewModel) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .align(Alignment.TopCenter)
-                                .semantics { contentDescription = "正在处理操作" },
+                                .semantics { contentDescription = processingDescription },
                         )
                     }
                 }
@@ -813,7 +843,7 @@ private fun DrawerContent(
                 }
                 Column {
                     Text(
-                        "岚仓 LanStash",
+                        stringResource(R.string.app_name),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -843,12 +873,12 @@ private fun DrawerContent(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
-                                module.title,
+                                stringResource(module.titleResource()),
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             )
                             if (availability?.isAvailable == false) {
                                 Text(
-                                    "不可用",
+                                    stringResource(R.string.unavailable),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.outline,
                                 )
@@ -896,7 +926,7 @@ private fun DrawerContent(
                 tint = MaterialTheme.colorScheme.error,
             )
             Spacer(Modifier.width(8.dp))
-            Text("断开连接并退出", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.sign_out_description), color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -930,7 +960,7 @@ private fun FileBrowser(state: WorkspaceState, model: AppViewModel) {
             ExtendedFloatingActionButton(
                 onClick = { showCreate = true },
                 icon = { Icon(Icons.Outlined.Add, null) },
-                text = { Text("新建文件夹", fontWeight = FontWeight.SemiBold) },
+                text = { Text(stringResource(R.string.new_folder), fontWeight = FontWeight.SemiBold) },
                 shape = MaterialTheme.shapes.medium,
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -952,13 +982,13 @@ private fun FileBrowser(state: WorkspaceState, model: AppViewModel) {
                             .clip(MaterialTheme.shapes.small)
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                     ) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回上一级")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.go_up))
                     }
                 }
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("搜索当前目录或文件名") },
+                    placeholder = { Text(stringResource(R.string.search_files)) },
                     leadingIcon = { Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.primary) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { model.searchFiles(query) }),
@@ -987,8 +1017,8 @@ private fun FileBrowser(state: WorkspaceState, model: AppViewModel) {
             }
             LoadableContent(
                 value = state.files,
-                emptyTitle = "目录为空",
-                emptyMessage = "这里还没有文件或子文件夹。",
+                emptyTitle = stringResource(R.string.directory_empty),
+                emptyMessage = stringResource(R.string.empty_folder_description),
                 onRetry = { model.load(Module.FILES) },
             ) { page ->
                 LazyColumn(
@@ -1007,7 +1037,7 @@ private fun FileBrowser(state: WorkspaceState, model: AppViewModel) {
                             },
                             supportingContent = {
                                 Text(
-                                    if (item.isDirectory) "文件夹" else formatBytes(item.size),
+                                    if (item.isDirectory) stringResource(R.string.folder) else formatBytes(item.size),
                                     maxLines = 1,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1034,7 +1064,7 @@ private fun FileBrowser(state: WorkspaceState, model: AppViewModel) {
                             },
                             trailingContent = {
                                 IconButton(onClick = { selected = item }) {
-                                    Icon(Icons.Outlined.MoreVert, contentDescription = "更多操作")
+                                    Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.more_actions))
                                 }
                             },
                             modifier = Modifier.combinedClickable(
@@ -1058,31 +1088,31 @@ private fun FileBrowser(state: WorkspaceState, model: AppViewModel) {
             text = {
                 Column {
                     if (item.isDirectory) {
-                        ActionRow(Icons.Outlined.FolderOpen, "打开") {
+                        ActionRow(Icons.Outlined.FolderOpen, stringResource(R.string.open)) {
                             model.openDirectory(item)
                             selected = null
                         }
                     }
-                    ActionRow(Icons.Outlined.Edit, "重命名") {
+                    ActionRow(Icons.Outlined.Edit, stringResource(R.string.rename)) {
                         rename = item
                         selected = null
                     }
-                    ActionRow(Icons.Outlined.DeleteOutline, "删除", destructive = true) {
+                    ActionRow(Icons.Outlined.DeleteOutline, stringResource(R.string.delete), destructive = true) {
                         delete = item
                         selected = null
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { selected = null }) { Text("关闭") }
+                TextButton(onClick = { selected = null }) { Text(stringResource(R.string.close)) }
             },
         )
     }
     if (showCreate) {
         TextInputDialog(
-            title = "新建文件夹",
-            label = "文件夹名称",
-            confirm = "创建",
+            title = stringResource(R.string.new_folder),
+            label = stringResource(R.string.folder_name),
+            confirm = stringResource(R.string.create),
             onConfirm = {
                 model.createFolder(it)
                 showCreate = false
@@ -1092,10 +1122,10 @@ private fun FileBrowser(state: WorkspaceState, model: AppViewModel) {
     }
     rename?.let { item ->
         TextInputDialog(
-            title = "重命名",
-            label = "新名称",
+            title = stringResource(R.string.rename),
+            label = stringResource(R.string.new_name),
             initial = item.name,
-            confirm = "保存",
+            confirm = stringResource(R.string.save),
             onConfirm = {
                 model.renameFile(item, it)
                 rename = null
@@ -1105,9 +1135,9 @@ private fun FileBrowser(state: WorkspaceState, model: AppViewModel) {
     }
     delete?.let { item ->
         ConfirmDialog(
-            title = "删除“${item.name}”？",
-            message = "删除后能否恢复取决于共享文件夹的回收站设置。",
-            confirm = "删除",
+            title = stringResource(R.string.delete_named_item, item.name),
+            message = stringResource(R.string.delete_recycle_note),
+            confirm = stringResource(R.string.delete),
             destructive = true,
             onConfirm = {
                 model.deleteFiles(listOf(item))
@@ -1122,8 +1152,8 @@ private fun FileBrowser(state: WorkspaceState, model: AppViewModel) {
 private fun PhotosScreen(state: WorkspaceState, model: AppViewModel) {
     LoadableContent(
         value = state.files,
-        emptyTitle = "没有找到照片",
-        emptyMessage = "当前目录没有可显示的照片或视频。",
+        emptyTitle = stringResource(R.string.no_photos),
+        emptyMessage = stringResource(R.string.no_media_in_folder),
         onRetry = { model.load(Module.PHOTOS) },
     ) { page ->
         val media = page.items.filter {
@@ -1132,7 +1162,7 @@ private fun PhotosScreen(state: WorkspaceState, model: AppViewModel) {
             )
         }
         if (media.isEmpty()) {
-            EmptyState("没有找到照片", "进入包含照片的文件夹后即可浏览。", Icons.Outlined.PhotoLibrary)
+            EmptyState(stringResource(R.string.no_photos), stringResource(R.string.no_photos_description), Icons.Outlined.PhotoLibrary)
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(132.dp),
@@ -1178,17 +1208,23 @@ private fun PhotosScreen(state: WorkspaceState, model: AppViewModel) {
 private fun ChatScreen(state: WorkspaceState, model: AppViewModel) {
     LoadableContent(
         value = state.conversations,
-        emptyTitle = "还没有会话",
-        emptyMessage = "在 Synology Chat 中开始会话后会显示在这里。",
+        emptyTitle = stringResource(R.string.no_conversations),
+        emptyMessage = stringResource(R.string.no_conversations_description),
         onRetry = { model.load(Module.CHAT) },
     ) { conversations ->
         LazyColumn {
             items(conversations, key = { it.id }) { conversation ->
                 ListItem(
-                    headlineContent = { Text(conversation.title) },
+                    headlineContent = {
+                        Text(conversation.title.ifBlank { stringResource(R.string.unnamed_conversation) })
+                    },
                     supportingContent = {
                         Text(
-                            conversation.latestPreview ?: "${conversation.memberCount} 位成员",
+                            conversation.latestPreview ?: pluralStringResource(
+                                R.plurals.member_count,
+                                conversation.memberCount,
+                                conversation.memberCount,
+                            ),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -1221,22 +1257,26 @@ private fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
             ExtendedFloatingActionButton(
                 onClick = { create = true },
                 icon = { Icon(Icons.Outlined.Add, null) },
-                text = { Text("添加下载") },
+                text = { Text(stringResource(R.string.add_download)) },
             )
         },
     ) { padding ->
         Box(Modifier.padding(padding)) {
             LoadableContent(
                 value = state.downloads,
-                emptyTitle = "没有下载任务",
-                emptyMessage = "添加网址、磁力链接或任务文件开始下载。",
+                emptyTitle = stringResource(R.string.no_download_tasks),
+                emptyMessage = stringResource(R.string.add_download_description),
                 onRetry = { model.load(Module.DOWNLOADS) },
             ) { tasks ->
                 LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
                     items(tasks, key = DownloadTask::id) { task ->
                         ListItem(
                             headlineContent = {
-                                Text(task.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    task.title.ifBlank { stringResource(R.string.unnamed_download) },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             },
                             supportingContent = {
                                 Column {
@@ -1260,7 +1300,10 @@ private fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
                             },
                             trailingContent = {
                                 IconButton(onClick = { selected = task }) {
-                                    Icon(Icons.Outlined.MoreVert, contentDescription = "任务操作")
+                                    Icon(
+                                        Icons.Outlined.MoreVert,
+                                        contentDescription = stringResource(R.string.task_actions),
+                                    )
                                 }
                             },
                         )
@@ -1285,21 +1328,25 @@ private fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
             title = { Text(task.title) },
             text = {
                 Column {
-                    ActionRow(Icons.Outlined.Pause, "暂停") {
+                    ActionRow(Icons.Outlined.Pause, stringResource(R.string.pause)) {
                         model.controlDownloads(listOf(task.id), "pause")
                         selected = null
                     }
-                    ActionRow(Icons.Outlined.PlayArrow, "继续") {
+                    ActionRow(Icons.Outlined.PlayArrow, stringResource(R.string.resume)) {
                         model.controlDownloads(listOf(task.id), "resume")
                         selected = null
                     }
-                    ActionRow(Icons.Outlined.DeleteOutline, "移除任务", destructive = true) {
+                    ActionRow(Icons.Outlined.DeleteOutline, stringResource(R.string.remove_task), destructive = true) {
                         model.controlDownloads(listOf(task.id), "delete")
                         selected = null
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { selected = null }) { Text("关闭") } },
+            confirmButton = {
+                TextButton(onClick = { selected = null }) {
+                    Text(stringResource(R.string.close))
+                }
+            },
         )
     }
 }
@@ -1308,9 +1355,9 @@ private fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
 private fun ContainersScreen(state: WorkspaceState, model: AppViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var selected by remember { mutableStateOf<ManagedResource?>(null) }
-    var confirmDelete by remember { mutableStateOf<Pair<String, ManagedResource>?>(null) }
+    var confirmDelete by remember { mutableStateOf<Pair<Int, ManagedResource>?>(null) }
     var createNetwork by remember { mutableStateOf(false) }
-    val titles = listOf("容器", "映像", "网络", "项目")
+    val titles = listOf(stringResource(R.string.containers), stringResource(R.string.images), stringResource(R.string.networks), stringResource(R.string.projects))
     Column {
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
             titles.forEachIndexed { index, title ->
@@ -1323,8 +1370,8 @@ private fun ContainersScreen(state: WorkspaceState, model: AppViewModel) {
         }
         LoadableContent(
             value = state.containers,
-            emptyTitle = "没有可显示的项目",
-            emptyMessage = "当前 NAS 没有返回这个分类的内容。",
+            emptyTitle = stringResource(R.string.no_items),
+            emptyMessage = stringResource(R.string.no_category_items),
             onRetry = { model.load(Module.CONTAINERS) },
         ) { overview ->
             val resources = when (tab) {
@@ -1335,14 +1382,14 @@ private fun ContainersScreen(state: WorkspaceState, model: AppViewModel) {
             }
             ResourceList(
                 resources = resources,
-                emptyTitle = "没有${titles[tab]}",
+                emptyTitle = stringResource(R.string.no_named_items, titles[tab]),
                 onSelect = { selected = it },
                 headerAction = if (tab == 2) {
                     {
                         FilledTonalButton(onClick = { createNetwork = true }) {
                             Icon(Icons.Outlined.Add, null)
                             Spacer(Modifier.width(8.dp))
-                            Text("新建网络")
+                            Text(stringResource(R.string.new_network))
                         }
                     }
                 } else null,
@@ -1356,41 +1403,45 @@ private fun ContainersScreen(state: WorkspaceState, model: AppViewModel) {
             text = {
                 Column {
                     if (tab == 0) {
-                        ActionRow(Icons.Outlined.PlayArrow, "启动") {
+                        ActionRow(Icons.Outlined.PlayArrow, stringResource(R.string.start)) {
                             model.controlContainer(resource.id, "start")
                             selected = null
                         }
-                        ActionRow(Icons.Outlined.Pause, "停止") {
+                        ActionRow(Icons.Outlined.Pause, stringResource(R.string.stop)) {
                             model.controlContainer(resource.id, "stop")
                             selected = null
                         }
                     }
                     if (tab in 0..2) {
-                        ActionRow(Icons.Outlined.DeleteOutline, "删除", destructive = true) {
-                            confirmDelete = titles[tab] to resource
+                        ActionRow(Icons.Outlined.DeleteOutline, stringResource(R.string.delete), destructive = true) {
+                            confirmDelete = tab to resource
                             selected = null
                         }
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { selected = null }) { Text("关闭") } },
+            confirmButton = {
+                TextButton(onClick = { selected = null }) {
+                    Text(stringResource(R.string.close))
+                }
+            },
         )
     }
     confirmDelete?.let { (kind, resource) ->
         ConfirmDialog(
-            title = "删除“${resource.name}”？",
+            title = stringResource(R.string.delete_named_item, resource.name),
             message = when (kind) {
-                "容器" -> "容器会从 NAS 移除。映像和共享文件夹中的数据不会自动删除。"
-                "映像" -> "正在使用的映像无法删除，请先移除相关容器。"
-                else -> "请先确认没有容器仍连接到这个网络。"
+                0 -> stringResource(R.string.delete_container_message)
+                1 -> stringResource(R.string.image_in_use_message)
+                else -> stringResource(R.string.delete_network_confirmation)
             },
-            confirm = "删除",
+            confirm = stringResource(R.string.delete),
             destructive = true,
             onConfirm = {
                 when (kind) {
-                    "容器" -> model.deleteContainer(resource.id)
-                    "映像" -> model.deleteContainerImage(resource.id)
-                    "网络" -> model.deleteContainerNetwork(resource.id)
+                    0 -> model.deleteContainer(resource.id)
+                    1 -> model.deleteContainerImage(resource.id)
+                    2 -> model.deleteContainerNetwork(resource.id)
                 }
                 confirmDelete = null
             },
@@ -1399,9 +1450,9 @@ private fun ContainersScreen(state: WorkspaceState, model: AppViewModel) {
     }
     if (createNetwork) {
         TextInputDialog(
-            title = "新建容器网络",
-            label = "网络名称",
-            confirm = "创建",
+            title = stringResource(R.string.create_container_network),
+            label = stringResource(R.string.network_name),
+            confirm = stringResource(R.string.create),
             onConfirm = {
                 model.createContainerNetwork(it, "bridge")
                 createNetwork = false
@@ -1418,7 +1469,7 @@ private fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
     var selected by remember { mutableStateOf<ManagedResource?>(null) }
     var pendingDelete by remember { mutableStateOf<Pair<Int, ManagedResource>?>(null) }
     var editNetwork by remember { mutableStateOf<ManagedResource?>(null) }
-    val titles = listOf("虚拟机", "主机", "存储", "网络", "映像", "保护", "日志")
+    val titles = listOf(stringResource(R.string.virtual_machines), stringResource(R.string.hosts), stringResource(R.string.storage), stringResource(R.string.networks), stringResource(R.string.images), stringResource(R.string.protection), stringResource(R.string.logs))
     Column {
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
             titles.forEachIndexed { index, title ->
@@ -1427,8 +1478,8 @@ private fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
         }
         LoadableContent(
             value = state.virtualMachines,
-            emptyTitle = "没有可显示的项目",
-            emptyMessage = "当前 NAS 没有返回这个分类的内容。",
+            emptyTitle = stringResource(R.string.no_items),
+            emptyMessage = stringResource(R.string.no_category_items),
             onRetry = { model.load(Module.VIRTUAL_MACHINES) },
         ) { overview ->
             when (tab) {
@@ -1438,7 +1489,7 @@ private fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                     val resources = overview.forTab(tab)
                     ResourceList(
                         resources,
-                        "没有${titles[tab]}",
+                        stringResource(R.string.no_named_items, titles[tab]),
                         onSelect = { selected = it },
                     )
                 }
@@ -1452,38 +1503,42 @@ private fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
             text = {
                 Column {
                     if (tab == 0) {
-                        ActionRow(Icons.Outlined.PlayArrow, "启动") {
+                        ActionRow(Icons.Outlined.PlayArrow, stringResource(R.string.start)) {
                             model.controlVirtualMachine(resource.id, "poweron")
                             selected = null
                         }
-                        ActionRow(Icons.Outlined.Pause, "正常关机") {
+                        ActionRow(Icons.Outlined.Pause, stringResource(R.string.normal_shutdown)) {
                             model.controlVirtualMachine(resource.id, "shutdown")
                             selected = null
                         }
                     }
                     if (tab == 3) {
-                        ActionRow(Icons.Outlined.Edit, "修改名称") {
+                        ActionRow(Icons.Outlined.Edit, stringResource(R.string.edit_name)) {
                             editNetwork = resource
                             selected = null
                         }
                     }
                     if (tab == 0 || tab == 3 || tab == 4) {
-                        ActionRow(Icons.Outlined.DeleteOutline, "删除", destructive = true) {
+                        ActionRow(Icons.Outlined.DeleteOutline, stringResource(R.string.delete), destructive = true) {
                             pendingDelete = tab to resource
                             selected = null
                         }
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { selected = null }) { Text("关闭") } },
+            confirmButton = {
+                TextButton(onClick = { selected = null }) {
+                    Text(stringResource(R.string.close))
+                }
+            },
         )
     }
     editNetwork?.let { resource ->
         TextInputDialog(
-            title = "修改网络",
-            label = "网络名称",
+            title = stringResource(R.string.modify_network),
+            label = stringResource(R.string.network_name),
             initial = resource.name,
-            confirm = "保存",
+            confirm = stringResource(R.string.save),
             onConfirm = {
                 model.renameVirtualMachineNetwork(resource.id, it)
                 editNetwork = null
@@ -1493,13 +1548,13 @@ private fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
     }
     pendingDelete?.let { (kind, resource) ->
         ConfirmDialog(
-            title = "删除“${resource.name}”？",
+            title = stringResource(R.string.delete_named_item, resource.name),
             message = when (kind) {
-                0 -> "虚拟机及其配置会被移除。请先确认重要数据已有备份。"
-                3 -> "删除后，连接到这个网络的虚拟机可能无法正常通信。"
-                else -> "映像会从 NAS 移除，已安装的虚拟机不会被删除。"
+                0 -> stringResource(R.string.delete_virtual_machine_message)
+                3 -> stringResource(R.string.delete_network_message)
+                else -> stringResource(R.string.delete_image_message)
             },
-            confirm = "删除",
+            confirm = stringResource(R.string.delete),
             destructive = true,
             onConfirm = {
                 when (kind) {
@@ -1520,7 +1575,7 @@ private fun ProtectionContent(
     selected: Int,
     onSelected: (Int) -> Unit,
 ) {
-    val titles = listOf("保护计划", "计划策略", "保留策略")
+    val titles = listOf(stringResource(R.string.protection_plans), stringResource(R.string.schedule_policies), stringResource(R.string.retention_policies))
     val items = when (selected) {
         0 -> overview.protectionPlans
         1 -> overview.protectionSchedules
@@ -1532,7 +1587,11 @@ private fun ProtectionContent(
                 Tab(selected = index == selected, onClick = { onSelected(index) }, text = { Text(title) })
             }
         }
-        ResourceList(items, "没有${titles[selected]}", onSelect = {})
+        ResourceList(
+            items,
+            stringResource(R.string.no_named_items, titles[selected]),
+            onSelect = {},
+        )
     }
 }
 
@@ -1550,7 +1609,7 @@ private fun LogList(logs: List<LogEntry>) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                AssistChip(onClick = { level = null }, label = { Text("全部") })
+                AssistChip(onClick = { level = null }, label = { Text(stringResource(R.string.all)) })
             }
             items(LogLevel.entries) { value ->
                 AssistChip(onClick = { level = value }, label = { Text(value.displayName()) })
@@ -1559,7 +1618,7 @@ private fun LogList(logs: List<LogEntry>) {
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            placeholder = { Text("搜索日志") },
+            placeholder = { Text(stringResource(R.string.search_logs)) },
             leadingIcon = { Icon(Icons.Outlined.Search, null) },
             singleLine = true,
             modifier = Modifier
@@ -1567,7 +1626,7 @@ private fun LogList(logs: List<LogEntry>) {
                 .padding(horizontal = 12.dp),
         )
         if (filtered.isEmpty()) {
-            EmptyState("没有日志", "当前筛选条件下没有可显示的记录。", Icons.Outlined.ListAlt)
+            EmptyState(stringResource(R.string.no_log_entries), stringResource(R.string.no_records_for_filter), Icons.Outlined.ListAlt)
         } else {
             LazyColumn {
                 items(filtered, key = LogEntry::id) { log ->
@@ -1595,7 +1654,7 @@ private fun LogList(logs: List<LogEntry>) {
 @Composable
 private fun NasSettingsScreen(state: WorkspaceState, model: AppViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val titles = listOf("概览", "存储", "套件", "账号", "日志", "连接", "网络", "安全")
+    val titles = listOf(stringResource(R.string.overview), stringResource(R.string.storage), stringResource(R.string.packages), stringResource(R.string.account), stringResource(R.string.logs), stringResource(R.string.connect), stringResource(R.string.networks), stringResource(R.string.security))
     Column {
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
             titles.forEachIndexed { index, title ->
@@ -1604,8 +1663,8 @@ private fun NasSettingsScreen(state: WorkspaceState, model: AppViewModel) {
         }
         LoadableContent(
             value = state.nasSettings,
-            emptyTitle = "暂时无法读取",
-            emptyMessage = "请刷新；如果仍然失败，请确认账号具有管理权限。",
+            emptyTitle = stringResource(R.string.temporarily_unavailable),
+            emptyMessage = stringResource(R.string.admin_permission_recovery),
             onRetry = { model.load(Module.NAS_SETTINGS) },
         ) { snapshot ->
             NasSettingsTab(snapshot, tab)
@@ -1620,11 +1679,11 @@ private fun NasSettingsTab(snapshot: NasSettingsSnapshot, tab: Int) {
         0 -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 snapshot.system?.let { system ->
-                    SummaryCard("系统") {
-                        SummaryLine("设备名称", system.serverName)
-                        SummaryLine("型号", system.model)
+                    SummaryCard(stringResource(R.string.system)) {
+                        SummaryLine(stringResource(R.string.device_name), system.serverName)
+                        SummaryLine(stringResource(R.string.model), system.model)
                         SummaryLine("DSM", system.dsmVersion)
-                        system.uptimeSeconds?.let { SummaryLine("运行时间", formatDuration(it)) }
+                        system.uptimeSeconds?.let { SummaryLine(stringResource(R.string.uptime), formatDuration(it)) }
                     }
                 }
             }
@@ -1633,10 +1692,10 @@ private fun NasSettingsTab(snapshot: NasSettingsSnapshot, tab: Int) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    MetricCard("存储空间", snapshot.volumes.size.toString(), Icons.Outlined.Storage)
-                    MetricCard("套件", snapshot.packages.size.toString(), Icons.Outlined.Dns)
-                    MetricCard("活动连接", snapshot.connections.size.toString(), Icons.Outlined.NetworkCheck)
-                    MetricCard("账号", snapshot.accounts.size.toString(), Icons.Outlined.AdminPanelSettings)
+                    MetricCard(stringResource(R.string.storage_space), snapshot.volumes.size.toString(), Icons.Outlined.Storage)
+                    MetricCard(stringResource(R.string.packages), snapshot.packages.size.toString(), Icons.Outlined.Dns)
+                    MetricCard(stringResource(R.string.active_connections), snapshot.connections.size.toString(), Icons.Outlined.NetworkCheck)
+                    MetricCard(stringResource(R.string.account), snapshot.accounts.size.toString(), Icons.Outlined.AdminPanelSettings)
                 }
             }
         }
@@ -1649,28 +1708,28 @@ private fun NasSettingsTab(snapshot: NasSettingsSnapshot, tab: Int) {
                     it.status,
                 )
             } + snapshot.pools + snapshot.disks,
-            "没有存储信息",
+            stringResource(R.string.no_storage_info),
             onSelect = {},
         )
         2 -> ResourceList(
             snapshot.packages.map {
                 ManagedResource(it.id, it.name, "${it.version} · ${it.description.orEmpty()}", it.status)
             },
-            "没有套件信息",
+            stringResource(R.string.no_package_info),
             onSelect = {},
         )
         3 -> LazyColumn {
             items(snapshot.accounts, key = { it.name }) {
                 ListItem(
                     headlineContent = { Text(it.name) },
-                    supportingContent = { Text(it.description ?: it.email ?: "NAS 账号") },
+                    supportingContent = { Text(it.description ?: it.email ?: stringResource(R.string.nas_account)) },
                     leadingContent = { Icon(Icons.Outlined.AdminPanelSettings, null) },
                 )
             }
             items(snapshot.groups, key = { "group:${it.name}" }) {
                 ListItem(
                     headlineContent = { Text(it.name) },
-                    supportingContent = { Text(it.description ?: "用户群组") },
+                    supportingContent = { Text(it.description ?: stringResource(R.string.user_group)) },
                     leadingContent = { Icon(Icons.Outlined.Security, null) },
                 )
             }
@@ -1679,8 +1738,12 @@ private fun NasSettingsTab(snapshot: NasSettingsSnapshot, tab: Int) {
         5 -> LazyColumn {
             items(snapshot.connections, key = { it.id }) {
                 ListItem(
-                    headlineContent = { Text("${it.user} · ${it.service}") },
-                    supportingContent = { Text(it.client) },
+                    headlineContent = {
+                        Text("${it.user.ifBlank { stringResource(R.string.unknown_account) }} · ${it.service}")
+                    },
+                    supportingContent = {
+                        Text(it.client.ifBlank { stringResource(R.string.unknown_device) })
+                    },
                     leadingContent = { Icon(Icons.Outlined.NetworkCheck, null) },
                 )
                 HorizontalDivider(Modifier.padding(start = 72.dp))
@@ -1688,17 +1751,17 @@ private fun NasSettingsTab(snapshot: NasSettingsSnapshot, tab: Int) {
         }
         6 -> ResourceList(
             snapshot.networkInterfaces + snapshot.ddnsRecords,
-            "没有网络信息",
+            stringResource(R.string.no_network_info),
             onSelect = {},
         )
-        else -> ResourceList(snapshot.security, "没有安全状态", onSelect = {})
+        else -> ResourceList(snapshot.security, stringResource(R.string.no_security_status), onSelect = {})
     }
 }
 
 @Composable
 private fun TransfersScreen(state: WorkspaceState) {
     if (state.transfers.isEmpty()) {
-        EmptyState("没有传输任务", "上传、下载和 NAS 后台任务会显示在这里。", Icons.Outlined.SwapVert)
+        EmptyState(stringResource(R.string.no_transfer_tasks), stringResource(R.string.transfers_description), Icons.Outlined.SwapVert)
     } else {
         LazyColumn {
             items(state.transfers, key = { it.id }) { task ->
@@ -1721,10 +1784,36 @@ private fun TransfersScreen(state: WorkspaceState) {
 
 @Composable
 private fun SettingsScreen(state: WorkspaceState) {
+    val context = LocalContext.current
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
+            Card {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.language_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            stringResource(R.string.language_fallback_note),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    LanguageMenu()
+                }
+            }
+        }
+        item {
             Text(
-                "功能模块",
+                stringResource(R.string.feature_modules),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.semantics { heading() },
@@ -1741,9 +1830,14 @@ private fun SettingsScreen(state: WorkspaceState) {
                     Icon(item.module.icon(), contentDescription = null)
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(item.module.title, fontWeight = FontWeight.Medium)
+                        Text(stringResource(item.module.titleResource()), fontWeight = FontWeight.Medium)
                         Text(
-                            if (item.isAvailable) "可用" else item.reason ?: "不可用",
+                            if (item.isAvailable) {
+                                stringResource(R.string.available)
+                            } else {
+                                item.reason?.localize(context)
+                                    ?: stringResource(R.string.unavailable)
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1754,12 +1848,79 @@ private fun SettingsScreen(state: WorkspaceState) {
         }
         item {
             Text(
-                "只有开启“记住密码”后，密码才会由 Android Keystore 安全保护。",
+                stringResource(R.string.password_feature_note),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
+}
+
+@StringRes
+private fun Module.titleResource(): Int = when (this) {
+    Module.FILES -> R.string.module_files
+    Module.PHOTOS -> R.string.module_photos
+    Module.CHAT -> R.string.module_chat
+    Module.DOWNLOADS -> R.string.module_downloads
+    Module.CONTAINERS -> R.string.module_containers
+    Module.VIRTUAL_MACHINES -> R.string.module_virtual_machines
+    Module.NAS_SETTINGS -> R.string.module_nas_settings
+    Module.TRANSFERS -> R.string.module_transfers
+    Module.SETTINGS -> R.string.module_settings
+}
+
+@Composable
+private fun LanguageMenu(modifier: Modifier = Modifier) {
+    var expanded by remember { mutableStateOf(false) }
+    val currentTags = AppCompatDelegate.getApplicationLocales().toLanguageTags()
+    Box(modifier) {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                Icons.Outlined.Language,
+                contentDescription = stringResource(R.string.language_title),
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            LanguageMenuItem(
+                title = stringResource(R.string.language_follow_system),
+                selected = currentTags.isEmpty(),
+            ) {
+                AppCompatDelegate.setApplicationLocales(LocaleListCompat.getEmptyLocaleList())
+                expanded = false
+            }
+            LanguageMenuItem(
+                title = stringResource(R.string.language_english),
+                selected = currentTags.startsWith("en"),
+            ) {
+                AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("en"))
+                expanded = false
+            }
+            LanguageMenuItem(
+                title = stringResource(R.string.language_simplified_chinese),
+                selected = currentTags.startsWith("zh"),
+            ) {
+                AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("zh-CN"))
+                expanded = false
+            }
+        }
+    }
+}
+
+@Composable
+private fun LanguageMenuItem(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(title) },
+        leadingIcon = {
+            if (selected) {
+                Icon(Icons.Outlined.CheckCircle, contentDescription = null)
+            }
+        },
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -1770,11 +1931,18 @@ private fun <T> LoadableContent(
     onRetry: () -> Unit,
     content: @Composable (T) -> Unit,
 ) {
+    val loadingDescription = stringResource(R.string.loading)
+    val context = LocalContext.current
     when (value) {
         Loadable.Idle, Loadable.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(Modifier.semantics { contentDescription = "正在读取" })
+            CircularProgressIndicator(
+                Modifier.semantics { contentDescription = loadingDescription },
+            )
         }
-        is Loadable.Failed -> ErrorState(value.error.message, value.error.recovery, onRetry)
+        is Loadable.Failed -> {
+            val error = value.error.localize(context)
+            ErrorState(error.message, error.recovery, onRetry)
+        }
         is Loadable.Ready -> {
             val data = value.value
             val empty = when (data) {
@@ -1794,7 +1962,7 @@ private fun ResourceList(
     headerAction: (@Composable () -> Unit)? = null,
 ) {
     if (resources.isEmpty() && headerAction == null) {
-        EmptyState(emptyTitle, "当前 NAS 没有返回这个分类的内容。", Icons.Outlined.Info)
+        EmptyState(emptyTitle, stringResource(R.string.no_category_items), Icons.Outlined.Info)
         return
     }
     LazyColumn {
@@ -1811,7 +1979,7 @@ private fun ResourceList(
         items(resources, key = ManagedResource::id) { resource ->
             ListItem(
                 headlineContent = {
-                    Text(resource.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(resource.displayName(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
                 supportingContent = {
                     Text(
@@ -1823,7 +1991,7 @@ private fun ResourceList(
                 leadingContent = { StatusIcon(resource.state) },
                 trailingContent = {
                     IconButton(onClick = { onSelect(resource) }) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = "更多操作")
+                        Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.more_actions))
                     }
                 },
                 modifier = Modifier.clickable { onSelect(resource) },
@@ -1895,7 +2063,7 @@ private fun ErrorState(message: String, recovery: String, onRetry: () -> Unit) {
                 onClick = onRetry,
                 shape = MaterialTheme.shapes.medium,
             ) {
-                Text("重试")
+                Text(stringResource(R.string.retry))
             }
         }
     }
@@ -1996,7 +2164,7 @@ private fun ConfirmDialog(
                 },
             ) { Text(confirm, fontWeight = FontWeight.Bold) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -2031,7 +2199,7 @@ private fun TextInputDialog(
                 shape = MaterialTheme.shapes.medium,
             ) { Text(confirm, fontWeight = FontWeight.Bold) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -2042,13 +2210,13 @@ private fun DownloadDialog(onConfirm: (String, String?) -> Unit, onDismiss: () -
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = MaterialTheme.shapes.extraLarge,
-        title = { Text("添加下载任务", fontWeight = FontWeight.Bold) },
+        title = { Text(stringResource(R.string.add_download_task), fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 OutlinedTextField(
                     value = uri,
                     onValueChange = { uri = it },
-                    label = { Text("网址或磁力链接") },
+                    label = { Text(stringResource(R.string.url_or_magnet)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     minLines = 2,
                     shape = MaterialTheme.shapes.small,
@@ -2057,7 +2225,7 @@ private fun DownloadDialog(onConfirm: (String, String?) -> Unit, onDismiss: () -
                 OutlinedTextField(
                     value = destination,
                     onValueChange = { destination = it },
-                    label = { Text("保存到（可选）") },
+                    label = { Text(stringResource(R.string.save_to_optional)) },
                     singleLine = true,
                     shape = MaterialTheme.shapes.small,
                     modifier = Modifier.fillMaxWidth(),
@@ -2069,9 +2237,9 @@ private fun DownloadDialog(onConfirm: (String, String?) -> Unit, onDismiss: () -
                 onClick = { onConfirm(uri, destination.ifBlank { null }) },
                 enabled = uri.isNotBlank(),
                 shape = MaterialTheme.shapes.medium,
-            ) { Text("创建任务", fontWeight = FontWeight.Bold) }
+            ) { Text(stringResource(R.string.create_task), fontWeight = FontWeight.Bold) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -2175,22 +2343,32 @@ private fun VirtualMachineOverview.forTab(tab: Int): List<ManagedResource> = whe
     else -> emptyList()
 }
 
-private fun ResourceState.displayName(): String = when (this) {
-    ResourceState.RUNNING -> "运行中"
-    ResourceState.STOPPED -> "已停止"
-    ResourceState.PAUSED -> "已暂停"
-    ResourceState.WAITING -> "等待中"
-    ResourceState.HEALTHY -> "正常"
-    ResourceState.WARNING -> "需要注意"
-    ResourceState.ERROR -> "异常"
-    ResourceState.UNKNOWN -> "状态未知"
+@Composable
+private fun ManagedResource.displayName(): String = when (localizedLabel) {
+    ManagedResourceLabel.SECURITY_AUTO_BLOCK -> stringResource(R.string.security_auto_block)
+    ManagedResourceLabel.SECURITY_DOS_PROTECTION -> stringResource(R.string.security_dos_protection)
+    ManagedResourceLabel.SECURITY_FIREWALL -> stringResource(R.string.security_firewall)
+    null -> name.ifBlank { stringResource(R.string.unnamed_item) }
 }
 
+@Composable
+private fun ResourceState.displayName(): String = when (this) {
+    ResourceState.RUNNING -> stringResource(R.string.running)
+    ResourceState.STOPPED -> stringResource(R.string.stopped)
+    ResourceState.PAUSED -> stringResource(R.string.paused)
+    ResourceState.WAITING -> stringResource(R.string.waiting)
+    ResourceState.HEALTHY -> stringResource(R.string.normal)
+    ResourceState.WARNING -> stringResource(R.string.needs_attention)
+    ResourceState.ERROR -> stringResource(R.string.abnormal)
+    ResourceState.UNKNOWN -> stringResource(R.string.unknown_status)
+}
+
+@Composable
 private fun LogLevel.displayName(): String = when (this) {
-    LogLevel.INFO -> "信息"
-    LogLevel.WARNING -> "警告"
-    LogLevel.ERROR -> "错误"
-    LogLevel.UNKNOWN -> "其他"
+    LogLevel.INFO -> stringResource(R.string.info)
+    LogLevel.WARNING -> stringResource(R.string.warning)
+    LogLevel.ERROR -> stringResource(R.string.error)
+    LogLevel.UNKNOWN -> stringResource(R.string.other)
 }
 
 private fun LogLevel.icon(): ImageVector = when (this) {
@@ -2217,8 +2395,13 @@ private fun formatDate(epochSeconds: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
         .format(Date(epochSeconds * 1000))
 
+@Composable
 private fun formatDuration(seconds: Long): String {
     val days = seconds / 86_400
     val hours = (seconds % 86_400) / 3_600
-    return if (days > 0) "$days 天 $hours 小时" else "$hours 小时"
+    return if (days > 0) {
+        stringResource(R.string.days_hours, days, hours)
+    } else {
+        stringResource(R.string.hours_only, hours)
+    }
 }

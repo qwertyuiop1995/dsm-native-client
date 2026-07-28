@@ -1,4 +1,5 @@
 import Foundation
+import DsmLocalization
 
 public enum PhotoSpaceKind: String, Codable, CaseIterable, Sendable {
     case personal
@@ -8,24 +9,29 @@ public enum PhotoSpaceKind: String, Codable, CaseIterable, Sendable {
 public struct PhotoSpace: Identifiable, Codable, Hashable, Sendable {
     public var id: PhotoSpaceKind { kind }
     public let kind: PhotoSpaceKind
-    public let title: String
     public let rootPath: String
 
-    public init(kind: PhotoSpaceKind, title: String, rootPath: String) {
+    public var title: String {
+        switch kind {
+        case .personal:
+            L10n.string("shared.51fcaa8035fc61e2")
+        case .shared:
+            L10n.string("shared.17d2e16862f16829")
+        }
+    }
+
+    public init(kind: PhotoSpaceKind, rootPath: String) {
         self.kind = kind
-        self.title = title
         self.rootPath = rootPath
     }
 
     public static let personal = PhotoSpace(
         kind: .personal,
-        title: "个人空间",
         rootPath: "/home/Photos"
     )
 
     public static let shared = PhotoSpace(
         kind: .shared,
-        title: "共享空间",
         rootPath: "/photo"
     )
 }
@@ -300,13 +306,21 @@ public extension PhotoLibraryRepository {
 
 public struct PhotoTimelineSection: Identifiable, Sendable {
     public let date: Date
-    public let title: String
     public let items: [PhotoLibraryItem]
     public var id: Date { date }
 
-    public init(date: Date, title: String, items: [PhotoLibraryItem]) {
+    public var title: String {
+        guard date != .distantPast else {
+            return L10n.string("ui.0a680746ce36d7a8")
+        }
+        return date.formatted(
+            Date.FormatStyle(date: .long, time: .omitted)
+                .locale(L10n.locale)
+        )
+    }
+
+    public init(date: Date, items: [PhotoLibraryItem]) {
         self.date = date
-        self.title = title
         self.items = items
     }
 }

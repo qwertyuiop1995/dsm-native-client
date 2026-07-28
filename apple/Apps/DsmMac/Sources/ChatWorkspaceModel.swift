@@ -3,6 +3,7 @@ import DsmCore
 import Foundation
 import ImageIO
 import Observation
+import DsmLocalization
 
 @MainActor
 @Observable
@@ -116,10 +117,10 @@ final class ChatWorkspaceModel {
         guard conversations.contains(where: { $0.id == id }) else { return }
         if let index = pinnedConversationIDs.firstIndex(of: id) {
             pinnedConversationIDs.remove(at: index)
-            showToast("已取消置顶", icon: "pin.slash")
+            showToast(L10n.string("ui.b45a48730dd4f8ba"), icon: "pin.slash")
         } else {
             pinnedConversationIDs.insert(id, at: 0)
-            showToast("已置顶会话", icon: "pin.fill")
+            showToast(L10n.string("ui.b1bade10a9e4aa94"), icon: "pin.fill")
         }
         persistPinnedConversations()
         conversations = sortedConversations(conversations)
@@ -161,15 +162,19 @@ final class ChatWorkspaceModel {
     }
 
     func memberSummary(for conversation: ChatConversation) -> String {
-        guard conversation.kind == .group else { return "一对一聊天" }
+        guard conversation.kind == .group else { return L10n.string("ui.23f0220786ea1d90") }
         let names = conversation.memberIDs.compactMap(displayName(for:))
         let count = conversation.memberCount ?? conversation.memberIDs.count
         if !names.isEmpty {
-            let prefix = count > 0 ? "\(count) 位成员 · " : ""
+            let prefix = count > 0
+                ? L10n.string("chat.members.prefix", String(count))
+                : ""
             return prefix + names.prefix(4).joined(separator: "、")
-                + (names.count > 4 ? " 等" : "")
+                + (names.count > 4 ? L10n.string("ui.8ab274ae26fa1765") : "")
         }
-        return count > 0 ? "\(count) 位成员" : "群聊"
+        return count > 0
+            ? L10n.string("chat.members.count", String(count))
+            : L10n.string("ui.35b49ee58a4a0e82")
     }
 
     var canUseMessaging: Bool {
@@ -340,11 +345,11 @@ final class ChatWorkspaceModel {
             attachmentDownloadTasksByMessageID[messageID] = downloadTask
             try await downloadTask.value
             if announcesSuccess {
-                showToast("“\(attachment.fileName)”已保存", icon: "arrow.down.circle.fill")
+                showToast(L10n.string("ui.85d535ca829260ca", String(describing: attachment.fileName)), icon: "arrow.down.circle.fill")
             }
             return true
         } catch is CancellationError {
-            showToast("已取消保存。", icon: "xmark.circle", style: .info)
+            showToast(L10n.string("ui.9c68e3c7422d3700"), icon: "xmark.circle", style: .info)
             return false
         } catch {
             show(error)
@@ -432,7 +437,7 @@ final class ChatWorkspaceModel {
             reminders.removeAll { $0.messageID == messageID }
             reminders.append(reminder)
             reminders.sort { $0.remindAt < $1.remindAt }
-            showToast("提醒已设置", icon: "bell.fill")
+            showToast(L10n.string("ui.16c4c8ad6b7443e3"), icon: "bell.fill")
             return true
         } catch {
             show(error)
@@ -452,7 +457,7 @@ final class ChatWorkspaceModel {
                 clientRequestID: UUID()
             )
             reminders.removeAll { $0.messageID == messageID }
-            showToast("提醒已取消", icon: "bell.slash.fill")
+            showToast(L10n.string("ui.b70ea5d26374d398"), icon: "bell.slash.fill")
             return true
         } catch {
             show(error)
@@ -488,7 +493,7 @@ final class ChatWorkspaceModel {
             scheduledMessages.removeAll { $0.id == scheduled.id }
             scheduledMessages.append(scheduled)
             scheduledMessages.sort { $0.sendAt < $1.sendAt }
-            showToast("定时消息已安排", icon: "clock.badge.checkmark")
+            showToast(L10n.string("ui.e1d902552ebf8ace"), icon: "clock.badge.checkmark")
             return true
         } catch {
             show(error)
@@ -508,7 +513,7 @@ final class ChatWorkspaceModel {
                 clientRequestID: UUID()
             )
             scheduledMessages.removeAll { $0.id == id }
-            showToast("定时消息已取消", icon: "clock.badge.xmark")
+            showToast(L10n.string("ui.70e0315cbc11f517"), icon: "clock.badge.xmark")
             return true
         } catch {
             show(error)
@@ -567,7 +572,7 @@ final class ChatWorkspaceModel {
                 conversationID: conversationID
             )
             showToast(
-                isPinned ? "已设为群公告" : "已从群公告中移除",
+                isPinned ? L10n.string("ui.a2219064fe9014bd") : L10n.string("ui.7d2bc752fbb71ed2"),
                 icon: isPinned ? "pin.fill" : "pin.slash"
             )
             return true
@@ -981,7 +986,7 @@ final class ChatWorkspaceModel {
             messages.removeAll { $0.id == message.id }
             messages.append(message)
             messages.sort(by: Self.messageSort)
-            showToast("投票已发送", icon: "chart.bar.fill")
+            showToast(L10n.string("ui.8c6ec0e6eb0022db"), icon: "chart.bar.fill")
             return true
         } catch {
             show(error)
@@ -1044,7 +1049,7 @@ final class ChatWorkspaceModel {
             return true
         } catch is CancellationError {
             removeLocalMessage(id: localMessage.id, conversationID: selectedConversationID)
-            showToast("已取消发送。")
+            showToast(L10n.string("ui.d5c45fed1c7b0cc2"))
             return false
         } catch {
             markMessageFailed(localMessage, error: error)
@@ -1079,7 +1084,7 @@ final class ChatWorkspaceModel {
               directUserIDs.count == newDirectUserIDs.count,
               sourceMessages.count == ids.count else {
             statusIsError = true
-            statusMessage = "部分转发目标已经不可用，请重新选择后再试。"
+            statusMessage = L10n.string("ui.200a7e5fbb2b9bc3")
             return false
         }
 
@@ -1108,7 +1113,7 @@ final class ChatWorkspaceModel {
         let targetIDs = resolvedTargetIDs.sorted()
         guard !targetIDs.isEmpty else {
             statusIsError = true
-            statusMessage = "没有可用的转发目标，请重新选择后再试。"
+            statusMessage = L10n.string("ui.46fa3f872c997417")
             return false
         }
 
@@ -1135,7 +1140,7 @@ final class ChatWorkspaceModel {
             showBatchFailure(
                 completedCount: completedCount,
                 failedCount: failedCount,
-                noun: "次转发",
+                noun: L10n.string("ui.4ec8d920c4fc522a"),
                 lastError: lastError
             )
             return false
@@ -1143,8 +1148,8 @@ final class ChatWorkspaceModel {
 
         showToast(
             sourceMessages.count == 1
-                ? "消息已转发到 \(targetIDs.count) 个会话"
-                : "\(sourceMessages.count) 条消息已转发到 \(targetIDs.count) 个会话",
+                ? L10n.string("ui.47bb06634893688d", String(describing: targetIDs.count))
+                : L10n.string("ui.6fed19067a9ae071", String(describing: sourceMessages.count), String(describing: targetIDs.count)),
             icon: "arrowshape.turn.up.right.fill"
         )
         return true
@@ -1199,7 +1204,7 @@ final class ChatWorkspaceModel {
             replaceLocalMessage(localID: id, with: sent)
         } catch is CancellationError {
             removeLocalMessage(id: id, conversationID: message.conversationID)
-            showToast("已取消发送。")
+            showToast(L10n.string("ui.d5c45fed1c7b0cc2"))
         } catch {
             guard let current = messages.first(where: { $0.id == id }) else { return }
             markMessageFailed(current, error: error)
@@ -1227,7 +1232,7 @@ final class ChatWorkspaceModel {
         let targets = messages.filter { ids.contains($0.id) }
         guard targets.count == ids.count, targets.allSatisfy(canDelete) else {
             statusIsError = true
-            statusMessage = "只能删除自己发送的消息。"
+            statusMessage = L10n.string("ui.66a12c2de716c8cf")
             return 0
         }
 
@@ -1260,14 +1265,14 @@ final class ChatWorkspaceModel {
             showBatchFailure(
                 completedCount: deletedCount,
                 failedCount: targets.count - deletedCount,
-                noun: "条消息",
+                noun: L10n.string("ui.3b5110664aa4cadb"),
                 lastError: lastError
             )
         } else {
             statusMessage = nil
             statusIsError = false
             showToast(
-                deletedCount == 1 ? "消息已删除" : "已删除 \(deletedCount) 条消息",
+                deletedCount == 1 ? L10n.string("ui.8a92b54dacdaccad") : L10n.string("ui.b60d233a7f488b7e", String(describing: deletedCount)),
                 icon: "trash.fill"
             )
         }
@@ -1318,14 +1323,14 @@ final class ChatWorkspaceModel {
             showBatchFailure(
                 completedCount: closedCount,
                 failedCount: targets.count - closedCount,
-                noun: "个会话",
+                noun: L10n.string("ui.0ef703f76a8da8f6"),
                 lastError: lastError
             )
         } else {
             statusMessage = nil
             statusIsError = false
             showToast(
-                closedCount == 1 ? "会话已删除并进入归档" : "已删除 \(closedCount) 个会话并进入归档",
+                closedCount == 1 ? L10n.string("ui.97f6a92c69ab9f4e") : L10n.string("ui.027eaf484175e27a", String(describing: closedCount)),
                 icon: "archivebox.fill"
             )
         }
@@ -1348,7 +1353,7 @@ final class ChatWorkspaceModel {
 
     func showAttachmentUnavailable() {
         showToast(
-            "这台 NAS 尚未开放附件发送",
+            L10n.string("ui.e19b010fb03f1d59"),
             icon: "paperclip",
             style: .info
         )
@@ -1436,7 +1441,7 @@ final class ChatWorkspaceModel {
            let description = localizedError.errorDescription {
             return description
         }
-        return "操作暂时没有完成，请检查连接后重试。"
+        return L10n.string("ui.46c613a2fccce12e")
     }
 
     private func matchingServerMessage(
@@ -1503,10 +1508,10 @@ final class ChatWorkspaceModel {
                   let description = localizedError.errorDescription {
             detail = description
         } else {
-            detail = "请刷新后重试。"
+            detail = L10n.string("ui.5448ceb91a80e260")
         }
         if completedCount > 0 {
-            statusMessage = "已处理 \(completedCount) \(noun)，另有 \(failedCount) \(noun)未完成。\(detail)"
+            statusMessage = L10n.string("ui.7f0fd6ab737e3331", String(describing: completedCount), String(describing: noun), String(describing: failedCount), String(describing: noun), String(describing: detail))
         } else {
             statusMessage = detail
         }
@@ -1515,11 +1520,11 @@ final class ChatWorkspaceModel {
     private func availabilityMessage(for status: ChatAvailabilityStatus) -> String {
         switch status {
         case .available:
-            "消息服务已就绪。"
+            L10n.string("ui.4bb0024f2b966457")
         case .requiresValidation:
-            "岚仓暂时还不能安全连接这台 NAS 的消息服务。准备完成前不会尝试发送消息，你仍可以继续使用文件和照片功能。"
+            L10n.string("ui.9984c9276092ef03")
         case .unavailable:
-            "这台 NAS 当前没有可用的消息服务。请确认已安装并启用 Synology Chat Server，且当前账号具有使用权限。"
+            L10n.string("ui.8680d55b0f6fff71")
         }
     }
 

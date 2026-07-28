@@ -1,6 +1,7 @@
 import AppKit
 import DsmCore
 import SwiftUI
+import DsmLocalization
 
 /// 在时间轴或文件夹视图中移动照片时，供用户选择目标文件夹。
 /// 使用独立的 PhotoLibraryModel 实例，避免影响主照片库状态。
@@ -31,10 +32,10 @@ struct PhotoFolderDestinationPicker: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("移动到…")
+                Text(L10n.string("ui.0bee1672c6d4a3a9"))
                     .font(.headline)
                 Spacer()
-                Button("取消") { onCancel() }
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { onCancel() }
                     .keyboardShortcut(.escape, modifiers: [])
             }
             .padding(.horizontal, 16)
@@ -70,20 +71,20 @@ struct PhotoFolderDestinationPicker: View {
             .padding(.vertical, 10)
 
             if pickerModel.isLoading && pickerModel.displayedItems.isEmpty {
-                ProgressView("正在载入文件夹…")
+                ProgressView(L10n.string("ui.038b9263cfd8c1a8"))
                     .fillsAvailableContentArea()
             } else if let errorMessage = pickerModel.errorMessage {
                 ContentUnavailableView(
-                    "无法读取文件夹",
+                    L10n.string("ui.c7046f4c767b4d60"),
                     systemImage: "exclamationmark.triangle",
                     description: Text(errorMessage)
                 )
                 .fillsAvailableContentArea()
             } else if availableFolders.isEmpty {
                 ContentUnavailableView(
-                    "这里没有子文件夹",
+                    L10n.string("ui.2e3012c9f8d17867"),
                     systemImage: "folder",
-                    description: Text("可以选择当前文件夹，或返回上一级继续查找。")
+                    description: Text(L10n.string("ui.8ed1c0e8bd363f97"))
                 )
                 .fillsAvailableContentArea()
             } else {
@@ -93,7 +94,7 @@ struct PhotoFolderDestinationPicker: View {
             Divider()
 
             HStack(spacing: 12) {
-                Button("选择当前文件夹") {
+                Button(L10n.string("ui.21493a0f78021d9b")) {
                     onSelect(pickerModel.currentPath)
                 }
                 .buttonStyle(.borderedProminent)
@@ -101,7 +102,7 @@ struct PhotoFolderDestinationPicker: View {
 
                 Spacer()
 
-                Button("取消") { onCancel() }
+                Button(L10n.string("ui.2cd0f3be8738a86c")) { onCancel() }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)

@@ -1,4 +1,5 @@
 import Foundation
+import DsmLocalization
 
 public enum NasAddressKind: Equatable, Sendable {
     case direct
@@ -34,11 +35,11 @@ extension NasAddressInputError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .empty:
-            "请输入 NAS 地址或 QuickConnect ID。"
+            L10n.string("shared.4da44b2e6887b5ed")
         case .invalid:
-            "无法识别这个地址。你可以粘贴浏览器中的完整地址，或输入 IP、域名和 QuickConnect ID。"
+            L10n.string("shared.147071af9b1ef6c0")
         case .insecure:
-            "为了保护登录信息，请使用 HTTPS 地址。"
+            L10n.string("shared.4234d503af1c54d5")
         }
     }
 }

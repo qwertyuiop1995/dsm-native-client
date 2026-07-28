@@ -1,3 +1,4 @@
+using LanStash.App.Localization;
 using LanStash.App.ViewModels;
 using LanStash.Domain;
 using Microsoft.UI.Xaml;
@@ -8,6 +9,7 @@ namespace LanStash.App.Views;
 public sealed partial class LoginPage : Page
 {
     private readonly AppViewModel _viewModel;
+    private bool _isLoadingLanguage;
 
     public LoginPage(AppViewModel viewModel)
     {
@@ -17,7 +19,29 @@ public sealed partial class LoginPage : Page
         _viewModel.PropertyChanged += (_, _) => UpdateState();
         _viewModel.PasswordLoaded += (_, password) =>
             DispatcherQueue.TryEnqueue(() => PasswordInput.Password = password);
+        LoadLanguageOptions();
         UpdateState();
+    }
+
+    private void LoadLanguageOptions()
+    {
+        _isLoadingLanguage = true;
+        var localization = LocalizationService.Current;
+        LanguageLabel.Text = localization.Get("LanguageTitle");
+        LanguageNote.Text = localization.Get("LanguageFallbackNote");
+        LanguageSelector.ItemsSource = localization.Choices();
+        LanguageSelector.SelectedItem = localization.Choices()
+            .First(choice => choice.Value == localization.Selection);
+        _isLoadingLanguage = false;
+    }
+
+    private void LanguageSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoadingLanguage || LanguageSelector.SelectedItem is not LanguageChoice choice)
+        {
+            return;
+        }
+        LocalizationService.Current.SetSelection(choice.Value);
     }
 
     private async void ProfileList_SelectionChanged(object sender, SelectionChangedEventArgs e)

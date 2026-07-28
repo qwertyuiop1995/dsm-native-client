@@ -1,4 +1,5 @@
 import Foundation
+import DsmLocalization
 
 public enum ChatFeature: String, Codable, CaseIterable, Hashable, Sendable {
     case directConversation
@@ -319,21 +320,21 @@ extension ChatContractError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .emptyUserID:
-            "请选择要聊天的用户。"
+            L10n.string("shared.006df27b0005ac55")
         case .emptyConversationID:
-            "没有找到这段聊天，请返回会话列表后重试。"
+            L10n.string("shared.6c08b32c5cb3f9d5")
         case .emptyGroupTitle:
-            "请输入群聊名称。"
+            L10n.string("shared.bc20c155e8acbe13")
         case .insufficientGroupMembers:
-            "请至少选择两位成员创建群聊。"
+            L10n.string("shared.88fc95a3dca1fdef")
         case .emptyMessage:
-            "请输入消息或添加附件。"
+            L10n.string("shared.9af2434b7b841a78")
         case .emptyPollQuestion:
-            "请输入投票问题。"
+            L10n.string("shared.7b82ce1bdda1e2e7")
         case .insufficientPollOptions:
-            "请至少填写两个投票选项。"
+            L10n.string("shared.bfa23e166962ce12")
         case .duplicatePollOptions:
-            "投票选项不能重复。"
+            L10n.string("shared.c7b4b7f12f23c5c3")
         }
     }
 }

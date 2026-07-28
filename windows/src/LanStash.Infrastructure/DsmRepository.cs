@@ -80,7 +80,7 @@ public sealed class DsmRepository(
             },
             cancellationToken).ConfigureAwait(false);
         var taskId = start.String("taskid")
-            ?? throw new DsmException("NAS 没有开始搜索", "请稍后重试。");
+            ?? throw new DsmException(UserText.Key("WinShared17bab1054ab28010"), UserText.Key("WinSharedefc81ced18eb3bb0"));
         try
         {
             var result = await CallAsync(
@@ -157,7 +157,7 @@ public sealed class DsmRepository(
     {
         if (paths.Count == 0)
         {
-            throw new ArgumentException("请先选择要删除的项目。", nameof(paths));
+            throw new ArgumentException(UserText.Key("WinShared73a4d6d9c92df71c"), nameof(paths));
         }
         await CallVoidAsync(
             "SYNO.FileStation.Delete",
@@ -183,7 +183,7 @@ public sealed class DsmRepository(
                 }
                 return true;
             },
-            "NAS 尚未确认项目已删除，请刷新后重试。",
+            UserText.Key("WinSharedfea22978bfdec072"),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -207,7 +207,7 @@ public sealed class DsmRepository(
             var detail = item.Object("additional")?.Object("detail");
             return new DownloadTask(
                 item.String("id") ?? string.Empty,
-                item.String("title") ?? "未命名任务",
+                item.String("title") ?? UserText.Key("WinSharede23ff8b80f6200c5"),
                 item.String("status") ?? "unknown",
                 item.Long("size"),
                 item.Long("size_downloaded") ?? transfer?.Long("size_downloaded"),
@@ -264,7 +264,7 @@ public sealed class DsmRepository(
                     var remaining = await LoadDownloadsAsync(cancellationToken).ConfigureAwait(false);
                     return ids.All(id => remaining.All(item => item.Id != id));
                 },
-                "NAS 尚未确认下载任务已删除，请刷新后重试。",
+                UserText.Key("WinShared7ca744fb7c598d20"),
                 cancellationToken).ConfigureAwait(false);
         }
     }
@@ -329,7 +329,7 @@ public sealed class DsmRepository(
                 return snapshot.Networks.Any(item =>
                     string.Equals(item.Name, name.Trim(), StringComparison.OrdinalIgnoreCase));
             },
-            "NAS 尚未确认网络已创建，请刷新后重试。",
+            UserText.Key("WinSharedab9474d0616d3198"),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -351,7 +351,7 @@ public sealed class DsmRepository(
                     cancellationToken).ConfigureAwait(false);
                 return remaining.All(item => item.Id != id);
             },
-            "NAS 尚未确认网络已删除，请刷新后重试。",
+            UserText.Key("WinShared3f7da50cab7bd49a"),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -466,7 +466,7 @@ public sealed class DsmRepository(
                     item.Id == id &&
                     string.Equals(item.Name, name.Trim(), StringComparison.Ordinal));
             },
-            "NAS 尚未确认网络设置已保存，请刷新后重试。",
+            UserText.Key("WinShared35129033ee98c3ee"),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -503,7 +503,7 @@ public sealed class DsmRepository(
             .OfType<JsonObject>()
             .Select(item => new ChatConversation(
                 item.String("channel_id") ?? item.String("id") ?? string.Empty,
-                item.String("name") ?? item.String("channel_name") ?? "会话",
+                item.String("name") ?? item.String("channel_name") ?? UserText.Key("WinShareda63280253f17d440"),
                 item.Int("unread") ?? item.Int("unread_count") ?? 0,
                 item.String("last_post") ?? item.String("last_message"),
                 item.Date("last_update_at") ?? item.Date("time")))
@@ -590,9 +590,9 @@ public sealed class DsmRepository(
         var result = new List<ResourceItem>();
         foreach (var (apiName, title) in new[]
         {
-            ("SYNO.Core.Security.AutoBlock", "自动封锁"),
-            ("SYNO.Core.Security.DoS", "DoS 防护"),
-            ("SYNO.Core.Security.Firewall", "防火墙"),
+            ("SYNO.Core.Security.AutoBlock", UserText.Key("WinSharedb4ffcaefff280faf")),
+            ("SYNO.Core.Security.DoS", UserText.Key("WinShareda167a95b73b968b4")),
+            ("SYNO.Core.Security.Firewall", UserText.Key("WinSharedeee30e9d97ca1e61")),
         })
         {
             var data = await TryCallFirstAsync(apiName, ["get", "list"], cancellationToken)
@@ -605,7 +605,7 @@ public sealed class DsmRepository(
             result.Add(new ResourceItem(
                 apiName,
                 title,
-                enabled is false ? "已关闭" : "已开启",
+                enabled is false ? UserText.Key("WinShared6744b4c6a9aa0038") : UserText.Key("WinShared8a4ef3e48e4e8a5a"),
                 enabled is false ? ResourceState.Warning : ResourceState.Healthy));
         }
         return result;
@@ -635,7 +635,7 @@ public sealed class DsmRepository(
                     .ConfigureAwait(false);
                 return remaining.All(item => item.Id != id);
             },
-            "NAS 尚未确认删除结果，请刷新后检查项目状态。",
+            UserText.Key("WinShared90a556f6814be8fb"),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -691,8 +691,8 @@ public sealed class DsmRepository(
             }
         }
         throw lastError ?? new DsmException(
-            "当前 NAS 不支持这项功能",
-            "请更新相关套件。");
+            UserText.Key("WinShared11a208e43c34b77c"),
+            UserText.Key("WinShared2580b8992c005ea7"));
     }
 
     private async Task<JsonObject?> TryCallFirstAsync(
@@ -727,8 +727,8 @@ public sealed class DsmRepository(
         if (!_capabilities.TryGetValue(apiName, out var capability))
         {
             throw new DsmException(
-                "当前 NAS 不支持这项功能",
-                "请更新 DSM 或相关套件。",
+                UserText.Key("WinShared11a208e43c34b77c"),
+                UserText.Key("WinShared371d84f48836296f"),
                 102);
         }
         return _api.CallAsync(
@@ -763,7 +763,7 @@ public sealed class DsmRepository(
         }
         throw new DsmException(
             failureMessage,
-            "请刷新列表；如果项目仍存在，请确认没有其他任务正在使用它。");
+            UserText.Key("WinShared4470548cdf9d51c2"));
     }
 
     private static string ParentPath(string path)
@@ -783,8 +783,8 @@ public sealed class DsmRepository(
         if (!page.Items.Any(item => string.Equals(item.Name, name, StringComparison.Ordinal)))
         {
             throw new DsmException(
-                "NAS 没有确认这次更改",
-                "请刷新列表并检查结果。");
+                UserText.Key("WinShared0dc50225eea5c275"),
+                UserText.Key("WinShared6e75c1fff5138b30"));
         }
     }
 
@@ -797,7 +797,7 @@ public sealed class DsmRepository(
             var permission = additional?.Object("perm");
             return new FileItem(
                 item.String("path") ?? string.Empty,
-                item.String("name") ?? item.String("path")?.Split('/').Last() ?? "项目",
+                item.String("name") ?? item.String("path")?.Split('/').Last() ?? UserText.Key("WinShared79f326be4409d51f"),
                 item.Bool("isdir") ?? false,
                 item.Long("size") ?? additional?.Long("size") ?? 0,
                 time?.Date("mtime") ?? item.Date("mtime"),
@@ -919,7 +919,7 @@ public sealed class DsmRepository(
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         if (name.Contains('/'))
         {
-            throw new ArgumentException("名称不能包含路径分隔符。", nameof(name));
+            throw new ArgumentException(UserText.Key("WinSharedfa9066ff052e7270"), nameof(name));
         }
     }
 
@@ -928,8 +928,8 @@ public sealed class DsmRepository(
     private string Preferred(params string[] names) =>
         names.FirstOrDefault(Supports)
         ?? throw new DsmException(
-            "当前 NAS 不支持这项功能",
-            "请更新 DSM 或相关套件。",
+            UserText.Key("WinShared11a208e43c34b77c"),
+            UserText.Key("WinShared371d84f48836296f"),
             102);
 
     private string? PreferredOptional(params string[] names) => names.FirstOrDefault(Supports);

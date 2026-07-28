@@ -8,12 +8,15 @@
 
 /* Begin PBXBuildFile section */
 		02B33EDD7AEE3D39F6F56A3B /* MobileRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35538E9B1754A5850399FB5E /* MobileRootView.swift */; };
-		05FC52A091594BF9F8E96B62 /* DsmCore in Frameworks */ = {isa = PBXBuildFile; productRef = 28492EA0CE4CAD3EC3C9163D /* DsmCore */; };
+		05FC52A091594BF9F8E96B62 /* DsmLocalization in Frameworks */ = {isa = PBXBuildFile; productRef = 1378A92318CD7678974010E4 /* DsmLocalization */; };
 		0DE9E34E1ED20A280E95275C /* AppIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = C0C941E338B615CF4156D6DF /* AppIcon.png */; };
+		1426FE1B006C7564A67E6441 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 313CF1924503C1EB6667424B /* Localizable.strings */; };
+		5204B26460967C98388305C6 /* DsmNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = 014F2C74E046B32D937E73A2 /* DsmNetwork */; };
 		6394B4C4C0B71B453620827D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C7E3C64B837651EFE7D18295 /* Assets.xcassets */; };
-		70E932303769E6811F205B52 /* DsmNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = 014F2C74E046B32D937E73A2 /* DsmNetwork */; };
+		70E932303769E6811F205B52 /* DsmCore in Frameworks */ = {isa = PBXBuildFile; productRef = 28492EA0CE4CAD3EC3C9163D /* DsmCore */; };
 		8926A7EDBD39D30074E13FDA /* MobileAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC94602D9044B0204D0418D9 /* MobileAppModel.swift */; };
 		97938D7B0AC80E7384388680 /* KeychainSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9AD25190A561C9AB18A6B09 /* KeychainSessionStore.swift */; };
+		A55817773722F79E87C57CE0 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 83C0AB333F8D5F74490217B4 /* InfoPlist.strings */; };
 		ADEC01498BDB4D86E619729C /* DsmMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98360F050406F1BD9076A89 /* DsmMobileApp.swift */; };
 		C6DBB1F1C2E6E594D09204F3 /* MobileModuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F13179FE2BF0AAE3F3AC76FF /* MobileModuleTests.swift */; };
 /* End PBXBuildFile section */
@@ -29,12 +32,16 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		27D53A798CAB0718E50F78B8 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		35538E9B1754A5850399FB5E /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
 		4DD69A0DF2CC3B89B136C95F /* DsmMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = DsmMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6E60E499EC5EA8C45209777C /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 		C0C941E338B615CF4156D6DF /* AppIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = AppIcon.png; sourceTree = "<group>"; };
 		C4724BE81BEF1AF43DBAA783 /* DsmMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = DsmMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C7E3C64B837651EFE7D18295 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		CC94602D9044B0204D0418D9 /* MobileAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileAppModel.swift; sourceTree = "<group>"; };
+		D6474ABBF2C626D021872745 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		E919EE7D617AD9A7D12C5EA3 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		F13179FE2BF0AAE3F3AC76FF /* MobileModuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModuleTests.swift; sourceTree = "<group>"; };
 		F6B036892E44B6793F28E6BE /* apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = apple; path = ../..; sourceTree = SOURCE_ROOT; };
 		F98360F050406F1BD9076A89 /* DsmMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DsmMobileApp.swift; sourceTree = "<group>"; };
@@ -46,8 +53,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				05FC52A091594BF9F8E96B62 /* DsmCore in Frameworks */,
-				70E932303769E6811F205B52 /* DsmNetwork in Frameworks */,
+				05FC52A091594BF9F8E96B62 /* DsmLocalization in Frameworks */,
+				70E932303769E6811F205B52 /* DsmCore in Frameworks */,
+				5204B26460967C98388305C6 /* DsmNetwork in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -68,6 +76,8 @@
 			children = (
 				C0C941E338B615CF4156D6DF /* AppIcon.png */,
 				C7E3C64B837651EFE7D18295 /* Assets.xcassets */,
+				83C0AB333F8D5F74490217B4 /* InfoPlist.strings */,
+				313CF1924503C1EB6667424B /* Localizable.strings */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -145,6 +155,7 @@
 			);
 			name = DsmMobile;
 			packageProductDependencies = (
+				1378A92318CD7678974010E4 /* DsmLocalization */,
 				28492EA0CE4CAD3EC3C9163D /* DsmCore */,
 				014F2C74E046B32D937E73A2 /* DsmNetwork */,
 			);
@@ -177,6 +188,7 @@
 			knownRegions = (
 				Base,
 				en,
+				"zh-Hans",
 			);
 			mainGroup = B9B57ECEB4A9147BF0C524F5;
 			minimizedProjectReferenceProxies = 1;
@@ -201,6 +213,8 @@
 			files = (
 				0DE9E34E1ED20A280E95275C /* AppIcon.png in Resources */,
 				6394B4C4C0B71B453620827D /* Assets.xcassets in Resources */,
+				A55817773722F79E87C57CE0 /* InfoPlist.strings in Resources */,
+				1426FE1B006C7564A67E6441 /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -235,6 +249,27 @@
 			targetProxy = D1A418AC228246B7EEC302A0 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		313CF1924503C1EB6667424B /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				D6474ABBF2C626D021872745 /* en */,
+				27D53A798CAB0718E50F78B8 /* zh-Hans */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+		83C0AB333F8D5F74490217B4 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				E919EE7D617AD9A7D12C5EA3 /* en */,
+				6E60E499EC5EA8C45209777C /* zh-Hans */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		1F173CBB0D72CA722D58FB47 /* Debug */ = {
@@ -473,6 +508,10 @@
 		014F2C74E046B32D937E73A2 /* DsmNetwork */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DsmNetwork;
+		};
+		1378A92318CD7678974010E4 /* DsmLocalization */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DsmLocalization;
 		};
 		28492EA0CE4CAD3EC3C9163D /* DsmCore */ = {
 			isa = XCSwiftPackageProductDependency;

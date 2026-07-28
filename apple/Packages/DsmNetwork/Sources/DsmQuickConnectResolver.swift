@@ -1,6 +1,7 @@
 import CryptoKit
 import DsmCore
 import Foundation
+import DsmLocalization
 
 public enum QuickConnectEndpointKind: Equatable, Sendable {
     case local
@@ -35,21 +36,21 @@ extension QuickConnectResolutionError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .notFound:
-            "没有找到这个 QuickConnect ID，请检查拼写和 NAS 中的 QuickConnect 设置。"
+            L10n.string("shared.d96486036c975839")
         case .offline:
-            "QuickConnect 找到了这台 NAS，但设备目前不在线。"
+            L10n.string("shared.d2273a40a6f9387a")
         case .noDirectRoute:
-            "QuickConnect 没有提供可用的直接连接地址。你可以连接家庭 VPN，或改用可从当前网络访问的 NAS 地址。"
+            L10n.string("shared.2952c5ce0efa0ffd")
         case .relayDisabled:
-            "这台 NAS 没有开启 QuickConnect 中继。请在 DSM 的 QuickConnect 高级设置中开启中继后重试。"
+            L10n.string("shared.ef6c11be2ae49b06")
         case .relayUnavailable:
-            "QuickConnect 暂时无法建立中继连接，请稍后重试。"
+            L10n.string("shared.9e73a1cad5867f75")
         case .relayIdentityMismatch:
-            "QuickConnect 返回的连接无法确认属于这台 NAS。为保护登录信息，岚仓已停止连接。"
+            L10n.string("shared.9edd5ea14dc200aa")
         case .serviceUnavailable:
-            "QuickConnect 暂时没有响应，请稍后重试。"
+            L10n.string("shared.25e80b22c8d9f4e6")
         case .invalidResponse:
-            "QuickConnect 返回的信息无法读取，请稍后重试。"
+            L10n.string("shared.b0738d49115e3229")
         }
     }
 }

@@ -1,5 +1,6 @@
 import DsmCore
 import Foundation
+import DsmLocalization
 
 enum DsmErrorContext {
     case general
@@ -13,7 +14,7 @@ enum DsmErrorMapper {
             return AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "无法开始此操作，请重试。",
+                safeUserMessage: L10n.string("shared.ceafc4ba41052cd3"),
                 requestID: requestID
             )
         case .httpStatus(let code, let requestID):
@@ -22,7 +23,7 @@ enum DsmErrorMapper {
             return AppError(
                 category: .invalidResponse,
                 isRetryable: false,
-                safeUserMessage: "NAS 返回的数据无法读取，请确认 DSM 已更新到受支持版本。",
+                safeUserMessage: L10n.string("shared.f98d542d79142efa"),
                 requestID: requestID
             )
         case .api(let code, let requestID):
@@ -33,7 +34,7 @@ enum DsmErrorMapper {
             return AppError(
                 category: .cancelled,
                 isRetryable: false,
-                safeUserMessage: "操作已取消。",
+                safeUserMessage: L10n.string("shared.83f4727f2b4672a6"),
                 requestID: requestID
             )
         }
@@ -48,7 +49,7 @@ enum DsmErrorMapper {
             return AppError(
                 category: .authenticationRequired,
                 isRetryable: false,
-                safeUserMessage: "登录失败，请检查用户名、密码和用户权限。",
+                safeUserMessage: L10n.string("shared.f19745ebfe7e7094"),
                 httpStatus: code,
                 requestID: requestID
             )
@@ -59,7 +60,7 @@ enum DsmErrorMapper {
                 return AppError(
                     category: .authenticationRequired,
                     isRetryable: false,
-                    safeUserMessage: "登录失败，请检查用户名、密码和用户权限。",
+                    safeUserMessage: L10n.string("shared.f19745ebfe7e7094"),
                     httpStatus: code,
                     requestID: requestID
                 )
@@ -67,7 +68,7 @@ enum DsmErrorMapper {
             return AppError(
                 category: .permissionDenied,
                 isRetryable: false,
-                safeUserMessage: "已经连接到 NAS，但当前用户没有使用 File Station 的权限。请在 DSM 中检查应用权限。",
+                safeUserMessage: L10n.string("shared.f0daa43c26f5dc7c"),
                 httpStatus: code,
                 requestID: requestID
             )
@@ -76,7 +77,7 @@ enum DsmErrorMapper {
         return AppError(
             category: code >= 500 ? .serverBusy : .invalidResponse,
             isRetryable: code >= 500,
-            safeUserMessage: code >= 500 ? "NAS 暂时无法响应，请稍后重试。" : "NAS 没有接受这次请求，请检查地址后重试。",
+            safeUserMessage: code >= 500 ? L10n.string("shared.3a10274bc9cbc505") : L10n.string("shared.266b4cf4f0a2c3ea"),
             httpStatus: code,
             requestID: requestID
         )
@@ -90,21 +91,21 @@ enum DsmErrorMapper {
         if case .authentication(let otpWasSubmitted) = context {
             switch code {
             case 400:
-                return apiError(.authenticationRequired, false, "用户名或密码错误。", code, requestID)
+                return apiError(.authenticationRequired, false, L10n.string("shared.971c1182f4bc8d69"), code, requestID)
             case 401:
-                return apiError(.authenticationRequired, false, "这个用户已被停用。", code, requestID)
+                return apiError(.authenticationRequired, false, L10n.string("shared.3c5f4468deb3648e"), code, requestID)
             case 402:
-                return apiError(.permissionDenied, false, "当前用户没有登录权限。", code, requestID)
+                return apiError(.permissionDenied, false, L10n.string("shared.993d62ddf6d3073c"), code, requestID)
             case 403, 406:
-                return apiError(.otpRequired, false, "需要输入双重验证验证码。", code, requestID)
+                return apiError(.otpRequired, false, L10n.string("shared.cc1dfd45497926ba"), code, requestID)
             case 404 where otpWasSubmitted:
-                return apiError(.otpRequired, false, "验证码不正确，请重新输入。", code, requestID)
+                return apiError(.otpRequired, false, L10n.string("shared.999c5ca11380400b"), code, requestID)
             case 407:
-                return apiError(.permissionDenied, false, "NAS 已阻止当前网络位置登录，请在 DSM 中检查自动封锁设置。", code, requestID)
+                return apiError(.permissionDenied, false, L10n.string("shared.7fe7b412406eb8b2"), code, requestID)
             case 408:
-                return apiError(.authenticationRequired, false, "密码已过期，请联系管理员处理。", code, requestID)
+                return apiError(.authenticationRequired, false, L10n.string("shared.a444c2afe457be21"), code, requestID)
             case 409, 410:
-                return apiError(.authenticationRequired, false, "请先在 DSM 登录页面修改密码。", code, requestID)
+                return apiError(.authenticationRequired, false, L10n.string("shared.417ad1f7a8d06f80"), code, requestID)
             default:
                 break
             }
@@ -112,33 +113,33 @@ enum DsmErrorMapper {
 
         switch code {
         case 102, 103:
-            return apiError(.apiUnavailable, false, "这台 NAS 暂不支持此功能。", code, requestID)
+            return apiError(.apiUnavailable, false, L10n.string("shared.119cf0fb55dbb178"), code, requestID)
         case 104:
-            return apiError(.versionUnsupported, false, "这台 NAS 的系统版本暂不受支持。", code, requestID)
+            return apiError(.versionUnsupported, false, L10n.string("shared.95cbdf7aaaa0f83b"), code, requestID)
         case 105:
-            return apiError(.permissionDenied, false, "当前用户没有执行此操作的权限。", code, requestID)
+            return apiError(.permissionDenied, false, L10n.string("shared.b99b8ea54fa7ef76"), code, requestID)
         case 106, 107, 119:
-            return apiError(.authenticationRequired, false, "登录已过期，请重新登录。", code, requestID)
+            return apiError(.authenticationRequired, false, L10n.string("shared.18b4f39557c377e4"), code, requestID)
         case 109, 110, 111, 117, 118:
-            return apiError(.serverBusy, true, "NAS 暂时繁忙，请稍后重试。", code, requestID)
+            return apiError(.serverBusy, true, L10n.string("shared.fb3e57ef440d7c78"), code, requestID)
         case 150:
-            return apiError(.networkUnavailable, false, "网络环境发生变化，请重新连接。", code, requestID)
+            return apiError(.networkUnavailable, false, L10n.string("shared.e19b0bb20792fd73"), code, requestID)
         case 404, 408, 900:
-            return apiError(.notFound, false, "这个文件或文件夹已不存在。", code, requestID)
+            return apiError(.notFound, false, L10n.string("shared.5f35ed652b825e19"), code, requestID)
         case 1300:
-            return apiError(.unknown, true, "无法创建压缩包，请检查可用空间和文件夹权限后重试。", code, requestID)
+            return apiError(.unknown, true, L10n.string("shared.913dbcbb37d0b503"), code, requestID)
         case 1301:
-            return apiError(.invalidResponse, false, "压缩包名称过长，请缩短名称后重试。", code, requestID)
+            return apiError(.invalidResponse, false, L10n.string("shared.539873656a8d3b33"), code, requestID)
         case 1400:
-            return apiError(.unknown, true, "无法解压这个压缩包，请检查可用空间和文件夹权限后重试。", code, requestID)
+            return apiError(.unknown, true, L10n.string("shared.9c25538cfcc5cf55"), code, requestID)
         case 1401, 1402:
-            return apiError(.invalidResponse, false, "无法打开这个压缩包，它可能已损坏或格式不受支持。", code, requestID)
+            return apiError(.invalidResponse, false, L10n.string("shared.4c29707adc9687ba"), code, requestID)
         case 1403:
-            return apiError(.invalidResponse, false, "压缩包密码不正确，请重新输入。", code, requestID)
+            return apiError(.invalidResponse, false, L10n.string("shared.c9e14d75e9b9fa8c"), code, requestID)
         case 1404, 1405:
-            return apiError(.invalidResponse, false, "无法读取压缩包中的内容，请检查文件是否完整。", code, requestID)
+            return apiError(.invalidResponse, false, L10n.string("shared.55106e700c58cc74"), code, requestID)
         default:
-            return apiError(.unknown, false, "NAS 无法完成这次操作，请稍后重试。", code, requestID)
+            return apiError(.unknown, false, L10n.string("shared.98ba28a8694df5f0"), code, requestID)
         }
     }
 
@@ -149,14 +150,14 @@ enum DsmErrorMapper {
             return AppError(
                 category: .timeout,
                 isRetryable: true,
-                safeUserMessage: "连接超时，请确认 NAS 已开机并且当前网络可以访问它。",
+                safeUserMessage: L10n.string("shared.c78d50442236c602"),
                 requestID: requestID
             )
         case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost:
             return AppError(
                 category: .networkUnavailable,
                 isRetryable: true,
-                safeUserMessage: "找不到这台 NAS，请检查地址、端口和当前网络。",
+                safeUserMessage: L10n.string("shared.3891ecb7c07e3057"),
                 requestID: requestID
             )
         case .serverCertificateUntrusted,
@@ -167,21 +168,21 @@ enum DsmErrorMapper {
             return AppError(
                 category: .tlsUntrusted,
                 isRetryable: false,
-                safeUserMessage: "无法建立安全连接。请确认地址和端口正确，并检查 NAS 的证书设置。",
+                safeUserMessage: L10n.string("shared.e34c1fb14f39863b"),
                 requestID: requestID
             )
         case .cancelled:
             return AppError(
                 category: .cancelled,
                 isRetryable: false,
-                safeUserMessage: "操作已取消。",
+                safeUserMessage: L10n.string("shared.83f4727f2b4672a6"),
                 requestID: requestID
             )
         default:
             return AppError(
                 category: .networkUnavailable,
                 isRetryable: true,
-                safeUserMessage: "连接中断，请检查网络后重试。",
+                safeUserMessage: L10n.string("shared.0a8292dd1d9b62a1"),
                 requestID: requestID
             )
         }

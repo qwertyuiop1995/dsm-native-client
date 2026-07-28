@@ -7,6 +7,7 @@ import PDFKit
 import Security
 import SwiftUI
 import UniformTypeIdentifiers
+import DsmLocalization
 
 private final class MediaLoadingContext: @unchecked Sendable {
     let loadingRequest: AVAssetResourceLoadingRequest
@@ -136,7 +137,7 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
 
         guard let context, let httpResponse = response as? HTTPURLResponse else {
             completionHandler(.cancel)
-            finish(dataTask, message: "媒体服务没有返回可读取的数据。")
+            finish(dataTask, message: L10n.string("ui.4feefc15ab58f95b"))
             return
         }
 
@@ -149,7 +150,7 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
               contentType?.contains("application/json") != true,
               contentType?.contains("text/html") != true else {
             completionHandler(.cancel)
-            finish(dataTask, message: "NAS 没有返回可播放的媒体内容，请重新登录后重试。")
+            finish(dataTask, message: L10n.string("ui.13c93a65254a46cc"))
             return
         }
 
@@ -159,12 +160,12 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
         let supportsRange = httpResponse.statusCode == 206 && contentRange != nil
         if context.requestedOffset > 0 && !supportsRange {
             completionHandler(.cancel)
-            finish(dataTask, message: "这台 NAS 没有响应媒体分段读取，暂时无法流式播放。")
+            finish(dataTask, message: L10n.string("ui.d0b56b3e4f2fb3cf"))
             return
         }
         if let contentRange, contentRange.start != context.requestedOffset {
             completionHandler(.cancel)
-            finish(dataTask, message: "NAS 返回的媒体片段位置不正确，请重试。")
+            finish(dataTask, message: L10n.string("ui.02de0cf3dca4382e"))
             return
         }
 
@@ -220,7 +221,7 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
         guard let context else { return }
         if let error, (error as? URLError)?.code != .cancelled {
             context.loadingRequest.finishLoading(with: error)
-            onFailure("媒体读取中断，请检查网络后重试。")
+            onFailure(L10n.string("ui.457c462f18bd4fc3"))
         } else {
             context.loadingRequest.finishLoading()
         }
@@ -237,7 +238,7 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
         guard request.url?.host?.lowercased() == source.expectedHost.lowercased() else {
             completionHandler(nil)
             if let dataTask = task as? URLSessionDataTask {
-                finish(dataTask, message: "媒体地址发生了意外变化，已停止播放以保护登录信息。")
+                finish(dataTask, message: L10n.string("ui.dea6a9f8ea69e6d9"))
             }
             return
         }
@@ -299,7 +300,7 @@ final class DsmAVAssetResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDel
             }
         }
         completionHandler(.cancelAuthenticationChallenge, nil)
-        onFailure("无法确认媒体来源的安全信息，请重新连接这台 NAS。")
+        onFailure(L10n.string("ui.9bf6e079d400159d"))
     }
 
     private func finish(_ task: URLSessionDataTask, message: String? = nil) {
@@ -406,29 +407,29 @@ struct FileDetailView: View {
                 requestClose()
             }
         }
-        .alert("放弃未保存的修改？", isPresented: $confirmsDiscardAndClose) {
-            Button("继续编辑", role: .cancel) {}
-            Button("放弃修改", role: .destructive) {
+        .alert(L10n.string("ui.01aeaa37eedefb79"), isPresented: $confirmsDiscardAndClose) {
+            Button(L10n.string("ui.fd4b9e3b6c685bae"), role: .cancel) {}
+            Button(L10n.string("ui.9b7824cefa1e8b16"), role: .destructive) {
                 model.cancelTextEditing()
                 model.dismissPreview()
             }
         } message: {
-            Text("关闭后，尚未保存到 NAS 的修改会丢失。")
+            Text(L10n.string("ui.f76d9fbcbb4dd66f"))
         }
-        .alert("取消这次编辑？", isPresented: $confirmsCancelEditing) {
-            Button("继续编辑", role: .cancel) {}
-            Button("放弃修改", role: .destructive) {
+        .alert(L10n.string("ui.8d45a3f709e375f4"), isPresented: $confirmsCancelEditing) {
+            Button(L10n.string("ui.fd4b9e3b6c685bae"), role: .cancel) {}
+            Button(L10n.string("ui.9b7824cefa1e8b16"), role: .destructive) {
                 model.cancelTextEditing()
             }
         } message: {
-            Text("尚未保存到 NAS 的修改会丢失。")
+            Text(L10n.string("ui.58f8945d5a6ac8d0"))
         }
     }
 
     private var standardPreview: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("项目详情")
+                Text(L10n.string("ui.126689cc9d017c4c"))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -442,8 +443,8 @@ struct FileDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .keyboardShortcut("f", modifiers: [.command, .control])
-                    .help("进入或退出全屏（⌃⌘F）")
-                    .accessibilityLabel("进入或退出全屏")
+                    .help(L10n.string("ui.16611f4f13b21eaa"))
+                    .accessibilityLabel(L10n.string("ui.967a720c0622734e"))
                 }
                 Button {
                     requestClose()
@@ -455,8 +456,8 @@ struct FileDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(model.isSavingText)
-                .help("关闭预览窗口")
-                .accessibilityLabel("关闭预览窗口")
+                .help(L10n.string("ui.f2873f0def187cc5"))
+                .accessibilityLabel(L10n.string("ui.f2873f0def187cc5"))
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -467,17 +468,17 @@ struct FileDetailView: View {
             Group {
                 if model.selection.count > 1 {
                     ContentUnavailableView(
-                        "已选择 \(model.selection.count) 个项目",
+                        L10n.string("ui.9db17d4290e27f67", String(describing: model.selection.count)),
                         systemImage: "checkmark.circle",
-                        description: Text("可从工具栏下载或删除所选项目。")
+                        description: Text(L10n.string("ui.20803ae2cc67f9ff"))
                     )
                 } else if let item = model.selectedItem {
                     detail(for: item)
                 } else {
                     ContentUnavailableView(
-                        "选择一个项目",
+                        L10n.string("ui.c0365276d32f78ff"),
                         systemImage: "sidebar.right",
-                        description: Text("文件详情和预览会显示在这里。")
+                        description: Text(L10n.string("ui.a5454cba27a893ad"))
                     )
                 }
             }
@@ -512,8 +513,8 @@ struct FileDetailView: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut("f", modifiers: [.command, .control])
-            .help("退出全屏（⌃⌘F）")
-            .accessibilityLabel("退出全屏")
+            .help(L10n.string("ui.88ebd1615b038fe1"))
+            .accessibilityLabel(L10n.string("ui.0f1505b6ad3fafe4"))
             .padding(20)
         }
     }
@@ -568,11 +569,11 @@ struct FileDetailView: View {
                     Button {
                         onRestore(item)
                     } label: {
-                        Label("恢复", systemImage: "arrow.uturn.backward.circle")
+                        Label(L10n.string("ui.e0534b8a4e46a0cb"), systemImage: "arrow.uturn.backward.circle")
                             .font(.caption)
                     }
                     .buttonStyle(.borderless)
-                    .help("将这个项目恢复到原来的位置")
+                    .help(L10n.string("ui.0c61c4b47e2d4bb9"))
                 } else if !item.isDirectory {
                     Button {
                         model.toggleFavorite(item)
@@ -584,7 +585,7 @@ struct FileDetailView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help(isFavorite ? "从收藏中移除" : "添加到收藏")
+                    .help(isFavorite ? L10n.string("ui.d9eba5226c5df4c4") : L10n.string("ui.0cfc396e4aa347ad"))
                 }
             }
             .padding(.horizontal, 16)
@@ -626,10 +627,10 @@ struct FileDetailView: View {
         case .loading:
             VStack(spacing: 12) {
                 ProgressView()
-                Text("正在准备预览…")
+                Text(L10n.string("ui.9cbeebf62a6d909d"))
                     .foregroundStyle(.secondary)
                 if let speed = model.previewLoadingSpeedBytesPerSecond, speed > 0 {
-                    Text("读取速度 \(networkSpeedText(speed))")
+                    Text(L10n.string("ui.6b6dde1b911d84d4", String(describing: networkSpeedText(speed))))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -654,7 +655,7 @@ struct FileDetailView: View {
                         if model.canPreviewPreviousImage || model.canPreviewNextImage {
                             HStack {
                                 imageNavigationButton(
-                                    title: "上一张",
+                                    title: L10n.string("ui.bcf200709dbc7ff4"),
                                     systemImage: "chevron.left",
                                     isEnabled: model.canPreviewPreviousImage,
                                     shortcut: .leftArrow,
@@ -662,7 +663,7 @@ struct FileDetailView: View {
                                 )
                                 Spacer()
                                 imageNavigationButton(
-                                    title: "下一张",
+                                    title: L10n.string("ui.dcd4eb0273699416"),
                                     systemImage: "chevron.right",
                                     isEnabled: model.canPreviewNextImage,
                                     shortcut: .rightArrow,
@@ -673,13 +674,13 @@ struct FileDetailView: View {
                         }
                     }
                 } else if previewDecodingFailed {
-                    previewMessage("无法读取这张图片。", systemImage: "photo.badge.exclamationmark") {
+                    previewMessage(L10n.string("ui.b8661cfa7d6d10fe"), systemImage: "photo.badge.exclamationmark") {
                         onDownload(item, .archive)
                     }
                 } else {
                     VStack(spacing: 12) {
                         ProgressView()
-                        Text("正在解码图片…")
+                        Text(L10n.string("ui.4836a49a67cdc785"))
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -700,14 +701,14 @@ struct FileDetailView: View {
         case .text(let text, let truncated):
             VStack(spacing: 0) {
                 if truncated {
-                    Label("较大的文件仅显示开头内容", systemImage: "scissors")
+                    Label(L10n.string("ui.947b866677d0b366"), systemImage: "scissors")
                         .font(.caption)
                         .foregroundStyle(.orange)
                         .padding(8)
                 }
                 HStack(spacing: 10) {
                     if model.isEditingText {
-                        Button("取消") {
+                        Button(L10n.string("ui.2cd0f3be8738a86c")) {
                             if model.hasUnsavedTextEdits {
                                 confirmsCancelEditing = true
                             } else {
@@ -716,11 +717,11 @@ struct FileDetailView: View {
                         }
                         .disabled(model.isSavingText)
                         if model.canFormatSelectedText {
-                            Button("整理格式") {
+                            Button(L10n.string("ui.18a69f09939e46cd")) {
                                 model.formatEditableText()
                             }
                             .disabled(model.isSavingText)
-                            .help("整理支持格式的缩进与换行")
+                            .help(L10n.string("ui.87f219b0a6b8d93b"))
                         }
                         Spacer()
                         Button {
@@ -729,10 +730,10 @@ struct FileDetailView: View {
                             if model.isSavingText {
                                 HStack(spacing: 6) {
                                     ProgressView().controlSize(.small)
-                                    Text("正在保存…")
+                                    Text(L10n.string("ui.6bdb4435095e5d28"))
                                 }
                             } else {
-                                Text("保存")
+                                Text(L10n.string("ui.a3030bf8f16dc63c"))
                             }
                         }
                         .buttonStyle(.borderedProminent)
@@ -741,7 +742,7 @@ struct FileDetailView: View {
                     } else {
                         Spacer()
                         if model.canEditSelectedText {
-                            Button("编辑") {
+                            Button(L10n.string("ui.051836569928a9f9")) {
                                 model.beginTextEditing()
                             }
                             .keyboardShortcut("e", modifiers: .command)
@@ -770,7 +771,7 @@ struct FileDetailView: View {
                         .scrollContentBackground(.hidden)
                         .padding(10)
                         .background(Color(nsColor: .textBackgroundColor))
-                        .accessibilityLabel("编辑 \(item.name)")
+                        .accessibilityLabel(L10n.string("ui.5d5903894506eb80", String(describing: item.name)))
                 } else {
                     ScrollView([.horizontal, .vertical]) {
                         Text(text)
@@ -805,7 +806,7 @@ struct FileDetailView: View {
         if isLoadingMetadata {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
-                Text("正在读取元数据…")
+                Text(L10n.string("ui.89eb41c818ad7eba"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -860,7 +861,7 @@ struct FileDetailView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("查看完整元数据与位置信息")
+                    .help(L10n.string("ui.24ffcb3067b0acb2"))
                     .popover(isPresented: $showFullMetadataPopover, arrowEdge: .top) {
                         fullMetadataPopoverContent(for: item, metadata: metadata)
                     }
@@ -889,7 +890,7 @@ struct FileDetailView: View {
     private func fullMetadataPopoverContent(for item: FileItem, metadata: PhotoMetadata) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("详细信息", systemImage: "info.circle.fill")
+                Label(L10n.string("ui.1932da4d4dba4ed0"), systemImage: "info.circle.fill")
                     .font(.headline)
                 Spacer()
             }
@@ -898,51 +899,51 @@ struct FileDetailView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 if let width = metadata.width, let height = metadata.height {
-                    metadataRow(label: "图像尺寸", value: "\(width) × \(height)")
+                    metadataRow(label: L10n.string("ui.71a90485d5657484"), value: "\(width) × \(height)")
                 }
                 if let creationDate = metadata.creationDate {
                     metadataRow(
-                        label: "拍摄时间",
+                        label: L10n.string("ui.50b635ec9c64c64e"),
                         value: Self.metadataDateFormatter.string(from: creationDate)
                     )
                 } else if let creationDate = item.times?.createdAt {
                     metadataRow(
-                        label: "创建时间",
+                        label: L10n.string("ui.07ec86e0f1d44f91"),
                         value: Self.metadataDateFormatter.string(from: creationDate)
                     )
                 }
                 if let sizeBytes = item.sizeBytes {
                     metadataRow(
-                        label: "文件大小",
+                        label: L10n.string("ui.b9bf6916437a77eb"),
                         value: ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
                     )
                 }
                 if let make = metadata.cameraMake, let model = metadata.cameraModel {
-                    metadataRow(label: "相机设备", value: "\(make) \(model)")
+                    metadataRow(label: L10n.string("ui.a5ab5f9773e993ed"), value: "\(make) \(model)")
                 } else if let model = metadata.cameraModel {
-                    metadataRow(label: "相机设备", value: model)
+                    metadataRow(label: L10n.string("ui.a5ab5f9773e993ed"), value: model)
                 } else if let make = metadata.cameraMake {
-                    metadataRow(label: "相机设备", value: make)
+                    metadataRow(label: L10n.string("ui.a5ab5f9773e993ed"), value: make)
                 }
                 if let lens = metadata.lens {
-                    metadataRow(label: "镜头型号", value: lens)
+                    metadataRow(label: L10n.string("ui.f2a3530d04d3e68a"), value: lens)
                 }
                 if let iso = metadata.iso, !iso.isEmpty {
-                    metadataRow(label: "ISO 感光度", value: iso)
+                    metadataRow(label: L10n.string("ui.f683414a7a7238a2"), value: iso)
                 }
                 if let aperture = metadata.aperture, !aperture.isEmpty {
-                    metadataRow(label: "光圈数值", value: "f/\(aperture)")
+                    metadataRow(label: L10n.string("ui.deb7484ef13d3b08"), value: "f/\(aperture)")
                 }
                 if let shutter = metadata.shutterSpeed, !shutter.isEmpty {
-                    metadataRow(label: "快门速度", value: shutter)
+                    metadataRow(label: L10n.string("ui.82941f1032948e2b"), value: shutter)
                 }
                 if let focal = metadata.focalLength, !focal.isEmpty {
-                    metadataRow(label: "焦距长度", value: "\(focal) mm")
+                    metadataRow(label: L10n.string("ui.d19c52b976916327"), value: "\(focal) mm")
                 }
                 if let location = metadata.locationText, !location.isEmpty {
-                    metadataRow(label: "地理位置", value: location)
+                    metadataRow(label: L10n.string("ui.8dc9d6d1e78dda28"), value: location)
                 }
-                metadataRow(label: "文件路径", value: item.path)
+                metadataRow(label: L10n.string("ui.c71200b5952e3781"), value: item.path)
             }
             .font(.callout)
         }
@@ -962,13 +963,13 @@ struct FileDetailView: View {
         }
     }
 
-    private static let metadataDateFormatter: DateFormatter = {
+    private static var metadataDateFormatter: DateFormatter {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
-        formatter.locale = Locale.current
+        formatter.locale = L10n.locale
         return formatter
-    }()
+    }
 
     private func requestClose() {
         guard !model.isSavingText else { return }
@@ -997,7 +998,7 @@ struct FileDetailView: View {
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.32)
         .keyboardShortcut(shortcut, modifiers: [])
-        .help("\(title)（方向键）")
+        .help(L10n.string("ui.bce7873cec1f287f", String(describing: title)))
         .accessibilityLabel(title)
     }
 
@@ -1007,9 +1008,9 @@ struct FileDetailView: View {
                 .font(.system(size: 72))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.blue)
-            Text("双击文件夹以浏览内容")
+            Text(L10n.string("ui.0ac754408132ab71"))
                 .foregroundStyle(.secondary)
-            Button("打开文件夹") {
+            Button(L10n.string("ui.fcf8b4bff0df782d")) {
                 Task { await model.open(item) }
             }
         }
@@ -1026,7 +1027,7 @@ struct FileDetailView: View {
             Image(systemName: systemImage)
                 .font(.system(size: 30, weight: .regular))
                 .foregroundStyle(color)
-            Text("无法预览")
+            Text(L10n.string("ui.b825ccc758e9cba4"))
                 .font(.headline)
             Text(message)
                 .font(.callout)
@@ -1034,7 +1035,7 @@ struct FileDetailView: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             if let action {
-                Button("下载文件…", action: action)
+                Button(L10n.string("ui.d683d1f7d649b079"), action: action)
                     .buttonStyle(.bordered)
             }
         }
@@ -1165,7 +1166,7 @@ private struct FittedImagePreview: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .accessibilityLabel("图片预览，可使用滚轮缩放")
+        .accessibilityLabel(L10n.string("ui.288f3d9291737873"))
     }
 
     private func updateZoom(_ value: CGFloat) {
@@ -1271,10 +1272,10 @@ struct VideoPlayerView: View {
             if isPreparing, failureMessage == nil {
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text("正在缓冲视频…")
+                    Text(L10n.string("ui.6ffae3d623e16c04"))
                         .foregroundStyle(.secondary)
                     if let networkSpeed, networkSpeed > 0 {
-                        Text("读取速度 \(networkSpeedText(networkSpeed))")
+                        Text(L10n.string("ui.6b6dde1b911d84d4", String(describing: networkSpeedText(networkSpeed))))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -1294,7 +1295,7 @@ struct VideoPlayerView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .background(.regularMaterial, in: Capsule())
-                            .accessibilityLabel("视频读取速度 \(networkSpeedText(networkSpeed))")
+                            .accessibilityLabel(L10n.string("ui.076788e9cbfea3aa", String(describing: networkSpeedText(networkSpeed))))
                     }
                     Spacer()
                 }
@@ -1307,17 +1308,17 @@ struct VideoPlayerView: View {
                     Image(systemName: "video.slash")
                         .font(.system(size: 34))
                         .foregroundStyle(.secondary)
-                    Text("视频无法播放")
+                    Text(L10n.string("ui.e84df95c16ea8a1f"))
                         .font(.headline)
                     Text(failureMessage)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                     HStack {
-                    Button("重试") {
+                    Button(L10n.string("ui.b8784c8dd5636ff2")) {
                         setupPlayer()
                     }
-                        Button("下载文件…", action: onDownload)
+                        Button(L10n.string("ui.d683d1f7d649b079"), action: onDownload)
                             .buttonStyle(.borderedProminent)
                     }
                 }
@@ -1351,7 +1352,7 @@ struct VideoPlayerView: View {
             Task { @MainActor in
                 guard playbackGeneration == generation else { return }
                 isPreparing = false
-                failureMessage = message.replacingOccurrences(of: "媒体", with: "视频")
+                failureMessage = message.replacingOccurrences(of: L10n.string("ui.fa33e10009759859"), with: L10n.string("ui.c20f7618d330a854"))
                 player?.pause()
             }
         } onLoadingMetrics: { speed, isLoading in
@@ -1365,7 +1366,7 @@ struct VideoPlayerView: View {
 
         let suffix = source.fileExtension.map { ".\($0)" } ?? ".mp4"
         guard let assetURL = URL(string: "lanstash-media://stream/\(UUID().uuidString)\(suffix)") else {
-            failureMessage = "无法准备视频播放器。"
+            failureMessage = L10n.string("ui.5b623f125f236df3")
             isPreparing = false
             return
         }
@@ -1386,7 +1387,7 @@ struct VideoPlayerView: View {
                     guard playbackGeneration == generation else { return }
                     guard playable else {
                         isPreparing = false
-                        failureMessage = "视频编码不受这台 Mac 支持。请下载后使用其他播放器打开。"
+                        failureMessage = L10n.string("ui.a9df5c3dfdbf9c18")
                         return
                     }
                     isPreparing = false
@@ -1396,7 +1397,7 @@ struct VideoPlayerView: View {
                 await MainActor.run {
                     guard playbackGeneration == generation, failureMessage == nil else { return }
                     isPreparing = false
-                    failureMessage = "视频信息读取失败，请检查网络后重试。"
+                    failureMessage = L10n.string("ui.d8af503f7d5ff85b")
                 }
             }
         }
@@ -1464,10 +1465,10 @@ struct AudioPlayerView: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("正在缓冲音乐…")
+                    Text(L10n.string("ui.6aa0e81ab840c508"))
                         .foregroundStyle(.secondary)
                     if let networkSpeed, networkSpeed > 0 {
-                        Text("读取速度 \(networkSpeedText(networkSpeed))")
+                        Text(L10n.string("ui.6b6dde1b911d84d4", String(describing: networkSpeedText(networkSpeed))))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -1477,23 +1478,23 @@ struct AudioPlayerView: View {
 
             if !isPreparing, failureMessage == nil, isNetworkLoading,
                let networkSpeed, networkSpeed > 0 {
-                Label("正在读取 · \(networkSpeedText(networkSpeed))", systemImage: "arrow.down.circle")
+                Label(L10n.string("ui.441591bc8c8af4d4", String(describing: networkSpeedText(networkSpeed))), systemImage: "arrow.down.circle")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(.quaternary, in: Capsule())
-                    .accessibilityLabel("音乐读取速度 \(networkSpeedText(networkSpeed))")
+                    .accessibilityLabel(L10n.string("ui.1ce1dca1fe366c40", String(describing: networkSpeedText(networkSpeed))))
             }
 
             if let failureMessage {
                 VStack(spacing: 10) {
-                    Label("音乐无法播放", systemImage: "waveform.badge.exclamationmark")
+                    Label(L10n.string("ui.2949b071d192f28f"), systemImage: "waveform.badge.exclamationmark")
                         .font(.headline)
                     Text(failureMessage)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                    Button("重试") {
+                    Button(L10n.string("ui.b8784c8dd5636ff2")) {
                         setupPlayer()
                     }
                 }
@@ -1510,7 +1511,7 @@ struct AudioPlayerView: View {
                 }
                 .tint(.blue)
                 .disabled(isPreparing || failureMessage != nil || duration <= 0)
-                .accessibilityLabel("播放进度")
+                .accessibilityLabel(L10n.string("ui.fc16e2a0fca66884"))
                 
                 HStack {
                     Text(formatTime(currentTime))
@@ -1534,7 +1535,7 @@ struct AudioPlayerView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isPreparing || failureMessage != nil)
-                .accessibilityLabel("后退 10 秒")
+                .accessibilityLabel(L10n.string("ui.6ffd3c04b1370caa"))
                 
                 Button {
                     if isPlaying {
@@ -1551,7 +1552,7 @@ struct AudioPlayerView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isPreparing || failureMessage != nil)
-                .accessibilityLabel(isPlaying ? "暂停" : "播放")
+                .accessibilityLabel(isPlaying ? L10n.string("ui.8d12fc0d4eb26021") : L10n.string("ui.c3396195e91ccdd8"))
                 
                 Button {
                     let newTime = min(currentTime + 10, duration)
@@ -1563,7 +1564,7 @@ struct AudioPlayerView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isPreparing || failureMessage != nil)
-                .accessibilityLabel("前进 10 秒")
+                .accessibilityLabel(L10n.string("ui.f7d78f76e1921809"))
             }
             
             Spacer()
@@ -1593,7 +1594,7 @@ struct AudioPlayerView: View {
             Task { @MainActor in
                 guard playbackGeneration == generation else { return }
                 isPreparing = false
-                failureMessage = message.replacingOccurrences(of: "媒体", with: "音乐")
+                failureMessage = message.replacingOccurrences(of: L10n.string("ui.fa33e10009759859"), with: L10n.string("ui.db95142124934467"))
                 player?.pause()
                 isPlaying = false
             }
@@ -1608,7 +1609,7 @@ struct AudioPlayerView: View {
 
         let suffix = source.fileExtension.map { ".\($0)" } ?? ".mp3"
         guard let assetURL = URL(string: "lanstash-media://stream/\(UUID().uuidString)\(suffix)") else {
-            failureMessage = "无法准备音乐播放器。"
+            failureMessage = L10n.string("ui.970627a6535d2a4a")
             isPreparing = false
             return
         }
@@ -1630,7 +1631,7 @@ struct AudioPlayerView: View {
                     guard playbackGeneration == generation else { return }
                     guard playable else {
                         isPreparing = false
-                        failureMessage = "音乐编码不受这台 Mac 支持，可以下载后使用其他播放器打开。"
+                        failureMessage = L10n.string("ui.c90f56be41b10767")
                         return
                     }
                     let seconds = loadedDuration.seconds
@@ -1641,7 +1642,7 @@ struct AudioPlayerView: View {
                 await MainActor.run {
                     guard playbackGeneration == generation, failureMessage == nil else { return }
                     isPreparing = false
-                    failureMessage = "音乐信息读取失败，请检查网络后重试。"
+                    failureMessage = L10n.string("ui.878fa46daa32ef0f")
                 }
             }
         }
@@ -1687,7 +1688,7 @@ private func networkSpeedText(_ bytesPerSecond: Double) -> String {
         fromByteCount: Int64(max(0, bytesPerSecond)),
         countStyle: .file
     )
-    return "\(formatted)/秒"
+    return L10n.string("ui.3b14d1af77ab3e3e", String(describing: formatted))
 }
 
 private struct LivePhotoPreviewBadgeButton: View {
@@ -1705,7 +1706,7 @@ private struct LivePhotoPreviewBadgeButton: View {
             HStack(spacing: 4) {
                 Image(systemName: isPlaying ? "livephoto.play" : "livephoto")
                     .font(.caption.weight(.bold))
-                Text("LIVE")
+                Text(L10n.string("photo.live"))
                     .font(.caption2.weight(.bold))
             }
             .padding(.horizontal, 8)
@@ -1714,7 +1715,7 @@ private struct LivePhotoPreviewBadgeButton: View {
             .foregroundStyle(isPlaying ? .white : .primary)
         }
         .buttonStyle(.plain)
-        .help("播放动态照片动画")
+        .help(L10n.string("ui.f7ed6c3484c83a67"))
     }
 
     private func triggerLivePhoto() {

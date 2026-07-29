@@ -131,6 +131,8 @@ dotnet build src/LanStash.App/LanStash.App.csproj --configuration Release --runt
 - [产品路线图](docs/progress/ROADMAP.md)
 - [平台功能矩阵](docs/progress/PLATFORM_MATRIX.md)
 - [DSM 兼容矩阵](docs/compatibility/DSM_COMPATIBILITY_MATRIX.md)
+- [社区兼容性计划](docs/compatibility/COMMUNITY_COMPATIBILITY_PROGRAM_ZH.md)
+- [社区兼容矩阵](docs/compatibility/COMMUNITY_COMPATIBILITY_MATRIX_ZH.md)
 - [总体架构](docs/architecture/ARCHITECTURE.md)
 - [安全基线](docs/security/SECURITY_BASELINE.md)
 - [DSM Web API 参考](docs/api/DSM_WEB_API_REFERENCE_ZH.md)
@@ -140,5 +142,7 @@ dotnet build src/LanStash.App/LanStash.App.csproj --configuration Release --runt
 ## 参与开发
 
 开始修改前请阅读 [`AGENTS.md`](AGENTS.md) 和 [`CONTRIBUTING.md`](CONTRIBUTING.md)。所有新增或修改的用户可见文案必须同时提供英语和简体中文资源；翻译后的字符串不得参与业务判断、导航、筛选、持久化或 API 参数。
+
+如果你拥有不同型号或版本的 Synology NAS，也可以参加[社区兼容性计划](docs/compatibility/COMMUNITY_COMPATIBILITY_PROGRAM_ZH.md)。普通用户通过双语 GitHub 表单提交脱敏测试结果，开发者也可以提交经过校验的结构化报告。第一阶段不收集日志、截图、主机信息或真实文件数据。
 
 本项目及其所有历史提交均采用 [Apache License 2.0](LICENSE)。

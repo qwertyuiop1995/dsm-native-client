@@ -1,0 +1,202 @@
+name: 社区兼容性报告 / Community compatibility report
+description: 提交脱敏的 NAS、DSM、套件和功能测试结果 / Submit redacted NAS, DSM, package, and feature test results
+title: "[Compatibility] "
+labels:
+  - compatibility-report
+  - needs-review
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢参与岚仓社区兼容性计划。请先阅读[中文测试指南](../blob/main/docs/compatibility/COMMUNITY_TEST_GUIDE_ZH.md)；English contributors: read the [test guide](../blob/main/docs/compatibility/COMMUNITY_TEST_GUIDE_EN.md) first.
+
+        **本表单公开可见。不要提交日志、截图、HAR、原始错误、序列号、设备名、地址、QuickConnect ID、账号、真实文件名或路径。**
+
+        **This form is public. Do not submit logs, screenshots, HAR files, raw errors, serial numbers, device names, addresses, QuickConnect IDs, accounts, real file names, or paths.**
+
+  - type: input
+    id: app_version
+    attributes:
+      label: 岚仓版本 / LanStash version
+      description: 在 App 的“关于”页面查看；请勿填写自定义调试标识。 / Find this on the About screen; do not include custom debug identifiers.
+      placeholder: 0.3.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 客户端平台 / Client platform
+      options:
+        - macOS
+        - iPhone
+        - iPad
+        - Android
+        - Windows
+    validations:
+      required: true
+
+  - type: input
+    id: platform_version
+    attributes:
+      label: 系统版本 / Platform version
+      description: 只填写公开版本号，不填写设备名称。 / Enter only the public OS version, not a device name.
+      placeholder: macOS 15.5 / Android 16 / Windows 11 24H2
+    validations:
+      required: true
+
+  - type: input
+    id: nas_model
+    attributes:
+      label: NAS 产品型号 / NAS product model
+      description: 产品型号可以提交；禁止填写序列号或自定义设备名。 / A public product model is allowed; never enter a serial number or custom device name.
+      placeholder: DS923+
+    validations:
+      required: true
+
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: CPU 架构 / CPU architecture
+      description: 不确定时选择 unknown。 / Select unknown if unsure.
+      options:
+        - unknown
+        - x86_64
+        - aarch64
+        - armv7
+    validations:
+      required: true
+
+  - type: input
+    id: dsm
+    attributes:
+      label: DSM 完整版本 / Complete DSM version
+      description: 从 DSM 更新页面抄写版本、Build 和 Update，不要附带主机信息。 / Copy the version, build, and update from DSM without host information.
+      placeholder: 7.2.2-72806 Update 3
+    validations:
+      required: true
+
+  - type: textarea
+    id: packages
+    attributes:
+      label: 相关套件版本 / Relevant package versions
+      description: 每行一个公开套件名称和版本；未测试套件时填写 none。 / Enter one public package name and version per line, or none when no package was tested.
+      placeholder: |
+        File Station: 1.4.1-1595
+        Synology Photos: 1.8.2-10090
+      render: yaml
+    validations:
+      required: true
+
+  - type: dropdown
+    id: connection_type
+    attributes:
+      label: 连接方式类别 / Connection category
+      description: 只选择类别，不填写地址、域名、端口或 QuickConnect ID。 / Select only a category; do not enter an address, domain, port, or QuickConnect ID.
+      options:
+        - lan
+        - quickconnect-direct
+        - quickconnect-relay
+        - reverse-proxy
+        - unknown
+    validations:
+      required: true
+
+  - type: dropdown
+    id: account_role
+    attributes:
+      label: 账号权限类别 / Account role
+      options:
+        - standard
+        - administrator
+        - unknown
+    validations:
+      required: true
+
+  - type: dropdown
+    id: certificate_type
+    attributes:
+      label: 证书类别 / Certificate category
+      description: 不要提交证书正文、域名或指纹。 / Do not submit certificate content, domains, or fingerprints.
+      options:
+        - public-ca
+        - private-ca
+        - self-signed
+        - unknown
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 只读与登录结果 / Read-only and sign-in results
+
+        保留每个能力 ID，只把值改成 `passed`、`failed`、`partial`、`skipped` 或 `not-supported`。失败或部分通过时，在下一行填写一个固定失败类别，不要粘贴原始错误。
+
+        Keep every capability ID and change only its value to `passed`, `failed`, `partial`, `skipped`, or `not-supported`. For a failed or partial result, add `<capabilityId>.failureCategory: <category>` on the next line. Categories: `permission-denied`, `operation-failed`, `connection-failed`, `unexpected-result`, `app-crashed`, `unknown`. Never paste a raw error.
+
+  - type: textarea
+    id: readonly_results
+    attributes:
+      label: 只读与登录测试 / Read-only and sign-in tests
+      description: 测试指南对应 testSuiteVersion 1。 / The test guide corresponds to testSuiteVersion 1.
+      value: |
+        connection.resolve: skipped
+        authentication.password: skipped
+        authentication.otp: skipped
+        authentication.restore-session: skipped
+        files.list-shares: skipped
+        files.browse: skipped
+        files.search: skipped
+        files.download: skipped
+        # 失败或部分通过示例 / Failed or partial example:
+        # files.download.failureCategory: operation-failed
+      render: yaml
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 可选受控写入 / Optional controlled writes
+
+        只对专门创建、可以丢弃的测试项目执行。不确定是否安全时保留 `skipped`。不要为了测试执行永久删除或清空回收站。
+
+        Use only disposable items created specifically for testing. Leave a result as `skipped` when unsure. Never perform a permanent deletion or empty a recycle bin for this test.
+
+  - type: textarea
+    id: write_results
+    attributes:
+      label: 受控写入测试 / Controlled write tests
+      value: |
+        files.upload: skipped
+        files.create-folder: skipped
+        files.rename: skipped
+        files.copy-move: skipped
+        files.recycle: skipped
+        files.restore: skipped
+        # 失败或部分通过示例 / Failed or partial example:
+        # files.upload.failureCategory: operation-failed
+      render: yaml
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私与授权确认 / Privacy and authorization
+      options:
+        - label: 我只测试了自己拥有或获准使用的 NAS、账号和数据。 / I tested only a NAS, account, and data I own or am authorized to use.
+          required: true
+        - label: 我没有提交日志、截图、HAR、原始响应、凭据、地址、设备标识、账号、真实文件名或路径。 / I did not submit logs, screenshots, HAR files, raw responses, credentials, addresses, device identifiers, accounts, real file names, or paths.
+          required: true
+        - label: 我没有执行写操作，或所有写操作仅针对专门创建且可以丢弃的测试项目。 / I performed no write operation, or every write operation used only disposable items created specifically for testing.
+          required: true
+
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: 公开与使用确认 / Publication and use
+      options:
+        - label: 我理解本报告公开可见，并同意项目将脱敏后的结构化结果加入社区兼容矩阵。 / I understand that this report is public and allow the project to add its redacted structured results to the community compatibility matrix.
+          required: true

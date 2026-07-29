@@ -10,6 +10,7 @@ error-codes/         DSM 通用错误映射
 fixtures-redacted/   彻底脱敏的响应样本
 localization/        客户端语言注册表与回退规则
 private-api/         DSM 与套件私有 API 的版本兼容索引
+community-compatibility/  已审核的社区兼容性结构化报告
 ```
 
 照片基础契约包括 `photo-space.schema.json`、`photo-item.schema.json` 和 `photo-page.schema.json`。其中照片页面的分页位置基于 NAS 原始目录项目计算，即使客户端过滤了非媒体文件，也必须使用 `nextOffset` 继续读取，避免重复或遗漏。
@@ -24,3 +25,4 @@ Chat 基础契约包括能力、用户、会话、消息、附件、投票、提
 - fixture 只能来自专用测试数据，并在提交前脱敏。
 - 不允许保存真实 SID、主机、账号、共享名、路径或文件内容。
 - 私有 API 发现必须同时维护版本化环境记录、端点文档和 `private-api/compatibility.json`，详细规则见 [`docs/api/discovery`](../docs/api/discovery/README.md)。
+- 社区兼容性报告使用独立契约，不得据此提升私有 API 证据等级；详细规则见 [`COMMUNITY_COMPATIBILITY_PROGRAM_ZH.md`](../docs/compatibility/COMMUNITY_COMPATIBILITY_PROGRAM_ZH.md)。

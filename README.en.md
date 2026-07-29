@@ -131,6 +131,8 @@ Follow [`SECURITY.md`](SECURITY.md) when reporting a vulnerability. Do not attac
 - [Product roadmap](docs/progress/ROADMAP.md)
 - [Platform feature matrix](docs/progress/PLATFORM_MATRIX.md)
 - [DSM compatibility matrix](docs/compatibility/DSM_COMPATIBILITY_MATRIX.md)
+- [Community Compatibility Program](docs/compatibility/COMMUNITY_COMPATIBILITY_PROGRAM_EN.md)
+- [Community Compatibility Matrix](docs/compatibility/COMMUNITY_COMPATIBILITY_MATRIX_EN.md)
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Security baseline](docs/security/SECURITY_BASELINE.md)
 - [DSM Web API reference](docs/api/DSM_WEB_API_REFERENCE_ZH.md)
@@ -139,6 +141,8 @@ Follow [`SECURITY.md`](SECURITY.md) when reporting a vulnerability. Do not attac
 
 ## Contributing
 
-Read [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md) before making changes. Every new or changed user-visible string must have both English and Simplified Chinese resources. Translated strings must never drive business logic, navigation, filtering, persistence, or API parameters.
+Read [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.en.md`](CONTRIBUTING.en.md) before making changes. Every new or changed user-visible string must have both English and Simplified Chinese resources. Translated strings must never drive business logic, navigation, filtering, persistence, or API parameters.
+
+If you have access to a different Synology NAS model or version, you can also join the [Community Compatibility Program](docs/compatibility/COMMUNITY_COMPATIBILITY_PROGRAM_EN.md). Most users submit redacted results through a bilingual GitHub form; developers may submit validated structured reports. The first phase does not collect logs, screenshots, host information, or real file data.
 
 LanStash is licensed under the [Apache License 2.0](LICENSE).

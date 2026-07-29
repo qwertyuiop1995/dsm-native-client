@@ -1,0 +1,48 @@
+{
+  "$schema": "../../schemas/community-compatibility-report.schema.json",
+  "schemaVersion": 1,
+  "reportId": "cc-000000",
+  "sourceRef": "issue-1",
+  "submittedAt": "2026-07-29",
+  "reviewStatus": "submitted",
+  "app": {
+    "version": "0.0.0-example",
+    "platform": "macOS",
+    "platformVersion": "example"
+  },
+  "nas": {
+    "model": "DS000+",
+    "architecture": "unknown"
+  },
+  "dsm": {
+    "version": "7.0",
+    "build": "0000",
+    "update": "unknown"
+  },
+  "packages": [
+    {
+      "id": "file-station",
+      "version": "example"
+    }
+  ],
+  "connectionType": "unknown",
+  "accountRole": "unknown",
+  "certificateType": "unknown",
+  "testSuiteVersion": 1,
+  "results": [
+    {
+      "capabilityId": "connection.resolve",
+      "status": "passed"
+    },
+    {
+      "capabilityId": "files.upload",
+      "status": "failed",
+      "failureCategory": "operation-failed"
+    },
+    {
+      "capabilityId": "files.recycle",
+      "status": "skipped"
+    }
+  ],
+  "privacyAttestation": true
+}

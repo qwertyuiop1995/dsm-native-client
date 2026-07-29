@@ -1,5 +1,7 @@
 # 参与开发
 
+[English](CONTRIBUTING.en.md)
+
 ## 分支命名
 
 ```text
@@ -29,3 +31,20 @@ API 相关修改必须说明：
 ## Pull Request
 
 Pull Request 应包含变更内容、影响平台、验证方法、安全影响和文档更新情况。
+
+## 社区兼容性报告
+
+普通用户可以使用 GitHub 的“社区兼容性报告 / Community compatibility report”表单。提交前请阅读：
+
+- [`社区兼容性计划`](docs/compatibility/COMMUNITY_COMPATIBILITY_PROGRAM_ZH.md)
+- [`社区兼容性测试指南`](docs/compatibility/COMMUNITY_TEST_GUIDE_ZH.md)
+
+熟悉 GitHub 的贡献者可以根据 [`example-report.json`](contracts/community-compatibility/examples/example-report.json) 直接提交结构化报告 Pull Request。报告进入仓库前必须完成人工隐私检查，并通过：
+
+```bash
+python3 tools/community-compatibility/validate.py
+python3 tools/community-compatibility/generate.py
+python3 -m unittest discover -s tools/community-compatibility/tests -p 'test_*.py'
+```
+
+社区报告不得包含日志、截图、HAR、DSM 原始响应、凭据、地址、唯一设备标识、账号、真实文件名或路径。生成的中英文矩阵不得直接手改。

@@ -1,0 +1,52 @@
+name: Community Compatibility
+
+on:
+  push:
+    paths:
+      - ".github/ISSUE_TEMPLATE/compatibility_report.yml"
+      - ".github/workflows/community-compatibility.yml"
+      - "contracts/community-compatibility/**"
+      - "contracts/schemas/community-compatibility-report.schema.json"
+      - "docs/compatibility/COMMUNITY_COMPATIBILITY_*.md"
+      - "docs/compatibility/COMMUNITY_TEST_GUIDE_*.md"
+      - "tools/community-compatibility/**"
+  pull_request:
+    paths:
+      - ".github/ISSUE_TEMPLATE/compatibility_report.yml"
+      - ".github/workflows/community-compatibility.yml"
+      - "contracts/community-compatibility/**"
+      - "contracts/schemas/community-compatibility-report.schema.json"
+      - "docs/compatibility/COMMUNITY_COMPATIBILITY_*.md"
+      - "docs/compatibility/COMMUNITY_TEST_GUIDE_*.md"
+      - "tools/community-compatibility/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库 / Check out repository
+        uses: actions/checkout@v4
+
+      - name: 校验双语兼容性表单 YAML / Validate bilingual form YAML
+        shell: ruby {0}
+        run: |
+          require "yaml"
+          form = YAML.load_file(".github/ISSUE_TEMPLATE/compatibility_report.yml")
+          unless form.is_a?(Hash) && form["name"].is_a?(String) &&
+                 form["description"].is_a?(String) && form["body"].is_a?(Array)
+            abort "兼容性表单缺少必要字段"
+          end
+          ids = form["body"].map { |item| item["id"] }.compact
+          abort "兼容性表单包含重复 ID" unless ids.uniq.length == ids.length
+
+      - name: 校验社区兼容性报告 / Validate compatibility reports
+        run: python3 tools/community-compatibility/validate.py
+
+      - name: 运行社区兼容性工具测试 / Test compatibility tools
+        run: python3 -m unittest discover -s tools/community-compatibility/tests -p 'test_*.py'
+
+      - name: 检查中英文兼容矩阵已更新 / Check generated matrices
+        run: python3 tools/community-compatibility/generate.py --check

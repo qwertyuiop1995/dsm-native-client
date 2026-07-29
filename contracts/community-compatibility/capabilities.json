@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "testSuiteVersion": 1,
+  "capabilities": [
+    {
+      "id": "connection.resolve",
+      "module": "connection",
+      "operation": "read",
+      "required": true,
+      "name": {
+        "zh-Hans": "发现并连接 NAS",
+        "en": "Discover and connect to the NAS"
+      }
+    },
+    {
+      "id": "authentication.password",
+      "module": "authentication",
+      "operation": "read",
+      "required": true,
+      "name": {
+        "zh-Hans": "账号密码登录",
+        "en": "Password sign-in"
+      }
+    },
+    {
+      "id": "authentication.otp",
+      "module": "authentication",
+      "operation": "read",
+      "required": false,
+      "name": {
+        "zh-Hans": "两步验证登录",
+        "en": "Two-factor sign-in"
+      }
+    },
+    {
+      "id": "authentication.restore-session",
+      "module": "authentication",
+      "operation": "read",
+      "required": true,
+      "name": {
+        "zh-Hans": "重新打开 App 后恢复登录",
+        "en": "Restore sign-in after reopening the app"
+      }
+    },
+    {
+      "id": "files.list-shares",
+      "module": "files",
+      "operation": "read",
+      "required": true,
+      "name": {
+        "zh-Hans": "显示共享文件夹",
+        "en": "List shared folders"
+      }
+    },
+    {
+      "id": "files.browse",
+      "module": "files",
+      "operation": "read",
+      "required": true,
+      "name": {
+        "zh-Hans": "浏览目录",
+        "en": "Browse folders"
+      }
+    },
+    {
+      "id": "files.search",
+      "module": "files",
+      "operation": "read",
+      "required": true,
+      "name": {
+        "zh-Hans": "搜索文件",
+        "en": "Search files"
+      }
+    },
+    {
+      "id": "files.download",
+      "module": "files",
+      "operation": "read",
+      "required": true,
+      "name": {
+        "zh-Hans": "下载文件",
+        "en": "Download a file"
+      }
+    },
+    {
+      "id": "files.upload",
+      "module": "files",
+      "operation": "controlled-write",
+      "required": false,
+      "name": {
+        "zh-Hans": "上传测试文件",
+        "en": "Upload a test file"
+      }
+    },
+    {
+      "id": "files.create-folder",
+      "module": "files",
+      "operation": "controlled-write",
+      "required": false,
+      "name": {
+        "zh-Hans": "新建测试文件夹",
+        "en": "Create a test folder"
+      }
+    },
+    {
+      "id": "files.rename",
+      "module": "files",
+      "operation": "controlled-write",
+      "required": false,
+      "name": {
+        "zh-Hans": "重命名测试项目",
+        "en": "Rename a test item"
+      }
+    },
+    {
+      "id": "files.copy-move",
+      "module": "files",
+      "operation": "controlled-write",
+      "required": false,
+      "name": {
+        "zh-Hans": "复制或移动测试项目",
+        "en": "Copy or move a test item"
+      }
+    },
+    {
+      "id": "files.recycle",
+      "module": "files",
+      "operation": "controlled-write",
+      "required": false,
+      "name": {
+        "zh-Hans": "将测试项目移入回收站",
+        "en": "Move a test item to the recycle bin"
+      }
+    },
+    {
+      "id": "files.restore",
+      "module": "files",
+      "operation": "controlled-write",
+      "required": false,
+      "name": {
+        "zh-Hans": "恢复测试项目",
+        "en": "Restore a test item"
+      }
+    }
+  ]
+}

@@ -15,6 +15,10 @@
 - [平台功能矩阵](progress/PLATFORM_MATRIX.md)
 - [总体架构](architecture/ARCHITECTURE.md)
 - [DSM 兼容矩阵](compatibility/DSM_COMPATIBILITY_MATRIX.md)
+- [社区兼容性计划（中文）](compatibility/COMMUNITY_COMPATIBILITY_PROGRAM_ZH.md)
+- [Community Compatibility Program (English)](compatibility/COMMUNITY_COMPATIBILITY_PROGRAM_EN.md)
+- [社区兼容矩阵](compatibility/COMMUNITY_COMPATIBILITY_MATRIX_ZH.md)
+- [Community Compatibility Matrix](compatibility/COMMUNITY_COMPATIBILITY_MATRIX_EN.md)
 - [安全与隐私基线](security/SECURITY_BASELINE.md)
 
 ## 历史归档

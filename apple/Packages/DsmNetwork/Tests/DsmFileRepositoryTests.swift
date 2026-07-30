@@ -1,4 +1,5 @@
 import DsmCore
+import DsmLocalization
 import CryptoKit
 import Foundation
 import XCTest
@@ -210,7 +211,10 @@ final class DsmFileRepositoryTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.dsmCode, 119)
             XCTAssertEqual(error.category, .authenticationRequired)
-            XCTAssertTrue(error.safeUserMessage.contains("登录已过期"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("shared.18b4f39557c377e4")
+            )
         }
     }
 
@@ -490,7 +494,10 @@ final class DsmFileRepositoryTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .conflict)
             XCTAssertEqual(error.dsmCode, 1805)
-            XCTAssertTrue(error.safeUserMessage.contains("同名文件"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("shared.6c7c8cc0b215216b")
+            )
         }
     }
 
@@ -526,7 +533,10 @@ final class DsmFileRepositoryTests: XCTestCase {
             XCTFail("预期上传失败")
         } catch let error as AppError {
             XCTAssertEqual(error.dsmCode, 108)
-            XCTAssertTrue(error.safeUserMessage.contains("空间或传输状态"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("shared.074152c919ec8351")
+            )
         }
 
         // 测试 115 (不允许上传)
@@ -553,7 +563,10 @@ final class DsmFileRepositoryTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.dsmCode, 115)
             XCTAssertEqual(error.category, .permissionDenied)
-            XCTAssertTrue(error.safeUserMessage.contains("不允许上传"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("shared.71de0e6207d12dc7")
+            )
         }
     }
 

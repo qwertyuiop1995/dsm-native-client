@@ -1,4 +1,5 @@
 import DsmCore
+import DsmLocalization
 import Foundation
 import XCTest
 @testable import DsmNetwork
@@ -127,7 +128,10 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
             XCTFail("其他检测占用时不应启动 S.M.A.R.T. 检测")
         } catch let error as AppError {
             XCTAssertEqual(error.category, .conflict)
-            XCTAssertEqual(error.safeUserMessage, "这块硬盘正在执行其他检测，请等待完成后再试。")
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("shared.b8c5b11d9fc2c1f5")
+            )
         }
 
         let requests = await transport.recordedRequests()

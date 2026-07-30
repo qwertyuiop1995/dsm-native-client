@@ -1,4 +1,5 @@
 import DsmCore
+import DsmLocalization
 import DsmNetwork
 import Foundation
 import XCTest
@@ -33,7 +34,7 @@ final class ChatWorkspaceModelTests: XCTestCase {
         XCTAssertFalse(model.canUseMessaging)
         XCTAssertTrue(model.conversations.isEmpty)
         XCTAssertTrue(model.messages.isEmpty)
-        XCTAssertTrue(model.statusMessage?.contains("安全连接") == true)
+        XCTAssertEqual(model.statusMessage, L10n.string("ui.9984c9276092ef03"))
     }
 
     func test可用服务按最近活动排序并载入第一段会话() async throws {
@@ -90,7 +91,7 @@ final class ChatWorkspaceModelTests: XCTestCase {
 
         XCTAssertTrue(succeeded)
         XCTAssertEqual(model.messages.last?.poll?.question, "周末去哪？")
-        XCTAssertEqual(model.activeToast?.text, "投票已发送")
+        XCTAssertEqual(model.activeToast?.text, L10n.string("ui.8c6ec0e6eb0022db"))
     }
 
     func test设置和取消提醒同步本地列表() async {
@@ -263,7 +264,7 @@ final class ChatWorkspaceModelTests: XCTestCase {
 
         XCTAssertEqual(firstModel.conversations.map(\.id), [older.id, recent.id])
         XCTAssertTrue(firstModel.isConversationPinned(older.id))
-        XCTAssertEqual(firstModel.activeToast?.text, "已置顶会话")
+        XCTAssertEqual(firstModel.activeToast?.text, L10n.string("ui.b1bade10a9e4aa94"))
 
         let reopenedModel = ChatWorkspaceModel(
             repository: repository,
@@ -286,7 +287,7 @@ final class ChatWorkspaceModelTests: XCTestCase {
 
         reopenedModel.toggleConversationPin(id: older.id)
         XCTAssertEqual(reopenedModel.conversations.map(\.id), [recent.id, older.id])
-        XCTAssertEqual(reopenedModel.activeToast?.text, "已取消置顶")
+        XCTAssertEqual(reopenedModel.activeToast?.text, L10n.string("ui.b45a48730dd4f8ba"))
     }
 
     func test实时事件会刷新工作区未读数并切换定时校准间隔() async throws {
@@ -538,7 +539,10 @@ final class ChatWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(deletedCount, 2)
         XCTAssertTrue(model.messages.isEmpty)
         XCTAssertNil(model.statusMessage)
-        XCTAssertEqual(model.activeToast?.text, "已删除 2 条消息")
+        XCTAssertEqual(
+            model.activeToast?.text,
+            L10n.string("ui.b60d233a7f488b7e", String(describing: 2))
+        )
     }
 
     func test不能删除其他成员发送的消息() async {
@@ -566,7 +570,7 @@ final class ChatWorkspaceModelTests: XCTestCase {
 
         XCTAssertEqual(deletedCount, 0)
         XCTAssertEqual(model.messages.map(\.id), [otherMessage.id])
-        XCTAssertEqual(model.statusMessage, "只能删除自己发送的消息。")
+        XCTAssertEqual(model.statusMessage, L10n.string("ui.66a12c2de716c8cf"))
     }
 
     func test可以将收发双方的文字和附件消息转发到其他会话() async {
@@ -619,7 +623,14 @@ final class ChatWorkspaceModelTests: XCTestCase {
         XCTAssertTrue(succeeded)
         XCTAssertEqual(forwardedMessageIDs, [incoming.id, outgoingAttachment.id])
         XCTAssertEqual(forwardedTargets, [[target.id], [target.id]])
-        XCTAssertEqual(model.activeToast?.text, "2 条消息已转发到 1 个会话")
+        XCTAssertEqual(
+            model.activeToast?.text,
+            L10n.string(
+                "ui.6fed19067a9ae071",
+                String(describing: 2),
+                String(describing: 1)
+            )
+        )
     }
 
     func test可以先建立单聊再向没有聊天记录的联系人转发() async {
@@ -665,7 +676,10 @@ final class ChatWorkspaceModelTests: XCTestCase {
         XCTAssertTrue(succeeded)
         XCTAssertEqual(forwardedTargets, [["direct-\(recipient.id)"]])
         XCTAssertTrue(model.conversations.contains { $0.id == "direct-\(recipient.id)" })
-        XCTAssertEqual(model.activeToast?.text, "消息已转发到 1 个会话")
+        XCTAssertEqual(
+            model.activeToast?.text,
+            L10n.string("ui.47bb06634893688d", String(describing: 1))
+        )
     }
 
     func test批量关闭会话后直接同步会话列表() async {
@@ -683,7 +697,10 @@ final class ChatWorkspaceModelTests: XCTestCase {
         XCTAssertTrue(model.pinnedConversationIDs.isEmpty)
         XCTAssertNil(model.selectedConversationID)
         XCTAssertNil(model.statusMessage)
-        XCTAssertEqual(model.activeToast?.text, "已删除 2 个会话并进入归档")
+        XCTAssertEqual(
+            model.activeToast?.text,
+            L10n.string("ui.027eaf484175e27a", String(describing: 2))
+        )
     }
 
     private func conversation(

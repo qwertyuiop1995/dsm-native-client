@@ -50,12 +50,12 @@ let package = Package(
         ),
         .testTarget(
             name: "DsmCoreTests",
-            dependencies: ["DsmCore"],
+            dependencies: ["DsmCore", "DsmLocalization"],
             path: "Packages/DsmCore/Tests"
         ),
         .testTarget(
             name: "DsmNetworkTests",
-            dependencies: ["DsmCore", "DsmNetwork"],
+            dependencies: ["DsmCore", "DsmNetwork", "DsmLocalization"],
             path: "Packages/DsmNetwork/Tests"
         ),
         .testTarget(
@@ -65,7 +65,7 @@ let package = Package(
         ),
         .testTarget(
             name: "DsmMacTests",
-            dependencies: ["DsmCore", "DsmMacExecutable"],
+            dependencies: ["DsmCore", "DsmLocalization", "DsmMacExecutable"],
             path: "Apps/DsmMac/Tests"
         )
     ]

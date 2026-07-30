@@ -327,7 +327,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .unknown)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("刷新检测状态"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("storage.disk-test.start.unverified")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -349,7 +352,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .unknown)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("刷新检测状态"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("storage.disk-test.stop.unverified")
+            )
         }
         XCTAssertEqual(model.diskTestStatuses["disk1"]?.isRunning, true)
     }
@@ -404,7 +410,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .partialFailure)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("逐项核对"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("file-services.settings.partial")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -426,8 +435,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .unknown)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("重新读取"))
-            XCTAssertTrue(error.safeUserMessage.contains("不要再次保存"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("file-services.settings.unverified")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -479,7 +490,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .partialFailure)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("逐项核对"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("terminal.settings.partial")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -502,8 +516,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .unknown)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("重新读取"))
-            XCTAssertTrue(error.safeUserMessage.contains("不要再次保存"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("terminal.settings.unverified")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -566,7 +582,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .partialFailure)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("逐项核对"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("proxy.settings.partial")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -594,8 +613,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .unknown)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("重新读取"))
-            XCTAssertTrue(error.safeUserMessage.contains("不要再次保存"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("proxy.settings.unverified")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -646,7 +667,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .partialFailure)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("逐项核对"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("hardware.settings.partial")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -668,7 +692,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .unknown)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("逐项核对"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("hardware.settings.unverified")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -720,8 +747,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .partialFailure)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("重新连接"))
-            XCTAssertTrue(error.safeUserMessage.contains("核对"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("remote-access.settings.partial")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -743,8 +772,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .unknown)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("重新连接"))
-            XCTAssertTrue(error.safeUserMessage.contains("不要再次保存"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("remote-access.settings.unverified")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -796,7 +827,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .partialFailure)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("逐项核对"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("security.settings.partial")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }
@@ -818,7 +852,10 @@ final class NasAdministrationModelTests: XCTestCase {
         } catch let error as AppError {
             XCTAssertEqual(error.category, .unknown)
             XCTAssertFalse(error.isRetryable)
-            XCTAssertTrue(error.safeUserMessage.contains("重新读取"))
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("security.settings.unverified")
+            )
         } catch {
             XCTFail("返回了非统一错误：\(error)")
         }

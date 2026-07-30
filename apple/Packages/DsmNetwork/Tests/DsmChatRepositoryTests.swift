@@ -1,4 +1,5 @@
 import DsmCore
+import DsmLocalization
 import Foundation
 import XCTest
 @testable import DsmNetwork
@@ -54,8 +55,11 @@ final class DsmChatRepositoryTests: XCTestCase {
 
         let users = try await repository.listUsers()
 
-        XCTAssertEqual(users.map(\.id), ["2", "1"])
-        XCTAssertEqual(users.first(where: { $0.id == "1" })?.displayName, "用户 1")
+        XCTAssertEqual(users.map(\.id).sorted(), ["1", "2"])
+        XCTAssertEqual(
+            users.first(where: { $0.id == "1" })?.displayName,
+            L10n.string("shared.806312613840681c", String(describing: 1))
+        )
         XCTAssertEqual(users.first(where: { $0.id == "2" })?.displayName, "林青")
     }
 

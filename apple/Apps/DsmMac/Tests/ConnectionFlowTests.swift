@@ -1,4 +1,5 @@
 import DsmCore
+import DsmLocalization
 import DsmNetwork
 import Foundation
 import XCTest
@@ -382,7 +383,7 @@ final class ConnectionFlowTests: XCTestCase {
         XCTAssertNil(model.workspace)
         XCTAssertNil(model.selectedProfileID)
         XCTAssertEqual(model.profiles.count, 1)
-        XCTAssertEqual(model.displayName, "我的 NAS")
+        XCTAssertEqual(model.displayName, L10n.string("ui.b457fa7f7764aef5"))
         XCTAssertTrue(model.host.isEmpty)
         XCTAssertTrue(model.account.isEmpty)
     }
@@ -442,7 +443,7 @@ final class ConnectionFlowTests: XCTestCase {
         XCTAssertNotNil(model.pendingCertificate)
         XCTAssertEqual(model.password, "password")
         XCTAssertTrue(model.statusIsError)
-        XCTAssertEqual(model.statusMessage, "无法自动确认这台 NAS 的身份，请核对安全信息后继续。")
+        XCTAssertEqual(model.statusMessage, L10n.string("shared.747b72d0d6fc61f9"))
     }
 
     @MainActor

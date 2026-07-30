@@ -1,4 +1,5 @@
 import Foundation
+import DsmLocalization
 import XCTest
 @testable import DsmCore
 
@@ -39,7 +40,7 @@ final class PhotoLibraryTests: XCTestCase {
     func test照片空间使用固定公开目录() {
         XCTAssertEqual(PhotoSpace.personal.rootPath, "/home/Photos")
         XCTAssertEqual(PhotoSpace.shared.rootPath, "/photo")
-        XCTAssertEqual(PhotoSpace.shared.title, "共享空间")
+        XCTAssertEqual(PhotoSpace.shared.title, L10n.string("shared.17d2e16862f16829"))
     }
 
     func testLivePhotoAutoPairing() throws {

@@ -46,7 +46,8 @@ public sealed partial class ShellPage : Page
             ContentFrame.Content = new LanguageSettingsPage(_app);
             return;
         }
-        if (args.SelectedItem == LogoutItem)
+        if (args.SelectedItem is NavigationViewItem selectedItem
+            && ReferenceEquals(selectedItem, LogoutItem))
         {
             var localization = LocalizationService.Current;
             var dialog = new ContentDialog

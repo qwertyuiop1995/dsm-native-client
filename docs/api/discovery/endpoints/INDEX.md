@@ -47,6 +47,8 @@
   - `SYNO.Core.Storage.Disk` v1。
   - `SYNO.Core.Hardware.PowerRecovery`、`Led.Brightness`、`FanSpeed`、`BeepControl`、`Hibernation` v1。
   - `SYNO.Core.ExternalDevice.UPS` v1。
+- S.M.A.R.T. 稳定记录：[DSM S.M.A.R.T. 检测内部 API](dsm-smart-test.md)。
+- 硬件设置稳定记录：[DSM 硬件与 UPS 设置内部 API](dsm-hardware-settings.md)。
 - 当前确认：`Storage.load_info` v1 与硬盘检测读取结构已核对；`Storage.Volume.list` 在当前环境返回错误 `101`；S.M.A.R.T. 启停和硬件设置没有为发现而执行。
 - 降级：以 `load_info` 为主，不使用失败的 `Volume.list` 覆盖有效结果；写入口按能力与权限逐项关闭。
 
@@ -58,7 +60,6 @@
   - `SYNO.Core.Package.Control`、`SYNO.Core.Package.Uninstallation`、`SYNO.Core.Package.Thumb` v1。
   - `SYNO.Core.TaskScheduler` v1-v4；列表/运行使用 v3，详情/创建/修改使用 v4。
   - `SYNO.Core.EventScheduler` v1。
-- 账号：`SYNO.Core.User`、`SYNO.Core.Group` v1。
 - 控制面板：
   - `SYNO.Core.Terminal`、`SYNO.Core.FileServ.SMB`、`SYNO.Core.FileServ.NFS` v1-v3。
   - `SYNO.Core.FileServ.FTP`、`SYNO.Core.FileServ.FTP.SFTP`、`SYNO.Core.Network.Proxy` v1。
@@ -68,7 +69,39 @@
   - `SYNO.Core.Region.NTP` v1-v3。
   - `SYNO.Core.DDNS.Provider`、`SYNO.Core.DDNS.Record` v1。
   - `SYNO.Core.Security.Firewall`、`Firewall.Conf`、`Firewall.Profile.Apply` v1。
-- 当前证据：只读结构、网页请求和能力发现已分项记录；套件启停/卸载、任务写入、账号、网络、防火墙等不得仅凭同一端点组标记为行为验证。
+- 远程访问稳定记录：[DSM 远程访问设置内部 API](dsm-remote-access-settings.md)。
+- 文件服务稳定记录：[DSM 文件服务设置内部 API](dsm-file-service-settings.md)。
+- 远程终端稳定记录：[DSM 远程终端设置内部 API](dsm-terminal-settings.md)。
+- 互联网代理稳定记录：[DSM 互联网代理设置内部 API](dsm-proxy-settings.md)。
+- 当前证据：只读结构、网页请求和能力发现已分项记录；套件启停/卸载、任务写入、网络、防火墙等不得仅凭同一端点组标记为行为验证。
+
+### `dsm-account-directory`
+
+- 组件：`dsm-core`
+- API：`SYNO.Core.User`、`SYNO.Core.Group` v1。
+- 稳定记录：[DSM 账号与群组目录内部 API](dsm-account-directory.md)。
+- 当前证据：只读结构与网页请求为 `observed`；账号和群组写行为尚未在专用环境完成
+  `behavior-verified`。
+
+### `dsm-ethernet-settings`
+
+- 组件：`dsm-core`
+- API：`SYNO.Core.Network.Ethernet`，列表 v2、详情与设置 v1。
+- 稳定记录：[DSM 物理网卡设置内部 API](dsm-ethernet-settings.md)。
+- 当前证据：只读结构与网页请求为 `observed`；网卡写行为尚未在专用网络完成
+  `behavior-verified`。
+- 降级：能力、权限或写后回读不满足要求时关闭写入口，不自动提升权限或重放请求。
+
+### `dsm-security-settings`
+
+- 组件：`dsm-core`
+- API：`SYNO.Core.Security.AutoBlock`、`Security.DoS`、`Security.Firewall`、
+  `Firewall.Conf`、`Firewall.Profile.Apply`。
+- 稳定记录：[DSM 安全防护与防火墙设置内部 API](dsm-security-settings.md)。
+- 当前证据：只读结构与网页请求为 `observed`；合成请求、部分成功、断网、取消和重复
+  提交测试不提升当前环境的写行为证据等级。
+- 降级：任一实际变化缺少能力或完整预检时不提交；提交开始后失败必须先回读，不自动
+  重放复合设置。
 
 ### `download-station2-fallback`
 
@@ -134,4 +167,3 @@
 
 - `storage-analyzer`：当前安装版本 `2.1.0-0620`，但历史报告内部 API 尚未固化，不登记猜测的 API 名称。
 - 只有源码候选名称、没有当前环境证据的接口，不得自动提升到本索引的“当前确认”。
-

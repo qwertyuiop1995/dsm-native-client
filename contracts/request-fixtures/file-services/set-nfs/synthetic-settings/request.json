@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "file-services.set-nfs.synthetic-settings",
+  "module": "file-services",
+  "operation": "setNFS",
+  "api": {
+    "name": "SYNO.Core.FileServ.NFS",
+    "method": "set",
+    "preferredVersion": 3,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "enable_nfs",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

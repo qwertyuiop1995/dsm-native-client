@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "security.set-dos.synthetic-interface",
+  "module": "security",
+  "operation": "setDosProtection",
+  "api": {
+    "name": "SYNO.Core.Security.DoS",
+    "method": "set",
+    "preferredVersion": 2,
+    "resolvedVersion": 2,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "configs",
+      "valueType": "objectArray",
+      "encodedValue": "[{\"adapter\":\"eth-synthetic\",\"dos_protect_enable\":true}]"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

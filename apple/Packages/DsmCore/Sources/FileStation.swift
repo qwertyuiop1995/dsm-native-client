@@ -366,6 +366,10 @@ public protocol FileRepository: PhotoFileServing, Sendable {
         progress: @escaping FileTransferProgress
     ) async throws
     func delete(paths: [String], progress: @escaping FileTransferProgress) async throws
+    func deleteResult(
+        paths: [String],
+        progress: @escaping FileTransferProgress
+    ) async throws -> MutationResult
     func createFolder(parentPath: String, name: String) async throws
     func rename(path: String, newName: String) async throws
     func copy(
@@ -404,6 +408,7 @@ public protocol FileRepository: PhotoFileServing, Sendable {
     func fileMD5(remotePath: String) async throws -> String
     func listFavorites() async throws -> [FavoriteLocation]
     func addFavorite(path: String, name: String) async throws
+    func addFavoriteResult(path: String, name: String) async throws -> MutationResult
     func removeFavorite(path: String) async throws
     func listShareLinks() async throws -> [FileShareLink]
     func createShareLink(paths: [String], password: String?, expiresAt: String?) async throws -> FileShareLink

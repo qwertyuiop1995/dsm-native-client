@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "vmm.delete.synthetic-virtual-machine",
+  "module": "vmm",
+  "operation": "delete",
+  "api": {
+    "name": "SYNO.Virtualization.API.Guest",
+    "method": "delete",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "guest_id",
+      "valueType": "string",
+      "encodedValue": "<synthetic-virtual-machine>"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "destructive",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "publicDocumentation"
+  }
+}

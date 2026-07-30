@@ -3,20 +3,38 @@ import Foundation
 @testable import DsmNetwork
 
 actor MockHTTPTransport: DsmBinaryHTTPTransport {
-    private var responses: [DsmHTTPResponse]
+    enum Step: Sendable {
+        case response(DsmHTTPResponse)
+        case urlError(URLError.Code)
+        case waitUntilCancelled
+    }
+
+    private var steps: [Step]
     private var requests: [URLRequest] = []
     private var uploadBodies: [Data] = []
 
     init(responses: [DsmHTTPResponse]) {
-        self.responses = responses
+        steps = responses.map(Step.response)
+    }
+
+    init(steps: [Step]) {
+        self.steps = steps
     }
 
     func send(_ request: URLRequest) async throws -> DsmHTTPResponse {
         requests.append(request)
-        guard !responses.isEmpty else {
+        guard !steps.isEmpty else {
             throw URLError(.badServerResponse)
         }
-        return responses.removeFirst()
+        switch steps.removeFirst() {
+        case .response(let response):
+            return response
+        case .urlError(let code):
+            throw URLError(code)
+        case .waitUntilCancelled:
+            try await Task.sleep(nanoseconds: UInt64.max)
+            throw URLError(.cancelled)
+        }
     }
 
     func recordedRequests() -> [URLRequest] {

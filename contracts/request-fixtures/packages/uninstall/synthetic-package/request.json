@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "packages.uninstall.synthetic-package",
+  "module": "packages",
+  "operation": "uninstall",
+  "api": {
+    "name": "SYNO.Core.Package.Uninstallation",
+    "method": "uninstall",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "dsm_apps",
+      "valueType": "stringArray",
+      "encodedValue": "[\"<synthetic-app-one>\",\"<synthetic-app-two>\"]"
+    },
+    {
+      "name": "id",
+      "valueType": "string",
+      "encodedValue": "<synthetic-package>"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "destructive",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

@@ -528,16 +528,20 @@ public protocol ServiceManagementRepository: Sendable {
     func saveDownloadStationSettings(_ settings: DownloadStationSettings) async throws
     func controlDownloadTasks(ids: [String], action: DownloadStationTaskAction) async throws
     func deleteDownloadTasks(ids: [String], removeData: Bool) async throws
+    func deleteDownloadTasksResult(ids: [String], removeData: Bool) async throws -> MutationResult
 
     func loadContainerManager() async throws -> ContainerManagerSnapshot
     func controlContainers(ids: [String], action: ContainerAction) async throws
     func deleteContainers(ids: [String]) async throws
+    func deleteContainersResult(ids: [String]) async throws -> MutationResult
     func searchContainerImages(query: String) async throws -> [ContainerRegistryImage]
     func loadContainerImageTags(repository: String) async throws -> [String]
     func pullContainerImage(repository: String, tag: String) async throws
     func deleteContainerImages(ids: [String]) async throws
+    func deleteContainerImagesResult(ids: [String]) async throws -> MutationResult
     func createContainerNetwork(name: String, driver: String) async throws
     func deleteContainerNetworks(ids: [String]) async throws
+    func deleteContainerNetworksResult(ids: [String]) async throws -> MutationResult
 
     func loadVirtualMachineManager() async throws -> VirtualMachineManagerSnapshot
     func createVirtualMachine(_ configuration: VirtualMachineCreation) async throws
@@ -545,10 +549,95 @@ public protocol ServiceManagementRepository: Sendable {
     func openVirtualMachineConsole(id: String) async throws -> VirtualMachineConsoleSession
     func controlVirtualMachines(ids: [String], action: VirtualMachinePowerAction) async throws
     func deleteVirtualMachines(ids: [String]) async throws
+    func deleteVirtualMachinesResult(ids: [String]) async throws -> MutationResult
     func updateVirtualMachineNetwork(
         id: String,
         configuration: VirtualMachineNetworkUpdate
     ) async throws
     func deleteVirtualMachineNetworks(ids: [String]) async throws
+    func deleteVirtualMachineNetworksResult(ids: [String]) async throws -> MutationResult
     func deleteVirtualMachineImages(ids: [String]) async throws
+    func deleteVirtualMachineImagesResult(ids: [String]) async throws -> MutationResult
+}
+
+public extension ServiceManagementRepository {
+    func deleteDownloadTasksResult(
+        ids: [String],
+        removeData: Bool
+    ) async throws -> MutationResult {
+        try unsupportedDeletionResult(
+            operation: "downloadTaskDelete",
+            localizationPrefix: "download-task.delete",
+            count: ids.count
+        )
+    }
+
+    func deleteContainersResult(ids: [String]) async throws -> MutationResult {
+        try unsupportedDeletionResult(
+            operation: "containerDelete",
+            localizationPrefix: "container.delete",
+            count: ids.count
+        )
+    }
+
+    func deleteContainerImagesResult(ids: [String]) async throws -> MutationResult {
+        try unsupportedDeletionResult(
+            operation: "containerImageDelete",
+            localizationPrefix: "container-image.delete",
+            count: ids.count
+        )
+    }
+
+    func deleteContainerNetworksResult(ids: [String]) async throws -> MutationResult {
+        try unsupportedDeletionResult(
+            operation: "containerNetworkDelete",
+            localizationPrefix: "container-network.delete",
+            count: ids.count
+        )
+    }
+
+    func deleteVirtualMachinesResult(ids: [String]) async throws -> MutationResult {
+        try unsupportedDeletionResult(
+            operation: "virtualMachineDelete",
+            localizationPrefix: "virtual-machine.delete",
+            count: ids.count
+        )
+    }
+
+    func deleteVirtualMachineNetworksResult(ids: [String]) async throws -> MutationResult {
+        try unsupportedDeletionResult(
+            operation: "virtualMachineNetworkDelete",
+            localizationPrefix: "virtual-machine-network.delete",
+            count: ids.count
+        )
+    }
+
+    func deleteVirtualMachineImagesResult(ids: [String]) async throws -> MutationResult {
+        try unsupportedDeletionResult(
+            operation: "virtualMachineImageDelete",
+            localizationPrefix: "virtual-machine-image.delete",
+            count: ids.count
+        )
+    }
+
+    private func unsupportedDeletionResult(
+        operation: String,
+        localizationPrefix: String,
+        count: Int
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: operation,
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(
+                succeeded: 0,
+                failed: count,
+                unknown: 0
+            ),
+            errorCategory: .unsupported,
+            localizationKey: "\(localizationPrefix).unsupported",
+            diagnosticTag: "\(localizationPrefix).unsupported"
+        )
+    }
 }

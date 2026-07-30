@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "file-station.upload.synthetic-overwrite",
+  "module": "file-station",
+  "operation": "uploadOverwrite",
+  "api": {
+    "name": "SYNO.FileStation.Upload",
+    "method": "upload",
+    "preferredVersion": 2,
+    "resolvedVersion": 2,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "multipart"
+  },
+  "parameters": [
+    {
+      "name": "create_parents",
+      "valueType": "boolean",
+      "encodedValue": "false"
+    },
+    {
+      "name": "file",
+      "valueType": "binary",
+      "encodedValue": "<synthetic-binary>"
+    },
+    {
+      "name": "overwrite",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "path",
+      "valueType": "string",
+      "encodedValue": "<synthetic-destination>"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "query",
+      "multipart"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "query",
+      "multipart"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

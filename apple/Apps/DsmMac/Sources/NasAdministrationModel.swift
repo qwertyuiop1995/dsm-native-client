@@ -664,15 +664,27 @@ final class NasSettingsModel {
             )
         }
 
-        let status = try await repository.startDiskTest(diskID: diskID, type: type)
-        guard status.isRunning else {
-            throw AppError(
-                category: .invalidResponse,
-                isRetryable: true,
-                safeUserMessage: L10n.string("ui.ddef2b60c5d885df")
-            )
+        let result = try await repository.startDiskTestResult(
+            diskID: diskID,
+            type: type
+        )
+        if result.requiresRefresh || result.status == .confirmedSuccess,
+           let refreshed = try? await repository.loadDiskTestStatus(diskID: diskID) {
+            diskTestStatuses[diskID] = refreshed
         }
-        diskTestStatuses[diskID] = status
+        if diskTestStatuses[diskID]?.isRunning == true
+            || result.status == .confirmedSuccess {
+            if diskTestStatuses[diskID]?.isRunning != true {
+                diskTestStatuses[diskID] = diskTestStatus(
+                    diskID: diskID,
+                    isRunning: true,
+                    runningType: type
+                )
+            }
+            return
+        }
+        guard result.status != .cancelledBeforeSubmission else { return }
+        throw diskTestError(for: result.status, isStarting: true)
     }
 
     func stopDiskTest(diskID: String) async throws {
@@ -691,15 +703,106 @@ final class NasSettingsModel {
                 safeUserMessage: L10n.string("ui.1022d6b5423a7d10")
             )
         }
-        let status = try await repository.stopDiskTest(diskID: diskID)
-        guard !status.isRunning else {
-            throw AppError(
-                category: .invalidResponse,
-                isRetryable: true,
-                safeUserMessage: L10n.string("ui.9681fb468adf10c2")
+        let result = try await repository.stopDiskTestResult(diskID: diskID)
+        if result.requiresRefresh || result.status == .confirmedSuccess,
+           let refreshed = try? await repository.loadDiskTestStatus(diskID: diskID) {
+            diskTestStatuses[diskID] = refreshed
+        }
+        if diskTestStatuses[diskID]?.isRunning == false
+            || result.status == .confirmedSuccess {
+            if diskTestStatuses[diskID]?.isRunning != false {
+                diskTestStatuses[diskID] = diskTestStatus(
+                    diskID: diskID,
+                    isRunning: false,
+                    runningType: nil
+                )
+            }
+            return
+        }
+        guard result.status != .cancelledBeforeSubmission else { return }
+        throw diskTestError(for: result.status, isStarting: false)
+    }
+
+    struct DiskTestFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func diskTestFeedback(
+        for status: MutationResultStatus,
+        isStarting: Bool
+    ) -> DiskTestFeedback {
+        let prefix = isStarting
+            ? "storage.disk-test.start"
+            : "storage.disk-test.stop"
+        return switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            DiskTestFeedback(
+                resourceKey: "\(prefix).unverified",
+                category: .unknown
+            )
+        case .partialSuccess:
+            DiskTestFeedback(
+                resourceKey: "\(prefix).unverified",
+                category: .partialFailure
+            )
+        case .permissionDenied:
+            DiskTestFeedback(
+                resourceKey: "\(prefix).permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            DiskTestFeedback(
+                resourceKey: "\(prefix).unsupported",
+                category: .apiUnavailable
+            )
+        case .confirmedFailure:
+            DiskTestFeedback(
+                resourceKey: "\(prefix).failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            DiskTestFeedback(
+                resourceKey: "\(prefix).completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            DiskTestFeedback(
+                resourceKey: "\(prefix).cancelled",
+                category: .cancelled
             )
         }
-        diskTestStatuses[diskID] = status
+    }
+
+    private func diskTestError(
+        for status: MutationResultStatus,
+        isStarting: Bool
+    ) -> AppError {
+        let feedback = Self.diskTestFeedback(for: status, isStarting: isStarting)
+        return AppError(
+            category: feedback.category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(feedback.resourceKey)
+        )
+    }
+
+    private func diskTestStatus(
+        diskID: String,
+        isRunning: Bool,
+        runningType: NasDiskTestType?
+    ) -> NasDiskTestStatus {
+        let previous = diskTestStatuses[diskID]
+        return NasDiskTestStatus(
+            diskID: diskID,
+            isRunning: isRunning,
+            isBusyWithOtherTest: false,
+            runningType: runningType,
+            progressDescription: nil,
+            lastQuickTest: previous?.lastQuickTest,
+            lastExtendedTest: previous?.lastExtendedTest,
+            lastResult: previous?.lastResult,
+            isHistoryAvailable: previous?.isHistoryAvailable ?? false
+        )
     }
 
     func controlPackage(id: String, action: NasPackageAction) async throws {
@@ -732,6 +835,24 @@ final class NasSettingsModel {
             break
         }
 
+        if action == .uninstall {
+            let result = try await repository.uninstallPackageResult(id: id)
+            if result.requiresRefresh || result.status == .confirmedSuccess {
+                await activate(.packages, force: true)
+            }
+            if packageActionIsVerified(id: id, action: action)
+                || result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission {
+                return
+            }
+            let feedback = Self.packageUninstallFeedback(for: result.status)
+            throw AppError(
+                category: feedback.category,
+                isRetryable: false,
+                safeUserMessage: L10n.string(feedback.resourceKey)
+            )
+        }
+
         try await repository.controlPackage(id: id, action: action)
         for attempt in 0..<10 {
             await activate(.packages, force: true)
@@ -747,6 +868,53 @@ final class NasSettingsModel {
             isRetryable: true,
             safeUserMessage: L10n.string("ui.3b66d9f42d866bf0")
         )
+    }
+
+    struct PackageUninstallFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func packageUninstallFeedback(
+        for status: MutationResultStatus
+    ) -> PackageUninstallFeedback {
+        switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            PackageUninstallFeedback(
+                resourceKey: "package.uninstall.unverified",
+                category: .unknown
+            )
+        case .permissionDenied:
+            PackageUninstallFeedback(
+                resourceKey: "package.uninstall.permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            PackageUninstallFeedback(
+                resourceKey: "package.uninstall.unsupported",
+                category: .apiUnavailable
+            )
+        case .partialSuccess:
+            PackageUninstallFeedback(
+                resourceKey: "package.uninstall.unverified",
+                category: .partialFailure
+            )
+        case .confirmedFailure:
+            PackageUninstallFeedback(
+                resourceKey: "package.uninstall.failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            PackageUninstallFeedback(
+                resourceKey: "package.uninstall.completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            PackageUninstallFeedback(
+                resourceKey: "package.uninstall.cancelled",
+                category: .cancelled
+            )
+        }
     }
 
     func performPowerAction(_ action: NasPowerAction) async throws {
@@ -888,11 +1056,16 @@ final class NasSettingsModel {
             throw busyAccountError()
         }
         defer { accountOperationIDs.remove(account.id) }
-        try await repository.deleteAccount(name: account.name)
-        await activate(.accounts, force: true)
-        guard accounts?.users.contains(where: { $0.id == account.id }) == false else {
-            throw accountVerificationError()
+        let result = try await repository.deleteAccountResult(name: account.name)
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.accounts, force: true)
         }
+        if accounts?.users.contains(where: { $0.id == account.id }) == false
+            || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        throw directoryDeletionError(for: result.status, kind: .user)
     }
 
     func saveGroup(_ draft: NasGroupDraft) async throws {
@@ -920,11 +1093,77 @@ final class NasSettingsModel {
             throw busyAccountError()
         }
         defer { accountOperationIDs.remove(group.id) }
-        try await repository.deleteGroup(name: group.name)
-        await activate(.accounts, force: true)
-        guard accounts?.groups.contains(where: { $0.id == group.id }) == false else {
-            throw accountVerificationError()
+        let result = try await repository.deleteGroupResult(name: group.name)
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.accounts, force: true)
         }
+        if accounts?.groups.contains(where: { $0.id == group.id }) == false
+            || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        throw directoryDeletionError(for: result.status, kind: .group)
+    }
+
+    struct DirectoryDeletionFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func directoryDeletionFeedback(
+        for status: MutationResultStatus,
+        kind: NasAccount.Kind
+    ) -> DirectoryDeletionFeedback {
+        let prefix = kind == .group ? "group.delete" : "account.delete"
+        return switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            DirectoryDeletionFeedback(
+                resourceKey: "\(prefix).unverified",
+                category: .unknown
+            )
+        case .permissionDenied:
+            DirectoryDeletionFeedback(
+                resourceKey: "\(prefix).permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            DirectoryDeletionFeedback(
+                resourceKey: "\(prefix).unsupported",
+                category: .apiUnavailable
+            )
+        case .partialSuccess:
+            DirectoryDeletionFeedback(
+                resourceKey: "\(prefix).unverified",
+                category: .partialFailure
+            )
+        case .confirmedFailure:
+            DirectoryDeletionFeedback(
+                resourceKey: "\(prefix).failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            DirectoryDeletionFeedback(
+                resourceKey: "\(prefix).completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            DirectoryDeletionFeedback(
+                resourceKey: "\(prefix).cancelled",
+                category: .cancelled
+            )
+        }
+    }
+
+    private func directoryDeletionError(
+        for status: MutationResultStatus,
+        kind: NasAccount.Kind
+    ) -> AppError {
+        let feedback = Self.directoryDeletionFeedback(for: status, kind: kind)
+        return AppError(
+            category: feedback.category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(feedback.resourceKey)
+        )
     }
 
     private func busyAccountError() -> AppError {
@@ -980,62 +1219,415 @@ final class NasSettingsModel {
         guard !isSavingServiceSettings else { throw settingsBusyError() }
         isSavingServiceSettings = true
         defer { isSavingServiceSettings = false }
-        try await repository.saveFileServiceSettings(settings)
-        await activate(.fileServices, force: true)
-        guard fileServices == settings else {
-            throw settingsVerificationError()
+        let result = try await repository.saveFileServiceSettingsResult(settings)
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.fileServices, force: true)
         }
+        if fileServices.map({
+            Self.fileServiceSettings($0, match: settings)
+        }) == true
+            || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        let feedback = Self.fileServiceSettingsFeedback(for: result.status)
+        throw AppError(
+            category: feedback.category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? feedback.resourceKey
+            )
+        )
+    }
+
+    struct FileServiceSettingsFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func fileServiceSettingsFeedback(
+        for status: MutationResultStatus
+    ) -> FileServiceSettingsFeedback {
+        switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            FileServiceSettingsFeedback(
+                resourceKey: "file-services.settings.unverified",
+                category: .unknown
+            )
+        case .partialSuccess:
+            FileServiceSettingsFeedback(
+                resourceKey: "file-services.settings.partial",
+                category: .partialFailure
+            )
+        case .permissionDenied:
+            FileServiceSettingsFeedback(
+                resourceKey: "file-services.settings.permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            FileServiceSettingsFeedback(
+                resourceKey: "file-services.settings.unsupported",
+                category: .apiUnavailable
+            )
+        case .confirmedFailure:
+            FileServiceSettingsFeedback(
+                resourceKey: "file-services.settings.failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            FileServiceSettingsFeedback(
+                resourceKey: "file-services.settings.completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            FileServiceSettingsFeedback(
+                resourceKey: "file-services.settings.cancelled",
+                category: .cancelled
+            )
+        }
+    }
+
+    private static func fileServiceSettings(
+        _ actual: NasFileServiceSettings,
+        match expected: NasFileServiceSettings
+    ) -> Bool {
+        (expected.isSMBEnabled == nil
+            || actual.isSMBEnabled == expected.isSMBEnabled)
+            && (expected.isNFSEnabled == nil
+                || actual.isNFSEnabled == expected.isNFSEnabled)
+            && (expected.isFTPEnabled == nil
+                || actual.isFTPEnabled == expected.isFTPEnabled)
+            && (expected.isFTPSEnabled == nil
+                || actual.isFTPSEnabled == expected.isFTPSEnabled)
+            && (expected.ftpPort == nil
+                || actual.ftpPort == expected.ftpPort)
+            && (expected.isSFTPEnabled == nil
+                || actual.isSFTPEnabled == expected.isSFTPEnabled)
+            && (expected.sftpPort == nil
+                || actual.sftpPort == expected.sftpPort)
+            && (expected.isSSDPEnabled == nil
+                || actual.isSSDPEnabled == expected.isSSDPEnabled)
+            && (expected.isBonjourEnabled == nil
+                || actual.isBonjourEnabled == expected.isBonjourEnabled)
+            && (expected.isSMBTimeMachineEnabled == nil
+                || actual.isSMBTimeMachineEnabled
+                    == expected.isSMBTimeMachineEnabled)
     }
 
     func saveTerminal(_ settings: NasTerminalSettings) async throws {
         guard !isSavingServiceSettings else { throw settingsBusyError() }
         isSavingServiceSettings = true
         defer { isSavingServiceSettings = false }
-        try await repository.saveTerminalSettings(settings)
-        await activate(.terminal, force: true)
-        guard terminal == settings else {
-            throw settingsVerificationError()
+        let result = try await repository.saveTerminalSettingsResult(settings)
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.terminal, force: true)
         }
+        if terminal.map({
+            Self.terminalSettings($0, match: settings)
+        }) == true
+            || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        let feedback = Self.terminalSettingsFeedback(for: result.status)
+        throw AppError(
+            category: feedback.category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? feedback.resourceKey
+            )
+        )
+    }
+
+    struct TerminalSettingsFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func terminalSettingsFeedback(
+        for status: MutationResultStatus
+    ) -> TerminalSettingsFeedback {
+        switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            TerminalSettingsFeedback(
+                resourceKey: "terminal.settings.unverified",
+                category: .unknown
+            )
+        case .partialSuccess:
+            TerminalSettingsFeedback(
+                resourceKey: "terminal.settings.partial",
+                category: .partialFailure
+            )
+        case .permissionDenied:
+            TerminalSettingsFeedback(
+                resourceKey: "terminal.settings.permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            TerminalSettingsFeedback(
+                resourceKey: "terminal.settings.unsupported",
+                category: .apiUnavailable
+            )
+        case .confirmedFailure:
+            TerminalSettingsFeedback(
+                resourceKey: "terminal.settings.failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            TerminalSettingsFeedback(
+                resourceKey: "terminal.settings.completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            TerminalSettingsFeedback(
+                resourceKey: "terminal.settings.cancelled",
+                category: .cancelled
+            )
+        }
+    }
+
+    private static func terminalSettings(
+        _ actual: NasTerminalSettings,
+        match expected: NasTerminalSettings
+    ) -> Bool {
+        actual.isSSHEnabled == expected.isSSHEnabled
+            && actual.isTelnetEnabled == expected.isTelnetEnabled
+            && (expected.sshPort == nil
+                || actual.sshPort == expected.sshPort)
     }
 
     func saveProxy(_ settings: NasProxySettings) async throws {
         guard !isSavingServiceSettings else { throw settingsBusyError() }
         isSavingServiceSettings = true
         defer { isSavingServiceSettings = false }
-        try await repository.saveProxySettings(settings)
-        await activate(.network, force: true)
-        guard proxy?.isEnabled == settings.isEnabled,
-              !settings.isEnabled
-                || (proxy?.host == settings.host.trimmingCharacters(in: .whitespacesAndNewlines)
-                    && proxy?.port == settings.port) else {
-            throw settingsVerificationError()
+        let result = try await repository.saveProxySettingsResult(settings)
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.network, force: true)
         }
+        if proxy.map({
+            Self.proxySettings($0, match: settings)
+        }) == true
+            || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        let feedback = Self.proxySettingsFeedback(for: result.status)
+        throw AppError(
+            category: feedback.category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? feedback.resourceKey
+            )
+        )
+    }
+
+    struct ProxySettingsFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func proxySettingsFeedback(
+        for status: MutationResultStatus
+    ) -> ProxySettingsFeedback {
+        switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            ProxySettingsFeedback(
+                resourceKey: "proxy.settings.unverified",
+                category: .unknown
+            )
+        case .partialSuccess:
+            ProxySettingsFeedback(
+                resourceKey: "proxy.settings.partial",
+                category: .partialFailure
+            )
+        case .permissionDenied:
+            ProxySettingsFeedback(
+                resourceKey: "proxy.settings.permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            ProxySettingsFeedback(
+                resourceKey: "proxy.settings.unsupported",
+                category: .apiUnavailable
+            )
+        case .confirmedFailure:
+            ProxySettingsFeedback(
+                resourceKey: "proxy.settings.failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            ProxySettingsFeedback(
+                resourceKey: "proxy.settings.completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            ProxySettingsFeedback(
+                resourceKey: "proxy.settings.cancelled",
+                category: .cancelled
+            )
+        }
+    }
+
+    private static func proxySettings(
+        _ actual: NasProxySettings,
+        match expected: NasProxySettings
+    ) -> Bool {
+        actual.isEnabled == expected.isEnabled
+            && (!expected.isEnabled
+                || (actual.host == expected.normalizedHost
+                    && actual.port == expected.port))
     }
 
     func saveEthernetInterface(_ interface: NasEthernetInterface) async throws {
         let operationID = "network:\(interface.id)"
         guard networkOperationIDs.insert(operationID).inserted else { throw settingsBusyError() }
         defer { networkOperationIDs.remove(operationID) }
-        try await repository.saveEthernetInterface(interface)
-        await activate(.interfaces, force: true)
-        guard ethernetInterfaces.contains(where: {
-            $0.id == interface.id
-                && $0.usesDHCP == interface.usesDHCP
-                && $0.mtu == interface.mtu
-                && $0.isVLANEnabled == interface.isVLANEnabled
-        }) else {
-            throw settingsVerificationError()
+        let result = try await repository.saveEthernetInterfaceResult(interface)
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.interfaces, force: true)
         }
+        if ethernetInterfaces.contains(where: {
+            Self.ethernetInterface($0, matches: interface)
+        }) || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        let feedback = Self.ethernetUpdateFeedback(for: result.status)
+        throw AppError(
+            category: feedback.category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(feedback.resourceKey)
+        )
+    }
+
+    struct EthernetUpdateFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func ethernetUpdateFeedback(
+        for status: MutationResultStatus
+    ) -> EthernetUpdateFeedback {
+        switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            EthernetUpdateFeedback(
+                resourceKey: "network.ethernet.unverified",
+                category: .unknown
+            )
+        case .permissionDenied:
+            EthernetUpdateFeedback(
+                resourceKey: "network.ethernet.permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            EthernetUpdateFeedback(
+                resourceKey: "network.ethernet.unsupported",
+                category: .apiUnavailable
+            )
+        case .partialSuccess:
+            EthernetUpdateFeedback(
+                resourceKey: "network.ethernet.unverified",
+                category: .partialFailure
+            )
+        case .confirmedFailure:
+            EthernetUpdateFeedback(
+                resourceKey: "network.ethernet.failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            EthernetUpdateFeedback(
+                resourceKey: "network.ethernet.completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            EthernetUpdateFeedback(
+                resourceKey: "network.ethernet.cancelled",
+                category: .cancelled
+            )
+        }
+    }
+
+    private static func ethernetInterface(
+        _ actual: NasEthernetInterface,
+        matches expected: NasEthernetInterface
+    ) -> Bool {
+        actual.id == expected.id
+            && actual.usesDHCP == expected.usesDHCP
+            && (expected.usesDHCP || actual.address == expected.address)
+            && (expected.usesDHCP || actual.subnetMask == expected.subnetMask)
+            && (expected.usesDHCP || actual.gateway == expected.gateway)
+            && (expected.usesDHCP || actual.dnsServers == expected.dnsServers)
+            && actual.isDefaultGateway == expected.isDefaultGateway
+            && actual.mtu == expected.mtu
+            && actual.isVLANEnabled == expected.isVLANEnabled
+            && (!expected.isVLANEnabled || actual.vlanID == expected.vlanID)
     }
 
     func saveHardware(_ settings: NasHardwareSettings) async throws {
         guard !isSavingServiceSettings else { throw settingsBusyError() }
         isSavingServiceSettings = true
         defer { isSavingServiceSettings = false }
-        try await repository.saveHardwareSettings(settings)
-        await activate(.hardware, force: true)
-        guard hardware == settings else {
-            throw settingsVerificationError()
+        let result = try await repository.saveHardwareSettingsResult(settings)
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.hardware, force: true)
+        }
+        if hardware == settings
+            || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        let feedback = Self.hardwareSettingsFeedback(for: result.status)
+        throw AppError(
+            category: feedback.category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(feedback.resourceKey)
+        )
+    }
+
+    struct HardwareSettingsFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func hardwareSettingsFeedback(
+        for status: MutationResultStatus
+    ) -> HardwareSettingsFeedback {
+        switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            HardwareSettingsFeedback(
+                resourceKey: "hardware.settings.unverified",
+                category: .unknown
+            )
+        case .partialSuccess:
+            HardwareSettingsFeedback(
+                resourceKey: "hardware.settings.partial",
+                category: .partialFailure
+            )
+        case .permissionDenied:
+            HardwareSettingsFeedback(
+                resourceKey: "hardware.settings.permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            HardwareSettingsFeedback(
+                resourceKey: "hardware.settings.unsupported",
+                category: .apiUnavailable
+            )
+        case .confirmedFailure:
+            HardwareSettingsFeedback(
+                resourceKey: "hardware.settings.failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            HardwareSettingsFeedback(
+                resourceKey: "hardware.settings.completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            HardwareSettingsFeedback(
+                resourceKey: "hardware.settings.cancelled",
+                category: .cancelled
+            )
         }
     }
 
@@ -1043,24 +1635,171 @@ final class NasSettingsModel {
         guard !isSavingServiceSettings else { throw settingsBusyError() }
         isSavingServiceSettings = true
         defer { isSavingServiceSettings = false }
-        try await repository.saveRemoteAccessSettings(settings)
-        await activate(.remoteAccess, force: true)
-        guard remoteAccess?.isRelayEnabled == settings.isRelayEnabled,
-              remoteAccess?.isRouterConfigurationEnabled
-                == settings.isRouterConfigurationEnabled else {
-            throw settingsVerificationError()
+        let result = try await repository.saveRemoteAccessSettingsResult(settings)
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.remoteAccess, force: true)
         }
+        if remoteAccess.map({
+            Self.remoteAccessSettings($0, match: settings)
+        }) == true
+            || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        let feedback = Self.remoteAccessSettingsFeedback(for: result.status)
+        throw AppError(
+            category: feedback.category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(feedback.resourceKey)
+        )
+    }
+
+    struct RemoteAccessSettingsFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func remoteAccessSettingsFeedback(
+        for status: MutationResultStatus
+    ) -> RemoteAccessSettingsFeedback {
+        switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            RemoteAccessSettingsFeedback(
+                resourceKey: "remote-access.settings.unverified",
+                category: .unknown
+            )
+        case .partialSuccess:
+            RemoteAccessSettingsFeedback(
+                resourceKey: "remote-access.settings.partial",
+                category: .partialFailure
+            )
+        case .permissionDenied:
+            RemoteAccessSettingsFeedback(
+                resourceKey: "remote-access.settings.permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            RemoteAccessSettingsFeedback(
+                resourceKey: "remote-access.settings.unsupported",
+                category: .apiUnavailable
+            )
+        case .confirmedFailure:
+            RemoteAccessSettingsFeedback(
+                resourceKey: "remote-access.settings.failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            RemoteAccessSettingsFeedback(
+                resourceKey: "remote-access.settings.completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            RemoteAccessSettingsFeedback(
+                resourceKey: "remote-access.settings.cancelled",
+                category: .cancelled
+            )
+        }
+    }
+
+    private static func remoteAccessSettings(
+        _ actual: NasRemoteAccessSettings,
+        match expected: NasRemoteAccessSettings
+    ) -> Bool {
+        (expected.isRelayEnabled == nil
+            || actual.isRelayEnabled == expected.isRelayEnabled)
+            && (expected.isRouterConfigurationEnabled == nil
+                || actual.isRouterConfigurationEnabled
+                    == expected.isRouterConfigurationEnabled)
     }
 
     func saveSecurity(_ settings: NasSecuritySettings) async throws {
         guard !isSavingServiceSettings else { throw settingsBusyError() }
         isSavingServiceSettings = true
         defer { isSavingServiceSettings = false }
-        try await repository.saveSecuritySettings(settings)
-        await activate(.security, force: true)
-        guard security == settings else {
-            throw settingsVerificationError()
+        let result = try await repository.saveSecuritySettingsResult(settings)
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.security, force: true)
         }
+        if security.map({ Self.securitySettings($0, match: settings) }) == true
+            || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        let feedback = Self.securitySettingsFeedback(for: result.status)
+        throw AppError(
+            category: feedback.category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(feedback.resourceKey)
+        )
+    }
+
+    struct SecuritySettingsFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func securitySettingsFeedback(
+        for status: MutationResultStatus
+    ) -> SecuritySettingsFeedback {
+        switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            SecuritySettingsFeedback(
+                resourceKey: "security.settings.unverified",
+                category: .unknown
+            )
+        case .partialSuccess:
+            SecuritySettingsFeedback(
+                resourceKey: "security.settings.partial",
+                category: .partialFailure
+            )
+        case .permissionDenied:
+            SecuritySettingsFeedback(
+                resourceKey: "security.settings.permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            SecuritySettingsFeedback(
+                resourceKey: "security.settings.unsupported",
+                category: .apiUnavailable
+            )
+        case .confirmedFailure:
+            SecuritySettingsFeedback(
+                resourceKey: "security.settings.failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            SecuritySettingsFeedback(
+                resourceKey: "security.settings.completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            SecuritySettingsFeedback(
+                resourceKey: "security.settings.cancelled",
+                category: .cancelled
+            )
+        }
+    }
+
+    private static func securitySettings(
+        _ actual: NasSecuritySettings,
+        match expected: NasSecuritySettings
+    ) -> Bool {
+        actual.isAutoBlockEnabled == expected.isAutoBlockEnabled
+            && actual.failedAttempts == expected.failedAttempts
+            && actual.withinMinutes == expected.withinMinutes
+            && actual.expirationDays == expected.expirationDays
+            && Dictionary(
+                actual.dosProtection.map { ($0.id, $0.isEnabled) },
+                uniquingKeysWith: { _, latest in latest }
+            ) == Dictionary(
+                expected.dosProtection.map { ($0.id, $0.isEnabled) },
+                uniquingKeysWith: { _, latest in latest }
+            )
+            && (expected.isFirewallEnabled == nil
+                || actual.isFirewallEnabled == expected.isFirewallEnabled)
+            && (expected.isPortScanProtectionEnabled == nil
+                || actual.isPortScanProtectionEnabled
+                    == expected.isPortScanProtectionEnabled)
     }
 
     func saveRegion(_ settings: NasRegionSettings) async throws {

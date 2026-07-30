@@ -359,6 +359,7 @@ public actor DsmFileRepository: FileRepository {
     private let credential: DsmSessionCredential
     private let transport: any DsmBinaryHTTPTransport
     private let client: DsmAPIClient
+    private var activeDeletionPaths: Set<String> = []
 
     public init(
         profile: NasProfile,
@@ -1165,6 +1166,171 @@ public actor DsmFileRepository: FileRepository {
         }
     }
 
+    /// 删除属于破坏性操作；统一结果会区分明确失败、部分完成和提交后无法确认。
+    public func deleteResult(
+        paths: [String],
+        progress: @escaping FileTransferProgress
+    ) async throws -> MutationResult {
+        let operation = "fileDelete"
+        if Task.isCancelled {
+            return try makeMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "file-station.delete.cancelled-before-submission"
+            )
+        }
+
+        let normalizedPaths = Array(Set(paths.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        })).sorted()
+        guard !normalizedPaths.isEmpty,
+              normalizedPaths.allSatisfy(Self.isValidDeletionPath) else {
+            return try makeMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: paths.count,
+                unknown: 0,
+                errorCategory: .validation,
+                diagnosticTag: "file-station.delete.invalid-input"
+            )
+        }
+        guard !activeDeletionPaths.contains(where: { activePath in
+            normalizedPaths.contains {
+                Self.deletionPathsOverlap(activePath, $0)
+            }
+        }) else {
+            return try makeMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: normalizedPaths.count,
+                unknown: 0,
+                errorCategory: .conflict,
+                diagnosticTag: "file-station.delete.duplicate-submission"
+            )
+        }
+        guard let capability = capabilities[DsmAPIName.fileStationDelete],
+              let version = capability.selectedVersion else {
+            return try makeMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: normalizedPaths.count,
+                unknown: 0,
+                errorCategory: .unsupported,
+                diagnosticTag: "file-station.delete.unsupported"
+            )
+        }
+
+        activeDeletionPaths.formUnion(normalizedPaths)
+        defer { activeDeletionPaths.subtract(normalizedPaths) }
+
+        let taskID: String
+        do {
+            let start = try await client.call(
+                path: capability.path,
+                api: capability.name,
+                version: version,
+                method: "start",
+                requestFormat: capability.requestFormat,
+                parameters: [
+                    "path": .stringArray(normalizedPaths),
+                    "recursive": .boolean(true),
+                    "accurate_progress": .boolean(true),
+                ],
+                credential: credential,
+                as: TaskStartPayload.self
+            )
+            taskID = start.taskid
+        } catch let error as DsmNetworkError {
+            return try mutationResultForDeleteSubmissionError(
+                error,
+                operation: operation,
+                itemCount: normalizedPaths.count
+            )
+        } catch {
+            return try makeMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: normalizedPaths.count,
+                errorCategory: .unknown,
+                diagnosticTag: "file-station.delete.submission-unknown"
+            )
+        }
+
+        do {
+            try await pollTask(
+                capability: capability,
+                taskID: taskID,
+                progress: progress
+            )
+        } catch let error as DsmNetworkError {
+            let mapped = DsmErrorMapper.map(error)
+            if mapped.category == .cancelled || Task.isCancelled {
+                return try makeMutationResult(
+                    status: .cancellationRequestedAfterSubmission,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: 0,
+                    unknown: normalizedPaths.count,
+                    errorCategory: mutationErrorCategory(for: mapped.category),
+                    diagnosticTag: "file-station.delete.cancelled-after-submission"
+                )
+            }
+            return try makeMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: normalizedPaths.count,
+                errorCategory: mutationErrorCategory(for: mapped.category),
+                diagnosticTag: "file-station.delete.task-unverified"
+            )
+        } catch {
+            let cancelled = Task.isCancelled || error is CancellationError
+            return try makeMutationResult(
+                status: cancelled
+                    ? .cancellationRequestedAfterSubmission
+                    : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: normalizedPaths.count,
+                errorCategory: cancelled ? nil : .unknown,
+                diagnosticTag: cancelled
+                    ? "file-station.delete.cancelled-after-submission"
+                    : "file-station.delete.task-unknown"
+            )
+        }
+
+        return try await verifyDeletedPaths(
+            normalizedPaths,
+            operation: operation
+        )
+    }
+
     public func createFolder(parentPath: String, name: String) async throws {
         let capability = try requireCapability(DsmAPIName.fileStationCreateFolder)
         do {
@@ -1437,15 +1603,21 @@ public actor DsmFileRepository: FileRepository {
             }
         } catch {
             if Task.isCancelled {
-                try? await client.callVoid(
-                    path: capability.path,
-                    api: capability.name,
-                    version: try selectedVersion(capability),
-                    method: "stop",
-                    requestFormat: capability.requestFormat,
-                    parameters: ["taskid": .string(taskID)],
-                    credential: credential
-                )
+                let version = try selectedVersion(capability)
+                let pollingClient = client
+                let pollingCredential = credential
+                let stopTask = Task.detached {
+                    try? await pollingClient.callVoid(
+                        path: capability.path,
+                        api: capability.name,
+                        version: version,
+                        method: "stop",
+                        requestFormat: capability.requestFormat,
+                        parameters: ["taskid": .string(taskID)],
+                        credential: pollingCredential
+                    )
+                }
+                await stopTask.value
             }
             throw error
         }
@@ -1690,6 +1862,151 @@ public actor DsmFileRepository: FileRepository {
         )
     }
 
+    /// 收藏是统一写操作结果模型的低影响试点；旧方法保持不变，调用方可逐步迁移。
+    public func addFavoriteResult(
+        path: String,
+        name: String
+    ) async throws -> MutationResult {
+        let operation = "favoriteAdd"
+        if Task.isCancelled {
+            return try makeMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "file-station.favorite.add.cancelled-before-submission"
+            )
+        }
+
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard path.hasPrefix("/"),
+              path.count > 1,
+              !normalizedName.isEmpty else {
+            return try makeMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                diagnosticTag: "file-station.favorite.add.invalid-input"
+            )
+        }
+        guard let capability = capabilities[DsmAPIName.fileStationFavorite],
+              let version = capability.selectedVersion else {
+            return try makeMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                diagnosticTag: "file-station.favorite.add.unsupported"
+            )
+        }
+
+        do {
+            try await client.callVoid(
+                path: capability.path,
+                api: capability.name,
+                version: version,
+                method: "add",
+                requestFormat: capability.requestFormat,
+                parameters: [
+                    "path": .string(path),
+                    "name": .string(normalizedName),
+                ],
+                credential: credential
+            )
+        } catch let error as DsmNetworkError {
+            return try mutationResultForFavoriteSubmissionError(
+                error,
+                operation: operation
+            )
+        } catch {
+            return try makeMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                diagnosticTag: "file-station.favorite.add.submission-unknown"
+            )
+        }
+
+        if Task.isCancelled {
+            return try makeMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                diagnosticTag: "file-station.favorite.add.cancelled-after-submission"
+            )
+        }
+
+        do {
+            let favorites = try await listFavorites()
+            guard favorites.contains(where: { $0.path == path }) else {
+                return try makeMutationResult(
+                    status: .confirmedFailure,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: false,
+                    succeeded: 0,
+                    failed: 1,
+                    unknown: 0,
+                    errorCategory: .server,
+                    diagnosticTag: "file-station.favorite.add.readback-mismatch"
+                )
+            }
+            return try makeMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 1,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "file-station.favorite.add.confirmed"
+            )
+        } catch let error as DsmNetworkError {
+            return try mutationResultForFavoriteReadbackError(
+                DsmErrorMapper.map(error),
+                operation: operation
+            )
+        } catch let error as AppError {
+            return try mutationResultForFavoriteReadbackError(
+                error,
+                operation: operation
+            )
+        } catch {
+            return try makeMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                diagnosticTag: "file-station.favorite.add.readback-unknown"
+            )
+        }
+    }
+
     public func removeFavorite(path: String) async throws {
         let capability = try requireCapability(DsmAPIName.fileStationFavorite)
         try await client.callVoid(
@@ -1701,6 +2018,360 @@ public actor DsmFileRepository: FileRepository {
             parameters: ["path": .string(path)],
             credential: credential
         )
+    }
+
+    private func mutationResultForFavoriteSubmissionError(
+        _ error: DsmNetworkError,
+        operation: String
+    ) throws -> MutationResult {
+        let mapped = DsmErrorMapper.map(error)
+        switch error {
+        case .invalidRequest:
+            return try makeMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                diagnosticTag: "file-station.favorite.add.invalid-request"
+            )
+        case .api, .httpStatus:
+            let status: MutationResultStatus = switch mapped.category {
+            case .permissionDenied, .authenticationRequired:
+                .permissionDenied
+            case .apiUnavailable, .versionUnsupported:
+                .unsupported
+            default:
+                .confirmedFailure
+            }
+            return try makeMutationResult(
+                status: status,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: mutationErrorCategory(for: mapped.category),
+                diagnosticTag: "file-station.favorite.add.rejected"
+            )
+        case .cancelled:
+            return try makeMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                diagnosticTag: "file-station.favorite.add.cancelled-after-submission"
+            )
+        case .transport, .responseTooLarge, .invalidResponse:
+            return try makeMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: mutationErrorCategory(for: mapped.category),
+                diagnosticTag: "file-station.favorite.add.submitted-unverified"
+            )
+        }
+    }
+
+    private func mutationResultForFavoriteReadbackError(
+        _ error: AppError,
+        operation: String
+    ) throws -> MutationResult {
+        let status: MutationResultStatus = error.category == .cancelled
+            ? .cancellationRequestedAfterSubmission
+            : .submittedButUnverified
+        return try makeMutationResult(
+            status: status,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: 1,
+            errorCategory: mutationErrorCategory(for: error.category),
+            diagnosticTag: "file-station.favorite.add.readback-unverified"
+        )
+    }
+
+    private func mutationResultForDeleteSubmissionError(
+        _ error: DsmNetworkError,
+        operation: String,
+        itemCount: Int
+    ) throws -> MutationResult {
+        let mapped = DsmErrorMapper.map(error)
+        switch error {
+        case .invalidRequest:
+            return try makeMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: itemCount,
+                unknown: 0,
+                errorCategory: .validation,
+                diagnosticTag: "file-station.delete.invalid-request"
+            )
+        case .api:
+            let status: MutationResultStatus = switch mapped.category {
+            case .permissionDenied, .authenticationRequired:
+                .permissionDenied
+            case .apiUnavailable, .versionUnsupported:
+                .unsupported
+            default:
+                .confirmedFailure
+            }
+            return try makeMutationResult(
+                status: status,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: itemCount,
+                unknown: 0,
+                errorCategory: mutationErrorCategory(for: mapped.category),
+                diagnosticTag: "file-station.delete.rejected"
+            )
+        case .httpStatus(let code, _):
+            if 400..<500 ~= code {
+                let status: MutationResultStatus =
+                    mapped.category == .permissionDenied
+                    || mapped.category == .authenticationRequired
+                    ? .permissionDenied
+                    : .confirmedFailure
+                return try makeMutationResult(
+                    status: status,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: false,
+                    succeeded: 0,
+                    failed: itemCount,
+                    unknown: 0,
+                    errorCategory: mutationErrorCategory(for: mapped.category),
+                    diagnosticTag: "file-station.delete.http-rejected"
+                )
+            }
+            return try makeMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: itemCount,
+                errorCategory: mutationErrorCategory(for: mapped.category),
+                diagnosticTag: "file-station.delete.http-unverified"
+            )
+        case .cancelled:
+            return try makeMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: itemCount,
+                diagnosticTag: "file-station.delete.cancelled-during-submission"
+            )
+        case .transport, .responseTooLarge, .invalidResponse:
+            return try makeMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: itemCount,
+                errorCategory: mutationErrorCategory(for: mapped.category),
+                diagnosticTag: "file-station.delete.submitted-unverified"
+            )
+        }
+    }
+
+    private func verifyDeletedPaths(
+        _ paths: [String],
+        operation: String
+    ) async throws -> MutationResult {
+        var succeeded = 0
+        var failed = 0
+        var unknown = 0
+
+        for (index, path) in paths.enumerated() {
+            if Task.isCancelled {
+                unknown += paths.count - index
+                return try makeMutationResult(
+                    status: .cancellationRequestedAfterSubmission,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: succeeded,
+                    failed: failed,
+                    unknown: unknown,
+                    diagnosticTag: "file-station.delete.cancelled-during-readback"
+                )
+            }
+            do {
+                let items = try await getInfo(paths: [path])
+                if items.contains(where: { $0.path == path }) {
+                    failed += 1
+                } else {
+                    succeeded += 1
+                }
+            } catch let error as AppError {
+                if error.category == .notFound {
+                    succeeded += 1
+                } else if error.category == .cancelled || Task.isCancelled {
+                    unknown += paths.count - index
+                    return try makeMutationResult(
+                        status: .cancellationRequestedAfterSubmission,
+                        operation: operation,
+                        submitted: true,
+                        requiresRefresh: true,
+                        succeeded: succeeded,
+                        failed: failed,
+                        unknown: unknown,
+                        errorCategory: mutationErrorCategory(for: error.category),
+                        diagnosticTag: "file-station.delete.cancelled-during-readback"
+                    )
+                } else {
+                    unknown += 1
+                }
+            } catch is CancellationError {
+                unknown += paths.count - index
+                return try makeMutationResult(
+                    status: .cancellationRequestedAfterSubmission,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: succeeded,
+                    failed: failed,
+                    unknown: unknown,
+                    diagnosticTag: "file-station.delete.cancelled-during-readback"
+                )
+            } catch {
+                unknown += 1
+            }
+        }
+
+        if unknown > 0 {
+            return try makeMutationResult(
+                status: succeeded > 0 ? .partialSuccess : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown,
+                errorCategory: .unknown,
+                diagnosticTag: "file-station.delete.readback-unverified"
+            )
+        }
+        if failed > 0 {
+            return try makeMutationResult(
+                status: succeeded > 0 ? .partialSuccess : .confirmedFailure,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: succeeded > 0,
+                succeeded: succeeded,
+                failed: failed,
+                unknown: 0,
+                errorCategory: .server,
+                diagnosticTag: succeeded > 0
+                    ? "file-station.delete.partial"
+                    : "file-station.delete.readback-mismatch"
+            )
+        }
+        return try makeMutationResult(
+            status: .confirmedSuccess,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: false,
+            succeeded: succeeded,
+            failed: 0,
+            unknown: 0,
+            diagnosticTag: "file-station.delete.confirmed"
+        )
+    }
+
+    private static func isValidDeletionPath(_ path: String) -> Bool {
+        guard path.hasPrefix("/"), path.count > 1 else {
+            return false
+        }
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        return components.dropFirst().allSatisfy {
+            !$0.isEmpty && $0 != "." && $0 != ".."
+        }
+    }
+
+    private static func deletionPathsOverlap(
+        _ lhs: String,
+        _ rhs: String
+    ) -> Bool {
+        lhs == rhs
+            || lhs.hasPrefix(rhs + "/")
+            || rhs.hasPrefix(lhs + "/")
+    }
+
+    private func makeMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func mutationErrorCategory(
+        for category: AppErrorCategory
+    ) -> MutationErrorCategory {
+        switch category {
+        case .authenticationRequired, .otpRequired:
+            .authentication
+        case .permissionDenied:
+            .permission
+        case .conflict:
+            .conflict
+        case .networkUnavailable, .timeout, .tlsUntrusted, .tlsCertificateChanged:
+            .network
+        case .apiUnavailable, .versionUnsupported:
+            .unsupported
+        case .invalidResponse, .serverBusy, .remoteStorageFull:
+            .server
+        case .notFound,
+             .localStorageFull,
+             .partialFailure,
+             .cancelled,
+             .unknown:
+            .unknown
+        }
     }
 
     public func listShareLinks() async throws -> [FileShareLink] {

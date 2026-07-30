@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "hardware.set-ups.synthetic-settings",
+  "module": "hardware",
+  "operation": "setUps",
+  "api": {
+    "name": "SYNO.Core.ExternalDevice.UPS",
+    "method": "set",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "enable",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "mode",
+      "valueType": "string",
+      "encodedValue": "SLAVE"
+    },
+    {
+      "name": "delay_time",
+      "valueType": "integer",
+      "encodedValue": "120"
+    },
+    {
+      "name": "shutdown_device",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "net_server_ip",
+      "valueType": "string",
+      "encodedValue": "<synthetic-ups-server>"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

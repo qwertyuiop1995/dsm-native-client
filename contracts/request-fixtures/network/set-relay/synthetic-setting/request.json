@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "network.set-relay.synthetic-setting",
+  "module": "network",
+  "operation": "setRelay",
+  "api": {
+    "name": "SYNO.Core.QuickConnect",
+    "method": "set_misc_config",
+    "preferredVersion": 3,
+    "resolvedVersion": 3,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "relay_enabled",
+      "valueType": "boolean",
+      "encodedValue": "false"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

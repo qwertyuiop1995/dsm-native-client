@@ -782,6 +782,26 @@ public struct NasProxySettings: Hashable, Sendable {
         self.host = host
         self.port = port
     }
+
+    public var normalizedHost: String {
+        host.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var isValidForSaving: Bool {
+        guard isEnabled else { return true }
+        return Self.isValidHost(normalizedHost)
+            && port.map { (1...65_535).contains($0) } == true
+    }
+
+    /// 代理地址只接受主机名或 IP，不接受协议、路径、用户信息或空白。
+    public static func isValidHost(_ value: String) -> Bool {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let forbidden = CharacterSet(charactersIn: "/?#@")
+            .union(.whitespacesAndNewlines)
+        return !normalized.isEmpty
+            && normalized.rangeOfCharacter(from: forbidden) == nil
+            && !normalized.contains("://")
+    }
 }
 
 public struct NasEthernetInterface: Identifiable, Hashable, Sendable {
@@ -1133,6 +1153,11 @@ public protocol NasSettingsRepository: Sendable {
     func loadDiskTestStatus(diskID: String) async throws -> NasDiskTestStatus
     func startDiskTest(diskID: String, type: NasDiskTestType) async throws -> NasDiskTestStatus
     func stopDiskTest(diskID: String) async throws -> NasDiskTestStatus
+    func startDiskTestResult(
+        diskID: String,
+        type: NasDiskTestType
+    ) async throws -> MutationResult
+    func stopDiskTestResult(diskID: String) async throws -> MutationResult
     func loadPackages() async throws -> [NasPackage]
     func loadScheduledTasks() async throws -> [NasScheduledTask]
     func loadScheduledTaskDraft(id: Int?, realOwner: String?) async throws -> NasScheduledTaskDraft
@@ -1148,25 +1173,48 @@ public protocol NasSettingsRepository: Sendable {
     func loadAccountsAndGroups() async throws -> NasAccountDirectory
     func saveAccount(_ draft: NasAccountDraft) async throws
     func deleteAccount(name: String) async throws
+    func deleteAccountResult(name: String) async throws -> MutationResult
     func saveGroup(_ draft: NasGroupDraft) async throws
     func deleteGroup(name: String) async throws
+    func deleteGroupResult(name: String) async throws -> MutationResult
     func loadLogs(offset: Int, limit: Int) async throws -> NasLogPage
     func loadConnections(offset: Int, limit: Int) async throws -> NasConnectionPage
     func disconnectConnection(_ connection: NasConnection) async throws
     func loadFileServiceSettings() async throws -> NasFileServiceSettings
     func saveFileServiceSettings(_ settings: NasFileServiceSettings) async throws
+    func saveFileServiceSettingsResult(
+        _ settings: NasFileServiceSettings
+    ) async throws -> MutationResult
     func loadTerminalSettings() async throws -> NasTerminalSettings
     func saveTerminalSettings(_ settings: NasTerminalSettings) async throws
+    func saveTerminalSettingsResult(
+        _ settings: NasTerminalSettings
+    ) async throws -> MutationResult
     func loadProxySettings() async throws -> NasProxySettings
     func saveProxySettings(_ settings: NasProxySettings) async throws
+    func saveProxySettingsResult(
+        _ settings: NasProxySettings
+    ) async throws -> MutationResult
     func loadEthernetInterfaces() async throws -> [NasEthernetInterface]
     func saveEthernetInterface(_ interface: NasEthernetInterface) async throws
+    func saveEthernetInterfaceResult(
+        _ interface: NasEthernetInterface
+    ) async throws -> MutationResult
     func loadHardwareSettings() async throws -> NasHardwareSettings
     func saveHardwareSettings(_ settings: NasHardwareSettings) async throws
+    func saveHardwareSettingsResult(
+        _ settings: NasHardwareSettings
+    ) async throws -> MutationResult
     func loadRemoteAccessSettings() async throws -> NasRemoteAccessSettings
     func saveRemoteAccessSettings(_ settings: NasRemoteAccessSettings) async throws
+    func saveRemoteAccessSettingsResult(
+        _ settings: NasRemoteAccessSettings
+    ) async throws -> MutationResult
     func loadSecuritySettings() async throws -> NasSecuritySettings
     func saveSecuritySettings(_ settings: NasSecuritySettings) async throws
+    func saveSecuritySettingsResult(
+        _ settings: NasSecuritySettings
+    ) async throws -> MutationResult
     func loadRegionSettings() async throws -> NasRegionSettings
     func saveRegionSettings(_ settings: NasRegionSettings) async throws
     func loadDDNS() async throws -> NasDDNSDirectory
@@ -1174,6 +1222,7 @@ public protocol NasSettingsRepository: Sendable {
     func deleteDDNS(providerID: String) async throws
     func refreshDDNS() async throws
     func controlPackage(id: String, action: NasPackageAction) async throws
+    func uninstallPackageResult(id: String) async throws -> MutationResult
     func performPowerAction(_ action: NasPowerAction) async throws
     func checkSystemUpdate() async throws -> NasSystemUpdateInfo
 }
@@ -1203,8 +1252,47 @@ public extension NasSettingsRepository {
             safeUserMessage: L10n.string("shared.0863df49f654262b")
         )
     }
+    func startDiskTestResult(
+        diskID: String,
+        type: NasDiskTestType
+    ) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "diskTestStart",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "storage.disk-test.start.unsupported",
+            diagnosticTag: "storage.disk-test.start.unsupported"
+        )
+    }
+    func stopDiskTestResult(diskID: String) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "diskTestStop",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "storage.disk-test.stop.unsupported",
+            diagnosticTag: "storage.disk-test.stop.unsupported"
+        )
+    }
     func controlPackage(id: String, action: NasPackageAction) async throws {
         throw unsupportedManagementOperation()
+    }
+    func uninstallPackageResult(id: String) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "packageUninstall",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "package.uninstall.unsupported",
+            diagnosticTag: "package.uninstall.unsupported"
+        )
     }
     func loadScheduledTaskDraft(id: Int?, realOwner: String?) async throws -> NasScheduledTaskDraft {
         throw AppError(
@@ -1228,11 +1316,35 @@ public extension NasSettingsRepository {
     func deleteAccount(name: String) async throws {
         throw unsupportedManagementOperation()
     }
+    func deleteAccountResult(name: String) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "accountDelete",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "account.delete.unsupported",
+            diagnosticTag: "account.delete.unsupported"
+        )
+    }
     func saveGroup(_ draft: NasGroupDraft) async throws {
         throw unsupportedManagementOperation()
     }
     func deleteGroup(name: String) async throws {
         throw unsupportedManagementOperation()
+    }
+    func deleteGroupResult(name: String) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "groupDelete",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "group.delete.unsupported",
+            diagnosticTag: "group.delete.unsupported"
+        )
     }
     func saveScheduledTask(_ draft: NasScheduledTaskDraft) async throws {
         throw unsupportedManagementOperation()
@@ -1255,11 +1367,39 @@ public extension NasSettingsRepository {
     func saveFileServiceSettings(_ settings: NasFileServiceSettings) async throws {
         throw unsupportedManagementOperation()
     }
+    func saveFileServiceSettingsResult(
+        _ settings: NasFileServiceSettings
+    ) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "fileServiceSettingsUpdate",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "file-services.settings.unsupported",
+            diagnosticTag: "file-services.settings.unsupported"
+        )
+    }
     func loadTerminalSettings() async throws -> NasTerminalSettings {
         throw unsupportedManagementOperation()
     }
     func saveTerminalSettings(_ settings: NasTerminalSettings) async throws {
         throw unsupportedManagementOperation()
+    }
+    func saveTerminalSettingsResult(
+        _ settings: NasTerminalSettings
+    ) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "terminalSettingsUpdate",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "terminal.settings.unsupported",
+            diagnosticTag: "terminal.settings.unsupported"
+        )
     }
     func loadProxySettings() async throws -> NasProxySettings {
         throw unsupportedManagementOperation()
@@ -1267,11 +1407,39 @@ public extension NasSettingsRepository {
     func saveProxySettings(_ settings: NasProxySettings) async throws {
         throw unsupportedManagementOperation()
     }
+    func saveProxySettingsResult(
+        _ settings: NasProxySettings
+    ) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "proxySettingsUpdate",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "proxy.settings.unsupported",
+            diagnosticTag: "proxy.settings.unsupported"
+        )
+    }
     func loadEthernetInterfaces() async throws -> [NasEthernetInterface] {
         throw unsupportedManagementOperation()
     }
     func saveEthernetInterface(_ interface: NasEthernetInterface) async throws {
         throw unsupportedManagementOperation()
+    }
+    func saveEthernetInterfaceResult(
+        _ interface: NasEthernetInterface
+    ) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "ethernetUpdate",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "network.ethernet.unsupported",
+            diagnosticTag: "network.ethernet.unsupported"
+        )
     }
     func loadHardwareSettings() async throws -> NasHardwareSettings {
         throw unsupportedManagementOperation()
@@ -1279,17 +1447,59 @@ public extension NasSettingsRepository {
     func saveHardwareSettings(_ settings: NasHardwareSettings) async throws {
         throw unsupportedManagementOperation()
     }
+    func saveHardwareSettingsResult(
+        _ settings: NasHardwareSettings
+    ) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "hardwareSettingsUpdate",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "hardware.settings.unsupported",
+            diagnosticTag: "hardware.settings.unsupported"
+        )
+    }
     func loadRemoteAccessSettings() async throws -> NasRemoteAccessSettings {
         throw unsupportedManagementOperation()
     }
     func saveRemoteAccessSettings(_ settings: NasRemoteAccessSettings) async throws {
         throw unsupportedManagementOperation()
     }
+    func saveRemoteAccessSettingsResult(
+        _ settings: NasRemoteAccessSettings
+    ) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "remoteAccessSettingsUpdate",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "remote-access.settings.unsupported",
+            diagnosticTag: "remote-access.settings.unsupported"
+        )
+    }
     func loadSecuritySettings() async throws -> NasSecuritySettings {
         throw unsupportedManagementOperation()
     }
     func saveSecuritySettings(_ settings: NasSecuritySettings) async throws {
         throw unsupportedManagementOperation()
+    }
+    func saveSecuritySettingsResult(
+        _ settings: NasSecuritySettings
+    ) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "securitySettingsUpdate",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "security.settings.unsupported",
+            diagnosticTag: "security.settings.unsupported"
+        )
     }
     func loadRegionSettings() async throws -> NasRegionSettings {
         throw unsupportedManagementOperation()

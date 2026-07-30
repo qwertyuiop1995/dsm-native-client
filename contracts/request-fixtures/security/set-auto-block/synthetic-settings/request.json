@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "security.set-auto-block.synthetic-settings",
+  "module": "security",
+  "operation": "setAutoBlock",
+  "api": {
+    "name": "SYNO.Core.Security.AutoBlock",
+    "method": "set",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "enable",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "attempts",
+      "valueType": "integer",
+      "encodedValue": "5"
+    },
+    {
+      "name": "within_mins",
+      "valueType": "integer",
+      "encodedValue": "10"
+    },
+    {
+      "name": "expire_day",
+      "valueType": "integer",
+      "encodedValue": "7"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

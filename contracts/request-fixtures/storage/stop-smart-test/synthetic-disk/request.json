@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "storage.stop-smart-test.synthetic-disk",
+  "module": "storage",
+  "operation": "stopSmartTest",
+  "api": {
+    "name": "SYNO.Core.Storage.Disk",
+    "method": "do_smart_test",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "device",
+      "valueType": "string",
+      "encodedValue": "<synthetic-device>"
+    },
+    {
+      "name": "type",
+      "valueType": "string",
+      "encodedValue": "stop"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "standardWrite",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

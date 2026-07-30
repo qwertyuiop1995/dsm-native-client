@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "file-services.set-web-discovery.synthetic-settings",
+  "module": "file-services",
+  "operation": "setWebDiscovery",
+  "api": {
+    "name": "SYNO.Core.Web.DSM",
+    "method": "set",
+    "preferredVersion": 2,
+    "resolvedVersion": 2,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "enable_ssdp",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "enable_avahi",
+      "valueType": "boolean",
+      "encodedValue": "false"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

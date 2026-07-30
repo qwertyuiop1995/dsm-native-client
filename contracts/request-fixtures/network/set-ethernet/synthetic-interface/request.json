@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "network.set-ethernet.synthetic-interface",
+  "module": "network",
+  "operation": "setEthernet",
+  "api": {
+    "name": "SYNO.Core.Network.Ethernet",
+    "method": "set",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "configs",
+      "valueType": "objectArray",
+      "encodedValue": "[{\"enable_vlan\":false,\"ifname\":\"eth0\",\"is_default_gateway\":false,\"mtu\":1500,\"use_dhcp\":true}]"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

@@ -17,6 +17,7 @@
 ## 专项开发计划
 
 - [桌面端 NAS 云盘映射与按需缓存开发计划](development/NATIVE_DSM_DESKTOP_CLOUD_DRIVE_DEVELOPMENT_PLAN_ZH.md)
+- [请求契约与写操作结果模型实施计划](development/REQUEST_CONTRACT_AND_MUTATION_RESULT_PLAN_ZH.md)
 - [照片管理开发计划](development/NATIVE_DSM_PHOTOS_DEVELOPMENT_PLAN_ZH.md)
 - [Synology Chat 原生聊天功能开发计划](development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)
 - [DSM 套件管理三端实现计划](development/NATIVE_DSM_SERVICE_MANAGEMENT_PLAN_ZH.md)
@@ -35,6 +36,7 @@
 - [社区兼容矩阵](compatibility/COMMUNITY_COMPATIBILITY_MATRIX_ZH.md)
 - [macOS 桌面云盘发布与升级验收](compatibility/DESKTOP_CLOUD_DRIVE_RELEASE_ACCEPTANCE_ZH.md)
 - [Community Compatibility Matrix](compatibility/COMMUNITY_COMPATIBILITY_MATRIX_EN.md)
+- [功能实现与验证等级](quality/VERIFICATION_LEVELS_ZH.md)
 - [安全与隐私基线](security/SECURITY_BASELINE.md)
 
 ## 历史归档

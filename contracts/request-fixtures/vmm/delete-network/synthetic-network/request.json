@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "vmm.delete-network.synthetic-network",
+  "module": "vmm",
+  "operation": "deleteNetwork",
+  "api": {
+    "name": "SYNO.Virtualization.Network",
+    "method": "delete",
+    "preferredVersion": 2,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "json"
+  },
+  "parameters": [
+    {
+      "name": "network_id",
+      "valueType": "string",
+      "encodedValue": "\"<synthetic-virtual-machine-network>\""
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "destructive",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

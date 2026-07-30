@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "file-services.set-smb.synthetic-settings",
+  "module": "file-services",
+  "operation": "setSMB",
+  "api": {
+    "name": "SYNO.Core.FileServ.SMB",
+    "method": "set",
+    "preferredVersion": 3,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "enable_samba",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

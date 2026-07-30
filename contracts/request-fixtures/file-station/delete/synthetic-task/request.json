@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "file-station.delete.synthetic-task",
+  "module": "file-station",
+  "operation": "delete",
+  "api": {
+    "name": "SYNO.FileStation.Delete",
+    "method": "start",
+    "preferredVersion": 2,
+    "resolvedVersion": 2,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "accurate_progress",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "path",
+      "valueType": "stringArray",
+      "encodedValue": "[\"<synthetic-path>\"]"
+    },
+    {
+      "name": "recursive",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "destructive",
+    "readbackPolicy": "taskPoll"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

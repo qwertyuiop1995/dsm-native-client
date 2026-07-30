@@ -10,6 +10,7 @@
 		04BF49113047E6A5BFDD0565 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = CB5D2FCD484E6C915A3AF4BB /* Localizable.strings */; };
 		0BF65A78DC3488741ACAA862 /* DsmNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = 6A578FB6D5B34A59438162B6 /* DsmNetwork */; };
 		15984B33D2FC6DC271096E4A /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D43383FD609AFA6A0605CEA /* WorkspaceView.swift */; };
+		1AEE3A43BA84D08A5688E6D7 /* DesktopDriveMappingTransactionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 749F58346E89043A97184CFB /* DesktopDriveMappingTransactionCoordinator.swift */; };
 		1E07976CF65B26FF6DCC92F7 /* AppContentLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAA28F9CA875E65C60C3B1FE /* AppContentLayout.swift */; };
 		3679216DDA49A20D83B8411A /* NasAdministrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F276AF6EC0C343DF594E76B /* NasAdministrationView.swift */; };
 		3F7B3902FFF181AEC9D25BEE /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 55636F64951E9DD6841A1586 /* InfoPlist.strings */; };
@@ -86,6 +87,7 @@
 		6244065C1FCDAD42A9B769D5 /* FileProviderExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderExtension.swift; sourceTree = "<group>"; };
 		6499C1A22746CC05B3929D4F /* ProviderEnumerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderEnumerator.swift; sourceTree = "<group>"; };
 		73A190EAB72D1587728A072E /* LanStash.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LanStash.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		749F58346E89043A97184CFB /* DesktopDriveMappingTransactionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopDriveMappingTransactionCoordinator.swift; sourceTree = "<group>"; };
 		852694B5E54505BB153EF98A /* FilePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePreviewView.swift; sourceTree = "<group>"; };
 		867D32EDC1609777EE056B6B /* ProviderItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderItem.swift; sourceTree = "<group>"; };
 		8BC9C9961187B8013EEE5911 /* PhotoMetadataExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoMetadataExtractor.swift; sourceTree = "<group>"; };
@@ -168,6 +170,7 @@
 				FAD292E2717BB0B33B6B7982 /* DesktopDriveDiagnosticExportSheet.swift */,
 				1D050EA6A48E7A390E1A89BE /* DesktopDriveDiagnostics.swift */,
 				D983F7627104AB0720B16971 /* DesktopDriveDomainController.swift */,
+				749F58346E89043A97184CFB /* DesktopDriveMappingTransactionCoordinator.swift */,
 				46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */,
 				852694B5E54505BB153EF98A /* FilePreviewView.swift */,
 				DE9DB7D94AFC947DE39DF8D1 /* LoginView.swift */,
@@ -335,6 +338,7 @@
 				FC17F5E31EB69CED526BB24C /* DesktopDriveDiagnosticExportSheet.swift in Sources */,
 				D21ED85020993A9A901C5539 /* DesktopDriveDiagnostics.swift in Sources */,
 				6C6EE7AF31CE7819C5075FC2 /* DesktopDriveDomainController.swift in Sources */,
+				1AEE3A43BA84D08A5688E6D7 /* DesktopDriveMappingTransactionCoordinator.swift in Sources */,
 				3FCADE45FE1B6CE377E360BA /* DsmMacApp.swift in Sources */,
 				C3AFE337248691D6883C0CE7 /* FilePreviewView.swift in Sources */,
 				46CE97C3D80547D7061224F2 /* LoginView.swift in Sources */,

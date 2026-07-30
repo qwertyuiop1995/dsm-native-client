@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/mutation-result.schema.json",
+  "title": "MutationResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "operation",
+    "submitted",
+    "requiresRefresh",
+    "counts"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "status": {
+      "enum": [
+        "confirmedSuccess",
+        "confirmedFailure",
+        "submittedButUnverified",
+        "partialSuccess",
+        "cancelledBeforeSubmission",
+        "cancellationRequestedAfterSubmission",
+        "permissionDenied",
+        "unsupported"
+      ]
+    },
+    "operation": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)*$"
+    },
+    "submitted": {
+      "type": "boolean"
+    },
+    "requiresRefresh": {
+      "type": "boolean"
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["succeeded", "failed", "unknown"],
+      "properties": {
+        "succeeded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknown": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "errorCategory": {
+      "enum": [
+        "validation",
+        "authentication",
+        "permission",
+        "conflict",
+        "network",
+        "server",
+        "unsupported",
+        "unknown"
+      ]
+    },
+    "localizationKey": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+    },
+    "diagnosticTag": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "confirmedSuccess"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "submitted": {
+            "const": true
+          },
+          "counts": {
+            "properties": {
+              "failed": {
+                "const": 0
+              },
+              "unknown": {
+                "const": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "cancelledBeforeSubmission"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "submitted": {
+            "const": false
+          },
+          "requiresRefresh": {
+            "const": false
+          },
+          "counts": {
+            "properties": {
+              "succeeded": {
+                "const": 0
+              },
+              "failed": {
+                "const": 0
+              },
+              "unknown": {
+                "const": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "submittedButUnverified",
+              "cancellationRequestedAfterSubmission"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "submitted": {
+            "const": true
+          },
+          "requiresRefresh": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "partialSuccess"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "submitted": {
+            "const": true
+          },
+          "counts": {
+            "properties": {
+              "succeeded": {
+                "minimum": 1
+              }
+            },
+            "anyOf": [
+              {
+                "properties": {
+                  "failed": {
+                    "minimum": 1
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "unknown": {
+                    "minimum": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

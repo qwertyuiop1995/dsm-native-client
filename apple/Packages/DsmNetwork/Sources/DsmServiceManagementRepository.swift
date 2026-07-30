@@ -157,6 +157,9 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
     private let baseURL: URL
     private let client: DsmAPIClient
     private let transport: any DsmHTTPTransport
+    private var activeContainerDeletionIDs: Set<String> = []
+    private var activeVirtualMachineDeletionIDs: Set<String> = []
+    private var activeDeletionIDsByOperation: [String: Set<String>] = [:]
 
     public init(
         profile: NasProfile,
@@ -430,6 +433,35 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
     }
 
+    /// 下载任务删除通过任务列表逐项确认；删除任务和数据使用同一结果语义。
+    public func deleteDownloadTasksResult(
+        ids: [String],
+        removeData: Bool
+    ) async throws -> MutationResult {
+        let api = preferredDownloadTaskAPI()
+        return try await performServiceDeletion(
+            ids: ids,
+            context: ServiceDeletionContext(
+                operation: "downloadTaskDelete",
+                localizationPrefix: "download-task.delete"
+            ),
+            isSupported: capabilities[api]?.selectedVersion != nil,
+            loadCurrentIDs: {
+                Set(try await self.loadDownloadStation().tasks.map(\.id))
+            },
+            submit: { targets in
+                try await self.callVoid(
+                    api,
+                    method: "delete",
+                    parameters: [
+                        "id": .string(targets.joined(separator: ",")),
+                        "force_complete": .boolean(removeData)
+                    ]
+                )
+            }
+        )
+    }
+
     public func loadContainerManager() async throws -> ContainerManagerSnapshot {
         async let containersValue = call(
             DsmAPIName.dockerContainer,
@@ -490,6 +522,127 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         let remaining = try await loadContainerManager().containers.map(\.id)
         guard ids.allSatisfy({ !remaining.contains($0) }) else {
             throw verificationError(L10n.string("shared.830e41a22a4f104d"))
+        }
+    }
+
+    /// 容器删除使用内部接口；提交后通过容器列表逐项确认，未知结果不得自动重放。
+    public func deleteContainersResult(ids: [String]) async throws -> MutationResult {
+        let context = ServiceDeletionContext(
+            operation: "containerDelete",
+            localizationPrefix: "container.delete"
+        )
+        if Task.isCancelled {
+            return try deletionCancellationBeforeSubmission(context: context)
+        }
+
+        let targets: [String]
+        do {
+            targets = try validatedIDs(ids)
+        } catch let error as AppError {
+            return try deletionPreflightResult(
+                error,
+                targetCount: max(ids.count, 1),
+                context: context
+            )
+        } catch {
+            return try deletionUnexpectedPreflightResult(
+                targetCount: max(ids.count, 1),
+                context: context
+            )
+        }
+        guard capabilities[DsmAPIName.dockerContainer]?.selectedVersion != nil else {
+            return try deletionUnsupportedResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+
+        let targetSet = Set(targets)
+        guard activeContainerDeletionIDs.isDisjoint(with: targetSet) else {
+            return try deletionDuplicateResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+        activeContainerDeletionIDs.formUnion(targetSet)
+        defer { activeContainerDeletionIDs.subtract(targetSet) }
+
+        do {
+            let currentIDs = Set(try await loadContainerManager().containers.map(\.id))
+            guard targetSet.isSubset(of: currentIDs) else {
+                return try deletionMissingTargetResult(
+                    targetCount: targets.count,
+                    context: context
+                )
+            }
+        } catch let error as AppError {
+            return try deletionPreflightResult(
+                error,
+                targetCount: targets.count,
+                context: context
+            )
+        } catch {
+            return try deletionUnexpectedPreflightResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+
+        if Task.isCancelled {
+            return try deletionCancellationBeforeSubmission(context: context)
+        }
+
+        for id in targets {
+            if Task.isCancelled {
+                return try deletionCancellationAfterSubmission(
+                    targetCount: targets.count,
+                    context: context
+                )
+            }
+            do {
+                try await callVoid(
+                    DsmAPIName.dockerContainer,
+                    method: "delete",
+                    parameters: ["id": .string(id)]
+                )
+            } catch let error as AppError {
+                return try deletionSubmissionResult(
+                    error,
+                    targetCount: targets.count,
+                    context: context
+                )
+            } catch {
+                return try deletionUnexpectedSubmissionResult(
+                    targetCount: targets.count,
+                    context: context
+                )
+            }
+        }
+
+        if Task.isCancelled {
+            return try deletionCancellationAfterSubmission(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+        do {
+            let remaining = Set(try await loadContainerManager().containers.map(\.id))
+            return try deletionReadbackResult(
+                targets: targetSet,
+                remaining: remaining,
+                context: context
+            )
+        } catch let error as AppError {
+            return try deletionReadbackFailureResult(
+                error,
+                targetCount: targets.count,
+                context: context
+            )
+        } catch {
+            return try deletionUnexpectedReadbackResult(
+                targetCount: targets.count,
+                context: context
+            )
         }
     }
 
@@ -554,6 +707,30 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
     }
 
+    /// 容器映像删除使用内部接口；提交后重新读取映像列表确认。
+    public func deleteContainerImagesResult(ids: [String]) async throws -> MutationResult {
+        try await performServiceDeletion(
+            ids: ids,
+            context: ServiceDeletionContext(
+                operation: "containerImageDelete",
+                localizationPrefix: "container-image.delete"
+            ),
+            isSupported: capabilities[DsmAPIName.dockerImage]?.selectedVersion != nil,
+            loadCurrentIDs: {
+                Set(try await self.loadContainerManager().images.map(\.id))
+            },
+            submit: { targets in
+                for id in targets {
+                    try await self.callVoid(
+                        DsmAPIName.dockerImage,
+                        method: "delete",
+                        parameters: ["id": .string(id)]
+                    )
+                }
+            }
+        )
+    }
+
     public func createContainerNetwork(name: String, driver: String) async throws {
         let name = try validatedName(name, message: L10n.string("shared.1750af3117ab4301"))
         let driver = try validatedName(driver, message: L10n.string("shared.a3a649e40dd55868"))
@@ -585,6 +762,30 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         guard ids.allSatisfy({ !remaining.contains($0) }) else {
             throw verificationError(L10n.string("shared.3f7da50cab7bd49a"))
         }
+    }
+
+    /// 容器网络删除使用内部接口；提交后重新读取网络列表确认。
+    public func deleteContainerNetworksResult(ids: [String]) async throws -> MutationResult {
+        try await performServiceDeletion(
+            ids: ids,
+            context: ServiceDeletionContext(
+                operation: "containerNetworkDelete",
+                localizationPrefix: "container-network.delete"
+            ),
+            isSupported: capabilities[DsmAPIName.dockerNetwork]?.selectedVersion != nil,
+            loadCurrentIDs: {
+                Set(try await self.loadContainerManager().networks.map(\.id))
+            },
+            submit: { targets in
+                for id in targets {
+                    try await self.callVoid(
+                        DsmAPIName.dockerNetwork,
+                        method: "remove",
+                        parameters: ["id": .string(id)]
+                    )
+                }
+            }
+        )
     }
 
     public func loadVirtualMachineManager() async throws -> VirtualMachineManagerSnapshot {
@@ -960,6 +1161,121 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
     }
 
+    /// 虚拟机删除优先使用公开 API；提交后通过虚拟机列表逐项确认，未知结果不得自动重放。
+    public func deleteVirtualMachinesResult(ids: [String]) async throws -> MutationResult {
+        let context = ServiceDeletionContext(
+            operation: "virtualMachineDelete",
+            localizationPrefix: "virtual-machine.delete"
+        )
+        if Task.isCancelled {
+            return try deletionCancellationBeforeSubmission(context: context)
+        }
+
+        let targets: [String]
+        do {
+            targets = try validatedIDs(ids)
+        } catch let error as AppError {
+            return try deletionPreflightResult(
+                error,
+                targetCount: max(ids.count, 1),
+                context: context
+            )
+        } catch {
+            return try deletionUnexpectedPreflightResult(
+                targetCount: max(ids.count, 1),
+                context: context
+            )
+        }
+        let api = capabilities[DsmAPIName.virtualizationAPIGuest]?.selectedVersion != nil
+            ? DsmAPIName.virtualizationAPIGuest
+            : DsmAPIName.virtualizationGuest
+        guard capabilities[api]?.selectedVersion != nil else {
+            return try deletionUnsupportedResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+
+        let targetSet = Set(targets)
+        guard activeVirtualMachineDeletionIDs.isDisjoint(with: targetSet) else {
+            return try deletionDuplicateResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+        activeVirtualMachineDeletionIDs.formUnion(targetSet)
+        defer { activeVirtualMachineDeletionIDs.subtract(targetSet) }
+
+        do {
+            let currentIDs = Set(try await loadVirtualMachineManager().machines.map(\.id))
+            guard targetSet.isSubset(of: currentIDs) else {
+                return try deletionMissingTargetResult(
+                    targetCount: targets.count,
+                    context: context
+                )
+            }
+        } catch let error as AppError {
+            return try deletionPreflightResult(
+                error,
+                targetCount: targets.count,
+                context: context
+            )
+        } catch {
+            return try deletionUnexpectedPreflightResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+
+        if Task.isCancelled {
+            return try deletionCancellationBeforeSubmission(context: context)
+        }
+        do {
+            try await callVoid(
+                api,
+                method: "delete",
+                parameters: ["guest_id": .string(targets.joined(separator: ","))]
+            )
+        } catch let error as AppError {
+            return try deletionSubmissionResult(
+                error,
+                targetCount: targets.count,
+                context: context
+            )
+        } catch {
+            return try deletionUnexpectedSubmissionResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+
+        if Task.isCancelled {
+            return try deletionCancellationAfterSubmission(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+        do {
+            let remaining = Set(try await loadVirtualMachineManager().machines.map(\.id))
+            return try deletionReadbackResult(
+                targets: targetSet,
+                remaining: remaining,
+                context: context
+            )
+        } catch let error as AppError {
+            return try deletionReadbackFailureResult(
+                error,
+                targetCount: targets.count,
+                context: context
+            )
+        } catch {
+            return try deletionUnexpectedReadbackResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+    }
+
     /// VMM 网页端网络修改使用的内部接口；公开 API 仅支持读取。
     public func updateVirtualMachineNetwork(
         id: String,
@@ -1017,6 +1333,30 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         }
     }
 
+    /// VMM 网络删除使用内部接口；提交后通过网络列表逐项确认。
+    public func deleteVirtualMachineNetworksResult(ids: [String]) async throws -> MutationResult {
+        try await performServiceDeletion(
+            ids: ids,
+            context: ServiceDeletionContext(
+                operation: "virtualMachineNetworkDelete",
+                localizationPrefix: "virtual-machine-network.delete"
+            ),
+            isSupported: capabilities[DsmAPIName.virtualizationNetwork]?.selectedVersion != nil,
+            loadCurrentIDs: {
+                Set(try await self.loadVirtualMachineManager().networks.map(\.id))
+            },
+            submit: { targets in
+                for id in targets {
+                    try await self.callVoid(
+                        DsmAPIName.virtualizationNetwork,
+                        method: "delete",
+                        parameters: ["network_id": .string(id)]
+                    )
+                }
+            }
+        )
+    }
+
     /// 映像删除优先使用公开 VMM API；内部分支只在公开能力缺失时启用。
     public func deleteVirtualMachineImages(ids: [String]) async throws {
         let ids = try validatedIDs(ids)
@@ -1051,6 +1391,570 @@ public actor DsmServiceManagementRepository: ServiceManagementRepository {
         let remaining = Set(try await loadVirtualMachineManager().images.map(\.id))
         guard ids.allSatisfy({ !remaining.contains($0) }) else {
             throw verificationError(L10n.string("shared.298bd4a069695e72"))
+        }
+    }
+
+    /// VMM 映像删除优先使用公开 API；任务提交后仍以映像列表为最终依据。
+    public func deleteVirtualMachineImagesResult(ids: [String]) async throws -> MutationResult {
+        let api = capabilities[DsmAPIName.virtualizationAPIGuestImage]?.selectedVersion != nil
+            ? DsmAPIName.virtualizationAPIGuestImage
+            : DsmAPIName.virtualizationGuestImage
+        return try await performServiceDeletion(
+            ids: ids,
+            context: ServiceDeletionContext(
+                operation: "virtualMachineImageDelete",
+                localizationPrefix: "virtual-machine-image.delete"
+            ),
+            isSupported: capabilities[api]?.selectedVersion != nil,
+            loadCurrentIDs: {
+                Set(try await self.loadVirtualMachineManager().images.map(\.id))
+            },
+            submit: { targets in
+                for id in targets {
+                    if api == DsmAPIName.virtualizationAPIGuestImage {
+                        let result = try await self.call(
+                            api,
+                            method: "delete",
+                            parameters: ["image_id": .string(id)]
+                        )
+                        if let taskID = result.firstString(["task_id", "task", "id"]) {
+                            try await self.waitForVirtualizationTask(id: taskID)
+                        }
+                    } else {
+                        try await self.callVoid(
+                            api,
+                            method: "delete",
+                            parameters: ["image_id": .string(id)]
+                        )
+                    }
+                }
+            }
+        )
+    }
+
+    private struct ServiceDeletionContext {
+        let operation: String
+        let localizationPrefix: String
+    }
+
+    private func performServiceDeletion(
+        ids: [String],
+        context: ServiceDeletionContext,
+        isSupported: Bool,
+        loadCurrentIDs: () async throws -> Set<String>,
+        submit: ([String]) async throws -> Void
+    ) async throws -> MutationResult {
+        if Task.isCancelled {
+            return try deletionCancellationBeforeSubmission(context: context)
+        }
+
+        let targets: [String]
+        do {
+            targets = try validatedIDs(ids)
+        } catch let error as AppError {
+            return try deletionPreflightResult(
+                error,
+                targetCount: max(ids.count, 1),
+                context: context
+            )
+        } catch {
+            return try deletionUnexpectedPreflightResult(
+                targetCount: max(ids.count, 1),
+                context: context
+            )
+        }
+        guard isSupported else {
+            return try deletionUnsupportedResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+
+        let targetSet = Set(targets)
+        let activeTargets = activeDeletionIDsByOperation[context.operation] ?? []
+        guard activeTargets.isDisjoint(with: targetSet) else {
+            return try deletionDuplicateResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+        activeDeletionIDsByOperation[context.operation] = activeTargets.union(targetSet)
+        defer {
+            let remaining = (activeDeletionIDsByOperation[context.operation] ?? [])
+                .subtracting(targetSet)
+            if remaining.isEmpty {
+                activeDeletionIDsByOperation.removeValue(forKey: context.operation)
+            } else {
+                activeDeletionIDsByOperation[context.operation] = remaining
+            }
+        }
+
+        do {
+            let currentIDs = try await loadCurrentIDs()
+            guard targetSet.isSubset(of: currentIDs) else {
+                return try deletionMissingTargetResult(
+                    targetCount: targets.count,
+                    context: context
+                )
+            }
+        } catch let error as AppError {
+            return try deletionPreflightResult(
+                error,
+                targetCount: targets.count,
+                context: context
+            )
+        } catch {
+            return try deletionUnexpectedPreflightResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+
+        if Task.isCancelled {
+            return try deletionCancellationBeforeSubmission(context: context)
+        }
+        do {
+            try await submit(targets)
+        } catch let error as AppError {
+            if let reconciled = try await reconciledDeletionAfterSubmissionFailure(
+                targets: targetSet,
+                context: context,
+                loadCurrentIDs: loadCurrentIDs
+            ) {
+                return reconciled
+            }
+            return try deletionSubmissionResult(
+                error,
+                targetCount: targets.count,
+                context: context
+            )
+        } catch {
+            if let reconciled = try await reconciledDeletionAfterSubmissionFailure(
+                targets: targetSet,
+                context: context,
+                loadCurrentIDs: loadCurrentIDs
+            ) {
+                return reconciled
+            }
+            return try deletionUnexpectedSubmissionResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+
+        if Task.isCancelled {
+            return try deletionCancellationAfterSubmission(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+        do {
+            return try deletionReadbackResult(
+                targets: targetSet,
+                remaining: try await loadCurrentIDs(),
+                context: context
+            )
+        } catch let error as AppError {
+            return try deletionReadbackFailureResult(
+                error,
+                targetCount: targets.count,
+                context: context
+            )
+        } catch {
+            return try deletionUnexpectedReadbackResult(
+                targetCount: targets.count,
+                context: context
+            )
+        }
+    }
+
+    private func reconciledDeletionAfterSubmissionFailure(
+        targets: Set<String>,
+        context: ServiceDeletionContext,
+        loadCurrentIDs: () async throws -> Set<String>
+    ) async throws -> MutationResult? {
+        guard let remaining = try? await loadCurrentIDs() else {
+            return nil
+        }
+        let result = try deletionReadbackResult(
+            targets: targets,
+            remaining: remaining,
+            context: context
+        )
+        switch result.status {
+        case .confirmedSuccess, .partialSuccess:
+            return result
+        default:
+            return nil
+        }
+    }
+
+    private func deletionCancellationBeforeSubmission(
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        try serviceDeletionResult(
+            status: .cancelledBeforeSubmission,
+            context: context,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 0,
+            unknown: 0,
+            localizationSuffix: "cancelled",
+            diagnosticSuffix: "cancelled-before-submission"
+        )
+    }
+
+    private func deletionCancellationAfterSubmission(
+        targetCount: Int,
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        try serviceDeletionResult(
+            status: .cancellationRequestedAfterSubmission,
+            context: context,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: targetCount,
+            localizationSuffix: "unverified",
+            diagnosticSuffix: "cancelled-after-submission"
+        )
+    }
+
+    private func deletionUnsupportedResult(
+        targetCount: Int,
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        try serviceDeletionResult(
+            status: .unsupported,
+            context: context,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: targetCount,
+            unknown: 0,
+            errorCategory: .unsupported,
+            localizationSuffix: "unsupported",
+            diagnosticSuffix: "unsupported"
+        )
+    }
+
+    private func deletionDuplicateResult(
+        targetCount: Int,
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        try serviceDeletionResult(
+            status: .confirmedFailure,
+            context: context,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: targetCount,
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationSuffix: "failed",
+            diagnosticSuffix: "duplicate-submission"
+        )
+    }
+
+    private func deletionMissingTargetResult(
+        targetCount: Int,
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        try serviceDeletionResult(
+            status: .confirmedFailure,
+            context: context,
+            submitted: false,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: targetCount,
+            unknown: 0,
+            errorCategory: .validation,
+            localizationSuffix: "failed",
+            diagnosticSuffix: "target-not-found"
+        )
+    }
+
+    private func deletionPreflightResult(
+        _ error: AppError,
+        targetCount: Int,
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        switch error.category {
+        case .cancelled:
+            return try deletionCancellationBeforeSubmission(context: context)
+        case .permissionDenied, .authenticationRequired:
+            return try serviceDeletionResult(
+                status: .permissionDenied,
+                context: context,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: targetCount,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationSuffix: "permission-denied",
+                diagnosticSuffix: "preflight-permission-denied"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try deletionUnsupportedResult(
+                targetCount: targetCount,
+                context: context
+            )
+        default:
+            return try serviceDeletionResult(
+                status: .confirmedFailure,
+                context: context,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: targetCount,
+                unknown: 0,
+                errorCategory: serviceMutationErrorCategory(for: error.category),
+                localizationSuffix: "failed",
+                diagnosticSuffix: "preflight-failed"
+            )
+        }
+    }
+
+    private func deletionUnexpectedPreflightResult(
+        targetCount: Int,
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        try serviceDeletionResult(
+            status: .confirmedFailure,
+            context: context,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: targetCount,
+            unknown: 0,
+            errorCategory: .unknown,
+            localizationSuffix: "failed",
+            diagnosticSuffix: "preflight-unknown"
+        )
+    }
+
+    private func deletionSubmissionResult(
+        _ error: AppError,
+        targetCount: Int,
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        switch error.category {
+        case .cancelled:
+            return try deletionCancellationAfterSubmission(
+                targetCount: targetCount,
+                context: context
+            )
+        case .permissionDenied, .authenticationRequired:
+            return try serviceDeletionResult(
+                status: .permissionDenied,
+                context: context,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: targetCount,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationSuffix: "permission-denied",
+                diagnosticSuffix: "permission-denied"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try serviceDeletionResult(
+                status: .unsupported,
+                context: context,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: targetCount,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationSuffix: "unsupported",
+                diagnosticSuffix: "unsupported-response"
+            )
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            return try serviceDeletionResult(
+                status: .submittedButUnverified,
+                context: context,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: targetCount,
+                errorCategory: serviceMutationErrorCategory(for: error.category),
+                localizationSuffix: "unverified",
+                diagnosticSuffix: "submitted-unverified"
+            )
+        default:
+            return try serviceDeletionResult(
+                status: .confirmedFailure,
+                context: context,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: targetCount,
+                unknown: 0,
+                errorCategory: serviceMutationErrorCategory(for: error.category),
+                localizationSuffix: "failed",
+                diagnosticSuffix: "rejected"
+            )
+        }
+    }
+
+    private func deletionUnexpectedSubmissionResult(
+        targetCount: Int,
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        try serviceDeletionResult(
+            status: .submittedButUnverified,
+            context: context,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: targetCount,
+            errorCategory: .unknown,
+            localizationSuffix: "unverified",
+            diagnosticSuffix: "submission-unknown"
+        )
+    }
+
+    private func deletionReadbackResult(
+        targets: Set<String>,
+        remaining: Set<String>,
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        let remainingTargets = targets.intersection(remaining)
+        let succeeded = targets.count - remainingTargets.count
+        if remainingTargets.isEmpty {
+            return try serviceDeletionResult(
+                status: .confirmedSuccess,
+                context: context,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: succeeded,
+                failed: 0,
+                unknown: 0,
+                localizationSuffix: "completed",
+                diagnosticSuffix: "confirmed"
+            )
+        }
+        if succeeded > 0 {
+            return try serviceDeletionResult(
+                status: .partialSuccess,
+                context: context,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: succeeded,
+                failed: 0,
+                unknown: remainingTargets.count,
+                localizationSuffix: "partial",
+                diagnosticSuffix: "partially-confirmed"
+            )
+        }
+        return try serviceDeletionResult(
+            status: .submittedButUnverified,
+            context: context,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: targets.count,
+            localizationSuffix: "unverified",
+            diagnosticSuffix: "still-listed"
+        )
+    }
+
+    private func deletionReadbackFailureResult(
+        _ error: AppError,
+        targetCount: Int,
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        if error.category == .cancelled {
+            return try deletionCancellationAfterSubmission(
+                targetCount: targetCount,
+                context: context
+            )
+        }
+        return try serviceDeletionResult(
+            status: .submittedButUnverified,
+            context: context,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: targetCount,
+            errorCategory: serviceMutationErrorCategory(for: error.category),
+            localizationSuffix: "unverified",
+            diagnosticSuffix: "readback-unverified"
+        )
+    }
+
+    private func deletionUnexpectedReadbackResult(
+        targetCount: Int,
+        context: ServiceDeletionContext
+    ) throws -> MutationResult {
+        try serviceDeletionResult(
+            status: .submittedButUnverified,
+            context: context,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: targetCount,
+            errorCategory: .unknown,
+            localizationSuffix: "unverified",
+            diagnosticSuffix: "readback-unknown"
+        )
+    }
+
+    private func serviceDeletionResult(
+        status: MutationResultStatus,
+        context: ServiceDeletionContext,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationSuffix: String,
+        diagnosticSuffix: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: context.operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: "\(context.localizationPrefix).\(localizationSuffix)",
+            diagnosticTag: "\(context.localizationPrefix).\(diagnosticSuffix)"
+        )
+    }
+
+    private func serviceMutationErrorCategory(
+        for category: AppErrorCategory
+    ) -> MutationErrorCategory {
+        switch category {
+        case .networkUnavailable, .timeout:
+            .network
+        case .authenticationRequired, .otpRequired:
+            .authentication
+        case .permissionDenied:
+            .permission
+        case .conflict, .notFound, .serverBusy:
+            .conflict
+        case .apiUnavailable, .versionUnsupported:
+            .unsupported
+        case .invalidResponse:
+            .server
+        default:
+            .unknown
         }
     }
 

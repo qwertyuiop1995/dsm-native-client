@@ -147,6 +147,35 @@ final class DesktopCloudDriveTests: XCTestCase {
         XCTAssertEqual(restored?.connection.capabilitySet[capability.name], capability)
     }
 
+    func test损坏配置读取失败时不会覆盖原始文件() async throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+        let fileURL = directoryURL.appendingPathComponent(
+            "desktop-drive-config-v1.json"
+        )
+        let originalData = Data(
+            #"{"version":2,"connections":{},"mappings":"damaged"}"#.utf8
+        )
+        try originalData.write(to: fileURL)
+        let store = DesktopDriveConfigurationStore(
+            directoryURL: directoryURL
+        )
+
+        do {
+            _ = try await store.mappings()
+            XCTFail("损坏配置不应被当作空配置读取。")
+        } catch {}
+
+        XCTAssertEqual(try Data(contentsOf: fileURL), originalData)
+    }
+
     func test目录缓存规划递归分页并汇总可信大小() async {
         let rootItems = [
             Self.file(path: "/share/root.txt", size: 3),

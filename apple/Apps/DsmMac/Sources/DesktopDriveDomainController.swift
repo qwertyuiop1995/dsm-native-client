@@ -4,7 +4,7 @@ import Foundation
 
 /// 集中封装文件提供器域的生命周期和系统回调，避免界面状态管理器承担平台适配细节。
 @MainActor
-struct DesktopDriveDomainController {
+struct DesktopDriveDomainController: DesktopDriveDomainRegistrationControlling {
     func domain(for mapping: DesktopDriveMapping) -> NSFileProviderDomain {
         NSFileProviderDomain(
             identifier: NSFileProviderDomainIdentifier(
@@ -73,6 +73,51 @@ struct DesktopDriveDomainController {
             (continuation: CheckedContinuation<Void, Error>) in
             NSFileProviderManager.remove(domain) { error in
                 resume(continuation, error: error)
+            }
+        }
+    }
+
+    func registeredDomainIdentifiers() async throws -> Set<String> {
+        try await withCheckedThrowingContinuation { continuation in
+            NSFileProviderManager.getDomainsWithCompletionHandler {
+                domains,
+                error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(
+                        returning: Set(
+                            domains.map(\.identifier.rawValue)
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    func removeRegisteredDomain(identifier: String) async throws {
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Void, Error>) in
+            NSFileProviderManager.getDomainsWithCompletionHandler {
+                domains,
+                error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let domain = domains.first(where: {
+                    $0.identifier.rawValue == identifier
+                }) else {
+                    continuation.resume()
+                    return
+                }
+                NSFileProviderManager.remove(domain) { removeError in
+                    if let removeError {
+                        continuation.resume(throwing: removeError)
+                    } else {
+                        continuation.resume()
+                    }
+                }
             }
         }
     }

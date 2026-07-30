@@ -3421,6 +3421,7 @@ private struct TransferCenterView: View {
 
                                     TransferRow(
                                         task: task,
+                                        canRetry: taskWorkspace.canRetryTransfer(task.id),
                                         onPause: { taskWorkspace.pauseTransfer(task.id) },
                                         onResume: { taskWorkspace.resumeTransfer(task.id) },
                                         onRetry: { taskWorkspace.retryTransfer(task.id) },
@@ -3448,6 +3449,7 @@ private struct TransferCenterView: View {
 
 private struct TransferRow: View {
     let task: ActivityTask
+    let canRetry: Bool
     let onPause: () -> Void
     let onResume: () -> Void
     let onRetry: () -> Void
@@ -3547,7 +3549,7 @@ private struct TransferRow: View {
                         TransferActionButton(icon: "pause.fill", label: L10n.string("ui.8d12fc0d4eb26021"), color: .blue, action: onPause)
                     } else if task.state == .paused {
                         TransferActionButton(icon: "play.fill", label: task.kind == .upload ? L10n.string("ui.11b7c7173da21db8") : L10n.string("ui.7c9691192f1b7340"), color: .green, action: onResume)
-                    } else if task.state == .failed || task.state == .cancelled {
+                    } else if canRetry && (task.state == .failed || task.state == .cancelled) {
                         TransferActionButton(icon: "arrow.clockwise", label: L10n.string("ui.b8784c8dd5636ff2"), color: .blue, action: onRetry)
                     }
                     
@@ -3591,7 +3593,7 @@ private struct TransferRow: View {
             if task.state == .paused {
                 Button(task.kind == .upload ? L10n.string("ui.11b7c7173da21db8") : L10n.string("ui.7c9691192f1b7340"), action: onResume)
             }
-            if task.state == .failed || task.state == .cancelled {
+            if canRetry && (task.state == .failed || task.state == .cancelled) {
                 Button(L10n.string("ui.b8784c8dd5636ff2"), action: onRetry)
             }
             if task.state == .queued || task.state == .running || task.state == .paused {

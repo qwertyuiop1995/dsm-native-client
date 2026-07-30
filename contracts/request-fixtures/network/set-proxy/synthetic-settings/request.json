@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "network.set-proxy.synthetic-settings",
+  "module": "network",
+  "operation": "setProxySettings",
+  "api": {
+    "name": "SYNO.Core.Network.Proxy",
+    "method": "set",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "enable",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "http_host",
+      "valueType": "string",
+      "encodedValue": "proxy.example.invalid"
+    },
+    {
+      "name": "http_port",
+      "valueType": "integer",
+      "encodedValue": "3128"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

@@ -801,6 +801,386 @@ final class DsmFileRepositoryTests: XCTestCase {
         try await repository.deleteShareLinks(ids: ["link-1"])
     }
 
+    func test收藏结果在写后回读一致时确认成功() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(
+                data: Data(#"{"success":true}"#.utf8),
+                statusCode: 200
+            ),
+            DsmHTTPResponse(
+                data: Data(
+                    #"{"success":true,"data":{"favorites":[{"name":"文档","path":"/home/docs"}]}}"#
+                        .utf8
+                ),
+                statusCode: 200
+            ),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationFavorite: capability(
+                    DsmAPIName.fileStationFavorite,
+                    version: 2
+                ),
+            ]),
+            transport: transport
+        )
+
+        let result = try await repository.addFavoriteResult(
+            path: "/home/docs",
+            name: "文档"
+        )
+
+        XCTAssertEqual(result.status, .confirmedSuccess)
+        XCTAssertTrue(result.submitted)
+        XCTAssertFalse(result.requiresRefresh)
+        XCTAssertEqual(result.counts.succeeded, 1)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(
+            requests.compactMap { requestParameter("method", in: $0) },
+            ["add", "list"]
+        )
+    }
+
+    func test收藏被服务明确拒绝时返回权限不足() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(
+                data: Data(#"{"success":false,"error":{"code":105}}"#.utf8),
+                statusCode: 200
+            ),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationFavorite: capability(
+                    DsmAPIName.fileStationFavorite,
+                    version: 2
+                ),
+            ]),
+            transport: transport
+        )
+
+        let result = try await repository.addFavoriteResult(
+            path: "/home/docs",
+            name: "文档"
+        )
+
+        XCTAssertEqual(result.status, .permissionDenied)
+        XCTAssertTrue(result.submitted)
+        XCTAssertEqual(result.counts.failed, 1)
+        XCTAssertEqual(result.errorCategory, .permission)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func test收藏提交时网络中断不会伪装成明确失败() async throws {
+        let transport = MockHTTPTransport(steps: [
+            .urlError(.networkConnectionLost),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationFavorite: capability(
+                    DsmAPIName.fileStationFavorite,
+                    version: 2
+                ),
+            ]),
+            transport: transport
+        )
+
+        let result = try await repository.addFavoriteResult(
+            path: "/home/docs",
+            name: "文档"
+        )
+
+        XCTAssertEqual(result.status, .submittedButUnverified)
+        XCTAssertTrue(result.submitted)
+        XCTAssertTrue(result.requiresRefresh)
+        XCTAssertEqual(result.counts.unknown, 1)
+        XCTAssertEqual(result.errorCategory, .network)
+    }
+
+    func test收藏提交成功但回读失败时要求刷新而不自动重试() async throws {
+        let transport = MockHTTPTransport(steps: [
+            .response(
+                DsmHTTPResponse(
+                    data: Data(#"{"success":true}"#.utf8),
+                    statusCode: 200
+                )
+            ),
+            .urlError(.timedOut),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationFavorite: capability(
+                    DsmAPIName.fileStationFavorite,
+                    version: 2
+                ),
+            ]),
+            transport: transport
+        )
+
+        let result = try await repository.addFavoriteResult(
+            path: "/home/docs",
+            name: "文档"
+        )
+
+        XCTAssertEqual(result.status, .submittedButUnverified)
+        XCTAssertTrue(result.requiresRefresh)
+        XCTAssertEqual(result.counts.unknown, 1)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+    }
+
+    func test收藏回读明确缺少目标时返回确认失败() async throws {
+        let transport = MockHTTPTransport(responses: [
+            DsmHTTPResponse(
+                data: Data(#"{"success":true}"#.utf8),
+                statusCode: 200
+            ),
+            DsmHTTPResponse(
+                data: Data(#"{"success":true,"data":{"favorites":[]}}"#.utf8),
+                statusCode: 200
+            ),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationFavorite: capability(
+                    DsmAPIName.fileStationFavorite,
+                    version: 2
+                ),
+            ]),
+            transport: transport
+        )
+
+        let result = try await repository.addFavoriteResult(
+            path: "/home/docs",
+            name: "文档"
+        )
+
+        XCTAssertEqual(result.status, .confirmedFailure)
+        XCTAssertEqual(result.counts.failed, 1)
+        XCTAssertFalse(result.requiresRefresh)
+    }
+
+    func test收藏在提交前取消时不发出请求() async throws {
+        let transport = MockHTTPTransport(responses: [])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationFavorite: capability(
+                    DsmAPIName.fileStationFavorite,
+                    version: 2
+                ),
+            ]),
+            transport: transport
+        )
+
+        let task = Task {
+            withUnsafeCurrentTask { currentTask in
+                currentTask?.cancel()
+            }
+            return try await repository.addFavoriteResult(
+                path: "/home/docs",
+                name: "文档"
+            )
+        }
+        let result = try await task.value
+
+        XCTAssertEqual(result.status, .cancelledBeforeSubmission)
+        XCTAssertFalse(result.submitted)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 0)
+    }
+
+    func test删除任务完成且逐项回读不存在时确认成功() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"taskid":"delete-task"}}"#),
+            response(#"{"success":true,"data":{"finished":true}}"#),
+            response(#"{"success":true,"data":{"files":[]}}"#),
+        ])
+        let repository = try makeDeleteRepository(transport: transport)
+
+        let result = try await repository.deleteResult(
+            paths: ["/home/docs/a.txt"],
+            progress: { _, _ in }
+        )
+
+        XCTAssertEqual(result.status, .confirmedSuccess)
+        XCTAssertEqual(result.counts.succeeded, 1)
+        XCTAssertFalse(result.requiresRefresh)
+        let methods = await transport.recordedRequests().compactMap {
+            requestParameter("method", in: $0)
+        }
+        XCTAssertEqual(methods, ["start", "status", "getinfo"])
+    }
+
+    func test删除被服务明确拒绝时返回权限不足() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":false,"error":{"code":105}}"#),
+        ])
+        let repository = try makeDeleteRepository(transport: transport)
+
+        let result = try await repository.deleteResult(
+            paths: ["/home/docs/a.txt"],
+            progress: { _, _ in }
+        )
+
+        XCTAssertEqual(result.status, .permissionDenied)
+        XCTAssertEqual(result.counts.failed, 1)
+        XCTAssertEqual(result.errorCategory, .permission)
+        XCTAssertFalse(result.requiresRefresh)
+    }
+
+    func test删除提交时连接中断保留未确认语义() async throws {
+        let transport = MockHTTPTransport(steps: [
+            .urlError(.networkConnectionLost),
+        ])
+        let repository = try makeDeleteRepository(transport: transport)
+
+        let result = try await repository.deleteResult(
+            paths: ["/home/docs/a.txt"],
+            progress: { _, _ in }
+        )
+
+        XCTAssertEqual(result.status, .submittedButUnverified)
+        XCTAssertEqual(result.counts.unknown, 1)
+        XCTAssertTrue(result.requiresRefresh)
+        XCTAssertEqual(result.errorCategory, .network)
+    }
+
+    func test删除任务完成但回读超时时要求刷新() async throws {
+        let transport = MockHTTPTransport(steps: [
+            .response(response(#"{"success":true,"data":{"taskid":"delete-task"}}"#)),
+            .response(response(#"{"success":true,"data":{"finished":true}}"#)),
+            .urlError(.timedOut),
+        ])
+        let repository = try makeDeleteRepository(transport: transport)
+
+        let result = try await repository.deleteResult(
+            paths: ["/home/docs/a.txt"],
+            progress: { _, _ in }
+        )
+
+        XCTAssertEqual(result.status, .submittedButUnverified)
+        XCTAssertEqual(result.counts.unknown, 1)
+        XCTAssertTrue(result.requiresRefresh)
+    }
+
+    func test批量删除逐项回读不一致时返回部分成功() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"taskid":"delete-task"}}"#),
+            response(#"{"success":true,"data":{"finished":true}}"#),
+            response(#"{"success":true,"data":{"files":[]}}"#),
+            response(
+                #"{"success":true,"data":{"files":[{"name":"b.txt","path":"/home/docs/b.txt","isdir":false}]}}"#
+            ),
+        ])
+        let repository = try makeDeleteRepository(transport: transport)
+
+        let result = try await repository.deleteResult(
+            paths: ["/home/docs/a.txt", "/home/docs/b.txt"],
+            progress: { _, _ in }
+        )
+
+        XCTAssertEqual(result.status, .partialSuccess)
+        XCTAssertEqual(result.counts.succeeded, 1)
+        XCTAssertEqual(result.counts.failed, 1)
+        XCTAssertEqual(result.counts.unknown, 0)
+        XCTAssertTrue(result.requiresRefresh)
+    }
+
+    func test删除在提交前取消时不发出请求() async throws {
+        let transport = MockHTTPTransport(responses: [])
+        let repository = try makeDeleteRepository(transport: transport)
+
+        let task = Task {
+            withUnsafeCurrentTask { currentTask in
+                currentTask?.cancel()
+            }
+            return try await repository.deleteResult(
+                paths: ["/home/docs/a.txt"],
+                progress: { _, _ in }
+            )
+        }
+        let result = try await task.value
+
+        XCTAssertEqual(result.status, .cancelledBeforeSubmission)
+        XCTAssertFalse(result.submitted)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 0)
+    }
+
+    func test删除提交后取消会请求停止并要求刷新() async throws {
+        let transport = MockHTTPTransport(steps: [
+            .response(response(#"{"success":true,"data":{"taskid":"delete-task"}}"#)),
+            .waitUntilCancelled,
+            .response(response(#"{"success":true}"#)),
+        ])
+        let repository = try makeDeleteRepository(transport: transport)
+        let task = Task {
+            try await repository.deleteResult(
+                paths: ["/home/docs/a.txt"],
+                progress: { _, _ in }
+            )
+        }
+        while await transport.recordedRequests().count < 2 {
+            await Task.yield()
+        }
+
+        task.cancel()
+        let result = try await task.value
+
+        XCTAssertEqual(result.status, .cancellationRequestedAfterSubmission)
+        XCTAssertEqual(result.counts.unknown, 1)
+        XCTAssertTrue(result.requiresRefresh)
+        let methods = await transport.recordedRequests().compactMap {
+            requestParameter("method", in: $0)
+        }
+        XCTAssertEqual(methods, ["start", "status", "stop"])
+    }
+
+    func test父目录删除进行中时拒绝子路径重复提交() async throws {
+        let transport = MockHTTPTransport(steps: [
+            .response(response(#"{"success":true,"data":{"taskid":"delete-task"}}"#)),
+            .waitUntilCancelled,
+            .response(response(#"{"success":true}"#)),
+        ])
+        let repository = try makeDeleteRepository(transport: transport)
+        let firstTask = Task {
+            try await repository.deleteResult(
+                paths: ["/home/docs"],
+                progress: { _, _ in }
+            )
+        }
+        while await transport.recordedRequests().count < 2 {
+            await Task.yield()
+        }
+
+        let duplicate = try await repository.deleteResult(
+            paths: ["/home/docs/a.txt"],
+            progress: { _, _ in }
+        )
+        firstTask.cancel()
+        _ = try await firstTask.value
+
+        XCTAssertEqual(duplicate.status, .confirmedFailure)
+        XCTAssertFalse(duplicate.submitted)
+        XCTAssertEqual(duplicate.errorCategory, .conflict)
+    }
+
+    func test删除拒绝根目录和上级路径且不发出请求() async throws {
+        let transport = MockHTTPTransport(responses: [])
+        let repository = try makeDeleteRepository(transport: transport)
+
+        let result = try await repository.deleteResult(
+            paths: ["/home/../"],
+            progress: { _, _ in }
+        )
+
+        XCTAssertEqual(result.status, .confirmedFailure)
+        XCTAssertFalse(result.submitted)
+        XCTAssertEqual(result.errorCategory, .validation)
+        let requests = await transport.recordedRequests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     func test容量只汇总当前账号可见卷并去除重复共享() async throws {
         let response = DsmHTTPResponse(
             data: Data(
@@ -922,6 +1302,28 @@ final class DsmFileRepositoryTests: XCTestCase {
             ]),
             transport: transport
         )
+    }
+
+    private func makeDeleteRepository(
+        transport: MockHTTPTransport
+    ) throws -> DsmFileRepository {
+        try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDelete: capability(
+                    DsmAPIName.fileStationDelete,
+                    version: 2
+                ),
+                DsmAPIName.fileStationList: capability(
+                    DsmAPIName.fileStationList,
+                    version: 2
+                ),
+            ]),
+            transport: transport
+        )
+    }
+
+    private func response(_ body: String) -> DsmHTTPResponse {
+        DsmHTTPResponse(data: Data(body.utf8), statusCode: 200)
     }
 
     private func makeRepository(

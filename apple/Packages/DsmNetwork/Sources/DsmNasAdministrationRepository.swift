@@ -167,9 +167,62 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     private let isConnectedThroughQuickConnectRelay: Bool
     private var packageControlMetadata: [String: PackageControlMetadata] = [:]
     private var packageIconCache: [String: Data] = [:]
+    private var activePackageUninstallIDs: Set<String> = []
+    private var activeAccountDeletionNames: Set<String> = []
+    private var activeGroupDeletionNames: Set<String> = []
+    private var activeEthernetUpdateIDs: Set<String> = []
+    private var isFileServiceSettingsUpdateActive = false
+    private var isTerminalSettingsUpdateActive = false
+    private var isProxySettingsUpdateActive = false
+    private var isSecuritySettingsUpdateActive = false
+    private var isHardwareSettingsUpdateActive = false
+    private var isRemoteAccessSettingsUpdateActive = false
+    private var activeDiskTestIDs: Set<String> = []
     private var storageDisks: [String: NasDisk] = [:]
     private var diskTestHistories: [String: DiskTestHistorySnapshot] = [:]
     private var beepVolumeFieldName: String?
+
+    private enum SecuritySettingsMutationStep: Sendable {
+        case autoBlock
+        case denialOfService
+        case portScanProtection
+        case firewall
+    }
+
+    private enum HardwareSettingsMutationStep: Sendable {
+        case powerRecovery
+        case ledBrightness
+        case fanMode
+        case beep
+        case hibernation
+        case ups
+    }
+
+    private enum RemoteAccessSettingsMutationStep: Sendable {
+        case relay
+        case routerConfiguration
+    }
+
+    private enum FileServiceSettingsMutationStep: Sendable {
+        case smb
+        case nfs
+        case ftp
+        case sftp
+        case webDiscovery
+        case fileDiscovery
+    }
+
+    private enum TerminalSettingsMutationStep: Sendable {
+        case ssh
+        case telnet
+        case sshPort
+    }
+
+    private enum ProxySettingsMutationStep: Sendable {
+        case enabled
+        case host
+        case port
+    }
 
     public init(
         profile: NasProfile,
@@ -259,86 +312,779 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     }
 
     public func saveFileServiceSettings(_ settings: NasFileServiceSettings) async throws {
-        let current = try await loadFileServiceSettings()
-        if let enabled = settings.isSMBEnabled, enabled != current.isSMBEnabled {
+        let result = try await saveFileServiceSettingsResult(settings)
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw fileServiceSettingsError(for: result)
+        }
+    }
+
+    /// 文件服务设置跨越多个内部接口；先完整预检，再逐项提交并整体回读。
+    public func saveFileServiceSettingsResult(
+        _ settings: NasFileServiceSettings
+    ) async throws -> MutationResult {
+        let operation = "fileServiceSettingsUpdate"
+        let prefix = "file-services.settings"
+        if Task.isCancelled {
+            return try fileServiceMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
+        }
+        guard !isFileServiceSettingsUpdateActive else {
+            return try fileServiceMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).duplicate-submission"
+            )
+        }
+        isFileServiceSettingsUpdateActive = true
+        defer { isFileServiceSettingsUpdateActive = false }
+
+        let current: NasFileServiceSettings
+        do {
+            current = try await loadFileServiceSettings()
+        } catch let error as AppError {
+            return try fileServicePreflightResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try fileServiceMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-unknown"
+            )
+        }
+        do {
+            try validateFileServiceSettings(settings, current: current)
+        } catch {
+            return try fileServiceMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).invalid",
+                diagnosticTag: "\(prefix).invalid-input"
+            )
+        }
+        let steps = Self.fileServiceMutationSteps(from: current, to: settings)
+        guard !steps.isEmpty else {
+            return try fileServiceMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).no-changes"
+            )
+        }
+        guard fileServiceCapabilitiesSupport(steps) else {
+            return try fileServiceMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: steps.count,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+        if Task.isCancelled {
+            return try fileServiceMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
+
+        var acceptedCount = 0
+        for step in steps {
+            if Task.isCancelled {
+                if acceptedCount == 0 {
+                    return try fileServiceMutationResult(
+                        status: .cancelledBeforeSubmission,
+                        operation: operation,
+                        submitted: false,
+                        requiresRefresh: false,
+                        succeeded: 0,
+                        failed: 0,
+                        unknown: 0,
+                        diagnosticTag: "\(prefix).cancelled-before-first-submission"
+                    )
+                }
+                return try fileServiceMutationResult(
+                    status: .cancellationRequestedAfterSubmission,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: steps.count - acceptedCount,
+                    unknown: acceptedCount,
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).cancelled-after-submission"
+                )
+            }
+            do {
+                try await submitFileServiceMutationStep(
+                    step,
+                    settings: settings
+                )
+                acceptedCount += 1
+            } catch let error as AppError {
+                return try await fileServiceSubmissionFailureResult(
+                    error,
+                    settings: settings,
+                    steps: steps,
+                    acceptedCount: acceptedCount,
+                    operation: operation,
+                    prefix: prefix
+                )
+            } catch {
+                return try await fileServiceUnknownSubmissionResult(
+                    settings: settings,
+                    steps: steps,
+                    acceptedCount: acceptedCount,
+                    operation: operation,
+                    prefix: prefix
+                )
+            }
+        }
+
+        if Task.isCancelled {
+            return try fileServiceMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-before-readback"
+            )
+        }
+        do {
+            let verified = try await loadFileServiceSettings()
+            return try fileServiceVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch let error as AppError {
+            return try fileServiceMutationResult(
+                status: error.category == .cancelled
+                    ? .cancellationRequestedAfterSubmission
+                    : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unverified"
+            )
+        } catch {
+            return try fileServiceMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
+        }
+    }
+
+    private func validateFileServiceSettings(
+        _ settings: NasFileServiceSettings,
+        current: NasFileServiceSettings
+    ) throws {
+        if let port = settings.ftpPort {
+            try Self.validatePort(port)
+        }
+        if let port = settings.sftpPort {
+            try Self.validatePort(port)
+        }
+        let smbEnabled = settings.isSMBEnabled ?? current.isSMBEnabled
+        let timeMachineEnabled =
+            settings.isSMBTimeMachineEnabled ?? current.isSMBTimeMachineEnabled
+        guard timeMachineEnabled != true || smbEnabled != false else {
+            throw verificationError(
+                L10n.string("file-services.settings.invalid")
+            )
+        }
+        let ftpEnabled =
+            settings.isFTPEnabled ?? current.isFTPEnabled ?? false
+        let ftpsEnabled =
+            settings.isFTPSEnabled ?? current.isFTPSEnabled ?? false
+        let sftpEnabled =
+            settings.isSFTPEnabled ?? current.isSFTPEnabled ?? false
+        let ftpPort = settings.ftpPort ?? current.ftpPort
+        let sftpPort = settings.sftpPort ?? current.sftpPort
+        guard !(ftpEnabled || ftpsEnabled)
+                || !sftpEnabled
+                || ftpPort == nil
+                || sftpPort == nil
+                || ftpPort != sftpPort else {
+            throw verificationError(
+                L10n.string("file-services.settings.invalid")
+            )
+        }
+    }
+
+    private static func fileServiceMutationSteps(
+        from current: NasFileServiceSettings,
+        to expected: NasFileServiceSettings
+    ) -> [FileServiceSettingsMutationStep] {
+        var steps: [FileServiceSettingsMutationStep] = []
+        if expected.isSMBEnabled != nil,
+           expected.isSMBEnabled != current.isSMBEnabled {
+            steps.append(.smb)
+        }
+        if expected.isNFSEnabled != nil,
+           expected.isNFSEnabled != current.isNFSEnabled {
+            steps.append(.nfs)
+        }
+        if (expected.isFTPEnabled != nil
+                && expected.isFTPEnabled != current.isFTPEnabled)
+            || (expected.isFTPSEnabled != nil
+                && expected.isFTPSEnabled != current.isFTPSEnabled)
+            || (expected.ftpPort != nil
+                && expected.ftpPort != current.ftpPort) {
+            steps.append(.ftp)
+        }
+        if (expected.isSFTPEnabled != nil
+                && expected.isSFTPEnabled != current.isSFTPEnabled)
+            || (expected.sftpPort != nil
+                && expected.sftpPort != current.sftpPort) {
+            steps.append(.sftp)
+        }
+        if (expected.isSSDPEnabled != nil
+                && expected.isSSDPEnabled != current.isSSDPEnabled)
+            || (expected.isBonjourEnabled != nil
+                && expected.isBonjourEnabled != current.isBonjourEnabled) {
+            steps.append(.webDiscovery)
+        }
+        if expected.isSMBTimeMachineEnabled != nil,
+           expected.isSMBTimeMachineEnabled
+                != current.isSMBTimeMachineEnabled {
+            steps.append(.fileDiscovery)
+        }
+        return steps
+    }
+
+    private func fileServiceCapabilitiesSupport(
+        _ steps: [FileServiceSettingsMutationStep]
+    ) -> Bool {
+        steps.allSatisfy { step in
+            switch step {
+            case .smb:
+                capabilitySupports(DsmAPIName.coreFileServiceSMB)
+            case .nfs:
+                capabilitySupports(DsmAPIName.coreFileServiceNFS)
+            case .ftp:
+                capabilitySupports(DsmAPIName.coreFileServiceFTP)
+            case .sftp:
+                capabilitySupports(DsmAPIName.coreFileServiceSFTP)
+            case .webDiscovery:
+                capabilitySupports(DsmAPIName.coreWebDSM, version: 2)
+            case .fileDiscovery:
+                capabilitySupports(DsmAPIName.coreFileServiceDiscovery)
+            }
+        }
+    }
+
+    private func submitFileServiceMutationStep(
+        _ step: FileServiceSettingsMutationStep,
+        settings: NasFileServiceSettings
+    ) async throws {
+        switch step {
+        case .smb:
+            guard let enabled = settings.isSMBEnabled else {
+                throw verificationError(
+                    L10n.string("file-services.settings.failed")
+                )
+            }
             try await callVoid(
                 DsmAPIName.coreFileServiceSMB,
                 method: "set",
                 parameters: ["enable_samba": .boolean(enabled)]
             )
-        }
-        if let enabled = settings.isNFSEnabled, enabled != current.isNFSEnabled {
+        case .nfs:
+            guard let enabled = settings.isNFSEnabled else {
+                throw verificationError(
+                    L10n.string("file-services.settings.failed")
+                )
+            }
             try await callVoid(
                 DsmAPIName.coreFileServiceNFS,
                 method: "set",
                 parameters: ["enable_nfs": .boolean(enabled)]
             )
-        }
-        if settings.isFTPEnabled != current.isFTPEnabled
-            || settings.isFTPSEnabled != current.isFTPSEnabled
-            || settings.ftpPort != current.ftpPort {
-            var parameters: [String: DsmParameterValue] = [:]
-            if let enabled = settings.isFTPEnabled {
-                parameters["enable_ftp"] = .boolean(enabled)
-            }
-            if let enabled = settings.isFTPSEnabled {
-                parameters["enable_ftps"] = .boolean(enabled)
-            }
-            if let port = settings.ftpPort {
-                try Self.validatePort(port)
-                parameters["portnum"] = .integer(port)
-            }
+        case .ftp:
             try await callVoid(
                 DsmAPIName.coreFileServiceFTP,
                 method: "set",
-                parameters: parameters
+                parameters: Self.fileServiceFTPParameters(
+                    settings
+                )
             )
-        }
-        if settings.isSFTPEnabled != current.isSFTPEnabled
-            || settings.sftpPort != current.sftpPort {
-            var parameters: [String: DsmParameterValue] = [:]
-            if let enabled = settings.isSFTPEnabled {
-                parameters["enable"] = .boolean(enabled)
-            }
-            if let port = settings.sftpPort {
-                try Self.validatePort(port)
-                parameters["portnum"] = .integer(port)
-            }
+        case .sftp:
             try await callVoid(
                 DsmAPIName.coreFileServiceSFTP,
                 method: "set",
-                parameters: parameters
+                parameters: Self.fileServiceSFTPParameters(
+                    settings
+                )
             )
-        }
-        if settings.isSSDPEnabled != current.isSSDPEnabled
-            || settings.isBonjourEnabled != current.isBonjourEnabled {
-            var parameters: [String: DsmParameterValue] = [:]
-            if let enabled = settings.isSSDPEnabled {
-                parameters["enable_ssdp"] = .boolean(enabled)
-            }
-            if let enabled = settings.isBonjourEnabled {
-                parameters["enable_avahi"] = .boolean(enabled)
-            }
+        case .webDiscovery:
             try await callVoid(
                 DsmAPIName.coreWebDSM,
                 method: "set",
                 version: 2,
-                parameters: parameters
+                parameters: Self.fileServiceWebDiscoveryParameters(
+                    settings
+                )
             )
-        }
-        if let enabled = settings.isSMBTimeMachineEnabled,
-           enabled != current.isSMBTimeMachineEnabled {
+        case .fileDiscovery:
+            guard let enabled = settings.isSMBTimeMachineEnabled else {
+                throw verificationError(
+                    L10n.string("file-services.settings.failed")
+                )
+            }
             try await callVoid(
                 DsmAPIName.coreFileServiceDiscovery,
                 method: "set",
                 parameters: ["enable_smb_time_machine": .boolean(enabled)]
             )
         }
+    }
 
-        let verified = try await loadFileServiceSettings()
-        guard Self.fileServiceSettings(verified, match: settings) else {
-            throw verificationError(L10n.string("shared.86dc93229dc74567"))
+    private static func fileServiceFTPParameters(
+        _ settings: NasFileServiceSettings
+    ) -> [String: DsmParameterValue] {
+        var parameters: [String: DsmParameterValue] = [:]
+        if let enabled = settings.isFTPEnabled {
+            parameters["enable_ftp"] = .boolean(enabled)
         }
+        if let enabled = settings.isFTPSEnabled {
+            parameters["enable_ftps"] = .boolean(enabled)
+        }
+        if let port = settings.ftpPort {
+            parameters["portnum"] = .integer(port)
+        }
+        return parameters
+    }
+
+    private static func fileServiceSFTPParameters(
+        _ settings: NasFileServiceSettings
+    ) -> [String: DsmParameterValue] {
+        var parameters: [String: DsmParameterValue] = [:]
+        if let enabled = settings.isSFTPEnabled {
+            parameters["enable"] = .boolean(enabled)
+        }
+        if let port = settings.sftpPort {
+            parameters["portnum"] = .integer(port)
+        }
+        return parameters
+    }
+
+    private static func fileServiceWebDiscoveryParameters(
+        _ settings: NasFileServiceSettings
+    ) -> [String: DsmParameterValue] {
+        var parameters: [String: DsmParameterValue] = [:]
+        if let enabled = settings.isSSDPEnabled {
+            parameters["enable_ssdp"] = .boolean(enabled)
+        }
+        if let enabled = settings.isBonjourEnabled {
+            parameters["enable_avahi"] = .boolean(enabled)
+        }
+        return parameters
+    }
+
+    private func fileServiceSubmissionFailureResult(
+        _ submissionError: AppError,
+        settings: NasFileServiceSettings,
+        steps: [FileServiceSettingsMutationStep],
+        acceptedCount: Int,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        let isAmbiguous = switch submissionError.category {
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            true
+        default:
+            false
+        }
+        if submissionError.category == .cancelled {
+            return try fileServiceMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: max(0, steps.count - acceptedCount - 1),
+                unknown: min(steps.count, acceptedCount + 1),
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-during-submission"
+            )
+        }
+        do {
+            let verified = try await loadFileServiceSettings()
+            return try fileServiceVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: submissionError.category,
+                uncertainCount: isAmbiguous
+                    ? min(steps.count, acceptedCount + 1)
+                    : acceptedCount
+            )
+        } catch {
+            if acceptedCount > 0 || isAmbiguous {
+                let unknown = min(
+                    steps.count,
+                    acceptedCount + (isAmbiguous ? 1 : 0)
+                )
+                return try fileServiceMutationResult(
+                    status: .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: steps.count - unknown,
+                    unknown: unknown,
+                    errorCategory: packageMutationErrorCategory(
+                        for: submissionError.category
+                    ),
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).partial-readback-unverified"
+                )
+            }
+            return try fileServiceRejectedResult(
+                submissionError,
+                totalCount: steps.count,
+                submitted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+    }
+
+    private func fileServiceUnknownSubmissionResult(
+        settings: NasFileServiceSettings,
+        steps: [FileServiceSettingsMutationStep],
+        acceptedCount: Int,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        do {
+            let verified = try await loadFileServiceSettings()
+            return try fileServiceVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: .unknown,
+                uncertainCount: min(steps.count, acceptedCount + 1)
+            )
+        } catch {
+            let unknown = min(steps.count, acceptedCount + 1)
+            return try fileServiceMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: steps.count - unknown,
+                unknown: unknown,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unknown"
+            )
+        }
+    }
+
+    private func fileServiceVerifiedResult(
+        _ actual: NasFileServiceSettings,
+        expected: NasFileServiceSettings,
+        steps: [FileServiceSettingsMutationStep],
+        operation: String,
+        prefix: String,
+        failureCategory: AppErrorCategory? = nil,
+        uncertainCount: Int = 0
+    ) throws -> MutationResult {
+        let succeeded = steps.filter {
+            Self.fileServiceMutationStep($0, matches: actual, expected: expected)
+        }.count
+        let remaining = steps.count - succeeded
+        if succeeded == steps.count {
+            return try fileServiceMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: succeeded,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).confirmed"
+            )
+        }
+        let unknown = min(remaining, max(0, uncertainCount - succeeded))
+        if succeeded > 0 {
+            return try fileServiceMutationResult(
+                status: .partialSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: succeeded,
+                failed: remaining - unknown,
+                unknown: unknown,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).partial",
+                diagnosticTag: "\(prefix).partial"
+            )
+        }
+        if unknown > 0 {
+            return try fileServiceMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: remaining - unknown,
+                unknown: unknown,
+                errorCategory: failureCategory.map {
+                    packageMutationErrorCategory(for: $0)
+                },
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unchanged"
+            )
+        }
+        if let failureCategory {
+            return try fileServiceRejectedResult(
+                AppError(
+                    category: failureCategory,
+                    isRetryable: false,
+                    safeUserMessage: L10n.string(
+                        "file-services.settings.failed"
+                    )
+                ),
+                totalCount: steps.count,
+                submitted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        return try fileServiceMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: remaining,
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationKey: "\(prefix).failed",
+            diagnosticTag: "\(prefix).readback-mismatch"
+        )
+    }
+
+    private func fileServiceRejectedResult(
+        _ error: AppError,
+        totalCount: Int,
+        submitted: Bool,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        let status: MutationResultStatus
+        let localizationKey: String
+        let category: MutationErrorCategory
+        switch error.category {
+        case .permissionDenied, .authenticationRequired:
+            status = .permissionDenied
+            localizationKey = "\(prefix).permission-denied"
+            category = .permission
+        case .apiUnavailable, .versionUnsupported:
+            status = .unsupported
+            localizationKey = "\(prefix).unsupported"
+            category = .unsupported
+        default:
+            status = .confirmedFailure
+            localizationKey = "\(prefix).failed"
+            category = packageMutationErrorCategory(for: error.category)
+        }
+        return try fileServiceMutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: totalCount,
+            unknown: 0,
+            errorCategory: category,
+            localizationKey: localizationKey,
+            diagnosticTag: "\(prefix).rejected"
+        )
+    }
+
+    private func fileServicePreflightResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        if error.category == .cancelled {
+            return try fileServiceMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        }
+        return try fileServiceRejectedResult(
+            error,
+            totalCount: 1,
+            submitted: false,
+            operation: operation,
+            prefix: prefix
+        )
+    }
+
+    private static func fileServiceMutationStep(
+        _ step: FileServiceSettingsMutationStep,
+        matches actual: NasFileServiceSettings,
+        expected: NasFileServiceSettings
+    ) -> Bool {
+        switch step {
+        case .smb:
+            actual.isSMBEnabled == expected.isSMBEnabled
+        case .nfs:
+            actual.isNFSEnabled == expected.isNFSEnabled
+        case .ftp:
+            (expected.isFTPEnabled == nil
+                || actual.isFTPEnabled == expected.isFTPEnabled)
+                && (expected.isFTPSEnabled == nil
+                    || actual.isFTPSEnabled == expected.isFTPSEnabled)
+                && (expected.ftpPort == nil
+                    || actual.ftpPort == expected.ftpPort)
+        case .sftp:
+            (expected.isSFTPEnabled == nil
+                || actual.isSFTPEnabled == expected.isSFTPEnabled)
+                && (expected.sftpPort == nil
+                    || actual.sftpPort == expected.sftpPort)
+        case .webDiscovery:
+            (expected.isSSDPEnabled == nil
+                || actual.isSSDPEnabled == expected.isSSDPEnabled)
+                && (expected.isBonjourEnabled == nil
+                    || actual.isBonjourEnabled == expected.isBonjourEnabled)
+        case .fileDiscovery:
+            actual.isSMBTimeMachineEnabled
+                == expected.isSMBTimeMachineEnabled
+        }
+    }
+
+    private func fileServiceMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func fileServiceSettingsError(for result: MutationResult) -> AppError {
+        let category: AppErrorCategory = switch result.status {
+        case .permissionDenied:
+            .permissionDenied
+        case .unsupported:
+            .apiUnavailable
+        case .partialSuccess:
+            .partialFailure
+        case .cancelledBeforeSubmission, .cancellationRequestedAfterSubmission:
+            .cancelled
+        case .confirmedSuccess, .confirmedFailure, .submittedButUnverified:
+            .unknown
+        }
+        return AppError(
+            category: category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? "file-services.settings.failed"
+            )
+        )
     }
 
     public func loadTerminalSettings() async throws -> NasTerminalSettings {
@@ -355,11 +1101,131 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     }
 
     public func saveTerminalSettings(_ settings: NasTerminalSettings) async throws {
-        if let port = settings.sshPort {
-            try Self.validatePort(port)
+        let result = try await saveTerminalSettingsResult(settings)
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw terminalSettingsError(for: result)
         }
-        let current = try await loadTerminalSettings()
-        guard current != settings else { return }
+    }
+
+    /// 远程终端设置按实际变化字段回读；提交后的未知结果不得自动重放。
+    public func saveTerminalSettingsResult(
+        _ settings: NasTerminalSettings
+    ) async throws -> MutationResult {
+        let operation = "terminalSettingsUpdate"
+        let prefix = "terminal.settings"
+        if Task.isCancelled {
+            return try terminalMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
+        }
+        guard !isTerminalSettingsUpdateActive else {
+            return try terminalMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).duplicate-submission"
+            )
+        }
+        isTerminalSettingsUpdateActive = true
+        defer { isTerminalSettingsUpdateActive = false }
+
+        do {
+            if let port = settings.sshPort {
+                try Self.validatePort(port)
+            }
+        } catch {
+            return try terminalMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).invalid",
+                diagnosticTag: "\(prefix).invalid-input"
+            )
+        }
+        guard capabilitySupports(DsmAPIName.coreTerminal) else {
+            return try terminalMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+
+        let current: NasTerminalSettings
+        do {
+            current = try await loadTerminalSettings()
+        } catch let error as AppError {
+            return try terminalPreflightResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try terminalMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-unknown"
+            )
+        }
+        let steps = Self.terminalMutationSteps(from: current, to: settings)
+        guard !steps.isEmpty else {
+            return try terminalMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).no-changes"
+            )
+        }
+        if Task.isCancelled {
+            return try terminalMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
 
         var parameters: [String: DsmParameterValue] = [
             "enable_ssh": .boolean(settings.isSSHEnabled),
@@ -368,16 +1234,407 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         if let port = settings.sshPort {
             parameters["ssh_port"] = .integer(port)
         }
-        try await callVoid(
-            DsmAPIName.coreTerminal,
-            method: "set",
-            parameters: parameters
-        )
-
-        let verified = try await loadTerminalSettings()
-        guard verified == settings else {
-            throw verificationError(L10n.string("shared.373e3c888e7ebf52"))
+        do {
+            try await callVoid(
+                DsmAPIName.coreTerminal,
+                method: "set",
+                parameters: parameters
+            )
+        } catch let error as AppError {
+            return try await terminalSubmissionFailureResult(
+                error,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try await terminalUnknownSubmissionResult(
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix
+            )
         }
+
+        if Task.isCancelled {
+            return try terminalMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-before-readback"
+            )
+        }
+        do {
+            let verified = try await loadTerminalSettings()
+            return try terminalVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch let error as AppError {
+            return try terminalMutationResult(
+                status: error.category == .cancelled
+                    ? .cancellationRequestedAfterSubmission
+                    : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unverified"
+            )
+        } catch {
+            return try terminalMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
+        }
+    }
+
+    private static func terminalMutationSteps(
+        from current: NasTerminalSettings,
+        to expected: NasTerminalSettings
+    ) -> [TerminalSettingsMutationStep] {
+        var steps: [TerminalSettingsMutationStep] = []
+        if current.isSSHEnabled != expected.isSSHEnabled {
+            steps.append(.ssh)
+        }
+        if current.isTelnetEnabled != expected.isTelnetEnabled {
+            steps.append(.telnet)
+        }
+        if expected.sshPort != nil, current.sshPort != expected.sshPort {
+            steps.append(.sshPort)
+        }
+        return steps
+    }
+
+    private func terminalSubmissionFailureResult(
+        _ submissionError: AppError,
+        expected: NasTerminalSettings,
+        steps: [TerminalSettingsMutationStep],
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        if submissionError.category == .cancelled {
+            return try terminalMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-during-submission"
+            )
+        }
+        let isAmbiguous = switch submissionError.category {
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            true
+        default:
+            false
+        }
+        do {
+            let verified = try await loadTerminalSettings()
+            return try terminalVerifiedResult(
+                verified,
+                expected: expected,
+                steps: steps,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: submissionError.category,
+                treatsMismatchAsUnknown: isAmbiguous
+            )
+        } catch {
+            if isAmbiguous {
+                return try terminalMutationResult(
+                    status: .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: 0,
+                    unknown: steps.count,
+                    errorCategory: packageMutationErrorCategory(
+                        for: submissionError.category
+                    ),
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).readback-unverified"
+                )
+            }
+            return try terminalRejectedResult(
+                submissionError,
+                totalCount: steps.count,
+                submitted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+    }
+
+    private func terminalUnknownSubmissionResult(
+        expected: NasTerminalSettings,
+        steps: [TerminalSettingsMutationStep],
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        do {
+            let verified = try await loadTerminalSettings()
+            return try terminalVerifiedResult(
+                verified,
+                expected: expected,
+                steps: steps,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: .unknown,
+                treatsMismatchAsUnknown: true
+            )
+        } catch {
+            return try terminalMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unknown"
+            )
+        }
+    }
+
+    private func terminalVerifiedResult(
+        _ actual: NasTerminalSettings,
+        expected: NasTerminalSettings,
+        steps: [TerminalSettingsMutationStep],
+        operation: String,
+        prefix: String,
+        failureCategory: AppErrorCategory? = nil,
+        treatsMismatchAsUnknown: Bool = false
+    ) throws -> MutationResult {
+        let succeeded = steps.filter {
+            Self.terminalMutationStep($0, matches: actual, expected: expected)
+        }.count
+        let remaining = steps.count - succeeded
+        if succeeded == steps.count {
+            return try terminalMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: succeeded,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).confirmed"
+            )
+        }
+        let unknown = treatsMismatchAsUnknown ? remaining : 0
+        if succeeded > 0 {
+            return try terminalMutationResult(
+                status: .partialSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: succeeded,
+                failed: remaining - unknown,
+                unknown: unknown,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).partial",
+                diagnosticTag: "\(prefix).partial"
+            )
+        }
+        if unknown > 0 {
+            return try terminalMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: unknown,
+                errorCategory: failureCategory.map {
+                    packageMutationErrorCategory(for: $0)
+                },
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unchanged"
+            )
+        }
+        if let failureCategory {
+            return try terminalRejectedResult(
+                AppError(
+                    category: failureCategory,
+                    isRetryable: false,
+                    safeUserMessage: L10n.string("terminal.settings.failed")
+                ),
+                totalCount: steps.count,
+                submitted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        return try terminalMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: remaining,
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationKey: "\(prefix).failed",
+            diagnosticTag: "\(prefix).readback-mismatch"
+        )
+    }
+
+    private func terminalRejectedResult(
+        _ error: AppError,
+        totalCount: Int,
+        submitted: Bool,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        let status: MutationResultStatus
+        let localizationKey: String
+        let category: MutationErrorCategory
+        switch error.category {
+        case .permissionDenied, .authenticationRequired:
+            status = .permissionDenied
+            localizationKey = "\(prefix).permission-denied"
+            category = .permission
+        case .apiUnavailable, .versionUnsupported:
+            status = .unsupported
+            localizationKey = "\(prefix).unsupported"
+            category = .unsupported
+        default:
+            status = .confirmedFailure
+            localizationKey = "\(prefix).failed"
+            category = packageMutationErrorCategory(for: error.category)
+        }
+        return try terminalMutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: totalCount,
+            unknown: 0,
+            errorCategory: category,
+            localizationKey: localizationKey,
+            diagnosticTag: "\(prefix).rejected"
+        )
+    }
+
+    private func terminalPreflightResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        if error.category == .cancelled {
+            return try terminalMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        }
+        return try terminalRejectedResult(
+            error,
+            totalCount: 1,
+            submitted: false,
+            operation: operation,
+            prefix: prefix
+        )
+    }
+
+    private static func terminalMutationStep(
+        _ step: TerminalSettingsMutationStep,
+        matches actual: NasTerminalSettings,
+        expected: NasTerminalSettings
+    ) -> Bool {
+        switch step {
+        case .ssh:
+            actual.isSSHEnabled == expected.isSSHEnabled
+        case .telnet:
+            actual.isTelnetEnabled == expected.isTelnetEnabled
+        case .sshPort:
+            actual.sshPort == expected.sshPort
+        }
+    }
+
+    private func terminalMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func terminalSettingsError(for result: MutationResult) -> AppError {
+        let category: AppErrorCategory = switch result.status {
+        case .permissionDenied:
+            .permissionDenied
+        case .unsupported:
+            .apiUnavailable
+        case .partialSuccess:
+            .partialFailure
+        case .cancelledBeforeSubmission, .cancellationRequestedAfterSubmission:
+            .cancelled
+        case .confirmedSuccess, .confirmedFailure, .submittedButUnverified:
+            .unknown
+        }
+        return AppError(
+            category: category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? "terminal.settings.failed"
+            )
+        )
     }
 
     public func loadProxySettings() async throws -> NasProxySettings {
@@ -393,20 +1650,132 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     }
 
     public func saveProxySettings(_ settings: NasProxySettings) async throws {
-        let host = settings.host.trimmingCharacters(in: .whitespacesAndNewlines)
-        if settings.isEnabled {
-            guard !host.isEmpty, let port = settings.port else {
-                throw verificationError(L10n.string("shared.ee6423ab7d6992c8"))
-            }
-            try Self.validatePort(port)
+        let result = try await saveProxySettingsResult(settings)
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw proxySettingsError(for: result)
         }
+    }
+
+    /// 代理设置按实际变化字段回读；提交后的未知结果不得自动重放。
+    public func saveProxySettingsResult(
+        _ settings: NasProxySettings
+    ) async throws -> MutationResult {
+        let operation = "proxySettingsUpdate"
+        let prefix = "proxy.settings"
+        if Task.isCancelled {
+            return try proxyMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
+        }
+        guard !isProxySettingsUpdateActive else {
+            return try proxyMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).duplicate-submission"
+            )
+        }
+        isProxySettingsUpdateActive = true
+        defer { isProxySettingsUpdateActive = false }
+
+        guard settings.isValidForSaving else {
+            return try proxyMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).invalid",
+                diagnosticTag: "\(prefix).invalid-input"
+            )
+        }
+        guard capabilitySupports(DsmAPIName.coreNetworkProxy) else {
+            return try proxyMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+
         let normalized = NasProxySettings(
             isEnabled: settings.isEnabled,
-            host: host,
+            host: settings.normalizedHost,
             port: settings.port
         )
-        let current = try await loadProxySettings()
-        guard current != normalized else { return }
+        let current: NasProxySettings
+        do {
+            current = try await loadProxySettings()
+        } catch let error as AppError {
+            return try proxyPreflightResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try proxyMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-unknown"
+            )
+        }
+        let steps = Self.proxyMutationSteps(from: current, to: normalized)
+        guard !steps.isEmpty else {
+            return try proxyMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).no-changes"
+            )
+        }
+        if Task.isCancelled {
+            return try proxyMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
 
         var parameters: [String: DsmParameterValue] = [
             "enable": .boolean(normalized.isEnabled)
@@ -415,17 +1784,409 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             parameters["http_host"] = .string(normalized.host)
             parameters["http_port"] = .integer(port)
         }
-        try await callVoid(
-            DsmAPIName.coreNetworkProxy,
-            method: "set",
-            parameters: parameters
-        )
-        let verified = try await loadProxySettings()
-        guard verified.isEnabled == normalized.isEnabled,
-              !normalized.isEnabled
-                || (verified.host == normalized.host && verified.port == normalized.port) else {
-            throw verificationError(L10n.string("shared.d29407101028f890"))
+        do {
+            try await callVoid(
+                DsmAPIName.coreNetworkProxy,
+                method: "set",
+                parameters: parameters
+            )
+        } catch let error as AppError {
+            return try await proxySubmissionFailureResult(
+                error,
+                expected: normalized,
+                steps: steps,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try await proxyUnknownSubmissionResult(
+                expected: normalized,
+                steps: steps,
+                operation: operation,
+                prefix: prefix
+            )
         }
+
+        if Task.isCancelled {
+            return try proxyMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-before-readback"
+            )
+        }
+        do {
+            let verified = try await loadProxySettings()
+            return try proxyVerifiedResult(
+                verified,
+                expected: normalized,
+                steps: steps,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch let error as AppError {
+            return try proxyMutationResult(
+                status: error.category == .cancelled
+                    ? .cancellationRequestedAfterSubmission
+                    : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unverified"
+            )
+        } catch {
+            return try proxyMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
+        }
+    }
+
+    private static func proxyMutationSteps(
+        from current: NasProxySettings,
+        to expected: NasProxySettings
+    ) -> [ProxySettingsMutationStep] {
+        var steps: [ProxySettingsMutationStep] = []
+        if current.isEnabled != expected.isEnabled {
+            steps.append(.enabled)
+        }
+        if expected.isEnabled {
+            if current.host != expected.host {
+                steps.append(.host)
+            }
+            if current.port != expected.port {
+                steps.append(.port)
+            }
+        }
+        return steps
+    }
+
+    private func proxySubmissionFailureResult(
+        _ submissionError: AppError,
+        expected: NasProxySettings,
+        steps: [ProxySettingsMutationStep],
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        if submissionError.category == .cancelled {
+            return try proxyMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-during-submission"
+            )
+        }
+        let isAmbiguous = switch submissionError.category {
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            true
+        default:
+            false
+        }
+        do {
+            let verified = try await loadProxySettings()
+            return try proxyVerifiedResult(
+                verified,
+                expected: expected,
+                steps: steps,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: submissionError.category,
+                treatsMismatchAsUnknown: isAmbiguous
+            )
+        } catch {
+            if isAmbiguous {
+                return try proxyMutationResult(
+                    status: .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: 0,
+                    unknown: steps.count,
+                    errorCategory: packageMutationErrorCategory(
+                        for: submissionError.category
+                    ),
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).readback-unverified"
+                )
+            }
+            return try proxyRejectedResult(
+                submissionError,
+                totalCount: steps.count,
+                submitted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+    }
+
+    private func proxyUnknownSubmissionResult(
+        expected: NasProxySettings,
+        steps: [ProxySettingsMutationStep],
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        do {
+            let verified = try await loadProxySettings()
+            return try proxyVerifiedResult(
+                verified,
+                expected: expected,
+                steps: steps,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: .unknown,
+                treatsMismatchAsUnknown: true
+            )
+        } catch {
+            return try proxyMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unknown"
+            )
+        }
+    }
+
+    private func proxyVerifiedResult(
+        _ actual: NasProxySettings,
+        expected: NasProxySettings,
+        steps: [ProxySettingsMutationStep],
+        operation: String,
+        prefix: String,
+        failureCategory: AppErrorCategory? = nil,
+        treatsMismatchAsUnknown: Bool = false
+    ) throws -> MutationResult {
+        let succeeded = steps.filter {
+            Self.proxyMutationStep($0, matches: actual, expected: expected)
+        }.count
+        let remaining = steps.count - succeeded
+        if succeeded == steps.count {
+            return try proxyMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: succeeded,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).confirmed"
+            )
+        }
+        let unknown = treatsMismatchAsUnknown ? remaining : 0
+        if succeeded > 0 {
+            return try proxyMutationResult(
+                status: .partialSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: succeeded,
+                failed: remaining - unknown,
+                unknown: unknown,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).partial",
+                diagnosticTag: "\(prefix).partial"
+            )
+        }
+        if unknown > 0 {
+            return try proxyMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: unknown,
+                errorCategory: failureCategory.map {
+                    packageMutationErrorCategory(for: $0)
+                },
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unchanged"
+            )
+        }
+        if let failureCategory {
+            return try proxyRejectedResult(
+                AppError(
+                    category: failureCategory,
+                    isRetryable: false,
+                    safeUserMessage: L10n.string("proxy.settings.failed")
+                ),
+                totalCount: steps.count,
+                submitted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        return try proxyMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: remaining,
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationKey: "\(prefix).failed",
+            diagnosticTag: "\(prefix).readback-mismatch"
+        )
+    }
+
+    private func proxyRejectedResult(
+        _ error: AppError,
+        totalCount: Int,
+        submitted: Bool,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        let status: MutationResultStatus
+        let localizationKey: String
+        let category: MutationErrorCategory
+        switch error.category {
+        case .permissionDenied, .authenticationRequired:
+            status = .permissionDenied
+            localizationKey = "\(prefix).permission-denied"
+            category = .permission
+        case .apiUnavailable, .versionUnsupported:
+            status = .unsupported
+            localizationKey = "\(prefix).unsupported"
+            category = .unsupported
+        default:
+            status = .confirmedFailure
+            localizationKey = "\(prefix).failed"
+            category = packageMutationErrorCategory(for: error.category)
+        }
+        return try proxyMutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: totalCount,
+            unknown: 0,
+            errorCategory: category,
+            localizationKey: localizationKey,
+            diagnosticTag: "\(prefix).rejected"
+        )
+    }
+
+    private func proxyPreflightResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        if error.category == .cancelled {
+            return try proxyMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        }
+        return try proxyRejectedResult(
+            error,
+            totalCount: 1,
+            submitted: false,
+            operation: operation,
+            prefix: prefix
+        )
+    }
+
+    private static func proxyMutationStep(
+        _ step: ProxySettingsMutationStep,
+        matches actual: NasProxySettings,
+        expected: NasProxySettings
+    ) -> Bool {
+        switch step {
+        case .enabled:
+            actual.isEnabled == expected.isEnabled
+        case .host:
+            actual.host == expected.host
+        case .port:
+            actual.port == expected.port
+        }
+    }
+
+    private func proxyMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func proxySettingsError(for result: MutationResult) -> AppError {
+        let category: AppErrorCategory = switch result.status {
+        case .permissionDenied:
+            .permissionDenied
+        case .unsupported:
+            .apiUnavailable
+        case .partialSuccess:
+            .partialFailure
+        case .cancelledBeforeSubmission, .cancellationRequestedAfterSubmission:
+            .cancelled
+        case .confirmedSuccess, .confirmedFailure, .submittedButUnverified:
+            .unknown
+        }
+        return AppError(
+            category: category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? "proxy.settings.failed"
+            )
+        )
     }
 
     public func loadEthernetInterfaces() async throws -> [NasEthernetInterface] {
@@ -464,54 +2225,21 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     }
 
     public func saveEthernetInterface(_ interface: NasEthernetInterface) async throws {
-        guard interface.id.hasPrefix("eth"),
-              interface.id.unicodeScalars.allSatisfy({
-                  CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
-                      .contains($0)
-              }) else {
-            throw verificationError(L10n.string("shared.e08a7f16a91c9932"))
-        }
-        guard (576...9_000).contains(interface.mtu) else {
-            throw verificationError(L10n.string("shared.bd04fc72d0e308c0"))
-        }
-        if interface.isVLANEnabled {
-            guard let vlanID = interface.vlanID, (1...4_094).contains(vlanID) else {
-                throw verificationError(L10n.string("shared.e5be64194f7d7959"))
-            }
-        }
-        if !interface.usesDHCP {
-            guard Self.isValidIPv4(interface.address),
-                  Self.isValidIPv4(interface.subnetMask),
-                  (interface.gateway.isEmpty || Self.isValidIPv4(interface.gateway)) else {
-                throw verificationError(L10n.string("shared.e4338b64530bcbcc"))
-            }
-        }
+        try Self.validateEthernetInterface(interface)
         let current = try await loadEthernetInterfaces()
         guard let existing = current.first(where: { $0.id == interface.id }) else {
             throw verificationError(L10n.string("shared.f0a75be9d773f2a6"))
         }
         guard existing != interface else { return }
-        var config: [String: DsmJSONValue] = [
-            "ifname": .string(interface.id),
-            "use_dhcp": .boolean(interface.usesDHCP),
-            "is_default_gateway": .boolean(interface.isDefaultGateway),
-            "mtu": .integer(interface.mtu),
-            "enable_vlan": .boolean(interface.isVLANEnabled)
-        ]
-        if !interface.usesDHCP {
-            config["ip"] = .string(interface.address)
-            config["mask"] = .string(interface.subnetMask)
-            config["gateway"] = .string(interface.gateway)
-            config["dns"] = .string(interface.dnsServers)
-        }
-        if interface.isVLANEnabled, let vlanID = interface.vlanID {
-            config["vlan_id"] = .integer(vlanID)
-        }
         try await callVoid(
             DsmAPIName.coreNetworkEthernet,
             method: "set",
             version: 1,
-            parameters: ["configs": .objectArray([config])]
+            parameters: [
+                "configs": .objectArray([
+                    Self.ethernetConfiguration(interface)
+                ])
+            ]
         )
         let verifiedValue = try await call(
             DsmAPIName.coreNetworkEthernet,
@@ -525,6 +2253,243 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             id: interface.id
         ), Self.ethernetInterface(verified, matches: interface) else {
             throw verificationError(L10n.string("shared.648300d4688b5c30"))
+        }
+    }
+
+    /// 网卡配置可能在提交后中断当前连接；未知结果必须重新连接并回读，不得自动重放。
+    public func saveEthernetInterfaceResult(
+        _ interface: NasEthernetInterface
+    ) async throws -> MutationResult {
+        let operation = "ethernetUpdate"
+        let prefix = "network.ethernet"
+        if Task.isCancelled {
+            return try ethernetMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
+        }
+
+        do {
+            try Self.validateEthernetInterface(interface)
+        } catch {
+            return try ethernetMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).invalid-input"
+            )
+        }
+        guard capabilities[DsmAPIName.coreNetworkEthernet]?.selectedVersion != nil else {
+            return try ethernetMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+        guard activeEthernetUpdateIDs.insert(interface.id).inserted else {
+            return try ethernetMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).duplicate-submission"
+            )
+        }
+        defer { activeEthernetUpdateIDs.remove(interface.id) }
+
+        do {
+            let current = try await loadEthernetInterfaces()
+            guard let existing = current.first(where: { $0.id == interface.id }) else {
+                return try ethernetMutationResult(
+                    status: .confirmedFailure,
+                    operation: operation,
+                    submitted: false,
+                    requiresRefresh: false,
+                    succeeded: 0,
+                    failed: 1,
+                    unknown: 0,
+                    errorCategory: .conflict,
+                    localizationKey: "\(prefix).failed",
+                    diagnosticTag: "\(prefix).target-not-found"
+                )
+            }
+            guard !Self.ethernetInterface(existing, matches: interface) else {
+                return try ethernetMutationResult(
+                    status: .confirmedFailure,
+                    operation: operation,
+                    submitted: false,
+                    requiresRefresh: false,
+                    succeeded: 0,
+                    failed: 1,
+                    unknown: 0,
+                    errorCategory: .validation,
+                    localizationKey: "\(prefix).failed",
+                    diagnosticTag: "\(prefix).no-changes"
+                )
+            }
+        } catch let error as AppError {
+            return try ethernetPreflightResult(error, operation: operation, prefix: prefix)
+        } catch {
+            return try ethernetMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-unknown"
+            )
+        }
+
+        if Task.isCancelled {
+            return try ethernetMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
+
+        do {
+            try await callVoid(
+                DsmAPIName.coreNetworkEthernet,
+                method: "set",
+                version: 1,
+                parameters: [
+                    "configs": .objectArray([
+                        Self.ethernetConfiguration(interface)
+                    ])
+                ]
+            )
+        } catch let error as AppError {
+            return try ethernetSubmissionResult(error, operation: operation, prefix: prefix)
+        } catch {
+            return try ethernetMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unknown"
+            )
+        }
+
+        if Task.isCancelled {
+            return try ethernetMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-after-submission"
+            )
+        }
+
+        do {
+            let verifiedValue = try await call(
+                DsmAPIName.coreNetworkEthernet,
+                method: "get",
+                version: 1,
+                parameters: ["ifname": .string(interface.id)]
+            )
+            guard let verified = Self.ethernetInterface(
+                from: verifiedValue,
+                fallback: [:],
+                id: interface.id
+            ) else {
+                return try ethernetMutationResult(
+                    status: .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: 0,
+                    unknown: 1,
+                    errorCategory: .server,
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).readback-invalid"
+                )
+            }
+            guard Self.ethernetInterface(verified, matches: interface) else {
+                return try ethernetMutationResult(
+                    status: .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: 0,
+                    unknown: 1,
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).readback-mismatch"
+                )
+            }
+            return try ethernetMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 1,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).confirmed"
+            )
+        } catch let error as AppError {
+            return try ethernetReadbackResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try ethernetMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
         }
     }
 
@@ -603,29 +2568,245 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     }
 
     public func saveHardwareSettings(_ settings: NasHardwareSettings) async throws {
-        let current = try await loadHardwareSettings()
-        if let value = settings.restartsAfterPowerFailure,
-           value != current.restartsAfterPowerFailure {
-            try await callVoid(
-                DsmAPIName.coreHardwarePowerRecovery,
-                method: "set",
-                parameters: ["rc_power_config": .boolean(value)]
+        let result = try await saveHardwareSettingsResult(settings)
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw hardwareSettingsError(for: result)
+        }
+    }
+
+    /// 硬件设置由多个内部接口组成；任一提交失败后都整体回读，禁止自动重放。
+    public func saveHardwareSettingsResult(
+        _ settings: NasHardwareSettings
+    ) async throws -> MutationResult {
+        let operation = "hardwareSettingsUpdate"
+        let prefix = "hardware.settings"
+        if Task.isCancelled {
+            return try hardwareMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-before-submission"
             )
         }
+        guard !isHardwareSettingsUpdateActive else {
+            return try hardwareMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).duplicate-submission"
+            )
+        }
+        isHardwareSettingsUpdateActive = true
+        defer { isHardwareSettingsUpdateActive = false }
+
+        let current: NasHardwareSettings
+        do {
+            current = try await loadHardwareSettings()
+        } catch let error as AppError {
+            return try hardwarePreflightResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try hardwareMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-unknown"
+            )
+        }
+        do {
+            try validateHardwareSettings(settings, current: current)
+        } catch {
+            return try hardwareMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).invalid-input"
+            )
+        }
+        let steps = hardwareMutationSteps(from: current, to: settings)
+        guard !steps.isEmpty else {
+            return try hardwareMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).no-changes"
+            )
+        }
+        guard hardwareCapabilitiesSupport(steps) else {
+            return try hardwareMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: steps.count,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+        if Task.isCancelled {
+            return try hardwareMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
+
+        var acceptedCount = 0
+        for step in steps {
+            if Task.isCancelled {
+                if acceptedCount == 0 {
+                    return try hardwareMutationResult(
+                        status: .cancelledBeforeSubmission,
+                        operation: operation,
+                        submitted: false,
+                        requiresRefresh: false,
+                        succeeded: 0,
+                        failed: 0,
+                        unknown: 0,
+                        diagnosticTag: "\(prefix).cancelled-before-first-submission"
+                    )
+                }
+                return try hardwareMutationResult(
+                    status: .cancellationRequestedAfterSubmission,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: steps.count - acceptedCount,
+                    unknown: acceptedCount,
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).cancelled-after-submission"
+                )
+            }
+            do {
+                try await submitHardwareMutationStep(
+                    step,
+                    settings: settings,
+                    current: current
+                )
+                acceptedCount += 1
+            } catch let error as AppError {
+                return try await hardwareSubmissionFailureResult(
+                    error,
+                    settings: settings,
+                    steps: steps,
+                    acceptedCount: acceptedCount,
+                    operation: operation,
+                    prefix: prefix
+                )
+            } catch {
+                return try await hardwareUnknownSubmissionResult(
+                    settings: settings,
+                    steps: steps,
+                    acceptedCount: acceptedCount,
+                    operation: operation,
+                    prefix: prefix
+                )
+            }
+        }
+
+        if Task.isCancelled {
+            return try hardwareMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-before-readback"
+            )
+        }
+        do {
+            let verified = try await loadHardwareSettings()
+            return try hardwareVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch let error as AppError {
+            return try hardwareMutationResult(
+                status: error.category == .cancelled
+                    ? .cancellationRequestedAfterSubmission
+                    : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unverified"
+            )
+        } catch {
+            return try hardwareMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
+        }
+    }
+
+    private func validateHardwareSettings(
+        _ settings: NasHardwareSettings,
+        current: NasHardwareSettings
+    ) throws {
         if let brightness = settings.ledBrightness,
            brightness != current.ledBrightness {
             guard let range = current.ledBrightnessRange, range.contains(brightness) else {
                 throw verificationError(L10n.string("shared.e7bc95903e2c1a21"))
             }
-            try await callVoid(
-                DsmAPIName.coreHardwareLEDBrightness,
-                method: "set_current_brightness",
-                parameters: ["led_brightness": .integer(brightness)]
-            )
-            try await callVoid(
-                DsmAPIName.coreHardwareLEDBrightness,
-                method: "update"
-            )
         }
         if let fanMode = settings.fanMode,
            fanMode != current.fanMode {
@@ -640,184 +2821,624 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             guard supportedModes.contains(fanMode) else {
                 throw verificationError(L10n.string("shared.f57a2aff1b6f5542"))
             }
+        }
+        guard (settings.ups == nil) == (current.ups == nil) else {
+            throw verificationError(L10n.string("shared.4b3caf9ebe49fe9e"))
+        }
+        guard let expectedUPS = settings.ups, settings.ups != current.ups else { return }
+        guard ["USB", "SNMP", "SLAVE"].contains(expectedUPS.mode) else {
+            throw verificationError(L10n.string("shared.6c49d4a3c0dca3eb"))
+        }
+        if let delay = expectedUPS.safeModeDelaySeconds,
+           !(0...604_800).contains(delay) {
+            throw verificationError(L10n.string("shared.6fc94869ad264ba7"))
+        }
+        if expectedUPS.mode == "SLAVE",
+           expectedUPS.isEnabled,
+           (expectedUPS.networkServerAddress?
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+            throw verificationError(L10n.string("shared.47b0ea4e9e53c8c1"))
+        }
+        if expectedUPS.mode == "SNMP",
+           expectedUPS.isEnabled,
+           (expectedUPS.snmpServerAddress?
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+            throw verificationError(L10n.string("shared.0ac712a773c6795f"))
+        }
+    }
+
+    private func hardwareMutationSteps(
+        from current: NasHardwareSettings,
+        to expected: NasHardwareSettings
+    ) -> [HardwareSettingsMutationStep] {
+        var steps: [HardwareSettingsMutationStep] = []
+        if expected.restartsAfterPowerFailure != nil,
+           expected.restartsAfterPowerFailure != current.restartsAfterPowerFailure {
+            steps.append(.powerRecovery)
+        }
+        if expected.ledBrightness != nil,
+           expected.ledBrightness != current.ledBrightness {
+            steps.append(.ledBrightness)
+        }
+        if expected.fanMode != nil, expected.fanMode != current.fanMode {
+            steps.append(.fanMode)
+        }
+        if !hardwareBeepParameters(expected, current: current).isEmpty {
+            steps.append(.beep)
+        }
+        if !hardwareHibernationParameters(expected, current: current).isEmpty {
+            steps.append(.hibernation)
+        }
+        if expected.ups != nil, expected.ups != current.ups {
+            steps.append(.ups)
+        }
+        return steps
+    }
+
+    private func hardwareCapabilitiesSupport(
+        _ steps: [HardwareSettingsMutationStep]
+    ) -> Bool {
+        steps.allSatisfy { step in
+            switch step {
+            case .powerRecovery:
+                capabilitySupports(DsmAPIName.coreHardwarePowerRecovery)
+            case .ledBrightness:
+                capabilitySupports(DsmAPIName.coreHardwareLEDBrightness)
+            case .fanMode:
+                capabilitySupports(DsmAPIName.coreHardwareFanSpeed)
+            case .beep:
+                capabilitySupports(DsmAPIName.coreHardwareBeepControl)
+            case .hibernation:
+                capabilitySupports(DsmAPIName.coreHardwareHibernation)
+            case .ups:
+                capabilitySupports(DsmAPIName.coreExternalDeviceUPS)
+            }
+        }
+    }
+
+    private func submitHardwareMutationStep(
+        _ step: HardwareSettingsMutationStep,
+        settings: NasHardwareSettings,
+        current: NasHardwareSettings
+    ) async throws {
+        switch step {
+        case .powerRecovery:
+            guard let value = settings.restartsAfterPowerFailure else {
+                throw verificationError(L10n.string("shared.9e2bef35ff2e4491"))
+            }
+            try await callVoid(
+                DsmAPIName.coreHardwarePowerRecovery,
+                method: "set",
+                parameters: ["rc_power_config": .boolean(value)]
+            )
+        case .ledBrightness:
+            guard let brightness = settings.ledBrightness else {
+                throw verificationError(L10n.string("shared.9e2bef35ff2e4491"))
+            }
+            try await callVoid(
+                DsmAPIName.coreHardwareLEDBrightness,
+                method: "set_current_brightness",
+                parameters: ["led_brightness": .integer(brightness)]
+            )
+            try await callVoid(
+                DsmAPIName.coreHardwareLEDBrightness,
+                method: "update"
+            )
+        case .fanMode:
+            guard let fanMode = settings.fanMode else {
+                throw verificationError(L10n.string("shared.9e2bef35ff2e4491"))
+            }
             try await callVoid(
                 DsmAPIName.coreHardwareFanSpeed,
                 method: "set",
                 parameters: ["dual_fan_speed": .string(fanMode)]
             )
+        case .beep:
+            try await callVoid(
+                DsmAPIName.coreHardwareBeepControl,
+                method: "set",
+                parameters: hardwareBeepParameters(settings, current: current)
+            )
+        case .hibernation:
+            try await callVoid(
+                DsmAPIName.coreHardwareHibernation,
+                method: "set",
+                parameters: hardwareHibernationParameters(settings, current: current)
+            )
+        case .ups:
+            try await callVoid(
+                DsmAPIName.coreExternalDeviceUPS,
+                method: "set",
+                parameters: try hardwareUPSParameters(settings, current: current)
+            )
         }
-        var beepParameters: [String: DsmParameterValue] = [:]
+    }
+
+    private func hardwareBeepParameters(
+        _ settings: NasHardwareSettings,
+        current: NasHardwareSettings
+    ) -> [String: DsmParameterValue] {
+        var parameters: [String: DsmParameterValue] = [:]
         Self.appendChangedBoolean(
             settings.isFanFailureAlertEnabled,
             current.isFanFailureAlertEnabled,
             key: "fan_fail",
-            to: &beepParameters
+            to: &parameters
         )
         if let volumeField = beepVolumeFieldName {
             Self.appendChangedBoolean(
                 settings.isVolumeFailureAlertEnabled,
                 current.isVolumeFailureAlertEnabled,
                 key: volumeField,
-                to: &beepParameters
+                to: &parameters
             )
         }
         Self.appendChangedBoolean(
             settings.isPowerOnSoundEnabled,
             current.isPowerOnSoundEnabled,
             key: "poweron_beep",
-            to: &beepParameters
+            to: &parameters
         )
         Self.appendChangedBoolean(
             settings.isPowerOffSoundEnabled,
             current.isPowerOffSoundEnabled,
             key: "poweroff_beep",
-            to: &beepParameters
+            to: &parameters
         )
         Self.appendChangedBoolean(
             settings.isResetSoundEnabled,
             current.isResetSoundEnabled,
             key: "reset_beep",
-            to: &beepParameters
+            to: &parameters
         )
-        if !beepParameters.isEmpty {
-            try await callVoid(
-                DsmAPIName.coreHardwareBeepControl,
-                method: "set",
-                parameters: beepParameters
-            )
-        }
-        var hibernationParameters: [String: DsmParameterValue] = [:]
+        return parameters
+    }
+
+    private func hardwareHibernationParameters(
+        _ settings: NasHardwareSettings,
+        current: NasHardwareSettings
+    ) -> [String: DsmParameterValue] {
+        var parameters: [String: DsmParameterValue] = [:]
         Self.appendChangedBoolean(
             settings.isExternalDriveDeepSleepEnabled,
             current.isExternalDriveDeepSleepEnabled,
             key: "eunit_deep_sleep",
-            to: &hibernationParameters
+            to: &parameters
         )
         Self.appendChangedBoolean(
             settings.isWakeUpLogEnabled,
             current.isWakeUpLogEnabled,
             key: "enable_log",
-            to: &hibernationParameters
+            to: &parameters
         )
         Self.appendChangedBoolean(
             settings.isSATASleepEnabled,
             current.isSATASleepEnabled,
             key: "sata_deep_sleep",
-            to: &hibernationParameters
+            to: &parameters
         )
         Self.appendChangedBoolean(
             settings.ignoresNetworkDiscoveryDuringSleep,
             current.ignoresNetworkDiscoveryDuringSleep,
             key: "ignore_netbios_broadcast",
-            to: &hibernationParameters
+            to: &parameters
         )
         Self.appendChangedBoolean(
             settings.isAutomaticPowerOffEnabled,
             current.isAutomaticPowerOffEnabled,
             key: "auto_poweroff_enable",
-            to: &hibernationParameters
+            to: &parameters
         )
-        if !hibernationParameters.isEmpty {
-            try await callVoid(
-                DsmAPIName.coreHardwareHibernation,
-                method: "set",
-                parameters: hibernationParameters
+        return parameters
+    }
+
+    private func hardwareUPSParameters(
+        _ settings: NasHardwareSettings,
+        current: NasHardwareSettings
+    ) throws -> [String: DsmParameterValue] {
+        guard let expected = settings.ups, let currentUPS = current.ups else {
+            throw verificationError(L10n.string("shared.4b3caf9ebe49fe9e"))
+        }
+        var parameters: [String: DsmParameterValue] = [
+            "enable": .boolean(expected.isEnabled),
+            "mode": .string(expected.mode)
+        ]
+        if let delay = expected.safeModeDelaySeconds {
+            parameters["delay_time"] = .integer(delay)
+        }
+        Self.appendChangedBoolean(
+            expected.waitsUntilLowBattery,
+            currentUPS.waitsUntilLowBattery,
+            key: "ups_set_safemode_until_lowbatt",
+            to: &parameters
+        )
+        Self.appendChangedBoolean(
+            expected.shutsDownUPSAfterSafeMode,
+            currentUPS.shutsDownUPSAfterSafeMode,
+            key: "shutdown_device",
+            to: &parameters
+        )
+        if let address = expected.networkServerAddress {
+            parameters["net_server_ip"] = .string(
+                address.trimmingCharacters(in: .whitespacesAndNewlines)
             )
         }
-        if let expectedUPS = settings.ups, let currentUPS = current.ups,
-           expectedUPS != currentUPS {
-            let supportedModes = Set(["USB", "SNMP", "SLAVE"])
-            guard supportedModes.contains(expectedUPS.mode) else {
-                throw verificationError(L10n.string("shared.6c49d4a3c0dca3eb"))
-            }
-            if let delay = expectedUPS.safeModeDelaySeconds,
-               !(0...604_800).contains(delay) {
-                throw verificationError(L10n.string("shared.6fc94869ad264ba7"))
-            }
-            if expectedUPS.mode == "SLAVE",
-               expectedUPS.isEnabled,
-               (expectedUPS.networkServerAddress?
-                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
-                throw verificationError(L10n.string("shared.47b0ea4e9e53c8c1"))
-            }
-            if expectedUPS.mode == "SNMP",
-               expectedUPS.isEnabled,
-               (expectedUPS.snmpServerAddress?
-                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
-                throw verificationError(L10n.string("shared.0ac712a773c6795f"))
-            }
-            var upsParameters: [String: DsmParameterValue] = [
-                "enable": .boolean(expectedUPS.isEnabled),
-                "mode": .string(expectedUPS.mode)
-            ]
-            if let delay = expectedUPS.safeModeDelaySeconds {
-                upsParameters["delay_time"] = .integer(delay)
-            }
-            Self.appendChangedBoolean(
-                expectedUPS.waitsUntilLowBattery,
-                currentUPS.waitsUntilLowBattery,
-                key: "ups_set_safemode_until_lowbatt",
-                to: &upsParameters
+        if let address = expected.snmpServerAddress {
+            parameters["snmp_server_ip"] = .string(
+                address.trimmingCharacters(in: .whitespacesAndNewlines)
             )
-            Self.appendChangedBoolean(
-                expectedUPS.shutsDownUPSAfterSafeMode,
-                currentUPS.shutsDownUPSAfterSafeMode,
-                key: "shutdown_device",
-                to: &upsParameters
+        }
+        return parameters
+    }
+
+    private func hardwareSubmissionFailureResult(
+        _ submissionError: AppError,
+        settings: NasHardwareSettings,
+        steps: [HardwareSettingsMutationStep],
+        acceptedCount: Int,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        let isAmbiguous = switch submissionError.category {
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            true
+        default:
+            false
+        }
+        if submissionError.category == .cancelled {
+            return try hardwareMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: max(0, steps.count - acceptedCount - 1),
+                unknown: min(steps.count, acceptedCount + 1),
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-during-submission"
             )
-            if let address = expectedUPS.networkServerAddress {
-                upsParameters["net_server_ip"] = .string(
-                    address.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        do {
+            let verified = try await loadHardwareSettings()
+            return try hardwareVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: submissionError.category,
+                uncertainCount: isAmbiguous
+                    ? min(steps.count, acceptedCount + 1)
+                    : acceptedCount
+            )
+        } catch {
+            if acceptedCount > 0 || isAmbiguous {
+                let unknown = min(
+                    steps.count,
+                    acceptedCount + (isAmbiguous ? 1 : 0)
+                )
+                return try hardwareMutationResult(
+                    status: .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: steps.count - unknown,
+                    unknown: unknown,
+                    errorCategory: packageMutationErrorCategory(
+                        for: submissionError.category
+                    ),
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).partial-readback-unverified"
                 )
             }
-            if let address = expectedUPS.snmpServerAddress {
-                upsParameters["snmp_server_ip"] = .string(
-                    address.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
-            }
-            try await callVoid(
-                DsmAPIName.coreExternalDeviceUPS,
-                method: "set",
-                parameters: upsParameters
+            return try hardwareRejectedResult(
+                submissionError,
+                totalCount: steps.count,
+                submitted: true,
+                operation: operation,
+                prefix: prefix
             )
-        } else if settings.ups != nil || current.ups != nil {
-            guard settings.ups != nil, current.ups != nil else {
-                throw verificationError(L10n.string("shared.4b3caf9ebe49fe9e"))
-            }
         }
-        let verified = try await loadHardwareSettings()
-        guard (settings.restartsAfterPowerFailure == nil
-                || verified.restartsAfterPowerFailure == settings.restartsAfterPowerFailure),
-              (settings.ledBrightness == nil
-                || verified.ledBrightness == settings.ledBrightness),
-              (settings.fanMode == nil || verified.fanMode == settings.fanMode),
-              (settings.isFanFailureAlertEnabled == nil
-                || verified.isFanFailureAlertEnabled == settings.isFanFailureAlertEnabled),
-              (settings.isVolumeFailureAlertEnabled == nil
-                || verified.isVolumeFailureAlertEnabled
-                    == settings.isVolumeFailureAlertEnabled),
-              (settings.isPowerOnSoundEnabled == nil
-                || verified.isPowerOnSoundEnabled == settings.isPowerOnSoundEnabled),
-              (settings.isPowerOffSoundEnabled == nil
-                || verified.isPowerOffSoundEnabled == settings.isPowerOffSoundEnabled),
-              (settings.isResetSoundEnabled == nil
-                || verified.isResetSoundEnabled == settings.isResetSoundEnabled),
-              (settings.isExternalDriveDeepSleepEnabled == nil
-                || verified.isExternalDriveDeepSleepEnabled
-                    == settings.isExternalDriveDeepSleepEnabled),
-              (settings.isWakeUpLogEnabled == nil
-                || verified.isWakeUpLogEnabled == settings.isWakeUpLogEnabled),
-              (settings.isSATASleepEnabled == nil
-                || verified.isSATASleepEnabled == settings.isSATASleepEnabled),
-              (settings.ignoresNetworkDiscoveryDuringSleep == nil
-                || verified.ignoresNetworkDiscoveryDuringSleep
-                    == settings.ignoresNetworkDiscoveryDuringSleep),
-              (settings.isAutomaticPowerOffEnabled == nil
-                || verified.isAutomaticPowerOffEnabled
-                    == settings.isAutomaticPowerOffEnabled),
-              Self.upsSettings(verified.ups, match: settings.ups) else {
-            throw verificationError(L10n.string("shared.9e2bef35ff2e4491"))
+    }
+
+    private func hardwareUnknownSubmissionResult(
+        settings: NasHardwareSettings,
+        steps: [HardwareSettingsMutationStep],
+        acceptedCount: Int,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        do {
+            let verified = try await loadHardwareSettings()
+            return try hardwareVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: .unknown,
+                uncertainCount: min(steps.count, acceptedCount + 1)
+            )
+        } catch {
+            let unknown = min(steps.count, acceptedCount + 1)
+            return try hardwareMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: steps.count - unknown,
+                unknown: unknown,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unknown"
+            )
         }
+    }
+
+    private func hardwareVerifiedResult(
+        _ actual: NasHardwareSettings,
+        expected: NasHardwareSettings,
+        steps: [HardwareSettingsMutationStep],
+        operation: String,
+        prefix: String,
+        failureCategory: AppErrorCategory? = nil,
+        uncertainCount: Int = 0
+    ) throws -> MutationResult {
+        let succeeded = steps.filter {
+            Self.hardwareMutationStep($0, matches: actual, expected: expected)
+        }.count
+        let remaining = steps.count - succeeded
+        if succeeded == steps.count {
+            return try hardwareMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: succeeded,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).confirmed"
+            )
+        }
+        let unknown = min(remaining, max(0, uncertainCount - succeeded))
+        if succeeded > 0 {
+            return try hardwareMutationResult(
+                status: .partialSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: succeeded,
+                failed: remaining - unknown,
+                unknown: unknown,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).partial",
+                diagnosticTag: "\(prefix).partial"
+            )
+        }
+        if unknown > 0 {
+            return try hardwareMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: remaining - unknown,
+                unknown: unknown,
+                errorCategory: failureCategory.map {
+                    packageMutationErrorCategory(for: $0)
+                },
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unchanged"
+            )
+        }
+        if let failureCategory {
+            return try hardwareRejectedResult(
+                AppError(
+                    category: failureCategory,
+                    isRetryable: false,
+                    safeUserMessage: L10n.string("hardware.settings.failed")
+                ),
+                totalCount: steps.count,
+                submitted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        return try hardwareMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: remaining,
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationKey: "\(prefix).failed",
+            diagnosticTag: "\(prefix).readback-mismatch"
+        )
+    }
+
+    private func hardwareRejectedResult(
+        _ error: AppError,
+        totalCount: Int,
+        submitted: Bool,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        let status: MutationResultStatus
+        let localizationKey: String
+        let category: MutationErrorCategory
+        switch error.category {
+        case .permissionDenied, .authenticationRequired:
+            status = .permissionDenied
+            localizationKey = "\(prefix).permission-denied"
+            category = .permission
+        case .apiUnavailable, .versionUnsupported:
+            status = .unsupported
+            localizationKey = "\(prefix).unsupported"
+            category = .unsupported
+        default:
+            status = .confirmedFailure
+            localizationKey = "\(prefix).failed"
+            category = packageMutationErrorCategory(for: error.category)
+        }
+        return try hardwareMutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: totalCount,
+            unknown: 0,
+            errorCategory: category,
+            localizationKey: localizationKey,
+            diagnosticTag: "\(prefix).rejected"
+        )
+    }
+
+    private func hardwarePreflightResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        if error.category == .cancelled {
+            return try hardwareMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        }
+        return try hardwareRejectedResult(
+            error,
+            totalCount: 1,
+            submitted: false,
+            operation: operation,
+            prefix: prefix
+        )
+    }
+
+    private static func hardwareMutationStep(
+        _ step: HardwareSettingsMutationStep,
+        matches actual: NasHardwareSettings,
+        expected: NasHardwareSettings
+    ) -> Bool {
+        switch step {
+        case .powerRecovery:
+            actual.restartsAfterPowerFailure == expected.restartsAfterPowerFailure
+        case .ledBrightness:
+            actual.ledBrightness == expected.ledBrightness
+        case .fanMode:
+            actual.fanMode == expected.fanMode
+        case .beep:
+            optionalHardwareValue(
+                actual.isFanFailureAlertEnabled,
+                matches: expected.isFanFailureAlertEnabled
+            )
+                && optionalHardwareValue(
+                    actual.isVolumeFailureAlertEnabled,
+                    matches: expected.isVolumeFailureAlertEnabled
+                )
+                && optionalHardwareValue(
+                    actual.isPowerOnSoundEnabled,
+                    matches: expected.isPowerOnSoundEnabled
+                )
+                && optionalHardwareValue(
+                    actual.isPowerOffSoundEnabled,
+                    matches: expected.isPowerOffSoundEnabled
+                )
+                && optionalHardwareValue(
+                    actual.isResetSoundEnabled,
+                    matches: expected.isResetSoundEnabled
+                )
+        case .hibernation:
+            optionalHardwareValue(
+                actual.isExternalDriveDeepSleepEnabled,
+                matches: expected.isExternalDriveDeepSleepEnabled
+            )
+                && optionalHardwareValue(
+                    actual.isWakeUpLogEnabled,
+                    matches: expected.isWakeUpLogEnabled
+                )
+                && optionalHardwareValue(
+                    actual.isSATASleepEnabled,
+                    matches: expected.isSATASleepEnabled
+                )
+                && optionalHardwareValue(
+                    actual.ignoresNetworkDiscoveryDuringSleep,
+                    matches: expected.ignoresNetworkDiscoveryDuringSleep
+                )
+                && optionalHardwareValue(
+                    actual.isAutomaticPowerOffEnabled,
+                    matches: expected.isAutomaticPowerOffEnabled
+                )
+        case .ups:
+            upsSettings(actual.ups, match: expected.ups)
+        }
+    }
+
+    private static func optionalHardwareValue<T: Equatable>(
+        _ actual: T?,
+        matches expected: T?
+    ) -> Bool {
+        expected == nil || actual == expected
+    }
+
+    private func hardwareMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func hardwareSettingsError(for result: MutationResult) -> AppError {
+        let category: AppErrorCategory = switch result.status {
+        case .permissionDenied:
+            .permissionDenied
+        case .unsupported:
+            .apiUnavailable
+        case .partialSuccess:
+            .partialFailure
+        case .cancelledBeforeSubmission, .cancellationRequestedAfterSubmission:
+            .cancelled
+        case .confirmedSuccess, .confirmedFailure, .submittedButUnverified:
+            .unknown
+        }
+        return AppError(
+            category: category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? "hardware.settings.failed"
+            )
+        )
     }
 
     public func loadRemoteAccessSettings() async throws -> NasRemoteAccessSettings {
@@ -844,41 +3465,605 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     }
 
     public func saveRemoteAccessSettings(_ settings: NasRemoteAccessSettings) async throws {
-        let current = try await loadRemoteAccessSettings()
+        let result = try await saveRemoteAccessSettingsResult(settings)
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw remoteAccessSettingsError(for: result)
+        }
+    }
+
+    /// 远程访问设置可能改变连接路径；提交开始后必须先回读，禁止自动重放。
+    public func saveRemoteAccessSettingsResult(
+        _ settings: NasRemoteAccessSettings
+    ) async throws -> MutationResult {
+        let operation = "remoteAccessSettingsUpdate"
+        let prefix = "remote-access.settings"
+        if Task.isCancelled {
+            return try remoteAccessMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
+        }
+        guard !isRemoteAccessSettingsUpdateActive else {
+            return try remoteAccessMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).duplicate-submission"
+            )
+        }
+        isRemoteAccessSettingsUpdateActive = true
+        defer { isRemoteAccessSettingsUpdateActive = false }
+
+        let current: NasRemoteAccessSettings
+        do {
+            current = try await loadRemoteAccessSettings()
+        } catch let error as AppError {
+            return try remoteAccessPreflightResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try remoteAccessMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-unknown"
+            )
+        }
         if settings.isRelayEnabled == false,
            current.isRelayEnabled == true,
            !current.canDisableRelay {
-            throw AppError(
-                category: .conflict,
-                isRetryable: false,
-                safeUserMessage: L10n.string("shared.0ca30ab13245d805")
+            return try remoteAccessMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).active-relay-connection"
             )
         }
-        if let enabled = settings.isRelayEnabled,
-           enabled != current.isRelayEnabled {
+        let steps = remoteAccessMutationSteps(from: current, to: settings)
+        guard !steps.isEmpty else {
+            return try remoteAccessMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).no-changes"
+            )
+        }
+        guard remoteAccessCapabilitiesSupport(steps) else {
+            return try remoteAccessMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: steps.count,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+        if Task.isCancelled {
+            return try remoteAccessMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
+
+        var acceptedCount = 0
+        for step in steps {
+            if Task.isCancelled {
+                if acceptedCount == 0 {
+                    return try remoteAccessMutationResult(
+                        status: .cancelledBeforeSubmission,
+                        operation: operation,
+                        submitted: false,
+                        requiresRefresh: false,
+                        succeeded: 0,
+                        failed: 0,
+                        unknown: 0,
+                        diagnosticTag: "\(prefix).cancelled-before-first-submission"
+                    )
+                }
+                return try remoteAccessMutationResult(
+                    status: .cancellationRequestedAfterSubmission,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: steps.count - acceptedCount,
+                    unknown: acceptedCount,
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).cancelled-after-submission"
+                )
+            }
+            do {
+                try await submitRemoteAccessMutationStep(step, settings: settings)
+                acceptedCount += 1
+            } catch let error as AppError {
+                return try await remoteAccessSubmissionFailureResult(
+                    error,
+                    settings: settings,
+                    steps: steps,
+                    acceptedCount: acceptedCount,
+                    operation: operation,
+                    prefix: prefix
+                )
+            } catch {
+                return try await remoteAccessUnknownSubmissionResult(
+                    settings: settings,
+                    steps: steps,
+                    acceptedCount: acceptedCount,
+                    operation: operation,
+                    prefix: prefix
+                )
+            }
+        }
+
+        if Task.isCancelled {
+            return try remoteAccessMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-before-readback"
+            )
+        }
+        do {
+            let verified = try await loadRemoteAccessSettings()
+            return try remoteAccessVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch let error as AppError {
+            return try remoteAccessMutationResult(
+                status: error.category == .cancelled
+                    ? .cancellationRequestedAfterSubmission
+                    : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unverified"
+            )
+        } catch {
+            return try remoteAccessMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
+        }
+    }
+
+    private func remoteAccessMutationSteps(
+        from current: NasRemoteAccessSettings,
+        to expected: NasRemoteAccessSettings
+    ) -> [RemoteAccessSettingsMutationStep] {
+        var steps: [RemoteAccessSettingsMutationStep] = []
+        if expected.isRelayEnabled != nil,
+           expected.isRelayEnabled != current.isRelayEnabled {
+            steps.append(.relay)
+        }
+        if expected.isRouterConfigurationEnabled != nil,
+           expected.isRouterConfigurationEnabled
+                != current.isRouterConfigurationEnabled {
+            steps.append(.routerConfiguration)
+        }
+        return steps
+    }
+
+    private func remoteAccessCapabilitiesSupport(
+        _ steps: [RemoteAccessSettingsMutationStep]
+    ) -> Bool {
+        steps.allSatisfy { step in
+            switch step {
+            case .relay:
+                capabilitySupports(DsmAPIName.coreQuickConnect, version: 3)
+            case .routerConfiguration:
+                capabilitySupports(DsmAPIName.coreQuickConnectUPnP)
+            }
+        }
+    }
+
+    private func submitRemoteAccessMutationStep(
+        _ step: RemoteAccessSettingsMutationStep,
+        settings: NasRemoteAccessSettings
+    ) async throws {
+        switch step {
+        case .relay:
+            guard let enabled = settings.isRelayEnabled else {
+                throw verificationError(L10n.string("shared.259c1e687815c0a7"))
+            }
             try await callVoid(
                 DsmAPIName.coreQuickConnect,
                 method: "set_misc_config",
                 version: 3,
                 parameters: ["relay_enabled": .boolean(enabled)]
             )
-        }
-        if let enabled = settings.isRouterConfigurationEnabled,
-           enabled != current.isRouterConfigurationEnabled {
+        case .routerConfiguration:
+            guard let enabled = settings.isRouterConfigurationEnabled else {
+                throw verificationError(L10n.string("shared.259c1e687815c0a7"))
+            }
             try await callVoid(
                 DsmAPIName.coreQuickConnectUPnP,
                 method: "set",
                 parameters: ["enabled": .boolean(enabled)]
             )
         }
-        let verified = try await loadRemoteAccessSettings()
-        guard (settings.isRelayEnabled == nil
-                || verified.isRelayEnabled == settings.isRelayEnabled),
-              (settings.isRouterConfigurationEnabled == nil
-                || verified.isRouterConfigurationEnabled
-                    == settings.isRouterConfigurationEnabled) else {
-            throw verificationError(L10n.string("shared.259c1e687815c0a7"))
+    }
+
+    private func remoteAccessSubmissionFailureResult(
+        _ submissionError: AppError,
+        settings: NasRemoteAccessSettings,
+        steps: [RemoteAccessSettingsMutationStep],
+        acceptedCount: Int,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        let isAmbiguous = switch submissionError.category {
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            true
+        default:
+            false
         }
+        if submissionError.category == .cancelled {
+            return try remoteAccessMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: max(0, steps.count - acceptedCount - 1),
+                unknown: min(steps.count, acceptedCount + 1),
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-during-submission"
+            )
+        }
+        do {
+            let verified = try await loadRemoteAccessSettings()
+            return try remoteAccessVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: submissionError.category,
+                uncertainCount: isAmbiguous
+                    ? min(steps.count, acceptedCount + 1)
+                    : acceptedCount
+            )
+        } catch {
+            if acceptedCount > 0 || isAmbiguous {
+                let unknown = min(
+                    steps.count,
+                    acceptedCount + (isAmbiguous ? 1 : 0)
+                )
+                return try remoteAccessMutationResult(
+                    status: .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: steps.count - unknown,
+                    unknown: unknown,
+                    errorCategory: packageMutationErrorCategory(
+                        for: submissionError.category
+                    ),
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).partial-readback-unverified"
+                )
+            }
+            return try remoteAccessRejectedResult(
+                submissionError,
+                totalCount: steps.count,
+                submitted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+    }
+
+    private func remoteAccessUnknownSubmissionResult(
+        settings: NasRemoteAccessSettings,
+        steps: [RemoteAccessSettingsMutationStep],
+        acceptedCount: Int,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        do {
+            let verified = try await loadRemoteAccessSettings()
+            return try remoteAccessVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: .unknown,
+                uncertainCount: min(steps.count, acceptedCount + 1)
+            )
+        } catch {
+            let unknown = min(steps.count, acceptedCount + 1)
+            return try remoteAccessMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: steps.count - unknown,
+                unknown: unknown,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unknown"
+            )
+        }
+    }
+
+    private func remoteAccessVerifiedResult(
+        _ actual: NasRemoteAccessSettings,
+        expected: NasRemoteAccessSettings,
+        steps: [RemoteAccessSettingsMutationStep],
+        operation: String,
+        prefix: String,
+        failureCategory: AppErrorCategory? = nil,
+        uncertainCount: Int = 0
+    ) throws -> MutationResult {
+        let succeeded = steps.filter {
+            Self.remoteAccessMutationStep($0, matches: actual, expected: expected)
+        }.count
+        let remaining = steps.count - succeeded
+        if succeeded == steps.count {
+            return try remoteAccessMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: succeeded,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).confirmed"
+            )
+        }
+        let unknown = min(remaining, max(0, uncertainCount - succeeded))
+        if succeeded > 0 {
+            return try remoteAccessMutationResult(
+                status: .partialSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: succeeded,
+                failed: remaining - unknown,
+                unknown: unknown,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).partial",
+                diagnosticTag: "\(prefix).partial"
+            )
+        }
+        if unknown > 0 {
+            return try remoteAccessMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: remaining - unknown,
+                unknown: unknown,
+                errorCategory: failureCategory.map {
+                    packageMutationErrorCategory(for: $0)
+                },
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unchanged"
+            )
+        }
+        if let failureCategory {
+            return try remoteAccessRejectedResult(
+                AppError(
+                    category: failureCategory,
+                    isRetryable: false,
+                    safeUserMessage: L10n.string("remote-access.settings.failed")
+                ),
+                totalCount: steps.count,
+                submitted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        return try remoteAccessMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: remaining,
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationKey: "\(prefix).failed",
+            diagnosticTag: "\(prefix).readback-mismatch"
+        )
+    }
+
+    private func remoteAccessRejectedResult(
+        _ error: AppError,
+        totalCount: Int,
+        submitted: Bool,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        let status: MutationResultStatus
+        let localizationKey: String
+        let category: MutationErrorCategory
+        switch error.category {
+        case .permissionDenied, .authenticationRequired:
+            status = .permissionDenied
+            localizationKey = "\(prefix).permission-denied"
+            category = .permission
+        case .apiUnavailable, .versionUnsupported:
+            status = .unsupported
+            localizationKey = "\(prefix).unsupported"
+            category = .unsupported
+        default:
+            status = .confirmedFailure
+            localizationKey = "\(prefix).failed"
+            category = packageMutationErrorCategory(for: error.category)
+        }
+        return try remoteAccessMutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: totalCount,
+            unknown: 0,
+            errorCategory: category,
+            localizationKey: localizationKey,
+            diagnosticTag: "\(prefix).rejected"
+        )
+    }
+
+    private func remoteAccessPreflightResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        if error.category == .cancelled {
+            return try remoteAccessMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        }
+        return try remoteAccessRejectedResult(
+            error,
+            totalCount: 1,
+            submitted: false,
+            operation: operation,
+            prefix: prefix
+        )
+    }
+
+    private static func remoteAccessMutationStep(
+        _ step: RemoteAccessSettingsMutationStep,
+        matches actual: NasRemoteAccessSettings,
+        expected: NasRemoteAccessSettings
+    ) -> Bool {
+        switch step {
+        case .relay:
+            actual.isRelayEnabled == expected.isRelayEnabled
+        case .routerConfiguration:
+            actual.isRouterConfigurationEnabled
+                == expected.isRouterConfigurationEnabled
+        }
+    }
+
+    private func remoteAccessMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func remoteAccessSettingsError(for result: MutationResult) -> AppError {
+        let category: AppErrorCategory = switch result.status {
+        case .permissionDenied:
+            .permissionDenied
+        case .unsupported:
+            .apiUnavailable
+        case .partialSuccess:
+            .partialFailure
+        case .cancelledBeforeSubmission, .cancellationRequestedAfterSubmission:
+            .cancelled
+        case .confirmedSuccess, .confirmedFailure, .submittedButUnverified:
+            .unknown
+        }
+        return AppError(
+            category: category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? "remote-access.settings.failed"
+            )
+        )
     }
 
     public func loadSecuritySettings() async throws -> NasSecuritySettings {
@@ -1045,6 +4230,666 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                     == settings.isPortScanProtectionEnabled) else {
             throw verificationError(L10n.string("shared.879eb126a08e1b1c"))
         }
+    }
+
+    /// 安全设置由多个内部接口组成；每个子操作都必须单独记录并在结束后整体回读。
+    public func saveSecuritySettingsResult(
+        _ settings: NasSecuritySettings
+    ) async throws -> MutationResult {
+        let operation = "securitySettingsUpdate"
+        let prefix = "security.settings"
+        if Task.isCancelled {
+            return try securityMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
+        }
+        do {
+            try validateSecuritySettings(settings)
+        } catch {
+            return try securityMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).invalid-input"
+            )
+        }
+        guard !isSecuritySettingsUpdateActive else {
+            return try securityMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).duplicate-submission"
+            )
+        }
+        isSecuritySettingsUpdateActive = true
+        defer { isSecuritySettingsUpdateActive = false }
+
+        let current: NasSecuritySettings
+        let steps: [SecuritySettingsMutationStep]
+        do {
+            current = try await loadSecuritySettings()
+            steps = try securityMutationSteps(from: current, to: settings)
+        } catch let error as AppError {
+            return try securityPreflightResult(error, operation: operation, prefix: prefix)
+        } catch {
+            return try securityMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-unknown"
+            )
+        }
+        guard !steps.isEmpty else {
+            return try securityMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).no-changes"
+            )
+        }
+        guard securityCapabilitiesSupport(steps, settings: settings) else {
+            return try securityMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: steps.count,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+        if Task.isCancelled {
+            return try securityMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
+
+        var acceptedCount = 0
+        for step in steps {
+            if Task.isCancelled {
+                return try securityMutationResult(
+                    status: .cancellationRequestedAfterSubmission,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: steps.count - acceptedCount,
+                    unknown: acceptedCount,
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).cancelled-after-submission"
+                )
+            }
+            do {
+                try await submitSecurityMutationStep(
+                    step,
+                    settings: settings,
+                    current: current
+                )
+                acceptedCount += 1
+            } catch let error as AppError {
+                return try await securitySubmissionFailureResult(
+                    error,
+                    settings: settings,
+                    steps: steps,
+                    acceptedCount: acceptedCount,
+                    operation: operation,
+                    prefix: prefix
+                )
+            } catch {
+                return try await securityUnknownSubmissionResult(
+                    settings: settings,
+                    steps: steps,
+                    acceptedCount: acceptedCount,
+                    operation: operation,
+                    prefix: prefix
+                )
+            }
+        }
+
+        if Task.isCancelled {
+            return try securityMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-before-readback"
+            )
+        }
+        do {
+            let verified = try await loadSecuritySettings()
+            return try securityVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch let error as AppError {
+            return try securityMutationResult(
+                status: error.category == .cancelled
+                    ? .cancellationRequestedAfterSubmission
+                    : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unverified"
+            )
+        } catch {
+            return try securityMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: steps.count,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
+        }
+    }
+
+    private func validateSecuritySettings(
+        _ settings: NasSecuritySettings
+    ) throws {
+        guard (1...9_999).contains(settings.failedAttempts) else {
+            throw verificationError(L10n.string("shared.7172e0328c485e2d"))
+        }
+        guard (1...9_999_999).contains(settings.withinMinutes) else {
+            throw verificationError(L10n.string("shared.6b3faa04b8983fea"))
+        }
+        if let days = settings.expirationDays, !(1...999).contains(days) {
+            throw verificationError(L10n.string("shared.eb7055df43bef6c1"))
+        }
+        let ids = settings.dosProtection.map(\.id)
+        guard Set(ids).count == ids.count,
+              ids.allSatisfy({
+                  !$0.isEmpty
+                      && $0.unicodeScalars.allSatisfy {
+                          CharacterSet(
+                              charactersIn:
+                                  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+                          ).contains($0)
+                      }
+              }) else {
+            throw verificationError(L10n.string("shared.106655f64c87e191"))
+        }
+    }
+
+    private func securityMutationSteps(
+        from current: NasSecuritySettings,
+        to expected: NasSecuritySettings
+    ) throws -> [SecuritySettingsMutationStep] {
+        var steps: [SecuritySettingsMutationStep] = []
+        if current.isAutoBlockEnabled != expected.isAutoBlockEnabled
+            || current.failedAttempts != expected.failedAttempts
+            || current.withinMinutes != expected.withinMinutes
+            || current.expirationDays != expected.expirationDays {
+            steps.append(.autoBlock)
+        }
+        if Self.dosValues(current.dosProtection) != Self.dosValues(expected.dosProtection) {
+            guard Set(current.dosProtection.map(\.id))
+                    == Set(expected.dosProtection.map(\.id)) else {
+                throw verificationError(L10n.string("shared.106655f64c87e191"))
+            }
+            steps.append(.denialOfService)
+        }
+        if let expectedPortScan = expected.isPortScanProtectionEnabled,
+           expectedPortScan != current.isPortScanProtectionEnabled {
+            steps.append(.portScanProtection)
+        }
+        if let expectedFirewall = expected.isFirewallEnabled,
+           expectedFirewall != current.isFirewallEnabled {
+            if expectedFirewall {
+                guard let profile = current.firewallProfileName, !profile.isEmpty else {
+                    throw verificationError(L10n.string("shared.816830de0895450c"))
+                }
+            }
+            steps.append(.firewall)
+        }
+        return steps
+    }
+
+    private func securityCapabilitiesSupport(
+        _ steps: [SecuritySettingsMutationStep],
+        settings: NasSecuritySettings
+    ) -> Bool {
+        steps.allSatisfy { step in
+            switch step {
+            case .autoBlock:
+                capabilitySupports(DsmAPIName.coreSecurityAutoBlock)
+            case .denialOfService:
+                capabilitySupports(DsmAPIName.coreNetworkEthernet)
+                    && capabilitySupports(DsmAPIName.coreSecurityDoS, version: 2)
+            case .portScanProtection:
+                capabilitySupports(DsmAPIName.coreSecurityFirewallConf)
+            case .firewall:
+                capabilitySupports(DsmAPIName.coreSecurityFirewall)
+                    && (settings.isFirewallEnabled != true
+                        || capabilitySupports(DsmAPIName.coreSecurityFirewallProfileApply))
+            }
+        }
+    }
+
+    private func capabilitySupports(_ name: String, version: Int? = nil) -> Bool {
+        guard let capability = capabilities[name],
+              let selectedVersion = capability.selectedVersion else {
+            return false
+        }
+        let requiredVersion = version ?? selectedVersion
+        return capability.minVersion...capability.maxVersion ~= requiredVersion
+    }
+
+    private func submitSecurityMutationStep(
+        _ step: SecuritySettingsMutationStep,
+        settings: NasSecuritySettings,
+        current: NasSecuritySettings
+    ) async throws {
+        switch step {
+        case .autoBlock:
+            try await callVoid(
+                DsmAPIName.coreSecurityAutoBlock,
+                method: "set",
+                parameters: [
+                    "enable": .boolean(settings.isAutoBlockEnabled),
+                    "attempts": .integer(settings.failedAttempts),
+                    "within_mins": .integer(settings.withinMinutes),
+                    "expire_day": .integer(settings.expirationDays ?? 0)
+                ]
+            )
+        case .denialOfService:
+            let configs: [[String: DsmJSONValue]] = settings.dosProtection.map {
+                [
+                    "adapter": .string($0.id),
+                    "dos_protect_enable": .boolean($0.isEnabled)
+                ]
+            }
+            try await callVoid(
+                DsmAPIName.coreSecurityDoS,
+                method: "set",
+                version: 2,
+                parameters: ["configs": .objectArray(configs)]
+            )
+        case .portScanProtection:
+            guard let expected = settings.isPortScanProtectionEnabled else {
+                throw verificationError(L10n.string("shared.879eb126a08e1b1c"))
+            }
+            try await callVoid(
+                DsmAPIName.coreSecurityFirewallConf,
+                method: "set",
+                parameters: ["enable_port_check": .boolean(expected)]
+            )
+        case .firewall:
+            guard let expected = settings.isFirewallEnabled else {
+                throw verificationError(L10n.string("shared.879eb126a08e1b1c"))
+            }
+            if expected {
+                guard let profile = current.firewallProfileName, !profile.isEmpty else {
+                    throw verificationError(L10n.string("shared.816830de0895450c"))
+                }
+                try await applyFirewallProfile(profile)
+            } else {
+                try await callVoid(
+                    DsmAPIName.coreSecurityFirewall,
+                    method: "set",
+                    parameters: ["set_type": .string("disable")]
+                )
+            }
+        }
+    }
+
+    private func securitySubmissionFailureResult(
+        _ submissionError: AppError,
+        settings: NasSecuritySettings,
+        steps: [SecuritySettingsMutationStep],
+        acceptedCount: Int,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        if submissionError.category == .cancelled {
+            return try securityMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: max(0, steps.count - acceptedCount - 1),
+                unknown: min(steps.count, acceptedCount + 1),
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-during-submission"
+            )
+        }
+        let isAmbiguous = switch submissionError.category {
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            true
+        default:
+            false
+        }
+        if acceptedCount > 0 || isAmbiguous {
+            do {
+                let verified = try await loadSecuritySettings()
+                return try securityVerifiedResult(
+                    verified,
+                    expected: settings,
+                    steps: steps,
+                    operation: operation,
+                    prefix: prefix,
+                    failureCategory: submissionError.category
+                )
+            } catch {
+                let unknown = min(steps.count, acceptedCount + (isAmbiguous ? 1 : 0))
+                return try securityMutationResult(
+                    status: .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: steps.count - unknown,
+                    unknown: unknown,
+                    errorCategory: packageMutationErrorCategory(
+                        for: submissionError.category
+                    ),
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).partial-readback-unverified"
+                )
+            }
+        }
+        return try securityRejectedResult(
+            submissionError,
+            totalCount: steps.count,
+            operation: operation,
+            prefix: prefix
+        )
+    }
+
+    private func securityUnknownSubmissionResult(
+        settings: NasSecuritySettings,
+        steps: [SecuritySettingsMutationStep],
+        acceptedCount: Int,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        do {
+            let verified = try await loadSecuritySettings()
+            return try securityVerifiedResult(
+                verified,
+                expected: settings,
+                steps: steps,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: .unknown
+            )
+        } catch {
+            let unknown = min(steps.count, acceptedCount + 1)
+            return try securityMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: steps.count - unknown,
+                unknown: unknown,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unknown"
+            )
+        }
+    }
+
+    private func securityVerifiedResult(
+        _ actual: NasSecuritySettings,
+        expected: NasSecuritySettings,
+        steps: [SecuritySettingsMutationStep],
+        operation: String,
+        prefix: String,
+        failureCategory: AppErrorCategory? = nil
+    ) throws -> MutationResult {
+        let succeeded = steps.filter {
+            Self.securityMutationStep($0, matches: actual, expected: expected)
+        }.count
+        let failed = steps.count - succeeded
+        if succeeded == steps.count {
+            return try securityMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: succeeded,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).confirmed"
+            )
+        }
+        if succeeded > 0 {
+            return try securityMutationResult(
+                status: .partialSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: succeeded,
+                failed: failed,
+                unknown: 0,
+                errorCategory: failureCategory.map {
+                    packageMutationErrorCategory(for: $0)
+                } ?? .conflict,
+                localizationKey: "\(prefix).partial",
+                diagnosticTag: "\(prefix).partial"
+            )
+        }
+        if let failureCategory {
+            return try securityRejectedResult(
+                AppError(
+                    category: failureCategory,
+                    isRetryable: false,
+                    safeUserMessage: L10n.string("security.settings.failed")
+                ),
+                totalCount: steps.count,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        return try securityMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: failed,
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationKey: "\(prefix).failed",
+            diagnosticTag: "\(prefix).readback-mismatch"
+        )
+    }
+
+    private func securityRejectedResult(
+        _ error: AppError,
+        totalCount: Int,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        let status: MutationResultStatus
+        let localizationKey: String
+        let category: MutationErrorCategory
+        switch error.category {
+        case .permissionDenied, .authenticationRequired:
+            status = .permissionDenied
+            localizationKey = "\(prefix).permission-denied"
+            category = .permission
+        case .apiUnavailable, .versionUnsupported:
+            status = .unsupported
+            localizationKey = "\(prefix).unsupported"
+            category = .unsupported
+        default:
+            status = .confirmedFailure
+            localizationKey = "\(prefix).failed"
+            category = packageMutationErrorCategory(for: error.category)
+        }
+        return try securityMutationResult(
+            status: status,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: totalCount,
+            unknown: 0,
+            errorCategory: category,
+            localizationKey: localizationKey,
+            diagnosticTag: "\(prefix).rejected"
+        )
+    }
+
+    private func securityPreflightResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        let status: MutationResultStatus
+        let category: MutationErrorCategory?
+        let localizationKey: String?
+        switch error.category {
+        case .cancelled:
+            return try securityMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        case .permissionDenied, .authenticationRequired:
+            status = .permissionDenied
+            category = .permission
+            localizationKey = "\(prefix).permission-denied"
+        case .apiUnavailable, .versionUnsupported:
+            status = .unsupported
+            category = .unsupported
+            localizationKey = "\(prefix).unsupported"
+        default:
+            status = .confirmedFailure
+            category = packageMutationErrorCategory(for: error.category)
+            localizationKey = "\(prefix).failed"
+        }
+        return try securityMutationResult(
+            status: status,
+            operation: operation,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 1,
+            unknown: 0,
+            errorCategory: category,
+            localizationKey: localizationKey,
+            diagnosticTag: "\(prefix).preflight-failed"
+        )
+    }
+
+    private static func securityMutationStep(
+        _ step: SecuritySettingsMutationStep,
+        matches actual: NasSecuritySettings,
+        expected: NasSecuritySettings
+    ) -> Bool {
+        switch step {
+        case .autoBlock:
+            actual.isAutoBlockEnabled == expected.isAutoBlockEnabled
+                && actual.failedAttempts == expected.failedAttempts
+                && actual.withinMinutes == expected.withinMinutes
+                && actual.expirationDays == expected.expirationDays
+        case .denialOfService:
+            dosValues(actual.dosProtection) == dosValues(expected.dosProtection)
+        case .portScanProtection:
+            actual.isPortScanProtectionEnabled == expected.isPortScanProtectionEnabled
+        case .firewall:
+            actual.isFirewallEnabled == expected.isFirewallEnabled
+        }
+    }
+
+    private static func dosValues(
+        _ settings: [NasDoSProtectionSetting]
+    ) -> [String: Bool] {
+        Dictionary(settings.map { ($0.id, $0.isEnabled) }, uniquingKeysWith: { _, latest in latest })
+    }
+
+    private func securityMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
     }
 
     private func applyFirewallProfile(_ profile: String) async throws {
@@ -1675,6 +5520,281 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         )
     }
 
+    public func startDiskTestResult(
+        diskID: String,
+        type: NasDiskTestType
+    ) async throws -> MutationResult {
+        try await changeDiskTestResult(
+            diskID: diskID,
+            type: type,
+            shouldBeRunning: true
+        )
+    }
+
+    public func stopDiskTestResult(diskID: String) async throws -> MutationResult {
+        try await changeDiskTestResult(
+            diskID: diskID,
+            type: nil,
+            shouldBeRunning: false
+        )
+    }
+
+    /// 检测启停在提交或轮询失败时可能已经生效；未知结果必须先回读，不得自动重放。
+    private func changeDiskTestResult(
+        diskID: String,
+        type: NasDiskTestType?,
+        shouldBeRunning: Bool
+    ) async throws -> MutationResult {
+        let operation = shouldBeRunning ? "diskTestStart" : "diskTestStop"
+        let prefix = shouldBeRunning
+            ? "storage.disk-test.start"
+            : "storage.disk-test.stop"
+        if Task.isCancelled {
+            return try diskTestMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
+        }
+        guard !diskID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return try diskTestMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).invalid-disk"
+            )
+        }
+        guard capabilitySupports(DsmAPIName.coreStorageDisk) else {
+            return try diskTestMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+        guard activeDiskTestIDs.insert(diskID).inserted else {
+            return try diskTestMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).duplicate-submission"
+            )
+        }
+        defer { activeDiskTestIDs.remove(diskID) }
+
+        let disk: NasDisk
+        do {
+            disk = try await validatedStorageDisk(id: diskID)
+            guard disk.supportsSmartTest else {
+                return try diskTestMutationResult(
+                    status: .unsupported,
+                    operation: operation,
+                    submitted: false,
+                    requiresRefresh: false,
+                    succeeded: 0,
+                    failed: 1,
+                    unknown: 0,
+                    errorCategory: .unsupported,
+                    localizationKey: "\(prefix).unsupported",
+                    diagnosticTag: "\(prefix).disk-unsupported"
+                )
+            }
+            let current = try await loadDiskTestStatus(
+                for: disk,
+                includesHistory: false
+            )
+            if shouldBeRunning {
+                guard !current.isRunning, !current.isBusyWithOtherTest else {
+                    return try diskTestMutationResult(
+                        status: .confirmedFailure,
+                        operation: operation,
+                        submitted: false,
+                        requiresRefresh: false,
+                        succeeded: 0,
+                        failed: 1,
+                        unknown: 0,
+                        errorCategory: .conflict,
+                        localizationKey: "\(prefix).failed",
+                        diagnosticTag: current.isRunning
+                            ? "\(prefix).already-running"
+                            : "\(prefix).other-test-running"
+                    )
+                }
+            } else {
+                guard current.isRunning else {
+                    return try diskTestMutationResult(
+                        status: .confirmedFailure,
+                        operation: operation,
+                        submitted: false,
+                        requiresRefresh: false,
+                        succeeded: 0,
+                        failed: 1,
+                        unknown: 0,
+                        errorCategory: .conflict,
+                        localizationKey: "\(prefix).failed",
+                        diagnosticTag: "\(prefix).already-stopped"
+                    )
+                }
+            }
+        } catch let error as AppError {
+            return try diskTestPreflightResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try diskTestMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-unknown"
+            )
+        }
+
+        if Task.isCancelled {
+            return try diskTestMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
+
+        do {
+            try await callVoid(
+                DsmAPIName.coreStorageDisk,
+                method: "do_smart_test",
+                parameters: [
+                    "device": .string(disk.deviceID),
+                    "type": .string(
+                        shouldBeRunning
+                            ? (type == .quick ? "quick" : "extend")
+                            : "stop"
+                    )
+                ]
+            )
+        } catch let error as AppError {
+            return try await diskTestSubmissionResult(
+                error,
+                disk: disk,
+                shouldBeRunning: shouldBeRunning,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try await diskTestUnknownSubmissionResult(
+                disk: disk,
+                shouldBeRunning: shouldBeRunning,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+
+        if Task.isCancelled {
+            return try diskTestMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-after-submission"
+            )
+        }
+
+        for attempt in 0..<6 {
+            do {
+                if attempt > 0 {
+                    try await Task.sleep(for: .seconds(1))
+                }
+                let verified = try await loadDiskTestStatus(
+                    for: disk,
+                    includesHistory: false
+                )
+                if verified.isRunning == shouldBeRunning {
+                    return try diskTestMutationResult(
+                        status: .confirmedSuccess,
+                        operation: operation,
+                        submitted: true,
+                        requiresRefresh: false,
+                        succeeded: 1,
+                        failed: 0,
+                        unknown: 0,
+                        diagnosticTag: "\(prefix).confirmed"
+                    )
+                }
+            } catch let error as AppError {
+                return try diskTestReadbackResult(
+                    error,
+                    operation: operation,
+                    prefix: prefix
+                )
+            } catch {
+                return try diskTestMutationResult(
+                    status: Task.isCancelled
+                        ? .cancellationRequestedAfterSubmission
+                        : .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: 0,
+                    unknown: 1,
+                    errorCategory: .unknown,
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).readback-unknown"
+                )
+            }
+        }
+        return try diskTestMutationResult(
+            status: .submittedButUnverified,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: 1,
+            errorCategory: .conflict,
+            localizationKey: "\(prefix).unverified",
+            diagnosticTag: "\(prefix).poll-timeout"
+        )
+    }
+
     public func loadPackages() async throws -> [NasPackage] {
         let value = try await call(
             DsmAPIName.corePackage,
@@ -1860,6 +5980,180 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             )
         case .upgrade:
             return
+        }
+    }
+
+    /// 套件卸载属于破坏性操作；请求提交后必须通过套件列表回读确认，未知结果不得自动重放。
+    public func uninstallPackageResult(id: String) async throws -> MutationResult {
+        let operation = "packageUninstall"
+        if Task.isCancelled {
+            return try packageMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "package.uninstall.cancelled-before-submission"
+            )
+        }
+
+        let normalizedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedID.isEmpty else {
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "package.uninstall.failed",
+                diagnosticTag: "package.uninstall.invalid-input"
+            )
+        }
+        guard capabilities[DsmAPIName.corePackage]?.selectedVersion != nil,
+              capabilities[DsmAPIName.corePackageUninstallation]?.selectedVersion != nil else {
+            return try packageMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "package.uninstall.unsupported",
+                diagnosticTag: "package.uninstall.unsupported"
+            )
+        }
+        guard activePackageUninstallIDs.insert(normalizedID).inserted else {
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "package.uninstall.failed",
+                diagnosticTag: "package.uninstall.duplicate-submission"
+            )
+        }
+        defer { activePackageUninstallIDs.remove(normalizedID) }
+
+        do {
+            try await callVoid(
+                DsmAPIName.corePackage,
+                method: "feasibility_check",
+                parameters: [
+                    "type": .string("uninstall_check"),
+                    "packages": .stringArray([normalizedID]),
+                ]
+            )
+        } catch let error as AppError {
+            return try packagePreflightResult(error, operation: operation)
+        }
+
+        if Task.isCancelled {
+            return try packageMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "package.uninstall.cancelled-after-preflight"
+            )
+        }
+
+        do {
+            try await callVoid(
+                DsmAPIName.corePackageUninstallation,
+                method: "uninstall",
+                parameters: [
+                    "id": .string(normalizedID),
+                    "dsm_apps": .stringArray(
+                        packageControlMetadata[normalizedID]?.dsmApps ?? []
+                    ),
+                ]
+            )
+        } catch let error as AppError {
+            return try packageSubmissionResult(error, operation: operation)
+        }
+
+        if Task.isCancelled {
+            return try packageMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                localizationKey: "package.uninstall.unverified",
+                diagnosticTag: "package.uninstall.cancelled-after-submission"
+            )
+        }
+
+        do {
+            let packages = try await loadPackages()
+            if packages.contains(where: { $0.id == normalizedID }) {
+                return try packageMutationResult(
+                    status: .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: 0,
+                    unknown: 1,
+                    localizationKey: "package.uninstall.unverified",
+                    diagnosticTag: "package.uninstall.still-listed"
+                )
+            }
+            return try packageMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 1,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "package.uninstall.confirmed"
+            )
+        } catch let error as AppError {
+            let status: MutationResultStatus = error.category == .cancelled
+                ? .cancellationRequestedAfterSubmission
+                : .submittedButUnverified
+            return try packageMutationResult(
+                status: status,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "package.uninstall.unverified",
+                diagnosticTag: "package.uninstall.readback-unverified"
+            )
+        } catch {
+            return try packageMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                localizationKey: "package.uninstall.unverified",
+                diagnosticTag: "package.uninstall.readback-unknown"
+            )
         }
     }
 
@@ -2241,6 +6535,15 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         )
     }
 
+    /// 账号删除必须回读账号目录确认；请求提交后的未知结果不得自动重放。
+    public func deleteAccountResult(name: String) async throws -> MutationResult {
+        try await deleteDirectoryEntryResult(
+            name: name,
+            kind: .user,
+            protectedNames: ["admin", "guest"]
+        )
+    }
+
     public func saveGroup(_ draft: NasGroupDraft) async throws {
         let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
@@ -2274,6 +6577,15 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             DsmAPIName.coreGroup,
             method: "delete",
             parameters: ["name": .stringArray([trimmed])]
+        )
+    }
+
+    /// 群组删除必须回读群组目录确认；请求提交后的未知结果不得自动重放。
+    public func deleteGroupResult(name: String) async throws -> MutationResult {
+        try await deleteDirectoryEntryResult(
+            name: name,
+            kind: .group,
+            protectedNames: ["administrators", "users", "http"]
         )
     }
 
@@ -2515,6 +6827,1055 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         }
     }
 
+    private static func validateEthernetInterface(
+        _ interface: NasEthernetInterface
+    ) throws {
+        guard interface.id.hasPrefix("eth"),
+              interface.id.unicodeScalars.allSatisfy({
+                  CharacterSet(
+                      charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+                  ).contains($0)
+              }) else {
+            throw AppError(
+                category: .invalidResponse,
+                isRetryable: true,
+                safeUserMessage: L10n.string("shared.e08a7f16a91c9932")
+            )
+        }
+        guard (576...9_000).contains(interface.mtu) else {
+            throw AppError(
+                category: .invalidResponse,
+                isRetryable: true,
+                safeUserMessage: L10n.string("shared.bd04fc72d0e308c0")
+            )
+        }
+        if interface.isVLANEnabled {
+            guard let vlanID = interface.vlanID, (1...4_094).contains(vlanID) else {
+                throw AppError(
+                    category: .invalidResponse,
+                    isRetryable: true,
+                    safeUserMessage: L10n.string("shared.e5be64194f7d7959")
+                )
+            }
+        }
+        if !interface.usesDHCP {
+            guard Self.isValidIPv4(interface.address),
+                  Self.isValidIPv4(interface.subnetMask),
+                  interface.gateway.isEmpty || Self.isValidIPv4(interface.gateway) else {
+                throw AppError(
+                    category: .invalidResponse,
+                    isRetryable: true,
+                    safeUserMessage: L10n.string("shared.e4338b64530bcbcc")
+                )
+            }
+        }
+    }
+
+    private static func ethernetConfiguration(
+        _ interface: NasEthernetInterface
+    ) -> [String: DsmJSONValue] {
+        var config: [String: DsmJSONValue] = [
+            "ifname": .string(interface.id),
+            "use_dhcp": .boolean(interface.usesDHCP),
+            "is_default_gateway": .boolean(interface.isDefaultGateway),
+            "mtu": .integer(interface.mtu),
+            "enable_vlan": .boolean(interface.isVLANEnabled)
+        ]
+        if !interface.usesDHCP {
+            config["ip"] = .string(interface.address)
+            config["mask"] = .string(interface.subnetMask)
+            config["gateway"] = .string(interface.gateway)
+            config["dns"] = .string(interface.dnsServers)
+        }
+        if interface.isVLANEnabled, let vlanID = interface.vlanID {
+            config["vlan_id"] = .integer(vlanID)
+        }
+        return config
+    }
+
+    private func diskTestPreflightResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        switch error.category {
+        case .cancelled:
+            return try diskTestMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        case .permissionDenied, .authenticationRequired:
+            return try diskTestMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationKey: "\(prefix).permission-denied",
+                diagnosticTag: "\(prefix).preflight-permission-denied"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try diskTestMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).preflight-unsupported"
+            )
+        default:
+            return try diskTestMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-failed"
+            )
+        }
+    }
+
+    private func diskTestSubmissionResult(
+        _ error: AppError,
+        disk: NasDisk,
+        shouldBeRunning: Bool,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        switch error.category {
+        case .cancelled:
+            return try diskTestMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-during-submission"
+            )
+        case .permissionDenied, .authenticationRequired:
+            return try diskTestMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationKey: "\(prefix).permission-denied",
+                diagnosticTag: "\(prefix).permission-denied"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try diskTestMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported-response"
+            )
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            do {
+                let verified = try await loadDiskTestStatus(
+                    for: disk,
+                    includesHistory: false
+                )
+                if verified.isRunning == shouldBeRunning {
+                    return try diskTestMutationResult(
+                        status: .confirmedSuccess,
+                        operation: operation,
+                        submitted: true,
+                        requiresRefresh: false,
+                        succeeded: 1,
+                        failed: 0,
+                        unknown: 0,
+                        diagnosticTag: "\(prefix).confirmed-after-submit-error"
+                    )
+                }
+            } catch {
+                // 回读失败仍保持未知，不使用原请求自动重放。
+            }
+            return try diskTestMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unverified"
+            )
+        default:
+            return try diskTestMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).rejected"
+            )
+        }
+    }
+
+    private func diskTestUnknownSubmissionResult(
+        disk: NasDisk,
+        shouldBeRunning: Bool,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        do {
+            let verified = try await loadDiskTestStatus(
+                for: disk,
+                includesHistory: false
+            )
+            if verified.isRunning == shouldBeRunning {
+                return try diskTestMutationResult(
+                    status: .confirmedSuccess,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: false,
+                    succeeded: 1,
+                    failed: 0,
+                    unknown: 0,
+                    diagnosticTag: "\(prefix).confirmed-after-unknown-response"
+                )
+            }
+        } catch {
+            // 回读失败仍保持未知，不使用原请求自动重放。
+        }
+        return try diskTestMutationResult(
+            status: .submittedButUnverified,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: 1,
+            errorCategory: .unknown,
+            localizationKey: "\(prefix).unverified",
+            diagnosticTag: "\(prefix).submitted-unknown"
+        )
+    }
+
+    private func diskTestReadbackResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        try diskTestMutationResult(
+            status: error.category == .cancelled
+                ? .cancellationRequestedAfterSubmission
+                : .submittedButUnverified,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: 1,
+            errorCategory: packageMutationErrorCategory(for: error.category),
+            localizationKey: "\(prefix).unverified",
+            diagnosticTag: "\(prefix).readback-unverified"
+        )
+    }
+
+    private func diskTestMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func ethernetPreflightResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        switch error.category {
+        case .cancelled:
+            return try ethernetMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        case .permissionDenied, .authenticationRequired:
+            return try ethernetMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationKey: "\(prefix).permission-denied",
+                diagnosticTag: "\(prefix).preflight-permission-denied"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try ethernetMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).preflight-unsupported"
+            )
+        default:
+            return try ethernetMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-failed"
+            )
+        }
+    }
+
+    private func ethernetSubmissionResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        switch error.category {
+        case .permissionDenied, .authenticationRequired:
+            return try ethernetMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationKey: "\(prefix).permission-denied",
+                diagnosticTag: "\(prefix).permission-denied"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try ethernetMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported-response"
+            )
+        case .cancelled, .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            return try ethernetMutationResult(
+                status: error.category == .cancelled
+                    ? .cancellationRequestedAfterSubmission
+                    : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unverified"
+            )
+        default:
+            return try ethernetMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).rejected"
+            )
+        }
+    }
+
+    private func ethernetReadbackResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        try ethernetMutationResult(
+            status: error.category == .cancelled
+                ? .cancellationRequestedAfterSubmission
+                : .submittedButUnverified,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: 1,
+            errorCategory: packageMutationErrorCategory(for: error.category),
+            localizationKey: "\(prefix).unverified",
+            diagnosticTag: "\(prefix).readback-unverified"
+        )
+    }
+
+    private func ethernetMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func deleteDirectoryEntryResult(
+        name: String,
+        kind: NasAccount.Kind,
+        protectedNames: Set<String>
+    ) async throws -> MutationResult {
+        let isGroup = kind == .group
+        let operation = isGroup ? "groupDelete" : "accountDelete"
+        let prefix = isGroup ? "group.delete" : "account.delete"
+        let apiName = isGroup ? DsmAPIName.coreGroup : DsmAPIName.coreUser
+
+        if Task.isCancelled {
+            return try directoryMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
+        }
+
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed.lowercased()
+        guard !trimmed.isEmpty else {
+            return try directoryMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).invalid-input"
+            )
+        }
+        guard !protectedNames.contains(normalized) else {
+            return try directoryMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationKey: "\(prefix).permission-denied",
+                diagnosticTag: "\(prefix).protected-entry"
+            )
+        }
+        guard capabilities[apiName]?.selectedVersion != nil,
+              capabilities[DsmAPIName.coreUser]?.selectedVersion != nil,
+              capabilities[DsmAPIName.coreGroup]?.selectedVersion != nil else {
+            return try directoryMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+
+        let inserted: Bool
+        if isGroup {
+            inserted = activeGroupDeletionNames.insert(normalized).inserted
+        } else {
+            inserted = activeAccountDeletionNames.insert(normalized).inserted
+        }
+        guard inserted else {
+            return try directoryMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).duplicate-submission"
+            )
+        }
+        defer {
+            if isGroup {
+                activeGroupDeletionNames.remove(normalized)
+            } else {
+                activeAccountDeletionNames.remove(normalized)
+            }
+        }
+
+        do {
+            let directory = try await loadAccountsAndGroups()
+            let entries = isGroup ? directory.groups : directory.users
+            guard entries.contains(where: {
+                $0.name.caseInsensitiveCompare(trimmed) == .orderedSame
+            }) else {
+                return try directoryMutationResult(
+                    status: .confirmedFailure,
+                    operation: operation,
+                    submitted: false,
+                    requiresRefresh: false,
+                    succeeded: 0,
+                    failed: 1,
+                    unknown: 0,
+                    errorCategory: .conflict,
+                    localizationKey: "\(prefix).failed",
+                    diagnosticTag: "\(prefix).target-not-found"
+                )
+            }
+        } catch let error as AppError {
+            return try directoryPreflightResult(error, operation: operation, prefix: prefix)
+        } catch {
+            return try directoryMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-unknown"
+            )
+        }
+
+        if Task.isCancelled {
+            return try directoryMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
+
+        do {
+            try await callVoid(
+                apiName,
+                method: "delete",
+                parameters: ["name": .stringArray([trimmed])]
+            )
+        } catch let error as AppError {
+            return try directorySubmissionResult(error, operation: operation, prefix: prefix)
+        } catch {
+            return try directoryMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unknown"
+            )
+        }
+
+        if Task.isCancelled {
+            return try directoryMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-after-submission"
+            )
+        }
+
+        do {
+            let directory = try await loadAccountsAndGroups()
+            let entries = isGroup ? directory.groups : directory.users
+            if entries.contains(where: {
+                $0.name.caseInsensitiveCompare(trimmed) == .orderedSame
+            }) {
+                return try directoryMutationResult(
+                    status: .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: 0,
+                    unknown: 1,
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).still-listed"
+                )
+            }
+            return try directoryMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 1,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).confirmed"
+            )
+        } catch let error as AppError {
+            return try directoryReadbackResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try directoryMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
+        }
+    }
+
+    private func directoryPreflightResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        switch error.category {
+        case .cancelled:
+            return try directoryMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        case .permissionDenied, .authenticationRequired:
+            return try directoryMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationKey: "\(prefix).permission-denied",
+                diagnosticTag: "\(prefix).preflight-permission-denied"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try directoryMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).preflight-unsupported"
+            )
+        default:
+            return try directoryMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-failed"
+            )
+        }
+    }
+
+    private func directorySubmissionResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        switch error.category {
+        case .permissionDenied, .authenticationRequired:
+            return try directoryMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationKey: "\(prefix).permission-denied",
+                diagnosticTag: "\(prefix).permission-denied"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try directoryMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported-response"
+            )
+        case .cancelled, .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            return try directoryMutationResult(
+                status: error.category == .cancelled
+                    ? .cancellationRequestedAfterSubmission
+                    : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unverified"
+            )
+        default:
+            return try directoryMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).rejected"
+            )
+        }
+    }
+
+    private func directoryReadbackResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        try directoryMutationResult(
+            status: error.category == .cancelled
+                ? .cancellationRequestedAfterSubmission
+                : .submittedButUnverified,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: 1,
+            errorCategory: packageMutationErrorCategory(for: error.category),
+            localizationKey: "\(prefix).unverified",
+            diagnosticTag: "\(prefix).readback-unverified"
+        )
+    }
+
+    private func directoryMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func packagePreflightResult(
+        _ error: AppError,
+        operation: String
+    ) throws -> MutationResult {
+        let status: MutationResultStatus
+        let localizationKey: String
+        switch error.category {
+        case .cancelled:
+            return try packageMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "package.uninstall.preflight-cancelled"
+            )
+        case .permissionDenied, .authenticationRequired:
+            status = .permissionDenied
+            localizationKey = "package.uninstall.permission-denied"
+        case .apiUnavailable, .versionUnsupported:
+            status = .unsupported
+            localizationKey = "package.uninstall.unsupported"
+        default:
+            status = .confirmedFailure
+            localizationKey = "package.uninstall.failed"
+        }
+        return try packageMutationResult(
+            status: status,
+            operation: operation,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 1,
+            unknown: 0,
+            errorCategory: packageMutationErrorCategory(for: error.category),
+            localizationKey: localizationKey,
+            diagnosticTag: "package.uninstall.preflight-rejected"
+        )
+    }
+
+    private func packageSubmissionResult(
+        _ error: AppError,
+        operation: String
+    ) throws -> MutationResult {
+        switch error.category {
+        case .cancelled:
+            return try packageMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                localizationKey: "package.uninstall.unverified",
+                diagnosticTag: "package.uninstall.submission-cancelled"
+            )
+        case .permissionDenied, .authenticationRequired:
+            return try packageMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationKey: "package.uninstall.permission-denied",
+                diagnosticTag: "package.uninstall.permission-denied"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try packageMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "package.uninstall.unsupported",
+                diagnosticTag: "package.uninstall.unsupported-response"
+            )
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            return try packageMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "package.uninstall.unverified",
+                diagnosticTag: "package.uninstall.submitted-unverified"
+            )
+        default:
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "package.uninstall.failed",
+                diagnosticTag: "package.uninstall.rejected"
+            )
+        }
+    }
+
+    private func packageMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func packageMutationErrorCategory(
+        for category: AppErrorCategory
+    ) -> MutationErrorCategory {
+        switch category {
+        case .networkUnavailable, .timeout:
+            .network
+        case .authenticationRequired, .otpRequired:
+            .authentication
+        case .permissionDenied:
+            .permission
+        case .conflict, .notFound, .serverBusy:
+            .conflict
+        case .apiUnavailable, .versionUnsupported:
+            .unsupported
+        case .invalidResponse:
+            .server
+        default:
+            .unknown
+        }
+    }
+
     private func unavailableError() -> AppError {
         AppError(
             category: .apiUnavailable,
@@ -2720,25 +8081,6 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             }
             return String(number) == part || part == "0"
         }
-    }
-
-    private static func fileServiceSettings(
-        _ actual: NasFileServiceSettings,
-        match expected: NasFileServiceSettings
-    ) -> Bool {
-        func matches<T: Equatable>(_ actual: T?, _ expected: T?) -> Bool {
-            expected == nil || actual == expected
-        }
-        return matches(actual.isSMBEnabled, expected.isSMBEnabled)
-            && matches(actual.isNFSEnabled, expected.isNFSEnabled)
-            && matches(actual.isFTPEnabled, expected.isFTPEnabled)
-            && matches(actual.isFTPSEnabled, expected.isFTPSEnabled)
-            && matches(actual.ftpPort, expected.ftpPort)
-            && matches(actual.isSFTPEnabled, expected.isSFTPEnabled)
-            && matches(actual.sftpPort, expected.sftpPort)
-            && matches(actual.isSSDPEnabled, expected.isSSDPEnabled)
-            && matches(actual.isBonjourEnabled, expected.isBonjourEnabled)
-            && matches(actual.isSMBTimeMachineEnabled, expected.isSMBTimeMachineEnabled)
     }
 
     private static func package(_ package: NasPackage, iconData: Data?) -> NasPackage {

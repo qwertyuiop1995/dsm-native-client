@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "terminal.set-settings.synthetic-settings",
+  "module": "terminal",
+  "operation": "setTerminalSettings",
+  "api": {
+    "name": "SYNO.Core.Terminal",
+    "method": "set",
+    "preferredVersion": 3,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "enable_ssh",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "enable_telnet",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "ssh_port",
+      "valueType": "integer",
+      "encodedValue": "2222"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

@@ -41,6 +41,8 @@ jobs:
           python -m unittest discover -s tools/fixture-sanitization/tests -p 'test_*.py'
           python -m unittest discover -s tools/contract-validation/tests -p 'test_*.py'
           python tools/contract-validation/validate_fixtures.py
+          python -m unittest discover -s tools/request-contract/tests -p 'test_*.py'
+          python tools/request-contract/validate_contracts.py
 
       - name: 校验双语资源与可见文案硬编码
         run: python tools/localization/check_localization.py

@@ -11,11 +11,28 @@ final class DesktopDriveDiagnosticsTests: XCTestCase {
         let profileID = UUID(
             uuidString: "22222222-2222-2222-2222-222222222222"
         )!
-        let privatePath = "/private-share/secret-name.pdf"
+        let privatePath = "/volume1/private/真实文件名.pdf"
+        let sensitiveURL =
+            "https://192.168.1.10:5001/webapi/entry.cgi?_sid=SECRET"
+        let sensitiveValues = [
+            sensitiveURL,
+            "192.168.1.10",
+            "_sid=SECRET",
+            "SynoToken=PRIVATE_TOKEN",
+            "QuickConnect-ID",
+            "private-user",
+            privatePath,
+            mappingID.uuidString,
+            profileID.uuidString,
+            "private-volume-id",
+            "private-domain-id",
+        ]
         let mapping = DesktopDriveMapping(
             id: mappingID,
             profileID: profileID,
-            displayName: "私人 NAS 映射",
+            displayName:
+                "\(sensitiveURL) SynoToken=PRIVATE_TOKEN "
+                + "QuickConnect-ID private-user",
             scope: .folder(path: "/private-share"),
             cachePolicy: .init(
                 location: .eligibleVolume(id: "private-volume-id")
@@ -58,11 +75,8 @@ final class DesktopDriveDiagnosticsTests: XCTestCase {
         XCTAssertEqual(summary.desktopDrive.mappingCount, 1)
         XCTAssertEqual(summary.desktopDrive.stateCounts["paused"], 1)
         XCTAssertEqual(summary.desktopDrive.keptOfflineBytes, 128)
-        XCTAssertFalse(text.contains("私人 NAS 映射"))
-        XCTAssertFalse(text.contains(privatePath))
-        XCTAssertFalse(text.contains(mappingID.uuidString))
-        XCTAssertFalse(text.contains(profileID.uuidString))
-        XCTAssertFalse(text.contains("private-volume-id"))
-        XCTAssertFalse(text.contains("private-domain-id"))
+        for value in sensitiveValues {
+            XCTAssertFalse(text.contains(value))
+        }
     }
 }

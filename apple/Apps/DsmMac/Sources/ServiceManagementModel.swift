@@ -200,9 +200,28 @@ final class ServiceManagementModel {
 
     func deleteDownloads(removeData: Bool) async -> Bool {
         let ids = Array(downloadSelection)
-        return await perform(module: .downloads, success: L10n.string("ui.c12c2c036eefcf83")) {
-            try await self.repository.deleteDownloadTasks(ids: ids, removeData: removeData)
+        let succeeded = await performDeletion(
+            module: .downloads,
+            successKey: "download-task.delete.completed",
+            statusKeyPrefix: "download-task.delete",
+            operation: {
+                try await self.repository.deleteDownloadTasksResult(
+                    ids: ids,
+                    removeData: removeData
+                )
+            },
+            isVerified: {
+                guard let tasks = self.downloads?.tasks else { return false }
+                let remaining = Set(tasks.map(\.id))
+                return ids.allSatisfy { !remaining.contains($0) }
+            }
+        )
+        if succeeded {
+            downloadSelection.removeAll()
+        } else if let tasks = downloads?.tasks {
+            downloadSelection.formIntersection(Set(tasks.map(\.id)))
         }
+        return succeeded
     }
 
     func controlContainers(_ action: ContainerAction) async -> Bool {
@@ -214,9 +233,25 @@ final class ServiceManagementModel {
 
     func deleteContainers() async -> Bool {
         let ids = Array(containerSelection)
-        return await perform(module: .containers, success: L10n.string("ui.08f2d625407627c0")) {
-            try await self.repository.deleteContainers(ids: ids)
+        let succeeded = await performDeletion(
+            module: .containers,
+            successKey: "container.delete.completed",
+            statusKeyPrefix: "container.delete",
+            operation: {
+                try await self.repository.deleteContainersResult(ids: ids)
+            },
+            isVerified: {
+                guard let containers = self.containers?.containers else { return false }
+                let remaining = Set(containers.map(\.id))
+                return ids.allSatisfy { !remaining.contains($0) }
+            }
+        )
+        if succeeded {
+            containerSelection.removeAll()
+        } else if let containers = containers?.containers {
+            containerSelection.formIntersection(Set(containers.map(\.id)))
         }
+        return succeeded
     }
 
     func searchImages(query: String) async throws -> [ContainerRegistryImage] {
@@ -240,9 +275,25 @@ final class ServiceManagementModel {
 
     func deleteImages() async -> Bool {
         let ids = Array(imageSelection)
-        return await perform(module: .containers, success: L10n.string("ui.93fac68704c36472")) {
-            try await self.repository.deleteContainerImages(ids: ids)
+        let succeeded = await performDeletion(
+            module: .containers,
+            successKey: "container-image.delete.completed",
+            statusKeyPrefix: "container-image.delete",
+            operation: {
+                try await self.repository.deleteContainerImagesResult(ids: ids)
+            },
+            isVerified: {
+                guard let images = self.containers?.images else { return false }
+                let remaining = Set(images.map(\.id))
+                return ids.allSatisfy { !remaining.contains($0) }
+            }
+        )
+        if succeeded {
+            imageSelection.removeAll()
+        } else if let images = containers?.images {
+            imageSelection.formIntersection(Set(images.map(\.id)))
         }
+        return succeeded
     }
 
     func createNetwork(name: String, driver: String) async -> Bool {
@@ -253,9 +304,25 @@ final class ServiceManagementModel {
 
     func deleteNetworks() async -> Bool {
         let ids = Array(networkSelection)
-        return await perform(module: .containers, success: L10n.string("ui.9c630b71c45f2b8c")) {
-            try await self.repository.deleteContainerNetworks(ids: ids)
+        let succeeded = await performDeletion(
+            module: .containers,
+            successKey: "container-network.delete.completed",
+            statusKeyPrefix: "container-network.delete",
+            operation: {
+                try await self.repository.deleteContainerNetworksResult(ids: ids)
+            },
+            isVerified: {
+                guard let networks = self.containers?.networks else { return false }
+                let remaining = Set(networks.map(\.id))
+                return ids.allSatisfy { !remaining.contains($0) }
+            }
+        )
+        if succeeded {
+            networkSelection.removeAll()
+        } else if let networks = containers?.networks {
+            networkSelection.formIntersection(Set(networks.map(\.id)))
         }
+        return succeeded
     }
 
     func controlVirtualMachines(_ action: VirtualMachinePowerAction) async -> Bool {
@@ -297,9 +364,25 @@ final class ServiceManagementModel {
 
     func deleteVirtualMachines() async -> Bool {
         let ids = Array(virtualMachineSelection)
-        return await perform(module: .virtualMachines, success: L10n.string("ui.03f2e448dbfc3943")) {
-            try await self.repository.deleteVirtualMachines(ids: ids)
+        let succeeded = await performDeletion(
+            module: .virtualMachines,
+            successKey: "virtual-machine.delete.completed",
+            statusKeyPrefix: "virtual-machine.delete",
+            operation: {
+                try await self.repository.deleteVirtualMachinesResult(ids: ids)
+            },
+            isVerified: {
+                guard let machines = self.virtualMachines?.machines else { return false }
+                let remaining = Set(machines.map(\.id))
+                return ids.allSatisfy { !remaining.contains($0) }
+            }
+        )
+        if succeeded {
+            virtualMachineSelection.removeAll()
+        } else if let machines = virtualMachines?.machines {
+            virtualMachineSelection.formIntersection(Set(machines.map(\.id)))
         }
+        return succeeded
     }
 
     func updateVirtualMachineNetwork(
@@ -316,19 +399,47 @@ final class ServiceManagementModel {
 
     func deleteVirtualMachineNetworks() async -> Bool {
         let ids = Array(virtualMachineNetworkSelection)
-        let succeeded = await perform(module: .virtualMachines, success: L10n.string("ui.9c630b71c45f2b8c")) {
-            try await self.repository.deleteVirtualMachineNetworks(ids: ids)
+        let succeeded = await performDeletion(
+            module: .virtualMachines,
+            successKey: "virtual-machine-network.delete.completed",
+            statusKeyPrefix: "virtual-machine-network.delete",
+            operation: {
+                try await self.repository.deleteVirtualMachineNetworksResult(ids: ids)
+            },
+            isVerified: {
+                guard let networks = self.virtualMachines?.networks else { return false }
+                let remaining = Set(networks.map(\.id))
+                return ids.allSatisfy { !remaining.contains($0) }
+            }
+        )
+        if succeeded {
+            virtualMachineNetworkSelection.removeAll()
+        } else if let networks = virtualMachines?.networks {
+            virtualMachineNetworkSelection.formIntersection(Set(networks.map(\.id)))
         }
-        if succeeded { virtualMachineNetworkSelection.removeAll() }
         return succeeded
     }
 
     func deleteVirtualMachineImages() async -> Bool {
         let ids = Array(virtualMachineImageSelection)
-        let succeeded = await perform(module: .virtualMachines, success: L10n.string("ui.93fac68704c36472")) {
-            try await self.repository.deleteVirtualMachineImages(ids: ids)
+        let succeeded = await performDeletion(
+            module: .virtualMachines,
+            successKey: "virtual-machine-image.delete.completed",
+            statusKeyPrefix: "virtual-machine-image.delete",
+            operation: {
+                try await self.repository.deleteVirtualMachineImagesResult(ids: ids)
+            },
+            isVerified: {
+                guard let images = self.virtualMachines?.images else { return false }
+                let remaining = Set(images.map(\.id))
+                return ids.allSatisfy { !remaining.contains($0) }
+            }
+        )
+        if succeeded {
+            virtualMachineImageSelection.removeAll()
+        } else if let images = virtualMachines?.images {
+            virtualMachineImageSelection.formIntersection(Set(images.map(\.id)))
         }
-        if succeeded { virtualMachineImageSelection.removeAll() }
         return succeeded
     }
 
@@ -351,6 +462,89 @@ final class ServiceManagementModel {
             isPerformingAction = false
             show(error)
             return false
+        }
+    }
+
+    private func performDeletion(
+        module: Module,
+        successKey: String,
+        statusKeyPrefix: String,
+        operation: () async throws -> MutationResult,
+        isVerified: () -> Bool
+    ) async -> Bool {
+        guard !isPerformingAction else { return false }
+        isPerformingAction = true
+        message = nil
+        do {
+            let result = try await operation()
+            if result.requiresRefresh || result.status == .confirmedSuccess {
+                await activate(module, force: true)
+            }
+            isPerformingAction = false
+            if result.status == .confirmedSuccess || isVerified() {
+                message = L10n.string(successKey)
+                messageIsError = false
+                return true
+            }
+            let feedback = Self.deletionFeedback(
+                for: result.status,
+                keyPrefix: statusKeyPrefix
+            )
+            message = L10n.string(feedback.resourceKey)
+            messageIsError = feedback.isError
+            return false
+        } catch {
+            isPerformingAction = false
+            show(error)
+            return false
+        }
+    }
+
+    struct DeletionFeedback: Equatable {
+        let resourceKey: String
+        let isError: Bool
+    }
+
+    static func deletionFeedback(
+        for status: MutationResultStatus,
+        keyPrefix: String
+    ) -> DeletionFeedback {
+        switch status {
+        case .confirmedSuccess:
+            DeletionFeedback(
+                resourceKey: "\(keyPrefix).completed",
+                isError: false
+            )
+        case .cancelledBeforeSubmission:
+            DeletionFeedback(
+                resourceKey: "\(keyPrefix).cancelled",
+                isError: false
+            )
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            DeletionFeedback(
+                resourceKey: "\(keyPrefix).unverified",
+                isError: true
+            )
+        case .partialSuccess:
+            DeletionFeedback(
+                resourceKey: "\(keyPrefix).partial",
+                isError: true
+            )
+        case .permissionDenied:
+            DeletionFeedback(
+                resourceKey: "\(keyPrefix).permission-denied",
+                isError: true
+            )
+        case .unsupported:
+            DeletionFeedback(
+                resourceKey: "\(keyPrefix).unsupported",
+                isError: true
+            )
+        case .confirmedFailure:
+            DeletionFeedback(
+                resourceKey: "\(keyPrefix).failed",
+                isError: true
+            )
         }
     }
 

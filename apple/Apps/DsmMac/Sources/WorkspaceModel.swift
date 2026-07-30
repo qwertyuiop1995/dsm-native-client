@@ -1097,13 +1097,78 @@ final class WorkspaceModel {
                     try await repository.removeFavorite(path: path)
                     favorites.removeAll { $0.path == path }
                     statusMessage = L10n.string("ui.25400251730cea8a")
+                    statusIsError = false
                 } else {
-                    try await repository.addFavorite(path: path, name: name)
-                    favorites.append(FavoriteLocation(name: name, path: path))
-                    statusMessage = L10n.string("ui.f8f147eae9ef4058")
+                    let result = try await repository.addFavoriteResult(
+                        path: path,
+                        name: name
+                    )
+                    applyFavoriteAddResult(result, path: path, name: name)
                 }
-                statusIsError = false
             } catch { show(error) }
+        }
+    }
+
+    private func applyFavoriteAddResult(
+        _ result: MutationResult,
+        path: String,
+        name: String
+    ) {
+        let feedback = Self.favoriteAddFeedback(for: result.status)
+        if feedback.shouldApplyFavorite {
+            favorites.removeAll { $0.path == path }
+            favorites.append(FavoriteLocation(name: name, path: path))
+        }
+        statusMessage = L10n.string(feedback.resourceKey)
+        statusIsError = feedback.isError
+    }
+
+    struct FavoriteAddFeedback: Equatable {
+        let resourceKey: String
+        let isError: Bool
+        let shouldApplyFavorite: Bool
+    }
+
+    static func favoriteAddFeedback(
+        for status: MutationResultStatus
+    ) -> FavoriteAddFeedback {
+        switch status {
+        case .confirmedSuccess:
+            FavoriteAddFeedback(
+                resourceKey: "ui.f8f147eae9ef4058",
+                isError: false,
+                shouldApplyFavorite: true
+            )
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            FavoriteAddFeedback(
+                resourceKey: "ui.c6509276bfb40c3e",
+                isError: true,
+                shouldApplyFavorite: false
+            )
+        case .confirmedFailure, .partialSuccess:
+            FavoriteAddFeedback(
+                resourceKey: "ui.879eea91f0f03666",
+                isError: true,
+                shouldApplyFavorite: false
+            )
+        case .permissionDenied:
+            FavoriteAddFeedback(
+                resourceKey: "ui.8456cb379b109f1f",
+                isError: true,
+                shouldApplyFavorite: false
+            )
+        case .unsupported:
+            FavoriteAddFeedback(
+                resourceKey: "ui.1a328a0c6cdda7f4",
+                isError: true,
+                shouldApplyFavorite: false
+            )
+        case .cancelledBeforeSubmission:
+            FavoriteAddFeedback(
+                resourceKey: "ui.d5f06160eed23cb2",
+                isError: false,
+                shouldApplyFavorite: false
+            )
         }
     }
 
@@ -2452,6 +2517,11 @@ final class WorkspaceModel {
         guard isFileModuleEnabled, !targets.isEmpty else {
             return
         }
+        guard Self.canDeleteItems(targets) else {
+            statusIsError = true
+            statusMessage = L10n.string("ui.3f7c1a9e5b206d84")
+            return
+        }
         let displayName = targets.count == 1 ? targets[0].name : L10n.string("ui.05ec76407f6737d9", String(describing: targets.count))
         let taskID = addTransfer(
             kind: .delete,
@@ -2465,31 +2535,43 @@ final class WorkspaceModel {
             guard let self else { return }
             do {
                 setTransferState(taskID, .running)
-                try await repository.delete(paths: paths, progress: progressHandler(for: taskID))
-                let remaining: Set<String>
-                if deletingFromPhotos {
-                    try await verifyDeletedPhotoPaths(paths)
-                    photoLibrary.removeDeletedItems(at: paths)
-                    // displayedItems 是 items/timelineItems 异步刷新后的派生数组，
-                    // 这里直接用源数组判断才能避免“删除成功但仍提示存在”的误报。
-                    remaining = Set(
-                        (photoLibrary.items.map(\.path) + photoLibrary.timelineItems.map(\.path))
-                    )
+                let result = try await repository.deleteResult(
+                    paths: paths,
+                    progress: progressHandler(for: taskID)
+                )
+                if result.requiresRefresh
+                    || result.status == .confirmedSuccess
+                    || result.status == .partialSuccess {
+                    if deletingFromPhotos {
+                        if result.status == .confirmedSuccess {
+                            photoLibrary.removeDeletedItems(at: paths)
+                        }
+                        await photoLibrary.refreshAll()
+                    } else {
+                        await refresh()
+                    }
+                }
+
+                let feedback = Self.fileDeleteFeedback(for: result.status)
+                if feedback.shouldFinish {
+                    finishTransfer(taskID)
+                    statusIsError = false
+                    statusMessage = L10n.string(feedback.resourceKey)
+                    showToast(targets.count == 1 ? L10n.string("ui.025cce8bdaa86831") : L10n.string("ui.89b32b0e4eb8d36d", String(describing: targets.count)), icon: "trash.fill")
+                } else if feedback.shouldCancel {
+                    setTransferState(taskID, .cancelled)
+                    statusIsError = false
+                    statusMessage = L10n.string(feedback.resourceKey)
                 } else {
-                    await refresh()
-                    remaining = Set(items.map(\.path))
-                }
-                guard paths.allSatisfy({ !remaining.contains($0) }) else {
-                    throw AppError(
-                        category: .partialFailure,
-                        isRetryable: false,
-                        safeUserMessage: L10n.string("ui.c2b9f1d82b8cc6b2")
+                    failTransfer(
+                        taskID,
+                        error: AppError(
+                            category: Self.fileDeleteErrorCategory(for: result.status),
+                            isRetryable: false,
+                            safeUserMessage: L10n.string(feedback.resourceKey)
+                        )
                     )
                 }
-                finishTransfer(taskID)
-                statusIsError = false
-                statusMessage = L10n.string("ui.fe83a7f35e45f85e")
-                showToast(targets.count == 1 ? L10n.string("ui.025cce8bdaa86831") : L10n.string("ui.89b32b0e4eb8d36d", String(describing: targets.count)), icon: "trash.fill")
             } catch is CancellationError {
                 setTransferState(taskID, .cancelled)
             } catch {
@@ -2504,31 +2586,88 @@ final class WorkspaceModel {
         runningTasks[taskID] = operation
     }
 
-    /// 逐项复查删除结果，避免批量查询遇到单个不存在项目时掩盖部分失败。
-    private func verifyDeletedPhotoPaths(_ paths: [String]) async throws {
-        for path in paths {
-            do {
-                let existingItems = try await repository.getInfo(paths: [path])
-                guard !existingItems.contains(where: { $0.path == path }) else {
-                    throw AppError(
-                        category: .partialFailure,
-                        isRetryable: false,
-                        safeUserMessage: L10n.string("ui.c2b9f1d82b8cc6b2")
-                    )
-                }
-            } catch let error as AppError {
-                switch error.category {
-                case .notFound, .invalidResponse, .permissionDenied:
-                    // 目标已不在 NAS 结果中或由于被删除导致不可访问，符合删除成功预期。
-                    continue
-                case .partialFailure:
-                    throw error
-                default:
-                    throw error
-                }
-            } catch {
-                continue
-            }
+    struct FileDeleteFeedback: Equatable {
+        let resourceKey: String
+        let shouldFinish: Bool
+        let shouldCancel: Bool
+    }
+
+    static func canDeleteItems(_ items: [FileItem]) -> Bool {
+        !items.isEmpty
+            && items.allSatisfy { $0.permissions?.canDelete != false }
+    }
+
+    static func fileDeleteFeedback(
+        for status: MutationResultStatus
+    ) -> FileDeleteFeedback {
+        switch status {
+        case .confirmedSuccess:
+            FileDeleteFeedback(
+                resourceKey: "ui.fe83a7f35e45f85e",
+                shouldFinish: true,
+                shouldCancel: false
+            )
+        case .submittedButUnverified:
+            FileDeleteFeedback(
+                resourceKey: "ui.4d9a5f1438e2c7b1",
+                shouldFinish: false,
+                shouldCancel: false
+            )
+        case .partialSuccess:
+            FileDeleteFeedback(
+                resourceKey: "ui.6a2c0e8b7f314d95",
+                shouldFinish: false,
+                shouldCancel: false
+            )
+        case .confirmedFailure:
+            FileDeleteFeedback(
+                resourceKey: "ui.9b5e1c7a3d804f62",
+                shouldFinish: false,
+                shouldCancel: false
+            )
+        case .permissionDenied:
+            FileDeleteFeedback(
+                resourceKey: "ui.3f7c1a9e5b206d84",
+                shouldFinish: false,
+                shouldCancel: false
+            )
+        case .unsupported:
+            FileDeleteFeedback(
+                resourceKey: "ui.8c2e6b4a1d957f30",
+                shouldFinish: false,
+                shouldCancel: false
+            )
+        case .cancelledBeforeSubmission:
+            FileDeleteFeedback(
+                resourceKey: "ui.5e1a8d3c7b904f26",
+                shouldFinish: false,
+                shouldCancel: true
+            )
+        case .cancellationRequestedAfterSubmission:
+            FileDeleteFeedback(
+                resourceKey: "ui.7b3d9e1a5c806f42",
+                shouldFinish: false,
+                shouldCancel: false
+            )
+        }
+    }
+
+    private static func fileDeleteErrorCategory(
+        for status: MutationResultStatus
+    ) -> AppErrorCategory {
+        switch status {
+        case .permissionDenied:
+            .permissionDenied
+        case .unsupported:
+            .apiUnavailable
+        case .partialSuccess:
+            .partialFailure
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            .unknown
+        case .confirmedFailure:
+            .conflict
+        case .confirmedSuccess, .cancelledBeforeSubmission:
+            .cancelled
         }
     }
 
@@ -2641,6 +2780,10 @@ final class WorkspaceModel {
             return
         }
         restart(taskID, transfer: transfer)
+    }
+
+    func canRetryTransfer(_ taskID: UUID) -> Bool {
+        restartableTransfers[taskID] != nil
     }
 
     private func restart(_ taskID: UUID, transfer: RestartableTransfer) {

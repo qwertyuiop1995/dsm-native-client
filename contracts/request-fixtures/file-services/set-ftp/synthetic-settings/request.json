@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "file-services.set-ftp.synthetic-settings",
+  "module": "file-services",
+  "operation": "setFTP",
+  "api": {
+    "name": "SYNO.Core.FileServ.FTP",
+    "method": "set",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "enable_ftp",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "enable_ftps",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "portnum",
+      "valueType": "integer",
+      "encodedValue": "2121"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

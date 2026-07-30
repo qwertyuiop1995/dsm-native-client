@@ -15,6 +15,12 @@
 
 目标系统验收必须覆盖：正式签名后的 Finder/File Provider 端到端行为；Windows 专用 WinUI XAML 编译器下的 x64/arm64 完整构建；资源管理器 Cloud Files 回调、状态图标、固定/释放、只读失败、重启、外部磁盘和卸载行为。macOS 无法执行 Windows 专用 `XamlCompiler.exe`，因此不能用 Windows 核心源码编译代替完整 Windows 构建。
 
+在正式 Apple 签名环境可用前，macOS File Provider 核心架构进入验证冻结期：只处理
+能由自动化测试证明的缺陷、事务恢复边界和安全问题，不根据推测增加新的系统行为。
+正式签名后的完整检查以
+[macOS 桌面云盘发布与升级验收](../compatibility/DESKTOP_CLOUD_DRIVE_RELEASE_ACCEPTANCE_ZH.md)
+为准，验证等级使用[功能实现与验证等级](../quality/VERIFICATION_LEVELS_ZH.md)。
+
 ## 2. 已确认的产品决策
 
 1. 接受 Finder 和 Windows 文件资源管理器中的原生“云盘位置”，不要求 macOS 独立卷或 Windows 盘符。
@@ -233,6 +239,22 @@ degraded
 removing
 failed
 ```
+
+创建和移除已经接入独立事务协调器，并通过可注入的 domain controller、安全会话
+存储和配置存储验证以下边界：
+
+- 会话保存失败时不得注册 domain；
+- mapping 保存后 domain 注册失败时回滚；
+- domain 注册成功但 runtime 保存或可读验证失败时回滚；
+- 移除开始后持久化 `removing`，失败时保留足够信息供下次启动继续清理；
+- 系统盘 mapping 存在但 domain 不存在时补注册；
+- domain 存在但没有任何 mapping 时清理孤立 domain；
+- 外接缓存卷 domain 缺失时保持不可用，不错误迁移到系统盘；
+- 最后一个 mapping 完整清理后才移除共享会话。
+
+仍需补齐 runtime schema 无法解码、共享会话缺失后的显式重新认证状态，并通过正式
+签名验证系统回调和孤立 domain 行为。在这些出口完成前，不把代码级事务测试表述为
+Finder 系统行为已经验证。
 
 ### 8.5 `ItemAvailabilityState`
 

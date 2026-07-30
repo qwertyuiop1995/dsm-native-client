@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "hardware.set-hibernation.synthetic-settings",
+  "module": "hardware",
+  "operation": "setHibernation",
+  "api": {
+    "name": "SYNO.Core.Hardware.Hibernation",
+    "method": "set",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "eunit_deep_sleep",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "ignore_netbios_broadcast",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

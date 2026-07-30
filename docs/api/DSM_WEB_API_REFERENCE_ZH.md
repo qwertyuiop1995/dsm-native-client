@@ -771,14 +771,14 @@ S.M.A.R.T. 检测使用能力发现返回的 `SYNO.Core.Storage.Disk` v1。`Stor
 | `SYNO.Core.Network.PPPoE` | `list`；PPPoE | 高 |
 | `SYNO.Core.Network.Proxy` | `get`, `set`；`enable`, `http_host`, `http_port` | 中 |
 | `SYNO.Core.BandwidthControl` | `get`；账号带宽规则 | 中 |
-| `SYNO.Core.Web.DSM` | `get`；DSM HTTP/HTTPS 与门户设置 | 中 |
+| `SYNO.Core.Web.DSM` | `get`, `set`；DSM HTTP/HTTPS、门户与局域网发现设置 | 中 |
 | `SYNO.Core.FileServ.SMB` | `get`, `set`；`enable_samba` | 中 |
 | `SYNO.Core.FileServ.FTP` | `get`, `set`；`enable_ftp`, `enable_ftps`, `portnum` | 中 |
 | `SYNO.Core.FileServ.FTP.SFTP` | `get`, `set`；`enable`, `portnum` | 中 |
 | `SYNO.Core.FileServ.NFS` | `get`, `set`；`enable_nfs` | 中 |
 | `SYNO.Core.FileServ.AFP` | `get`；AFP 设置 | 中 |
 | `SYNO.Core.FileServ.ReflinkCopy` | `get`；写时复制能力 | 低 |
-| `SYNO.Core.FileServ.ServiceDiscovery` | `get`；服务发现 | 低 |
+| `SYNO.Core.FileServ.ServiceDiscovery` | `get`, `set`；服务发现与 SMB Time Machine | 中 |
 | `SYNO.Core.ACL` | `get_bypass_traverse` | 中 |
 | `SYNO.Core.Security.Firewall` | `get`, `set`；防火墙状态 | 高 |
 | `SYNO.Core.Security.Firewall.Conf` | `get`, `set`；端口扫描防护 | 高 |

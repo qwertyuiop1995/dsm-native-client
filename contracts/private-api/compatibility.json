@@ -1,7 +1,7 @@
 {
   "$schema": "../schemas/private-api-compatibility.schema.json",
   "schemaVersion": 1,
-  "updatedAt": "2026-07-29",
+  "updatedAt": "2026-07-30",
   "environments": [
     {
       "id": "lab-a-dsm-7-2-1-69057-u12-20260729",
@@ -224,9 +224,50 @@
           "verifiedAt": "2026-07-27",
           "evidenceRefs": [
             "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
-            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md",
+            "docs/api/discovery/endpoints/dsm-smart-test.md",
+            "docs/api/discovery/endpoints/dsm-hardware-settings.md"
           ],
           "notes": "S.M.A.R.T. 启停、硬件和 UPS 设置没有为发现而执行。"
+        }
+      ]
+    },
+    {
+      "id": "dsm-account-directory",
+      "componentId": "dsm-core",
+      "scope": "DSM",
+      "capability": "账号与群组目录读取和管理",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "critical",
+      "apiNames": [
+        "SYNO.Core.User",
+        "SYNO.Core.Group"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "能力缺失或权限不足时关闭账号管理；写请求结果无法回读时提示核对，不自动重放。",
+      "documentRef": "docs/api/discovery/endpoints/dsm-account-directory.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "observed",
+          "status": "degraded",
+          "versionMatrix": {
+            "SYNO.Core.User": "list / get / create / set / delete v1；写行为未验证",
+            "SYNO.Core.Group": "list / get / create / set / delete v1；写行为未验证"
+          },
+          "verifiedAt": "2026-07-27",
+          "evidenceRefs": [
+            "docs/api/discovery/endpoints/dsm-account-directory.md",
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+          ],
+          "notes": "只读结构与网页请求已有脱敏记录；共享请求 Fixture 和源码测试不提升当前环境的写行为证据等级。"
         }
       ]
     },
@@ -234,7 +275,7 @@
       "id": "dsm-administration",
       "componentId": "dsm-core",
       "scope": "DSM",
-      "capability": "套件、任务、账号、文件服务、网络、DDNS 与安全设置",
+      "capability": "套件、任务、文件服务、网络、DDNS 与安全设置",
       "classification": "internal",
       "operation": "mixed",
       "risk": "critical",
@@ -245,8 +286,6 @@
         "SYNO.Core.Package.Thumb",
         "SYNO.Core.TaskScheduler",
         "SYNO.Core.EventScheduler",
-        "SYNO.Core.User",
-        "SYNO.Core.Group",
         "SYNO.Core.Terminal",
         "SYNO.Core.FileServ.SMB",
         "SYNO.Core.FileServ.NFS",
@@ -285,8 +324,8 @@
             "SYNO.Core.Package.Control / Uninstallation / Thumb": "v1",
             "SYNO.Core.TaskScheduler": "列表/运行 v3；详情/创建/修改 v4",
             "SYNO.Core.EventScheduler": "v1",
-            "SYNO.Core.User / Group": "客户端范围 v1",
             "SYNO.Core.Terminal / FileServ.SMB / FileServ.NFS": "客户端范围 v1-v3",
+            "SYNO.Core.Network.Proxy": "客户端范围 v1；写行为未验证",
             "SYNO.Core.Web.DSM / Network.Ethernet / Security.DoS": "客户端范围 v1-v2",
             "SYNO.Core.QuickConnect / Region.NTP": "客户端范围 v1-v3",
             "其余已列 DSM 控制面板 API": "客户端范围 v1"
@@ -294,7 +333,13 @@
           "verifiedAt": "2026-07-27",
           "evidenceRefs": [
             "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
-            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md",
+            "docs/api/discovery/endpoints/dsm-ethernet-settings.md",
+            "docs/api/discovery/endpoints/dsm-security-settings.md",
+            "docs/api/discovery/endpoints/dsm-remote-access-settings.md",
+            "docs/api/discovery/endpoints/dsm-file-service-settings.md",
+            "docs/api/discovery/endpoints/dsm-terminal-settings.md",
+            "docs/api/discovery/endpoints/dsm-proxy-settings.md"
           ],
           "notes": "只读结构和网页请求已有记录；危险写操作未形成当前环境的统一行为验证结论。"
         }

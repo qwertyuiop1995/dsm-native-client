@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "hardware.set-fan-mode.synthetic-settings",
+  "module": "hardware",
+  "operation": "setFanMode",
+  "api": {
+    "name": "SYNO.Core.Hardware.FanSpeed",
+    "method": "set",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "dual_fan_speed",
+      "valueType": "string",
+      "encodedValue": "coolfan"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

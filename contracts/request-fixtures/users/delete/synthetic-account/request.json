@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "users.delete.synthetic-account",
+  "module": "users",
+  "operation": "delete",
+  "api": {
+    "name": "SYNO.Core.User",
+    "method": "delete",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "name",
+      "valueType": "stringArray",
+      "encodedValue": "[\"<synthetic-account>\"]"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "destructive",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

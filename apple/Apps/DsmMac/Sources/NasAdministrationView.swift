@@ -937,6 +937,7 @@ private struct SecuritySettingsView: View {
     @State private var expiresAutomatically: Bool
     @State private var isConfirming = false
     @State private var errorMessage: String?
+    @State private var successMessage: String?
     let original: NasSecuritySettings
     let isSaving: Bool
     let onSave: (NasSecuritySettings) async throws -> Void
@@ -1032,13 +1033,22 @@ private struct SecuritySettingsView: View {
             Section {
                 Text(L10n.string("ui.edd8f7a8fbe466ab"))
                     .foregroundStyle(.secondary)
+                if let successMessage {
+                    Label(successMessage, systemImage: "checkmark.circle.fill")
+                }
                 HStack {
                     Spacer()
                     Button(L10n.string("ui.e0534b8a4e46a0cb")) {
                         draft = original
                         expiresAutomatically = original.expirationDays != nil
+                        successMessage = nil
                     }
                     .disabled(draft == original || isSaving)
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(L10n.string("security.settings.saving"))
+                    }
                     Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
                         .buttonStyle(.borderedProminent)
                         .disabled(draft == original || isSaving)
@@ -1072,8 +1082,11 @@ private struct SecuritySettingsView: View {
 
     private func save() {
         Task {
+            successMessage = nil
             do {
                 try await onSave(draft)
+                guard !Task.isCancelled else { return }
+                successMessage = L10n.string("security.settings.completed")
             } catch {
                 errorMessage = userMessage(for: error, fallback: L10n.string("ui.f8f49516c226e6b7"))
             }
@@ -1102,7 +1115,7 @@ private struct RemoteAccessSettingsView: View {
 
     var body: some View {
         Form {
-            Section("QuickConnect") {
+            Section(L10n.string("remote-access.section.quickconnect")) {
                 if draft.isRelayEnabled != nil {
                     Toggle(
                         L10n.string("ui.c228914d93ed28bd"),
@@ -1132,6 +1145,13 @@ private struct RemoteAccessSettingsView: View {
                 Text(L10n.string("ui.ace40ffe0474ce20"))
                     .foregroundStyle(.secondary)
                 HStack {
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(
+                                L10n.string("remote-access.settings.saving")
+                            )
+                    }
                     Spacer()
                     Button(L10n.string("ui.e0534b8a4e46a0cb")) { draft = original }
                         .disabled(draft == original || isSaving)
@@ -1378,6 +1398,13 @@ private struct HardwareSettingsView: View {
                 Text(L10n.string("ui.8c76e485f46f5a7c"))
                     .foregroundStyle(.secondary)
                 HStack {
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(
+                                L10n.string("hardware.settings.saving")
+                            )
+                    }
                     Spacer()
                     Button(L10n.string("ui.e0534b8a4e46a0cb")) { draft = original }
                         .disabled(draft == original || isSaving)
@@ -1461,24 +1488,46 @@ private struct ProxySettingsView: View {
                 Toggle(L10n.string("ui.66cd771d3bbc9335"), isOn: $draft.isEnabled)
                 TextField(L10n.string("ui.d3716cc5a2f5a810"), text: $draft.host)
                     .disabled(!draft.isEnabled)
-                if draft.port != nil {
-                    TextField(L10n.string("ui.e71ac32b544b0ebf"), value: Binding(
-                        get: { draft.port ?? 0 },
-                        set: { draft.port = $0 }
-                    ), format: .number)
-                    .disabled(!draft.isEnabled)
+                if draft.isEnabled,
+                   !NasProxySettings.isValidHost(draft.normalizedHost) {
+                    Text(L10n.string("proxy.settings.host-invalid"))
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                TextField(
+                    L10n.string("ui.e71ac32b544b0ebf"),
+                    value: $draft.port,
+                    format: .number
+                )
+                .disabled(!draft.isEnabled)
+                if draft.isEnabled,
+                   draft.port.map({ (1...65_535).contains($0) }) != true {
+                    Text(L10n.string("proxy.settings.port-invalid"))
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
             }
             Section {
                 Text(L10n.string("ui.0bdd80480ee76860"))
                     .foregroundStyle(.secondary)
                 HStack {
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(
+                                L10n.string("proxy.settings.saving")
+                            )
+                    }
                     Spacer()
                     Button(L10n.string("ui.e0534b8a4e46a0cb")) { draft = original }
                         .disabled(draft == original || isSaving)
                     Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
                         .buttonStyle(.borderedProminent)
-                        .disabled(draft == original || isSaving)
+                        .disabled(
+                            draft == original
+                                || isSaving
+                                || !draft.isValidForSaving
+                        )
                 }
             }
         }
@@ -1567,6 +1616,13 @@ private struct FileServiceSettingsView: View {
                     .foregroundStyle(.secondary)
                 HStack {
                     Spacer()
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(
+                                L10n.string("file-services.settings.saving")
+                            )
+                    }
                     Button(L10n.string("ui.e0534b8a4e46a0cb")) { draft = original }
                         .disabled(draft == original || isSaving)
                     Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
@@ -1660,6 +1716,14 @@ private struct TerminalSettingsView: View {
                         get: { draft.sshPort ?? 0 },
                         set: { draft.sshPort = $0 }
                     ), format: .number)
+                    if isPortInvalid {
+                        Text(L10n.string("terminal.settings.port-invalid"))
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .accessibilityLabel(
+                                L10n.string("terminal.settings.port-invalid")
+                            )
+                    }
                 }
             }
             Section {
@@ -1667,11 +1731,18 @@ private struct TerminalSettingsView: View {
                     .foregroundStyle(.secondary)
                 HStack {
                     Spacer()
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(
+                                L10n.string("terminal.settings.saving")
+                            )
+                    }
                     Button(L10n.string("ui.e0534b8a4e46a0cb")) { draft = original }
                         .disabled(draft == original || isSaving)
                     Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
                         .buttonStyle(.borderedProminent)
-                        .disabled(draft == original || isSaving)
+                        .disabled(draft == original || isSaving || isPortInvalid)
                 }
             }
         }
@@ -1698,6 +1769,11 @@ private struct TerminalSettingsView: View {
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )
+    }
+
+    private var isPortInvalid: Bool {
+        guard let port = draft.sshPort else { return false }
+        return !(1...65_535).contains(port)
     }
 
     private func save() {
@@ -3138,6 +3214,7 @@ private struct StorageDetailSheet: View {
         Task {
             do {
                 try await startTest(disk.id, type)
+                guard !Task.isCancelled else { return }
                 message = type == .extended ? L10n.string("ui.13f8e4d6e493f0e2") : L10n.string("ui.7ca7666a8802812b")
             } catch {
                 message = (error as? AppError)?.safeUserMessage
@@ -3152,6 +3229,7 @@ private struct StorageDetailSheet: View {
         Task {
             do {
                 try await stopTest(disk.id)
+                guard !Task.isCancelled else { return }
                 message = L10n.string("ui.8ac5fb00b1e6f4cd")
             } catch {
                 message = (error as? AppError)?.safeUserMessage

@@ -32,7 +32,7 @@ enum DesktopCloudDriveAvailability {
     }
 }
 
-actor DesktopDriveSessionBridge {
+actor DesktopDriveSessionBridge: DesktopDriveSessionBridging {
     private let profileID: UUID
     private let session: AuthSession
     private let store: any SessionSecureStoring
@@ -108,15 +108,16 @@ final class DesktopCloudDriveManager {
     private let profile: NasProfile
     private let repository: any FileRepository
     private let store: DesktopDriveConfigurationStore
-    private let sessionBridge: DesktopDriveSessionBridge?
+    private let sessionBridge: (any DesktopDriveSessionBridging)?
     private let domainController = DesktopDriveDomainController()
+    private let transactionCoordinator: DesktopDriveMappingTransactionCoordinator
     @ObservationIgnored private var offlineTasks: [UUID: Task<Void, Never>] = [:]
 
     init(
         profile: NasProfile,
         repository: any FileRepository,
         store: DesktopDriveConfigurationStore = .init(),
-        sessionBridge: DesktopDriveSessionBridge? = nil,
+        sessionBridge: (any DesktopDriveSessionBridging)? = nil,
         isAvailable: Bool = DesktopCloudDriveAvailability.isAvailable
     ) {
         self.profile = profile
@@ -124,6 +125,11 @@ final class DesktopCloudDriveManager {
         self.store = store
         self.sessionBridge = sessionBridge
         self.isAvailable = isAvailable
+        transactionCoordinator = DesktopDriveMappingTransactionCoordinator(
+            store: store,
+            sessionBridge: sessionBridge,
+            domainController: domainController
+        )
     }
 
     func load() async {
@@ -141,6 +147,12 @@ final class DesktopCloudDriveManager {
             } else {
                 try await sessionBridge?.publish()
             }
+            for mapping in mappings {
+                runtimes[mapping.id] = try await store.runtime(mappingID: mapping.id)
+            }
+            await recoverInterruptedTransactions()
+            mappings = try await store.mappings(profileID: profile.id)
+            runtimes = [:]
             for mapping in mappings {
                 runtimes[mapping.id] = try await store.runtime(mappingID: mapping.id)
             }
@@ -243,14 +255,8 @@ final class DesktopCloudDriveManager {
         isBusy = true
         defer { isBusy = false }
         do {
-            try await domainController.remove(
-                domainController.domain(for: mapping)
-            )
-            try await store.removeMapping(id: mapping.id)
+            try await transactionCoordinator.remove(mapping)
             mappings.removeAll { $0.id == mapping.id }
-            if mappings.isEmpty {
-                try? await sessionBridge?.remove()
-            }
             runtimes[mapping.id] = nil
             cacheSummaries[mapping.id] = nil
             cacheBytes[mapping.id] = nil
@@ -652,13 +658,13 @@ final class DesktopCloudDriveManager {
         scope: DesktopDriveScope,
         cachePolicy: DesktopDriveCachePolicy
     ) async {
-        guard isAvailable, !isBusy, let sessionBridge else {
+        guard isAvailable, !isBusy, sessionBridge != nil else {
             setError("desktopDrive.error.unavailable")
             return
         }
         isBusy = true
         defer { isBusy = false }
-        var mapping = DesktopDriveMapping(
+        let mapping = DesktopDriveMapping(
             profileID: profile.id,
             displayName: displayName,
             scope: scope,
@@ -669,36 +675,15 @@ final class DesktopCloudDriveManager {
             return
         }
         do {
-            try await verifyReadable(mapping)
-            try await sessionBridge.publish()
-            let newDomain = try domainController.domainForCreation(mapping)
-            if newDomain.identifier.rawValue != mapping.id.uuidString {
-                mapping = mapping.replacing(
-                    providerDomainIdentifier: newDomain.identifier.rawValue
-                )
-            }
-            try await store.saveMapping(mapping)
-            try await store.setMappingState(
-                .available,
-                mappingID: mapping.id,
-                successfulCheckAt: Date()
+            let created = try await transactionCoordinator.create(
+                mapping,
+                verifyReadable: verifyReadable
             )
-            do {
-                try await domainController.add(newDomain)
-            } catch {
-                try? await store.removeMapping(id: mapping.id)
-                throw error
-            }
-            mappings.append(mapping)
+            mappings.append(created)
             mappings.sort { $0.createdAt < $1.createdAt }
-            runtimes[mapping.id] = try await store.runtime(mappingID: mapping.id)
+            runtimes[created.id] = try await store.runtime(mappingID: created.id)
             setSuccess("desktopDrive.status.added")
         } catch {
-            let remainingMappings =
-                (try? await store.mappings(profileID: profile.id)) ?? mappings
-            if remainingMappings.isEmpty {
-                try? await sessionBridge.remove()
-            }
             setError("desktopDrive.error.add")
         }
     }
@@ -930,6 +915,13 @@ final class DesktopCloudDriveManager {
                   let runtime = runtimes[mapping.id] else {
                 continue
             }
+            if [
+                DesktopDriveMappingState.removing,
+                .failed,
+                .cacheVolumeUnavailable,
+            ].contains(runtime.state) {
+                continue
+            }
             if runtime.isManuallyPaused {
                 try? await domainController.disconnect(
                     manager,
@@ -949,6 +941,26 @@ final class DesktopCloudDriveManager {
                 try? await store.setMappingState(.offline, mappingID: mapping.id)
             }
             await refreshRuntime(mapping)
+        }
+    }
+
+    private func recoverInterruptedTransactions() async {
+        if let allMappings = try? await store.mappings() {
+            _ = try? await transactionCoordinator.removeOrphanedDomains(
+                allMappings: allMappings
+            )
+        }
+        guard let identifiers =
+                try? await transactionCoordinator.registeredDomainIdentifiers()
+        else {
+            return
+        }
+        for mapping in mappings {
+            _ = await transactionCoordinator.recover(
+                mapping,
+                registeredDomainIdentifiers: identifiers,
+                verifyReadable: verifyReadable
+            )
         }
     }
 

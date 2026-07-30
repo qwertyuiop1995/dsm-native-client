@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "status": "submittedButUnverified",
+  "operation": "delete",
+  "submitted": true,
+  "requiresRefresh": true,
+  "counts": {
+    "succeeded": 0,
+    "failed": 0,
+    "unknown": 1
+  },
+  "errorCategory": "network",
+  "localizationKey": "mutation.submitted_unverified",
+  "diagnosticTag": "file-station.delete.unverified"
+}

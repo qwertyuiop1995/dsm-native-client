@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "container-manager.delete-network.synthetic-network",
+  "module": "container-manager",
+  "operation": "deleteNetwork",
+  "api": {
+    "name": "SYNO.Docker.Network",
+    "method": "remove",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "id",
+      "valueType": "string",
+      "encodedValue": "<synthetic-container-network>"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "destructive",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

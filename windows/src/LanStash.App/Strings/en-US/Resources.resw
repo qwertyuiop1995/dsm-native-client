@@ -20,6 +20,12 @@
   <data name="ModuleTransfers" xml:space="preserve"><value>Transfers</value></data>
   <data name="ModuleSettings" xml:space="preserve"><value>Settings</value></data>
   <data name="ActionSignOut" xml:space="preserve"><value>Sign out</value></data>
+  <data name="TrayTooltip" xml:space="preserve"><value>LanStash is running in the background</value></data>
+  <data name="TrayOpenApp" xml:space="preserve"><value>Open LanStash</value></data>
+  <data name="TrayPauseCloudDrives" xml:space="preserve"><value>Pause this NAS’s cloud drive locations</value></data>
+  <data name="TrayResumeCloudDrives" xml:space="preserve"><value>Resume this NAS’s cloud drive locations</value></data>
+  <data name="TrayCloudDriveIssues" xml:space="preserve"><value>{0} cloud drive locations need attention</value></data>
+  <data name="TrayExitApp" xml:space="preserve"><value>Exit LanStash</value></data>
   <data name="CategoryOverview" xml:space="preserve"><value>Overview</value></data>
   <data name="CategoryContainers" xml:space="preserve"><value>Containers</value></data>
   <data name="CategoryVirtualMachines" xml:space="preserve"><value>Virtual Machines</value></data>
@@ -188,4 +194,76 @@
   <data name="WinSharedf91eef8a1cf7b01c" xml:space="preserve"><value>Unable to connect to NAS</value></data>
   <data name="WinSharedfa9066ff052e7270" xml:space="preserve"><value>The name cannot contain path separators.</value></data>
   <data name="WinSharedfea22978bfdec072" xml:space="preserve"><value>The NAS has not confirmed that the item has been deleted, please refresh and try again.</value></data>
+  <data name="CloudDriveTitle" xml:space="preserve"><value>NAS locations</value></data>
+  <data name="CloudDriveDescription" xml:space="preserve"><value>Add an entire NAS or a folder to File Explorer. Files stay online-only until you open them or choose to keep them on this device. This version is read-only.</value></data>
+  <data name="CloudDriveFolderPath" xml:space="preserve"><value>NAS folder path</value></data>
+  <data name="CloudDriveFolderPlaceholder" xml:space="preserve"><value>/shared-folder/projects</value></data>
+  <data name="CloudDriveAddNas" xml:space="preserve"><value>Add entire NAS</value></data>
+  <data name="CloudDriveAddFolder" xml:space="preserve"><value>Add folder</value></data>
+  <data name="CloudDriveEmpty" xml:space="preserve"><value>No NAS locations have been added for this connection.</value></data>
+  <data name="CloudDriveEntireNas" xml:space="preserve"><value>Entire NAS</value></data>
+  <data name="CloudDriveReadOnlyOnline" xml:space="preserve"><value>Read-only · online-only by default</value></data>
+  <data name="CloudDriveOpen" xml:space="preserve"><value>Show in File Explorer</value></data>
+  <data name="CloudDriveClearCache" xml:space="preserve"><value>Free up space</value></data>
+  <data name="CloudDriveRemove" xml:space="preserve"><value>Remove</value></data>
+  <data name="CloudDriveRemoveTitle" xml:space="preserve"><value>Remove this NAS location?</value></data>
+  <data name="CloudDriveRemoveMessage" xml:space="preserve"><value>It will disappear from File Explorer. Files on the NAS will not be deleted.</value></data>
+  <data name="CloudDriveAdded" xml:space="preserve"><value>The NAS location was added.</value></data>
+  <data name="CloudDriveRemoved" xml:space="preserve"><value>The NAS location was removed.</value></data>
+  <data name="CloudDriveCacheCleared" xml:space="preserve"><value>Cached file contents were released where possible.</value></data>
+  <data name="CloudDriveInvalidPath" xml:space="preserve"><value>Enter a valid NAS folder path, such as /shared-folder/projects.</value></data>
+  <data name="CloudDriveOverlap" xml:space="preserve"><value>This location overlaps an existing NAS location. Remove the existing one or choose another folder.</value></data>
+  <data name="CloudDriveSignInRequired" xml:space="preserve"><value>Connect to the NAS before adding a location.</value></data>
+  <data name="CloudDriveGenericError" xml:space="preserve"><value>The NAS location could not be changed. Check the connection and try again.</value></data>
+  <data name="CloudDriveCacheSize" xml:space="preserve"><value>Downloaded: {0}</value></data>
+  <data name="CloudDriveKeepOffline" xml:space="preserve"><value>Always keep on this device</value></data>
+  <data name="CloudDriveReleaseOffline" xml:space="preserve"><value>Stop keeping offline</value></data>
+  <data name="CloudDriveCancel" xml:space="preserve"><value>Cancel task</value></data>
+  <data name="CloudDrivePause" xml:space="preserve"><value>Pause</value></data>
+  <data name="CloudDriveResume" xml:space="preserve"><value>Resume</value></data>
+  <data name="CloudDrivePlanning" xml:space="preserve"><value>Calculating required space: {0} files, {1} discovered</value></data>
+  <data name="CloudDriveCheckingSpace" xml:space="preserve"><value>Checking available local space</value></data>
+  <data name="CloudDrivePreparing" xml:space="preserve"><value>Preparing local placeholders</value></data>
+  <data name="CloudDriveDownloading" xml:space="preserve"><value>Keeping files offline: {0}/{1}, {2} complete</value></data>
+  <data name="CloudDriveOfflineReady" xml:space="preserve"><value>These contents are available offline.</value></data>
+  <data name="CloudDriveOfflineCancelled" xml:space="preserve"><value>The task was cancelled. Fully downloaded contents remain as regular cache.</value></data>
+  <data name="CloudDriveOfflineReleased" xml:space="preserve"><value>Offline retention was removed and releasable local contents were freed.</value></data>
+  <data name="CloudDrivePaused" xml:space="preserve"><value>This NAS location is paused.</value></data>
+  <data name="CloudDriveResumed" xml:space="preserve"><value>This NAS location resumed.</value></data>
+  <data name="CloudDrivePlanIncomplete" xml:space="preserve"><value>The full size could not be calculated. Check inaccessible items or items with unknown sizes, then try again.</value></data>
+  <data name="CloudDriveInsufficientSpace" xml:space="preserve"><value>There isn’t enough local cache space. These contents require {0}, but “{1}” only has {2} available; {3} more is needed. Select fewer contents or manage the cache.</value></data>
+  <data name="CloudDriveCacheBreakdown" xml:space="preserve"><value>Temporary {0} · Kept offline {1} · Temporary limit {2}</value></data>
+  <data name="CloudDriveStatePreparing" xml:space="preserve"><value>Preparing</value></data>
+  <data name="CloudDriveStateAvailable" xml:space="preserve"><value>Available</value></data>
+  <data name="CloudDriveStateChecking" xml:space="preserve"><value>Checking</value></data>
+  <data name="CloudDriveStatePaused" xml:space="preserve"><value>Paused</value></data>
+  <data name="CloudDriveStateOffline" xml:space="preserve"><value>NAS is not currently reachable</value></data>
+  <data name="CloudDriveStateAuthenticationRequired" xml:space="preserve"><value>Sign-in required</value></data>
+  <data name="CloudDriveStateCacheVolumeUnavailable" xml:space="preserve"><value>Cache disk is disconnected</value></data>
+  <data name="CloudDriveStateInsufficientLocalSpace" xml:space="preserve"><value>Not enough cache space</value></data>
+  <data name="CloudDriveStateDegraded" xml:space="preserve"><value>Some contents need attention</value></data>
+  <data name="CloudDriveStateRemoving" xml:space="preserve"><value>Removing</value></data>
+  <data name="CloudDriveStateFailed" xml:space="preserve"><value>Unavailable</value></data>
+  <data name="CloudDriveKeepSelected.Label" xml:space="preserve"><value>Always keep on this device</value></data>
+  <data name="CloudDriveReleaseSelected.Label" xml:space="preserve"><value>Free up space</value></data>
+  <data name="CloudDriveNotMapped" xml:space="preserve"><value>This item is not inside a NAS location. Add its folder as a NAS location first.</value></data>
+  <data name="CloudDriveNoSelection" xml:space="preserve"><value>Select a file or folder first.</value></data>
+  <data name="CloudDriveCoveredByParent" xml:space="preserve"><value>This item is still included by a parent folder that is kept on this device. Stop keeping the parent folder first.</value></data>
+  <data name="CloudDriveMappingName" xml:space="preserve"><value>Name in File Explorer</value></data>
+  <data name="CloudDriveMappingNamePlaceholder" xml:space="preserve"><value>Optional; the NAS or folder name is used by default</value></data>
+  <data name="CloudDriveCacheLimit" xml:space="preserve"><value>Temporary cache limit</value></data>
+  <data name="CloudDriveCacheLimitGiB" xml:space="preserve"><value>{0} GB</value></data>
+  <data name="CloudDriveCacheDiskDefault" xml:space="preserve"><value>Cache disk: system default</value></data>
+  <data name="CloudDriveCacheDiskSelected" xml:space="preserve"><value>Cache disk: {0}</value></data>
+  <data name="CloudDriveCacheDiskValue" xml:space="preserve"><value>Cache disk: {0}</value></data>
+  <data name="CloudDriveChooseCacheDisk" xml:space="preserve"><value>Choose disk…</value></data>
+  <data name="CloudDriveUseDefaultCacheDisk" xml:space="preserve"><value>Use default</value></data>
+  <data name="CloudDriveCacheDiskInvalid" xml:space="preserve"><value>This disk cannot store a NAS location. Choose a connected NTFS disk.</value></data>
+  <data name="CloudDriveCacheDiskUnavailable" xml:space="preserve"><value>The selected cache disk is disconnected. Reconnect it or choose another disk.</value></data>
+  <data name="CloudDriveInvalidName" xml:space="preserve"><value>Enter a name for this NAS location.</value></data>
+  <data name="CloudDriveCacheLimitInvalid" xml:space="preserve"><value>Choose a valid temporary cache limit.</value></data>
+  <data name="CloudDriveCacheLimitUpdated" xml:space="preserve"><value>The temporary cache limit was updated.</value></data>
+  <data name="CloudDriveLaunchAtLogin" xml:space="preserve"><value>Start after sign-in</value></data>
+  <data name="CloudDriveLaunchAtLoginEnabled" xml:space="preserve"><value>LanStash will start after you sign in to Windows.</value></data>
+  <data name="CloudDriveLaunchAtLoginDisabled" xml:space="preserve"><value>Online-only files remain unavailable until you open LanStash.</value></data>
 </root>

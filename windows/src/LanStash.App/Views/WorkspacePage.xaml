@@ -58,6 +58,16 @@
             <AppBarButton x:Uid="ActionStart" x:Name="StartButton" Click="Start_Click" Icon="Play" />
             <AppBarButton x:Uid="ActionStop" x:Name="StopButton" Click="Stop_Click" Icon="Stop" />
             <AppBarButton x:Uid="ActionDelete" x:Name="DeleteButton" Click="Delete_Click" Icon="Delete" />
+            <AppBarButton
+                x:Uid="CloudDriveKeepSelected"
+                x:Name="KeepOfflineButton"
+                Click="KeepOffline_Click"
+                Icon="Download" />
+            <AppBarButton
+                x:Uid="CloudDriveReleaseSelected"
+                x:Name="ReleaseOfflineButton"
+                Click="ReleaseOffline_Click"
+                Icon="Remove" />
             <AppBarButton x:Uid="ActionRefresh" Click="Refresh_Click" Icon="Refresh" />
         </CommandBar>
 

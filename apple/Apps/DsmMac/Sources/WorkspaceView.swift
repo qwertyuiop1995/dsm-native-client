@@ -1756,6 +1756,7 @@ private struct FileBrowserView: View {
     @State private var marqueeStart: CGPoint?
     @State private var marqueeCurrent: CGPoint?
     @State private var marqueeBaseSelection: Set<FileItem.ID> = []
+    @State private var desktopDriveManager: DesktopCloudDriveManager?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private struct BreadcrumbItem: Identifiable {
@@ -1901,6 +1902,17 @@ private struct FileBrowserView: View {
                     )
                         .font(.caption)
                         .foregroundStyle(model.searchErrorMessage != nil || model.statusIsError ? .red : .secondary)
+                }
+                if let manager = desktopDriveManager,
+                   let message = manager.statusMessage {
+                    Label(
+                        message,
+                        systemImage: manager.statusIsError
+                            ? "exclamationmark.triangle.fill"
+                            : "externaldrive.badge.checkmark"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(manager.statusIsError ? .red : .secondary)
                 }
             }
             .padding(.horizontal, 16)
@@ -2073,6 +2085,19 @@ private struct FileBrowserView: View {
         .task(id: displayedItemIDs) {
             model.updateDisplayedItemOrder(displayedItems)
         }
+        .task(id: model.profile.id) {
+            guard DesktopCloudDriveAvailability.isAvailable else {
+                desktopDriveManager = nil
+                return
+            }
+            let manager = DesktopCloudDriveManager(
+                profile: model.profile,
+                repository: model.fileRepository,
+                sessionBridge: model.desktopDriveSessionBridge
+            )
+            desktopDriveManager = manager
+            await manager.load()
+        }
         .navigationTitle(model.currentPath.isEmpty ? L10n.string("ui.39932f24fe11a6ba") : (model.currentPath as NSString).lastPathComponent)
     }
 
@@ -2202,6 +2227,23 @@ private struct FileBrowserView: View {
             Button(L10n.string("ui.0f50ddf3fa8bb870")) { onDownload(item, .directory) }
         } else {
             Button(L10n.string("ui.29610562f4b1c377")) { onDownload(item, .archive) }
+        }
+        if let manager = desktopDriveManager,
+           let mapping = manager.mapping(containing: targets.map(\.path)) {
+            Divider()
+            if manager.isKeepingOffline(mapping) {
+                Button(L10n.string("desktopDrive.cancel")) {
+                    manager.cancelOffline(mapping)
+                }
+            } else if manager.itemsAreKeptOffline(targets) {
+                Button(L10n.string("desktopDrive.releaseOffline")) {
+                    Task { await manager.releaseOffline(targets) }
+                }
+            } else {
+                Button(L10n.string("desktopDrive.keepOffline")) {
+                    manager.keepOffline(targets)
+                }
+            }
         }
         Button(targets.count > 1 ? L10n.string("ui.0d0313e9ffdb27fc") : L10n.string("ui.a6e09bfc6210d1e0")) { onShare(targets) }
         Divider()
@@ -3955,6 +3997,7 @@ private enum AppStorageInspector {
 private struct SettingsView: View {
     @Bindable var model: WorkspaceModel
     let onRenameNAS: (String) -> String?
+    @State private var desktopDriveManager: DesktopCloudDriveManager
     @State private var showsRenamePrompt = false
     @State private var renamedNAS = ""
     @State private var renameError: String?
@@ -3963,6 +4006,23 @@ private struct SettingsView: View {
     @State private var confirmsCacheCleanup = false
     @State private var showsSelectiveCleanupSheet = false
     @State private var storageMessage: String?
+    @State private var mappingToRemove: DesktopDriveMapping?
+    @State private var showsMappingCreator = false
+
+    init(
+        model: WorkspaceModel,
+        onRenameNAS: @escaping (String) -> String?
+    ) {
+        self.model = model
+        self.onRenameNAS = onRenameNAS
+        _desktopDriveManager = State(
+            initialValue: DesktopCloudDriveManager(
+                profile: model.profile,
+                repository: model.fileRepository,
+                sessionBridge: model.desktopDriveSessionBridge
+            )
+        )
+    }
 
     var body: some View {
         ScrollView {
@@ -4174,12 +4234,207 @@ private struct SettingsView: View {
                             .disabled(storage.safeTrash == 0)
                     }
                 }
+
+                SettingsSectionCard(
+                    title: L10n.string("desktopDrive.title"),
+                    icon: "externaldrive.connected.to.line.below",
+                    iconColor: .blue
+                ) {
+                    Text(L10n.string("desktopDrive.description"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Button(L10n.string("desktopDrive.add")) {
+                            showsMappingCreator = true
+                        }
+                        .disabled(
+                            desktopDriveManager.isBusy
+                                || !desktopDriveManager.isAvailable
+                        )
+                        Spacer()
+                        if desktopDriveManager.isBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                                .accessibilityLabel(
+                                    L10n.string("desktopDrive.status.working")
+                                )
+                        }
+                    }
+
+                    if !desktopDriveManager.isAvailable {
+                        Label(
+                            L10n.string("desktopDrive.unavailable"),
+                            systemImage: "info.circle"
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    } else if desktopDriveManager.mappings.isEmpty {
+                        Text(L10n.string("desktopDrive.empty"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(desktopDriveManager.mappings) { mapping in
+                            Divider().opacity(0.3)
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(mapping.displayName)
+                                        .font(.body.weight(.medium))
+                                    Text(mappingScopeText(mapping.scope))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                    Label(
+                                        mappingStatusText(mapping),
+                                        systemImage: mappingStatusIcon(mapping)
+                                    )
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    Text(mappingCacheText(mapping))
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                    Text(
+                                        desktopDriveManager.cacheLocationText(mapping)
+                                    )
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    if let progress = desktopDriveManager
+                                        .offlineProgress[mapping.id] {
+                                        mappingOfflineProgress(
+                                            mapping: mapping,
+                                            progress: progress
+                                        )
+                                    }
+                                }
+                                Spacer()
+                                Button(L10n.string("desktopDrive.open")) {
+                                    Task { await desktopDriveManager.reveal(mapping) }
+                                }
+                                Menu(L10n.string("desktopDrive.more")) {
+                                    if isOfflineTaskRunning(mapping) {
+                                        Button(L10n.string("desktopDrive.cancel")) {
+                                            desktopDriveManager.cancelOffline(mapping)
+                                        }
+                                    } else if desktopDriveManager.runtimes[mapping.id]?
+                                        .pinnedPaths.isEmpty == false {
+                                        Button(L10n.string("desktopDrive.releaseOffline")) {
+                                            Task {
+                                                await desktopDriveManager.releaseOffline(mapping)
+                                            }
+                                        }
+                                    } else {
+                                        Button(L10n.string("desktopDrive.keepOffline")) {
+                                            desktopDriveManager.keepMappingOffline(mapping)
+                                        }
+                                    }
+                                    Divider()
+                                    if desktopDriveManager.runtimes[mapping.id]?
+                                        .isManuallyPaused == true {
+                                        Button(L10n.string("desktopDrive.resume")) {
+                                            Task {
+                                                await desktopDriveManager.resume(mapping)
+                                            }
+                                        }
+                                    } else {
+                                        Button(L10n.string("desktopDrive.pause")) {
+                                            Task {
+                                                await desktopDriveManager.pause(mapping)
+                                            }
+                                        }
+                                    }
+                                    Button(L10n.string("desktopDrive.clearCache")) {
+                                        Task {
+                                            await desktopDriveManager.clearCache(mapping)
+                                        }
+                                    }
+                                    Menu(L10n.string("desktopDrive.cache.limit")) {
+                                        ForEach(
+                                            [Int64(5), 10, 20, 50],
+                                            id: \.self
+                                        ) { gibibytes in
+                                            let bytes = gibibytes
+                                                * 1_024 * 1_024 * 1_024
+                                            Button {
+                                                Task {
+                                                    await desktopDriveManager
+                                                        .setTemporaryCacheLimit(
+                                                            bytes,
+                                                            mapping: mapping
+                                                        )
+                                                }
+                                            } label: {
+                                                if mapping.cachePolicy
+                                                    .temporaryLimitBytes == bytes {
+                                                    Label(
+                                                        L10n.string(
+                                                            "desktopDrive.cache.limitGiB",
+                                                            gibibytes
+                                                        ),
+                                                        systemImage: "checkmark"
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        L10n.string(
+                                                            "desktopDrive.cache.limitGiB",
+                                                            gibibytes
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Divider()
+                                    Button(
+                                        L10n.string("desktopDrive.remove"),
+                                        role: .destructive
+                                    ) {
+                                        mappingToRemove = mapping
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let message = desktopDriveManager.statusMessage {
+                        Label(
+                            message,
+                            systemImage: desktopDriveManager.statusIsError
+                                ? "exclamationmark.triangle.fill"
+                                : "checkmark.circle.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(
+                            desktopDriveManager.statusIsError ? .red : .secondary
+                        )
+                    }
+                }
             }
             .padding(32)
             .frame(maxWidth: 680, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .task { storage = AppStorageInspector.snapshot() }
+        .task {
+            storage = AppStorageInspector.snapshot()
+            await desktopDriveManager.load()
+        }
+        .alert(
+            L10n.string("desktopDrive.remove.confirm.title"),
+            isPresented: Binding(
+                get: { mappingToRemove != nil },
+                set: { if !$0 { mappingToRemove = nil } }
+            )
+        ) {
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {
+                mappingToRemove = nil
+            }
+            Button(L10n.string("desktopDrive.remove"), role: .destructive) {
+                guard let mapping = mappingToRemove else { return }
+                mappingToRemove = nil
+                Task { await desktopDriveManager.remove(mapping) }
+            }
+        } message: {
+            Text(L10n.string("desktopDrive.remove.confirm.message"))
+        }
         .alert(L10n.string("ui.536d12618defa1a3"), isPresented: $confirmsCacheCleanup) {
             Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
             Button(L10n.string("ui.9d2998cca5172319"), role: .destructive) {
@@ -4207,6 +4462,13 @@ private struct SettingsView: View {
                 }
             }
         }
+        .sheet(isPresented: $showsMappingCreator) {
+            DesktopDriveMappingCreatorSheet(
+                manager: desktopDriveManager,
+                profileName: model.profile.displayName,
+                currentPath: model.currentPath
+            )
+        }
         .alert(L10n.string("ui.baa1159c128223dd"), isPresented: $showsRenamePrompt) {
             TextField(L10n.string("ui.65d8f92232ae77b0"), text: $renamedNAS)
             Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
@@ -4217,6 +4479,168 @@ private struct SettingsView: View {
         } message: {
             Text(L10n.string("ui.c0fb0cc138b48413"))
         }
+    }
+
+    private func mappingScopeText(_ scope: DesktopDriveScope) -> String {
+        switch scope {
+        case .allShares:
+            L10n.string("desktopDrive.scope.all")
+        case .folder(let path):
+            path
+        }
+    }
+
+    private func mappingCacheText(_ mapping: DesktopDriveMapping) -> String {
+        let summary = desktopDriveManager.cacheSummaries[mapping.id] ?? .init()
+        return L10n.string(
+            "desktopDrive.cache.breakdown",
+            ByteCountFormatter.string(
+                fromByteCount: summary.temporaryBytes,
+                countStyle: .file
+            ),
+            ByteCountFormatter.string(
+                fromByteCount: summary.keptOfflineBytes,
+                countStyle: .file
+            )
+        ) + " · " + L10n.string(
+            "desktopDrive.cache.limitValue",
+            ByteCountFormatter.string(
+                fromByteCount: mapping.cachePolicy.temporaryLimitBytes,
+                countStyle: .file
+            )
+        )
+    }
+
+    private func mappingStatusText(_ mapping: DesktopDriveMapping) -> String {
+        let state = desktopDriveManager.runtimes[mapping.id]?.state ?? .preparing
+        let key = switch state {
+        case .preparing: "desktopDrive.state.preparing"
+        case .available: "desktopDrive.state.available"
+        case .checking: "desktopDrive.state.checking"
+        case .paused: "desktopDrive.state.paused"
+        case .offline: "desktopDrive.state.offline"
+        case .authenticationRequired:
+            "desktopDrive.state.authenticationRequired"
+        case .cacheVolumeUnavailable:
+            "desktopDrive.state.cacheVolumeUnavailable"
+        case .insufficientLocalSpace:
+            "desktopDrive.state.insufficientLocalSpace"
+        case .degraded: "desktopDrive.state.degraded"
+        case .removing: "desktopDrive.state.removing"
+        case .failed: "desktopDrive.state.failed"
+        }
+        return L10n.string(key)
+    }
+
+    private func mappingStatusIcon(_ mapping: DesktopDriveMapping) -> String {
+        switch desktopDriveManager.runtimes[mapping.id]?.state ?? .preparing {
+        case .available:
+            return "checkmark.circle"
+        case .checking, .preparing:
+            return "clock"
+        case .paused:
+            return "pause.circle"
+        case .offline, .authenticationRequired, .cacheVolumeUnavailable,
+             .insufficientLocalSpace, .degraded:
+            return "exclamationmark.triangle"
+        case .removing:
+            return "minus.circle"
+        case .failed:
+            return "xmark.circle"
+        }
+    }
+
+    @ViewBuilder
+    private func mappingOfflineProgress(
+        mapping: DesktopDriveMapping,
+        progress: DesktopDriveOfflineProgress
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            switch progress.phase {
+            case .planning:
+                ProgressView()
+                    .controlSize(.small)
+                Text(
+                    L10n.string(
+                        "desktopDrive.offline.planning",
+                        progress.discoveredFiles,
+                        ByteCountFormatter.string(
+                            fromByteCount: progress.discoveredBytes,
+                            countStyle: .file
+                        )
+                    )
+                )
+            case .checkingSpace:
+                ProgressView()
+                    .controlSize(.small)
+                Text(L10n.string("desktopDrive.offline.checkingSpace"))
+            case .requesting:
+                ProgressView(
+                    value: Double(progress.completedFiles),
+                    total: Double(max(progress.totalFiles, 1))
+                )
+                Text(
+                    L10n.string(
+                        "desktopDrive.offline.requesting",
+                        progress.completedFiles,
+                        progress.totalFiles
+                    )
+                )
+            case .downloading:
+                ProgressView(
+                    value: Double(progress.completedBytes),
+                    total: Double(max(progress.totalBytes, 1))
+                )
+                Text(
+                    L10n.string(
+                        "desktopDrive.offline.downloading",
+                        progress.completedFiles,
+                        progress.totalFiles,
+                        ByteCountFormatter.string(
+                            fromByteCount: progress.completedBytes,
+                            countStyle: .file
+                        )
+                    )
+                )
+            case .failed:
+                if let required = progress.requiredBytes,
+                   let available = progress.availableBytes,
+                   let shortage = progress.shortageBytes {
+                    Text(
+                        L10n.string(
+                            "desktopDrive.offline.insufficient",
+                            ByteCountFormatter.string(
+                                fromByteCount: required,
+                                countStyle: .file
+                            ),
+                            progress.volumeName ?? L10n.string("desktopDrive.title"),
+                            ByteCountFormatter.string(
+                                fromByteCount: available,
+                                countStyle: .file
+                            ),
+                            ByteCountFormatter.string(
+                                fromByteCount: shortage,
+                                countStyle: .file
+                            )
+                        )
+                    )
+                    .foregroundStyle(.red)
+                }
+            case .completed, .cancelled:
+                EmptyView()
+            }
+        }
+        .font(.caption2)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func isOfflineTaskRunning(_ mapping: DesktopDriveMapping) -> Bool {
+        guard let phase = desktopDriveManager.offlineProgress[mapping.id]?.phase else {
+            return false
+        }
+        return [
+            .planning, .checkingSpace, .requesting, .downloading,
+        ].contains(phase)
     }
 }
 
@@ -4580,6 +5004,200 @@ struct FilePropertiesView: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .medium
         return formatter.string(from: date)
+    }
+}
+
+private struct DesktopDriveMappingCreatorSheet: View {
+    private enum ScopeChoice: String, CaseIterable, Identifiable {
+        case allShares
+        case currentFolder
+
+        var id: Self { self }
+    }
+
+    let manager: DesktopCloudDriveManager
+    let profileName: String
+    let currentPath: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var scope: ScopeChoice = .allShares
+    @State private var displayName = ""
+    @State private var cacheLimitGiB: Int64 = 10
+    @State private var cacheLocation: DesktopDriveCacheLocation = .systemDefault
+    @State private var cacheVolumeName: String?
+    @State private var selectionError: String?
+    @State private var isCreating = false
+
+    private var currentFolderAvailable: Bool {
+        DesktopDrivePath.normalized(currentPath).map { $0 != "/" } == true
+    }
+
+    private var cacheHelpText: String {
+        if #available(macOS 15.0, *) {
+            return L10n.string("desktopDrive.creator.cacheHelp")
+        }
+        return L10n.string("desktopDrive.creator.cacheHelpMac14")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(L10n.string("desktopDrive.creator.title"))
+                .font(.title2.weight(.semibold))
+            Text(L10n.string("desktopDrive.creator.description"))
+                .foregroundStyle(.secondary)
+
+            Form {
+                Picker(L10n.string("desktopDrive.creator.scope"), selection: $scope) {
+                    Text(L10n.string("desktopDrive.scope.all"))
+                        .tag(ScopeChoice.allShares)
+                    Text(L10n.string("desktopDrive.creator.currentFolder"))
+                        .tag(ScopeChoice.currentFolder)
+                        .disabled(!currentFolderAvailable)
+                }
+                TextField(
+                    L10n.string("desktopDrive.creator.name"),
+                    text: $displayName
+                )
+                Picker(
+                    L10n.string("desktopDrive.cache.limit"),
+                    selection: $cacheLimitGiB
+                ) {
+                    ForEach([Int64(5), 10, 20, 50], id: \.self) {
+                        Text(
+                            L10n.string(
+                                "desktopDrive.cache.limitGiB",
+                                $0
+                            )
+                        ).tag($0)
+                    }
+                }
+                LabeledContent(L10n.string("desktopDrive.creator.cacheDisk")) {
+                    HStack {
+                        Text(
+                            cacheVolumeName
+                                ?? L10n.string("desktopDrive.creator.systemDisk")
+                        )
+                        if #available(macOS 15.0, *) {
+                            Button(L10n.string("desktopDrive.creator.chooseDisk")) {
+                                chooseCacheVolume()
+                            }
+                        }
+                        if cacheVolumeName != nil {
+                            Button(L10n.string("desktopDrive.creator.useSystemDisk")) {
+                                cacheLocation = .systemDefault
+                                cacheVolumeName = nil
+                                selectionError = nil
+                            }
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+
+            Text(cacheHelpText)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if let selectionError {
+                Label(selectionError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            if manager.statusIsError, let message = manager.statusMessage {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            HStack {
+                Spacer()
+                Button(L10n.string("ui.2cd0f3be8738a86c")) {
+                    dismiss()
+                }
+                Button(L10n.string("desktopDrive.creator.create")) {
+                    createMapping()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    isCreating
+                        || displayName.trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        ).isEmpty
+                        || (scope == .currentFolder && !currentFolderAvailable)
+                )
+            }
+        }
+        .padding(24)
+        .frame(width: 560)
+        .onAppear {
+            if displayName.isEmpty {
+                displayName = profileName
+            }
+        }
+        .onChange(of: scope) { _, value in
+            switch value {
+            case .allShares:
+                displayName = profileName
+            case .currentFolder:
+                let folder = (currentPath as NSString).lastPathComponent
+                displayName = folder.isEmpty
+                    ? profileName
+                    : "\(profileName) — \(folder)"
+            }
+        }
+    }
+
+    @available(macOS 15.0, *)
+    private func chooseCacheVolume() {
+        let panel = NSOpenPanel()
+        panel.title = L10n.string("desktopDrive.creator.chooseDisk")
+        panel.message = L10n.string("desktopDrive.creator.chooseDiskHelp")
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
+        do {
+            let volumeURL = try selectedURL.resourceValues(
+                forKeys: [.volumeURLForRemountingKey, .volumeNameKey]
+            )
+            cacheLocation = try manager.eligibleCacheLocation(
+                selectedURL: selectedURL
+            )
+            cacheVolumeName = volumeURL.volumeName
+                ?? selectedURL.lastPathComponent
+            selectionError = nil
+        } catch {
+            selectionError = L10n.string(
+                "desktopDrive.creator.diskIneligible"
+            )
+        }
+    }
+
+    private func createMapping() {
+        isCreating = true
+        let selectedScope: DesktopDriveScope
+        switch scope {
+        case .allShares:
+            selectedScope = .allShares
+        case .currentFolder:
+            selectedScope = .folder(path: currentPath)
+        }
+        let previousCount = manager.mappings.count
+        Task {
+            await manager.addMapping(
+                displayName: displayName,
+                scope: selectedScope,
+                cachePolicy: DesktopDriveCachePolicy(
+                    location: cacheLocation,
+                    temporaryLimitBytes:
+                        cacheLimitGiB * 1_024 * 1_024 * 1_024
+                )
+            )
+            isCreating = false
+            if manager.mappings.count > previousCount {
+                dismiss()
+            }
+        }
     }
 }
 

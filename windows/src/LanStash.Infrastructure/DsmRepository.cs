@@ -40,13 +40,23 @@ public sealed class DsmRepository(
 
     public async Task<FilePage> ListFilesAsync(
         string path,
+        CancellationToken cancellationToken = default) =>
+        await ListFilesAsync(path, 0, 500, cancellationToken).ConfigureAwait(false);
+
+    public async Task<FilePage> ListFilesAsync(
+        string path,
+        int offset,
+        int limit,
         CancellationToken cancellationToken = default)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         var method = string.IsNullOrWhiteSpace(path) ? "list_share" : "list";
         var parameters = new Dictionary<string, string>
         {
-            ["offset"] = "0",
-            ["limit"] = "500",
+            ["offset"] = offset.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["limit"] = Math.Min(limit, 500).ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
             ["sort_by"] = "name",
             ["sort_direction"] = "asc",
             ["additional"] = "[\"real_path\",\"size\",\"owner\",\"time\",\"perm\",\"volume_status\"]",
@@ -63,6 +73,20 @@ public sealed class DsmRepository(
             cancellationToken).ConfigureAwait(false);
         return ParseFilePage(data, method == "list" ? "files" : "shares");
     }
+
+    public Task<byte[]> ReadFileRangeAsync(
+        string remotePath,
+        long offset,
+        long length,
+        CancellationToken cancellationToken = default) =>
+        _api.ReadFileRangeAsync(
+            _profile,
+            _session,
+            Required("SYNO.FileStation.Download"),
+            remotePath,
+            offset,
+            length,
+            cancellationToken);
 
     public async Task<IReadOnlyList<FileItem>> SearchFilesAsync(
         string path,
@@ -799,7 +823,9 @@ public sealed class DsmRepository(
                 item.String("path") ?? string.Empty,
                 item.String("name") ?? item.String("path")?.Split('/').Last() ?? UserText.Key("WinShared79f326be4409d51f"),
                 item.Bool("isdir") ?? false,
-                item.Long("size") ?? additional?.Long("size") ?? 0,
+                item.Bool("isdir") == true
+                    ? 0
+                    : item.Long("size") ?? additional?.Long("size") ?? -1,
                 time?.Date("mtime") ?? item.Date("mtime"),
                 additional?.Object("owner")?.String("user") ?? additional?.String("owner"),
                 permission?.Bool("write") ?? false,
@@ -924,6 +950,14 @@ public sealed class DsmRepository(
     }
 
     private bool Supports(string apiName) => _capabilities.ContainsKey(apiName);
+
+    private ApiCapability Required(string apiName) =>
+        _capabilities.TryGetValue(apiName, out var capability)
+            ? capability
+            : throw new DsmException(
+                UserText.Key("WinShared11a208e43c34b77c"),
+                UserText.Key("WinShared371d84f48836296f"),
+                102);
 
     private string Preferred(params string[] names) =>
         names.FirstOrDefault(Supports)

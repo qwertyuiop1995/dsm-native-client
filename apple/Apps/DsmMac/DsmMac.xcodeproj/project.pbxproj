@@ -14,6 +14,7 @@
 		3679216DDA49A20D83B8411A /* NasAdministrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F276AF6EC0C343DF594E76B /* NasAdministrationView.swift */; };
 		3F7B3902FFF181AEC9D25BEE /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 55636F64951E9DD6841A1586 /* InfoPlist.strings */; };
 		3FCADE45FE1B6CE377E360BA /* DsmMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */; };
+		42BF5B5E814A964E72ED075E /* FileProviderExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6244065C1FCDAD42A9B769D5 /* FileProviderExtension.swift */; };
 		4440F05E83E5ED0F48DAC304 /* DsmCore in Frameworks */ = {isa = PBXBuildFile; productRef = CDFB3D25D6035AB51E143261 /* DsmCore */; };
 		46CE97C3D80547D7061224F2 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE9DB7D94AFC947DE39DF8D1 /* LoginView.swift */; };
 		4991FA2CB347811AEB834677 /* PhotoLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F424D8AB691E25447A263E5 /* PhotoLibraryModel.swift */; };
@@ -21,22 +22,54 @@
 		6E494C113B6C2491904BC781 /* ChatWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF1EB3904279ABE52505A57B /* ChatWorkspaceView.swift */; };
 		756071EA5D77E4C53C9FCF75 /* AppIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = 903CFF29712CF8E5FC9DAB8F /* AppIcon.png */; };
 		7DED1007E77ED31FE27F7E62 /* ServiceManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC9DA1CDE1FC236E9AC8DEDB /* ServiceManagementView.swift */; };
+		7FFC8B0166B4B16D77EE1D90 /* DsmNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = 3B2A8675E12B02AFDAD476A1 /* DsmNetwork */; };
 		836B31D0C4FF095E4FC1EFCF /* PhotoFolderDestinationPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE8A84A73C0B512AF504E7AD /* PhotoFolderDestinationPicker.swift */; };
+		89BA1323D0D84BB246D213BA /* DsmCore in Frameworks */ = {isa = PBXBuildFile; productRef = 367CFE0D29884F7F90B0E0D6 /* DsmCore */; };
 		A8947CF70F1CC5F62D83C33C /* DsmLocalization in Frameworks */ = {isa = PBXBuildFile; productRef = 068B0CB217B93D2E04F6CB21 /* DsmLocalization */; };
 		AB278A90DA574E3C49D06481 /* ServiceManagementModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2578503BB6C863138963CE6B /* ServiceManagementModel.swift */; };
 		AC6936BB386C9A829A221F34 /* WorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6DF22565675FC82D7CC686 /* WorkspaceModel.swift */; };
 		B6FA5CB7DA8790CA0A105940 /* NasAdministrationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF05BE448D0653B1A065559A /* NasAdministrationModel.swift */; };
 		C3AFE337248691D6883C0CE7 /* FilePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 852694B5E54505BB153EF98A /* FilePreviewView.swift */; };
+		C9E339D485378E1875A349E6 /* DesktopCloudDriveManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3A50B5166E5AD3B95EA1CAA /* DesktopCloudDriveManager.swift */; };
 		CCC4CD40C42D47613EAA8E2C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CA993277E25000CAE41B0447 /* Assets.xcassets */; };
+		D5668FBDA5A5683EEC686044 /* ProviderEnumerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6499C1A22746CC05B3929D4F /* ProviderEnumerator.swift */; };
 		D733D79BB2B46B2F6E5C06E9 /* PhotoMetadataExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BC9C9961187B8013EEE5911 /* PhotoMetadataExtractor.swift */; };
+		D9F509ACD514897C93DBCCAD /* ProviderRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A56B3E5F2DD3A282E12BA4A6 /* ProviderRuntime.swift */; };
+		DF9A454EE827CB25400301C5 /* LanStashFileProvider.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 21F2702AC3558C7DD3F3EA25 /* LanStashFileProvider.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		E53088EB1BE1BCBA9B672B12 /* PhotoLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27CC848C4E842FE9081B6B85 /* PhotoLibraryView.swift */; };
+		E64E34C2F0F804681A008881 /* ProviderItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 867D32EDC1609777EE056B6B /* ProviderItem.swift */; };
 		F06931669E2EB893B31BBBE0 /* LoginViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D54FCCE59BEF04898E541CE /* LoginViewModel.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		6A4E817DFA5F56037D0FA890 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 377905DE64178F14E5580E64 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6E7F102405CE46BF9FADEA71;
+			remoteInfo = DsmFileProvider;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		2EED664F79B7B96EEB234548 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				DF9A454EE827CB25400301C5 /* LanStashFileProvider.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1DE7697E655CBAC946BEBF3F /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		1F424D8AB691E25447A263E5 /* PhotoLibraryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryModel.swift; sourceTree = "<group>"; };
 		1F6DF22565675FC82D7CC686 /* WorkspaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceModel.swift; sourceTree = "<group>"; };
+		21F2702AC3558C7DD3F3EA25 /* LanStashFileProvider.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LanStashFileProvider.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		226606003B75B91F9FA03683 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 		2578503BB6C863138963CE6B /* ServiceManagementModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceManagementModel.swift; sourceTree = "<group>"; };
 		27CC848C4E842FE9081B6B85 /* PhotoLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryView.swift; sourceTree = "<group>"; };
@@ -45,13 +78,18 @@
 		46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DsmMacApp.swift; sourceTree = "<group>"; };
 		4D54FCCE59BEF04898E541CE /* LoginViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModel.swift; sourceTree = "<group>"; };
 		4E1F96609F0323DC19D30EC7 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		6244065C1FCDAD42A9B769D5 /* FileProviderExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderExtension.swift; sourceTree = "<group>"; };
+		6499C1A22746CC05B3929D4F /* ProviderEnumerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderEnumerator.swift; sourceTree = "<group>"; };
 		73A190EAB72D1587728A072E /* LanStash.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LanStash.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		852694B5E54505BB153EF98A /* FilePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePreviewView.swift; sourceTree = "<group>"; };
+		867D32EDC1609777EE056B6B /* ProviderItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderItem.swift; sourceTree = "<group>"; };
 		8BC9C9961187B8013EEE5911 /* PhotoMetadataExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoMetadataExtractor.swift; sourceTree = "<group>"; };
 		903CFF29712CF8E5FC9DAB8F /* AppIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = AppIcon.png; sourceTree = "<group>"; };
 		9C86C1E7AC50E2616225F51D /* apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = apple; path = ../..; sourceTree = SOURCE_ROOT; };
 		9D89D62711D2351506A6E681 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		A56B3E5F2DD3A282E12BA4A6 /* ProviderRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderRuntime.swift; sourceTree = "<group>"; };
 		AE8A84A73C0B512AF504E7AD /* PhotoFolderDestinationPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFolderDestinationPicker.swift; sourceTree = "<group>"; };
+		B3A50B5166E5AD3B95EA1CAA /* DesktopCloudDriveManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopCloudDriveManager.swift; sourceTree = "<group>"; };
 		BAA28F9CA875E65C60C3B1FE /* AppContentLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppContentLayout.swift; sourceTree = "<group>"; };
 		BF05BE448D0653B1A065559A /* NasAdministrationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NasAdministrationModel.swift; sourceTree = "<group>"; };
 		CA993277E25000CAE41B0447 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -62,6 +100,15 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		B44CD5FED1946805DCC1BFA8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				89BA1323D0D84BB246D213BA /* DsmCore in Frameworks */,
+				7FFC8B0166B4B16D77EE1D90 /* DsmNetwork in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C7DEF40B295CFB0B8C9D9955 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -87,6 +134,7 @@
 			isa = PBXGroup;
 			children = (
 				73A190EAB72D1587728A072E /* LanStash.app */,
+				21F2702AC3558C7DD3F3EA25 /* LanStashFileProvider.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -108,6 +156,7 @@
 				BAA28F9CA875E65C60C3B1FE /* AppContentLayout.swift */,
 				FE2A90B20C76F1C8B23067D1 /* ChatWorkspaceModel.swift */,
 				EF1EB3904279ABE52505A57B /* ChatWorkspaceView.swift */,
+				B3A50B5166E5AD3B95EA1CAA /* DesktopCloudDriveManager.swift */,
 				46A9227A5E05161F8B71FDF4 /* DsmMacApp.swift */,
 				852694B5E54505BB153EF98A /* FilePreviewView.swift */,
 				DE9DB7D94AFC947DE39DF8D1 /* LoginView.swift */,
@@ -129,6 +178,7 @@
 		BABD61061DEDBD88532CB0CE = {
 			isa = PBXGroup;
 			children = (
+				E7268A4D3444978BB3A2E157 /* FileProviderExtension */,
 				1DCB50C9E6FCC6724C5CF5C6 /* Packages */,
 				3D117DBEECE90BFE5B58D5B6 /* Resources */,
 				6FE02D5A3AD87DF10918B39E /* Sources */,
@@ -136,9 +186,40 @@
 			);
 			sourceTree = "<group>";
 		};
+		E7268A4D3444978BB3A2E157 /* FileProviderExtension */ = {
+			isa = PBXGroup;
+			children = (
+				6244065C1FCDAD42A9B769D5 /* FileProviderExtension.swift */,
+				6499C1A22746CC05B3929D4F /* ProviderEnumerator.swift */,
+				867D32EDC1609777EE056B6B /* ProviderItem.swift */,
+				A56B3E5F2DD3A282E12BA4A6 /* ProviderRuntime.swift */,
+			);
+			path = FileProviderExtension;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		6E7F102405CE46BF9FADEA71 /* DsmFileProvider */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 974CB678B54914DD1182FBCD /* Build configuration list for PBXNativeTarget "DsmFileProvider" */;
+			buildPhases = (
+				DCDC9BC15F0D43EF93A60432 /* Sources */,
+				B44CD5FED1946805DCC1BFA8 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DsmFileProvider;
+			packageProductDependencies = (
+				367CFE0D29884F7F90B0E0D6 /* DsmCore */,
+				3B2A8675E12B02AFDAD476A1 /* DsmNetwork */,
+			);
+			productName = DsmFileProvider;
+			productReference = 21F2702AC3558C7DD3F3EA25 /* LanStashFileProvider.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		A4FE15DAB3C35747621D9326 /* DsmMac */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = DD49127E2253978EDB7DCD30 /* Build configuration list for PBXNativeTarget "DsmMac" */;
@@ -146,10 +227,12 @@
 				E2A3E86ED14C76E7F0011E92 /* Sources */,
 				05BB66CC778275FCAD7FCE36 /* Resources */,
 				C7DEF40B295CFB0B8C9D9955 /* Frameworks */,
+				2EED664F79B7B96EEB234548 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B3BC941C7E16AB1A83AE19D0 /* PBXTargetDependency */,
 			);
 			name = DsmMac;
 			packageProductDependencies = (
@@ -170,6 +253,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					6E7F102405CE46BF9FADEA71 = {
+						ProvisioningStyle = Automatic;
+					};
 					A4FE15DAB3C35747621D9326 = {
 						ProvisioningStyle = Automatic;
 					};
@@ -193,6 +279,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				6E7F102405CE46BF9FADEA71 /* DsmFileProvider */,
 				A4FE15DAB3C35747621D9326 /* DsmMac */,
 			);
 		};
@@ -213,6 +300,17 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		DCDC9BC15F0D43EF93A60432 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				42BF5B5E814A964E72ED075E /* FileProviderExtension.swift in Sources */,
+				D5668FBDA5A5683EEC686044 /* ProviderEnumerator.swift in Sources */,
+				E64E34C2F0F804681A008881 /* ProviderItem.swift in Sources */,
+				D9F509ACD514897C93DBCCAD /* ProviderRuntime.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E2A3E86ED14C76E7F0011E92 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -220,6 +318,7 @@
 				1E07976CF65B26FF6DCC92F7 /* AppContentLayout.swift in Sources */,
 				59C06DE7124461270B9173C6 /* ChatWorkspaceModel.swift in Sources */,
 				6E494C113B6C2491904BC781 /* ChatWorkspaceView.swift in Sources */,
+				C9E339D485378E1875A349E6 /* DesktopCloudDriveManager.swift in Sources */,
 				3FCADE45FE1B6CE377E360BA /* DsmMacApp.swift in Sources */,
 				C3AFE337248691D6883C0CE7 /* FilePreviewView.swift in Sources */,
 				46CE97C3D80547D7061224F2 /* LoginView.swift in Sources */,
@@ -238,6 +337,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B3BC941C7E16AB1A83AE19D0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6E7F102405CE46BF9FADEA71 /* DsmFileProvider */;
+			targetProxy = 6A4E817DFA5F56037D0FA890 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		55636F64951E9DD6841A1586 /* InfoPlist.strings */ = {
@@ -261,6 +368,31 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		0CAD44F252F2DA98BEF0C37E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = SupportingFiles/DsmFileProvider.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 7;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "SupportingFiles/DsmFileProvider-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 0.2.6;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.qwertyuiop1995.dsmnativeclient.macos.fileprovider;
+				PRODUCT_NAME = LanStashFileProvider;
+				SDKROOT = macosx;
+				SHARED_KEYCHAIN_ACCESS_GROUP = "$(AppIdentifierPrefix)io.github.qwertyuiop1995.dsmnativeclient.shared";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
 		1A21D183220130BEE4C3B47E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -344,6 +476,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.qwertyuiop1995.dsmnativeclient.macos;
 				PRODUCT_NAME = LanStash;
 				SDKROOT = macosx;
+				SHARED_KEYCHAIN_ACCESS_GROUP = "$(AppIdentifierPrefix)io.github.qwertyuiop1995.dsmnativeclient.shared";
 			};
 			name = Debug;
 		};
@@ -366,6 +499,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.qwertyuiop1995.dsmnativeclient.macos;
 				PRODUCT_NAME = LanStash;
 				SDKROOT = macosx;
+				SHARED_KEYCHAIN_ACCESS_GROUP = "$(AppIdentifierPrefix)io.github.qwertyuiop1995.dsmnativeclient.shared";
 			};
 			name = Release;
 		};
@@ -426,6 +560,31 @@
 			};
 			name = Release;
 		};
+		9C5654C200F0A1334A8A0E66 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = SupportingFiles/DsmFileProvider.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 7;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "SupportingFiles/DsmFileProvider-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 0.2.6;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.qwertyuiop1995.dsmnativeclient.macos.fileprovider;
+				PRODUCT_NAME = LanStashFileProvider;
+				SDKROOT = macosx;
+				SHARED_KEYCHAIN_ACCESS_GROUP = "$(AppIdentifierPrefix)io.github.qwertyuiop1995.dsmnativeclient.shared";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -434,6 +593,15 @@
 			buildConfigurations = (
 				1A21D183220130BEE4C3B47E /* Debug */,
 				6C422C14FB1A07D26B1168D3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		974CB678B54914DD1182FBCD /* Build configuration list for PBXNativeTarget "DsmFileProvider" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0CAD44F252F2DA98BEF0C37E /* Debug */,
+				9C5654C200F0A1334A8A0E66 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -460,6 +628,14 @@
 		068B0CB217B93D2E04F6CB21 /* DsmLocalization */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DsmLocalization;
+		};
+		367CFE0D29884F7F90B0E0D6 /* DsmCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DsmCore;
+		};
+		3B2A8675E12B02AFDAD476A1 /* DsmNetwork */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DsmNetwork;
 		};
 		6A578FB6D5B34A59438162B6 /* DsmNetwork */ = {
 			isa = XCSwiftPackageProductDependency;

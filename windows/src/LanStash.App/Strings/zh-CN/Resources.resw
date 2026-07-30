@@ -20,6 +20,12 @@
   <data name="ModuleTransfers" xml:space="preserve"><value>传输中心</value></data>
   <data name="ModuleSettings" xml:space="preserve"><value>设置</value></data>
   <data name="ActionSignOut" xml:space="preserve"><value>退出登录</value></data>
+  <data name="TrayTooltip" xml:space="preserve"><value>岚仓正在后台运行</value></data>
+  <data name="TrayOpenApp" xml:space="preserve"><value>打开岚仓</value></data>
+  <data name="TrayPauseCloudDrives" xml:space="preserve"><value>暂停当前 NAS 的云盘位置</value></data>
+  <data name="TrayResumeCloudDrives" xml:space="preserve"><value>继续当前 NAS 的云盘位置</value></data>
+  <data name="TrayCloudDriveIssues" xml:space="preserve"><value>{0} 个云盘位置需要处理</value></data>
+  <data name="TrayExitApp" xml:space="preserve"><value>退出岚仓</value></data>
   <data name="CategoryOverview" xml:space="preserve"><value>概览</value></data>
   <data name="CategoryContainers" xml:space="preserve"><value>容器</value></data>
   <data name="CategoryVirtualMachines" xml:space="preserve"><value>虚拟机</value></data>
@@ -188,4 +194,76 @@
   <data name="WinSharedf91eef8a1cf7b01c" xml:space="preserve"><value>无法连接到 NAS</value></data>
   <data name="WinSharedfa9066ff052e7270" xml:space="preserve"><value>名称不能包含路径分隔符。</value></data>
   <data name="WinSharedfea22978bfdec072" xml:space="preserve"><value>NAS 尚未确认项目已删除，请刷新后重试。</value></data>
+  <data name="CloudDriveTitle" xml:space="preserve"><value>NAS 位置</value></data>
+  <data name="CloudDriveDescription" xml:space="preserve"><value>将整个 NAS 或指定文件夹添加到文件资源管理器。文件默认仅在线，打开或选择保留在此设备上时才会下载。当前版本仅支持读取。</value></data>
+  <data name="CloudDriveFolderPath" xml:space="preserve"><value>NAS 文件夹路径</value></data>
+  <data name="CloudDriveFolderPlaceholder" xml:space="preserve"><value>/共享文件夹/项目</value></data>
+  <data name="CloudDriveAddNas" xml:space="preserve"><value>添加整个 NAS</value></data>
+  <data name="CloudDriveAddFolder" xml:space="preserve"><value>添加文件夹</value></data>
+  <data name="CloudDriveEmpty" xml:space="preserve"><value>当前连接还没有添加 NAS 位置。</value></data>
+  <data name="CloudDriveEntireNas" xml:space="preserve"><value>整个 NAS</value></data>
+  <data name="CloudDriveReadOnlyOnline" xml:space="preserve"><value>只读 · 默认仅在线</value></data>
+  <data name="CloudDriveOpen" xml:space="preserve"><value>在资源管理器中显示</value></data>
+  <data name="CloudDriveClearCache" xml:space="preserve"><value>释放空间</value></data>
+  <data name="CloudDriveRemove" xml:space="preserve"><value>移除</value></data>
+  <data name="CloudDriveRemoveTitle" xml:space="preserve"><value>移除这个 NAS 位置？</value></data>
+  <data name="CloudDriveRemoveMessage" xml:space="preserve"><value>它会从文件资源管理器中消失，但不会删除 NAS 上的文件。</value></data>
+  <data name="CloudDriveAdded" xml:space="preserve"><value>已添加 NAS 位置。</value></data>
+  <data name="CloudDriveRemoved" xml:space="preserve"><value>已移除 NAS 位置。</value></data>
+  <data name="CloudDriveCacheCleared" xml:space="preserve"><value>已尽可能释放缓存的文件内容。</value></data>
+  <data name="CloudDriveInvalidPath" xml:space="preserve"><value>请输入有效的 NAS 文件夹路径，例如 /共享文件夹/项目。</value></data>
+  <data name="CloudDriveOverlap" xml:space="preserve"><value>这个位置与已有 NAS 位置重叠。请先移除已有位置，或选择其他文件夹。</value></data>
+  <data name="CloudDriveSignInRequired" xml:space="preserve"><value>请先连接 NAS，再添加位置。</value></data>
+  <data name="CloudDriveGenericError" xml:space="preserve"><value>无法更改 NAS 位置。请检查连接后重试。</value></data>
+  <data name="CloudDriveCacheSize" xml:space="preserve"><value>已下载：{0}</value></data>
+  <data name="CloudDriveKeepOffline" xml:space="preserve"><value>保留在此设备上</value></data>
+  <data name="CloudDriveReleaseOffline" xml:space="preserve"><value>取消离线保留</value></data>
+  <data name="CloudDriveCancel" xml:space="preserve"><value>取消任务</value></data>
+  <data name="CloudDrivePause" xml:space="preserve"><value>暂停</value></data>
+  <data name="CloudDriveResume" xml:space="preserve"><value>继续</value></data>
+  <data name="CloudDrivePlanning" xml:space="preserve"><value>正在计算所需空间：{0} 个文件，已发现 {1}</value></data>
+  <data name="CloudDriveCheckingSpace" xml:space="preserve"><value>正在检查本机可用空间</value></data>
+  <data name="CloudDrivePreparing" xml:space="preserve"><value>正在准备本地占位内容</value></data>
+  <data name="CloudDriveDownloading" xml:space="preserve"><value>正在保留到本机：{0}/{1}，已完成 {2}</value></data>
+  <data name="CloudDriveOfflineReady" xml:space="preserve"><value>这些内容已可离线使用。</value></data>
+  <data name="CloudDriveOfflineCancelled" xml:space="preserve"><value>任务已取消；已完整下载的内容仍作为普通缓存保留。</value></data>
+  <data name="CloudDriveOfflineReleased" xml:space="preserve"><value>已取消离线保留并释放可释放的本地内容。</value></data>
+  <data name="CloudDrivePaused" xml:space="preserve"><value>这个 NAS 位置已暂停。</value></data>
+  <data name="CloudDriveResumed" xml:space="preserve"><value>这个 NAS 位置已继续。</value></data>
+  <data name="CloudDrivePlanIncomplete" xml:space="preserve"><value>无法计算完整大小。请检查无法访问或大小未知的项目后重试。</value></data>
+  <data name="CloudDriveInsufficientSpace" xml:space="preserve"><value>本机缓存空间不足。缓存这些内容需要 {0}，但“{1}”只有 {2} 可用；还差 {3}。请减少内容或管理缓存。</value></data>
+  <data name="CloudDriveCacheBreakdown" xml:space="preserve"><value>临时缓存 {0} · 离线保留 {1} · 临时上限 {2}</value></data>
+  <data name="CloudDriveStatePreparing" xml:space="preserve"><value>正在准备</value></data>
+  <data name="CloudDriveStateAvailable" xml:space="preserve"><value>可用</value></data>
+  <data name="CloudDriveStateChecking" xml:space="preserve"><value>正在检查</value></data>
+  <data name="CloudDriveStatePaused" xml:space="preserve"><value>已暂停</value></data>
+  <data name="CloudDriveStateOffline" xml:space="preserve"><value>NAS 当前不可连接</value></data>
+  <data name="CloudDriveStateAuthenticationRequired" xml:space="preserve"><value>需要重新登录</value></data>
+  <data name="CloudDriveStateCacheVolumeUnavailable" xml:space="preserve"><value>缓存磁盘未连接</value></data>
+  <data name="CloudDriveStateInsufficientLocalSpace" xml:space="preserve"><value>缓存空间不足</value></data>
+  <data name="CloudDriveStateDegraded" xml:space="preserve"><value>部分内容需要处理</value></data>
+  <data name="CloudDriveStateRemoving" xml:space="preserve"><value>正在移除</value></data>
+  <data name="CloudDriveStateFailed" xml:space="preserve"><value>不可用</value></data>
+  <data name="CloudDriveKeepSelected.Label" xml:space="preserve"><value>保留在此设备上</value></data>
+  <data name="CloudDriveReleaseSelected.Label" xml:space="preserve"><value>释放空间</value></data>
+  <data name="CloudDriveNotMapped" xml:space="preserve"><value>这个项目不在 NAS 位置中。请先将其所在文件夹添加为 NAS 位置。</value></data>
+  <data name="CloudDriveNoSelection" xml:space="preserve"><value>请先选择文件或文件夹。</value></data>
+  <data name="CloudDriveCoveredByParent" xml:space="preserve"><value>这个项目仍包含在已保留到本机的上级文件夹中。请先取消上级文件夹的保留。</value></data>
+  <data name="CloudDriveMappingName" xml:space="preserve"><value>资源管理器中的名称</value></data>
+  <data name="CloudDriveMappingNamePlaceholder" xml:space="preserve"><value>可选，默认使用 NAS 或文件夹名称</value></data>
+  <data name="CloudDriveCacheLimit" xml:space="preserve"><value>临时缓存上限</value></data>
+  <data name="CloudDriveCacheLimitGiB" xml:space="preserve"><value>{0} GB</value></data>
+  <data name="CloudDriveCacheDiskDefault" xml:space="preserve"><value>缓存磁盘：系统默认</value></data>
+  <data name="CloudDriveCacheDiskSelected" xml:space="preserve"><value>缓存磁盘：{0}</value></data>
+  <data name="CloudDriveCacheDiskValue" xml:space="preserve"><value>缓存磁盘：{0}</value></data>
+  <data name="CloudDriveChooseCacheDisk" xml:space="preserve"><value>选择磁盘…</value></data>
+  <data name="CloudDriveUseDefaultCacheDisk" xml:space="preserve"><value>使用默认磁盘</value></data>
+  <data name="CloudDriveCacheDiskInvalid" xml:space="preserve"><value>这个磁盘不能存放 NAS 位置。请选择已连接的 NTFS 磁盘。</value></data>
+  <data name="CloudDriveCacheDiskUnavailable" xml:space="preserve"><value>所选缓存磁盘未连接。请重新连接，或选择其他磁盘。</value></data>
+  <data name="CloudDriveInvalidName" xml:space="preserve"><value>请输入 NAS 位置名称。</value></data>
+  <data name="CloudDriveCacheLimitInvalid" xml:space="preserve"><value>请选择有效的临时缓存上限。</value></data>
+  <data name="CloudDriveCacheLimitUpdated" xml:space="preserve"><value>临时缓存上限已更新。</value></data>
+  <data name="CloudDriveLaunchAtLogin" xml:space="preserve"><value>登录后启动</value></data>
+  <data name="CloudDriveLaunchAtLoginEnabled" xml:space="preserve"><value>登录 Windows 后将自动启动岚仓。</value></data>
+  <data name="CloudDriveLaunchAtLoginDisabled" xml:space="preserve"><value>打开岚仓之前，仅在线文件将暂时不可用。</value></data>
 </root>

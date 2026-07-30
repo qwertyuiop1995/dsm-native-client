@@ -1,7 +1,9 @@
 # 当前开发进度
 
-> 最后更新：2026-07-28
-> 当前里程碑：`五种设备形态的原生客户端对齐与分平台验收`
+> 最后更新：2026-07-30
+> 当前里程碑：`五种设备形态的原生客户端对齐、分平台验收与桌面云盘位置`
+
+本文是功能完成情况、自动化结果、下一步和阻塞项的唯一事实来源。路线图、平台矩阵和专项计划不重复维护实时状态；发生冲突时以本文和同一源码版本的可复现验证结果为准。
 
 ## 总体状态
 
@@ -12,12 +14,13 @@
 | API 参考 | 进行中 | 官方与内部 API 已分类；随实机差异继续补充 |
 | Apple 共享工程 | 进行中 | Swift Package、macOS App、iPhone/iPad 通用 SwiftUI App 和 Apple CI 已建立 |
 | macOS 文件客户端 | 需要验证 | 主要功能已实现并通过自动化测试，正在收集真实 NAS 兼容证据 |
+| 桌面云盘位置 | 需要实机验证 | 双平台只读源码已完成：按需读取、文件/目录离线保留、递归空间预检、分项缓存、LRU、缓存卷、后台驻留和恢复均已接入；macOS 主 App 继续使用应用内 AES-GCM，只有存在映射时才共享不含密码的最小会话；临时签名包能力降级和 257+4 项测试通过，仍需正式签名 Finder 与真实 NAS 验收 |
 | 照片管理模块 | 进行中 | 文件夹扫描已获实机确认；macOS 时间线、搜索筛选、预览、详情和基础管理源码已实现，等待完整实机与性能验收 |
 | Synology Chat 模块 | 进行中 | macOS 已接入首次单聊、单附件收发、提醒管理、纯文字定时消息、无附件投票创建和 Socket.IO 实时刷新，等待新构建实机验收；语音、投票参与和加密未完成 |
 | NAS 设置模块 | 需要验证 | 已接入存储、套件、任务、账号、日志、连接、文件服务、远程终端、代理、物理网卡、DDNS、区域时间、远程访问、防火墙基础控制、安全防护、局域网发现、风扇/提示音、休眠节能及 UPS；所有新增写操作均确认、防重复并回读，等待专用测试目标实机验收 |
 | iPhone/iPad 客户端 | 已实现，需真机验收 | 已接入 QuickConnect、Keychain 可选记密、冷启动资料恢复和自动登录；5 项移动端测试、Release 构建、iPhone 测试启动及 iPad Release 安装启动通过，仍需分别完成真机完整登录 |
 | Android 客户端 | 已实现，需设备验收 | 已接入 QuickConnect、Keystore 可选记密、冷启动资料恢复和自动登录；19 项单元测试、Release 真机冷启动及不含凭据的真实能力发现通过，待用户完整登录复测 |
-| Windows 客户端 | 已实现，需 Windows 验收 | 已接入 QuickConnect、Credential Locker 可选记密、冷启动资料恢复和自动登录；Domain/Infrastructure 的 .NET 10 Release 编译、14 项测试及真实能力发现通过，完整 WinUI XAML 编译需在 Windows CI/设备完成 |
+| Windows 客户端 | 已实现，需 Windows 验收 | 已接入 QuickConnect、Credential Locker 可选记密、冷启动资料恢复、自动登录和桌面云盘；Domain/Infrastructure/桌面云盘的 38 项 .NET 10 测试及 Cloud Files 核心编译通过，完整 WinUI XAML 编译需在 Windows CI/设备完成 |
 
 ## macOS 功能状态
 
@@ -42,6 +45,7 @@
 | 分享链接 | 已实现创建、密码、有效期、复制、列表和取消分享 | 验证 DSM 版本差异、过期和批量项目 |
 | 传输中心与通知 | 已实现多 NAS 任务、速度、剩余时间、操作任务和成功/失败系统通知 | 验证通知权限、应用切换和应用退出 |
 | 应用存储管理 | 已实现占用统计和可再生缓存清理，受保护数据不参与清理 | 验证清理期间的并发预览与传输 |
+| 桌面云盘位置 | 已实现整个 NAS/目录映射、只读占位、按访问读取、文件/目录离线保留、递归空间预检、缓存分项、LRU、缓存卷和关闭窗口后台驻留 | 完成签名 Finder 验收，以及 Windows x64/arm64 完整构建、资源管理器、重启和安装/卸载验收 |
 | 安全删除 | 已实现确认、权限检查、任务轮询和结果校验 | 完成不同共享目录回收站设置的真实验证 |
 | 回收站恢复 | 已实现候选路径和受兼容开关保护的恢复流程 | 必须按 DSM build 验证后才能标记完成 |
 | NAS 设置 | 已实现单一开关、关闭即停止请求、性能趋势、真实系统更新检查、存储详情、S.M.A.R.T. 检测、套件、任务及运行记录、账号/群组、系统日志、当前连接、文件服务、物理网卡、DDNS、区域时间、防火墙基础控制和 UPS；危险操作具备能力/状态检查、确认、防重复和结果复查 | 使用专用测试目标验证可能断网/改时/停电联动的写操作、普通账号与 QuickConnect；完整共享文件夹复合管理、防火墙规则编辑和电源日程仍需原子流程与专用目标验收 |
@@ -76,9 +80,9 @@
 - Apple 共享包完整测试和 `DsmMac` Debug、无代码签名构建持续验证。
 - `DsmMobile` iPhone/iPad 通用目标已通过 5 项测试（含冷启动资料恢复与自动登录）、无签名 Release 模拟器构建、iPhone 测试启动和 iPad Release 安装启动。
 - Android Debug/Release APK、19 项单元测试、仪器测试编译、Android 14 真机 Release 冷启动和 QuickConnect 真实能力发现已通过。
-- Windows Domain、Infrastructure 和 14 项测试已使用 .NET 10 Release 验证，QuickConnect 真实能力发现通过；WinUI XAML 编译器只能在 Windows 运行，完整 App 仍由 Windows CI/设备验证。
-- 本地化检查覆盖 Apple、Android、Windows 的双语键、格式参数、资源引用、英语资源残留中文和生产界面硬编码；当前统计为 Apple 2,151 个、Android 246 个、Windows 184 个双语资源键。
-- Apple 共享包 239 项测试通过（1 项按条件跳过）；Android 单元测试与 Debug APK 构建通过。Windows 资源静态校验通过，完整 WinUI 编译继续由 Windows CI 执行。
+- Windows Domain、Infrastructure 和桌面云盘领域共 38 项测试已使用 .NET 10 验证，Cloud Files 核心源码独立编译通过；WinUI XAML 编译器只能在 Windows 运行，完整 App 仍由 Windows CI/设备验证。
+- 本地化检查覆盖 Apple、Android、Windows 的双语键、格式参数、资源引用、英语资源残留中文和生产界面硬编码；当前统计为 Apple 2,249 个、Android 246 个、Windows 262 个双语资源键。
+- Apple 共享包 257 项 XCTest 通过（1 项按条件跳过），4 项 Swift Testing 通过，`DsmMac` Debug 无签名构建和临时签名 Release 打包启动通过；Android 单元测试与 Debug APK 构建通过。Windows 完整 WinUI 编译继续由 Windows CI 执行。
 - 自动化通过不替代真实 NAS 权限、网络、套件版本和回收站行为验证。
 
 ## 照片管理进度
@@ -121,6 +125,7 @@ Chat 模块按[Synology Chat 原生聊天功能开发计划](../development/NATI
 5. 完成 macOS 发布前的无障碍、签名、公证、隐私和性能检查。
 6. 使用专用测试照片完成 PH0/PH1 只读实机验收，并补充完全脱敏 fixture 和版本记录。
 7. 使用专用测试账号和虚构数据验收首次单聊、附件收发、提醒、定时消息和投票创建；随后分析投票参与、实时同步和加密会话。
+8. 使用正式签名验证 macOS Finder 域，并在 Windows x64/arm64 完成 Cloud Files 编译、安装、资源管理器重启和卸载恢复验收。
 
 ## 阻塞项
 

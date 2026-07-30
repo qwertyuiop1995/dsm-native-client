@@ -12,6 +12,7 @@ WORKSPACE="$APPLE_DIR/DsmNativeClient.xcworkspace"
 SCHEME="DsmMac"
 PRODUCT_NAME="LanStash"
 ENTITLEMENTS="$SCRIPT_DIR/SupportingFiles/DsmMac.entitlements"
+FILE_PROVIDER_ENTITLEMENTS="$SCRIPT_DIR/SupportingFiles/DsmFileProvider.entitlements"
 BUILD_ROOT="$SCRIPT_DIR/build/package"
 DERIVED_DATA="$BUILD_ROOT/DerivedData"
 STAGING_DIR="$BUILD_ROOT/dmg"
@@ -122,7 +123,7 @@ choose_signing_identity() {
     if [[ ${#identities[@]} -eq 0 ]]; then
         echo
         echo "未在钥匙串中找到可用的代码签名证书。"
-        echo "将继续使用本机临时签名；它适合本机运行，但不适合公开分发。"
+        echo "将继续使用本机临时签名；主应用可以运行，但不会包含云盘映射扩展。"
         SIGNING_IDENTITY="-"
         return
     fi
@@ -174,7 +175,7 @@ configure_package() {
         esac
 
         ask_choice "3/4 选择签名方式" 1 \
-            "本机临时签名（推荐用于本机测试）" \
+            "本机临时签名（可启动，但不包含云盘映射）" \
             "从钥匙串选择签名证书"
         case "$SELECTED_CHOICE" in
             1) SIGNING_IDENTITY="-" ;;
@@ -194,7 +195,7 @@ configure_package() {
         echo "  构建类型：$CONFIGURATION"
         echo "  目标架构：$TARGET_ARCH_DESCRIPTION"
         if [[ "$SIGNING_IDENTITY" == "-" ]]; then
-            echo "  签名方式：本机临时签名"
+            echo "  签名方式：本机临时签名（不包含 File Provider 云盘扩展）"
         else
             echo "  签名证书：$SIGNING_IDENTITY"
         fi
@@ -240,12 +241,14 @@ else
     configure_package
 fi
 
-for command in xcodebuild codesign hdiutil ditto lipo open; do
+for command in xcodebuild codesign diskutil hdiutil ditto lipo open; do
     command -v "$command" >/dev/null 2>&1 || fail "未找到命令 ${command}，请先安装完整 Xcode"
 done
 
 [[ -d "$WORKSPACE" ]] || fail "找不到 Xcode 工作区：$WORKSPACE"
 [[ -f "$ENTITLEMENTS" ]] || fail "找不到权限文件：$ENTITLEMENTS"
+[[ -f "$FILE_PROVIDER_ENTITLEMENTS" ]] \
+    || fail "找不到 File Provider 权限文件：$FILE_PROVIDER_ENTITLEMENTS"
 validate_xcode_source_membership
 
 SOURCE_COMMIT="$(git -C "$REPO_ROOT" rev-parse --verify HEAD)"
@@ -318,21 +321,61 @@ fi
 
 echo "==> 签名应用"
 if [[ "$SIGNING_IDENTITY" == "-" ]]; then
+    # App Group 与共享钥匙串属于受限权限，macOS 不允许临时签名携带。
+    # 临时包移除 File Provider 扩展并且不附带受限权限，确保主应用可以启动。
+    /bin/rm -rf -- "$APP_PATH/Contents/PlugIns/LanStashFileProvider.appex"
     /usr/bin/codesign \
         --force \
         --deep \
         --options runtime \
         --timestamp=none \
-        --entitlements "$ENTITLEMENTS" \
         --sign - \
         "$APP_PATH"
+    echo "==> 临时签名包已移除云盘扩展；测试云盘映射请使用 Apple 开发签名证书"
 else
+    CERTIFICATE_PEM="$BUILD_ROOT/signing-certificate.pem"
+    EXPANDED_APP_ENTITLEMENTS="$BUILD_ROOT/DsmMac.expanded.entitlements"
+    EXPANDED_FILE_PROVIDER_ENTITLEMENTS="$BUILD_ROOT/DsmFileProvider.expanded.entitlements"
+    /usr/bin/security find-certificate \
+        -c "$SIGNING_IDENTITY" \
+        -p > "$CERTIFICATE_PEM"
+    TEAM_IDENTIFIER="$(
+        /usr/bin/openssl x509 \
+            -in "$CERTIFICATE_PEM" \
+            -noout \
+            -subject \
+            -nameopt RFC2253 \
+        | /usr/bin/sed -n 's/.*OU=\\([^,]*\\).*/\\1/p'
+    )"
+    [[ -n "$TEAM_IDENTIFIER" ]] \
+        || fail "无法从签名证书读取团队标识，请改用 Apple 开发或 Developer ID 证书"
+    SHARED_KEYCHAIN_GROUP="${TEAM_IDENTIFIER}.io.github.qwertyuiop1995.dsmnativeclient.shared"
+    /bin/cp "$ENTITLEMENTS" "$EXPANDED_APP_ENTITLEMENTS"
+    /bin/cp \
+        "$FILE_PROVIDER_ENTITLEMENTS" \
+        "$EXPANDED_FILE_PROVIDER_ENTITLEMENTS"
+    "$PLIST_BUDDY" \
+        -c "Set :keychain-access-groups:0 $SHARED_KEYCHAIN_GROUP" \
+        "$EXPANDED_APP_ENTITLEMENTS"
+    "$PLIST_BUDDY" \
+        -c "Set :keychain-access-groups:0 $SHARED_KEYCHAIN_GROUP" \
+        "$EXPANDED_FILE_PROVIDER_ENTITLEMENTS"
+
+    FILE_PROVIDER_APP="$APP_PATH/Contents/PlugIns/LanStashFileProvider.appex"
+    [[ -d "$FILE_PROVIDER_APP" ]] \
+        || fail "完整签名需要 File Provider 扩展，但构建产物中未找到"
     /usr/bin/codesign \
         --force \
-        --deep \
         --options runtime \
         --timestamp \
-        --entitlements "$ENTITLEMENTS" \
+        --entitlements "$EXPANDED_FILE_PROVIDER_ENTITLEMENTS" \
+        --sign "$SIGNING_IDENTITY" \
+        "$FILE_PROVIDER_APP"
+    /usr/bin/codesign \
+        --force \
+        --options runtime \
+        --timestamp \
+        --entitlements "$EXPANDED_APP_ENTITLEMENTS" \
         --sign "$SIGNING_IDENTITY" \
         "$APP_PATH"
 fi
@@ -352,11 +395,11 @@ mkdir -p "$STAGING_DIR"
 ln -s /Applications "$STAGING_DIR/Applications"
 
 echo "==> 生成 DMG"
-/usr/bin/hdiutil create \
-    -volname "$PRODUCT_NAME $VERSION" \
-    -srcfolder "$STAGING_DIR" \
-    -ov \
-    -format UDZO \
+/bin/rm -f -- "$DMG_PATH"
+/usr/sbin/diskutil image create from \
+    --volumeName "$PRODUCT_NAME $VERSION" \
+    --format UDZO \
+    "$STAGING_DIR" \
     "$DMG_PATH"
 
 echo "==> 验证 DMG"
@@ -383,7 +426,7 @@ echo "  App：$APP_PATH"
 echo "  DMG：$DMG_PATH"
 
 if [[ "$SIGNING_IDENTITY" == "-" ]]; then
-    echo "  签名：本机临时签名（适合本机运行，不适合公开分发）"
+    echo "  签名：本机临时签名（可运行主应用，不包含云盘映射）"
 else
     echo "  签名：$SIGNING_IDENTITY"
     echo "  提示：公开分发前仍需完成 Apple 公证。"

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using LanStash.Domain;
@@ -164,6 +165,96 @@ public sealed class DsmApiClient(HttpClient httpClient) : IDsmApiClient
         }
         var path = capability.Path.StartsWith('/') ? capability.Path : $"/webapi/{capability.Path}";
         return PostAsync(profile, path, values, session, cancellationToken);
+    }
+
+    public async Task<byte[]> ReadFileRangeAsync(
+        NasProfile profile,
+        DsmSession session,
+        ApiCapability capability,
+        string remotePath,
+        long offset,
+        long length,
+        CancellationToken cancellationToken = default)
+    {
+        if (offset < 0 || length <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(offset));
+        }
+        var path = capability.Path.StartsWith('/')
+            ? capability.Path
+            : $"/webapi/{capability.Path}";
+        var parameters = new Dictionary<string, string>
+        {
+            ["api"] = capability.Name,
+            ["version"] = capability.MaxVersion.ToString(),
+            ["method"] = "download",
+            ["path"] = JsonSerializer.Serialize(new[] { remotePath }),
+            ["mode"] = "download",
+            ["_sid"] = session.Sid,
+        };
+        var query = string.Join(
+            "&",
+            parameters.Select(pair =>
+                $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value)}"));
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            new Uri(GetBaseUri(profile), $"{path}?{query}"));
+        request.Headers.Range = new RangeHeaderValue(offset, checked(offset + length - 1));
+        request.Headers.UserAgent.ParseAdd("LanStash-Windows/0.1");
+        if (!string.IsNullOrWhiteSpace(session.SynoToken))
+        {
+            request.Headers.TryAddWithoutValidation("X-SYNO-TOKEN", session.SynoToken);
+        }
+        using var response = await _http.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        await using var source = await response.Content.ReadAsStreamAsync(
+            cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode != HttpStatusCode.PartialContent && offset > 0)
+        {
+            await SkipAsync(source, offset, cancellationToken).ConfigureAwait(false);
+        }
+        using var destination = new MemoryStream(
+            checked((int)Math.Min(length, int.MaxValue)));
+        var remaining = length;
+        var buffer = new byte[1024 * 1024];
+        while (remaining > 0)
+        {
+            var read = await source.ReadAsync(
+                buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)),
+                cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+            await destination.WriteAsync(
+                buffer.AsMemory(0, read),
+                cancellationToken).ConfigureAwait(false);
+            remaining -= read;
+        }
+        return destination.ToArray();
+    }
+
+    private static async Task SkipAsync(
+        Stream stream,
+        long byteCount,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new byte[1024 * 1024];
+        var remaining = byteCount;
+        while (remaining > 0)
+        {
+            var read = await stream.ReadAsync(
+                buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)),
+                cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                throw new EndOfStreamException();
+            }
+            remaining -= read;
+        }
     }
 
     private async Task<JsonObject> PostAsync(

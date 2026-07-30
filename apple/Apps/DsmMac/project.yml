@@ -24,6 +24,8 @@ targets:
       - path: Sources
       - path: Resources
     dependencies:
+      - target: DsmFileProvider
+        embed: true
       - package: DsmShared
         product: DsmLocalization
       - package: DsmShared
@@ -41,12 +43,40 @@ targets:
         MARKETING_VERSION: 0.2.6
         ENABLE_HARDENED_RUNTIME: true
         GENERATE_INFOPLIST_FILE: false
+        SHARED_KEYCHAIN_ACCESS_GROUP: "$(AppIdentifierPrefix)io.github.qwertyuiop1995.dsmnativeclient.shared"
+
+  DsmFileProvider:
+    type: app-extension
+    platform: macOS
+    productName: LanStashFileProvider
+    sources:
+      - path: FileProviderExtension
+    dependencies:
+      - package: DsmShared
+        product: DsmCore
+      - package: DsmShared
+        product: DsmNetwork
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.qwertyuiop1995.dsmnativeclient.macos.fileprovider
+        PRODUCT_NAME: LanStashFileProvider
+        INFOPLIST_FILE: SupportingFiles/DsmFileProvider-Info.plist
+        CODE_SIGN_ENTITLEMENTS: SupportingFiles/DsmFileProvider.entitlements
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: 7
+        MARKETING_VERSION: 0.2.6
+        ENABLE_HARDENED_RUNTIME: true
+        APPLICATION_EXTENSION_API_ONLY: true
+        SKIP_INSTALL: true
+        GENERATE_INFOPLIST_FILE: false
+        SHARED_KEYCHAIN_ACCESS_GROUP: "$(AppIdentifierPrefix)io.github.qwertyuiop1995.dsmnativeclient.shared"
 
 schemes:
   DsmMac:
     build:
       targets:
         DsmMac: all
+        DsmFileProvider: all
     run:
       config: Debug
     archive:

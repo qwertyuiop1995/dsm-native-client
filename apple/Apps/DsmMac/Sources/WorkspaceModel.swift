@@ -335,6 +335,7 @@ final class WorkspaceModel {
     let chat: ChatWorkspaceModel
     let nasSettings: NasSettingsModel
     let serviceManagement: ServiceManagementModel
+    let desktopDriveSessionBridge: DesktopDriveSessionBridge?
 
     var shares: [FileItem] = []
     var recycleRoots: [FileItem] = []
@@ -496,6 +497,10 @@ final class WorkspaceModel {
     @ObservationIgnored private var dragMoveUndoExpirationTask: Task<Void, Never>?
     @ObservationIgnored private var previewContextItems: [FileItem]?
 
+    var fileRepository: any FileRepository {
+        repository
+    }
+
     // 读取按 NAS 保存的模块开关；不存在时回退到旧全局 key，保持老用户已有选择。
     private static func moduleEnabledKey(for profileID: UUID, module: String) -> String {
         "LanStash_Module_\(module)_\(profileID.uuidString)"
@@ -528,11 +533,13 @@ final class WorkspaceModel {
         nasSettingsRepository: any NasSettingsRepository = UnavailableNasAdministrationRepository(),
         serviceManagementRepository: any ServiceManagementRepository =
             UnavailableServiceManagementRepository(),
+        desktopDriveSessionBridge: DesktopDriveSessionBridge? = nil,
         transferNotifier: any TransferNotifying = TransferNotifierFactory.makeDefault()
     ) {
         self.profile = profile
         self.repository = repository
         self.transferNotifier = transferNotifier
+        self.desktopDriveSessionBridge = desktopDriveSessionBridge
         self.allowsVerifiedRestore = repository.allowsVerifiedRestore
         self.allowsRemoteMountManagement = repository.allowsRemoteMountManagement
         self.photoLibrary = PhotoLibraryModel(

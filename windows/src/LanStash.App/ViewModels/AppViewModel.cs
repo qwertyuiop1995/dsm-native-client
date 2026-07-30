@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using LanStash.App.CloudDrive;
 using LanStash.App.Localization;
 using LanStash.Domain;
 using LanStash.Infrastructure;
@@ -19,6 +20,7 @@ public sealed class AppViewModel : ObservableObject
     private readonly ISecurePasswordStore _passwordStore = new CredentialPasswordStore();
     private readonly IDsmApiClient _api;
     private readonly DsmConnectionResolver _connectionResolver;
+    private readonly DesktopCloudDriveService _cloudDrives = new();
     private readonly string _profilesPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "LanStash",
@@ -35,6 +37,11 @@ public sealed class AppViewModel : ObservableObject
     private bool _rememberPassword;
     private bool _autoLogin;
     private bool _isInitialized;
+    private readonly Dictionary<Guid, CancellationTokenSource> _desktopDriveTasks = [];
+    private readonly Dictionary<Guid, DesktopDriveOfflineProgress> _desktopDriveProgress = [];
+    private readonly Dictionary<Guid, DesktopDrivePlanningProgress> _desktopDrivePlanning = [];
+    private CancellationTokenSource? _desktopDriveRecoveryCancellation;
+    private Task? _desktopDriveRecoveryTask;
 
     public AppViewModel()
     {
@@ -46,9 +53,11 @@ public sealed class AppViewModel : ObservableObject
 
     public event EventHandler<bool>? ConnectionChanged;
     public event EventHandler<string>? PasswordLoaded;
+    public event EventHandler? DesktopDriveProgressChanged;
 
     public ObservableCollection<NasProfile> Profiles { get; } = [];
     public ObservableCollection<AppModule> AvailableModules { get; } = [];
+    public ObservableCollection<DesktopDriveMapping> DesktopDriveMappings { get; } = [];
 
     public NasProfile? ActiveProfile { get; private set; }
     private NasProfile? ActiveConnectionProfile { get; set; }
@@ -140,6 +149,15 @@ public sealed class AppViewModel : ObservableObject
             return;
         }
         _isInitialized = true;
+        try
+        {
+            await _cloudDrives.InitializeAsync().ConfigureAwait(true);
+        }
+        catch
+        {
+            // 云盘配置异常不能阻止主应用加载已有 NAS 配置。
+        }
+        RefreshDesktopDriveMappings();
         await LoadProfilesAsync().ConfigureAwait(true);
         var profile = Profiles.LastOrDefault();
         if (profile is null)
@@ -225,6 +243,7 @@ public sealed class AppViewModel : ObservableObject
                 await _passwordStore.RemoveAsync(profile.Id).ConfigureAwait(true);
             }
             CompleteConnection(profile, connection.Profile, session, connection.Capabilities);
+            await TryActivateDesktopDrivesAsync(profile.Id).ConfigureAwait(true);
             await SaveProfileAsync(profile).ConfigureAwait(true);
             if (!RememberPassword)
             {
@@ -277,6 +296,7 @@ public sealed class AppViewModel : ObservableObject
                 connection.Capabilities);
             _ = await repository.ListFilesAsync(string.Empty).ConfigureAwait(true);
             CompleteConnection(profile, connection.Profile, session, connection.Capabilities);
+            await TryActivateDesktopDrivesAsync(profile.Id).ConfigureAwait(true);
         }
         catch (DsmException error)
         {
@@ -306,6 +326,13 @@ public sealed class AppViewModel : ObservableObject
 
     public async Task RemoveProfileAsync(NasProfile profile)
     {
+        foreach (var mapping in _cloudDrives.Mappings
+                     .Where(item => item.ProfileId == profile.Id)
+                     .ToArray())
+        {
+            await _cloudDrives.RemoveAsync(mapping.Id).ConfigureAwait(true);
+        }
+        RefreshDesktopDriveMappings();
         Profiles.Remove(profile);
         await _sessionStore.RemoveAsync(profile.Id).ConfigureAwait(true);
         await _passwordStore.RemoveAsync(profile.Id).ConfigureAwait(true);
@@ -317,6 +344,8 @@ public sealed class AppViewModel : ObservableObject
         var profile = ActiveProfile;
         if (profile is not null)
         {
+            StopDesktopDriveRecovery();
+            _cloudDrives.DisconnectProfile(profile.Id);
             if (Session is not null)
             {
                 try
@@ -346,6 +375,287 @@ public sealed class AppViewModel : ObservableObject
         Repository = null;
         AvailableModules.Clear();
         ConnectionChanged?.Invoke(this, false);
+    }
+
+    public async Task AddDesktopDriveAsync(string? folderPath)
+    {
+        await AddDesktopDriveAsync(
+            null,
+            folderPath,
+            DesktopDriveCachePolicy.Default).ConfigureAwait(true);
+    }
+
+    public async Task AddDesktopDriveAsync(
+        string? displayName,
+        string? folderPath,
+        DesktopDriveCachePolicy cachePolicy)
+    {
+        if (ActiveProfile is null || Repository is null)
+        {
+            throw new InvalidOperationException("CloudDriveSignInRequired");
+        }
+        var scope = string.IsNullOrWhiteSpace(folderPath)
+            ? DesktopDriveScope.AllShares
+            : DesktopDriveScope.Folder(folderPath);
+        var name = scope.Kind == DesktopDriveScopeKind.AllShares
+            ? ActiveProfile.DisplayName
+            : Path.GetFileName(scope.FolderPath?.TrimEnd('/')) ?? ActiveProfile.DisplayName;
+        await _cloudDrives.AddAsync(
+            ActiveProfile.Id,
+            string.IsNullOrWhiteSpace(displayName) ? name : displayName.Trim(),
+            scope,
+            Repository,
+            cachePolicy).ConfigureAwait(true);
+        RefreshDesktopDriveMappings();
+    }
+
+    public DesktopDriveCacheLocation DesktopDriveCacheLocationForPath(
+        string path) =>
+        DesktopCloudDriveService.CacheLocationForPath(path);
+
+    public async Task SetDesktopDriveCacheLimitAsync(
+        DesktopDriveMapping mapping,
+        long limitBytes)
+    {
+        await _cloudDrives.SetTemporaryCacheLimitAsync(mapping, limitBytes)
+            .ConfigureAwait(true);
+        RefreshDesktopDriveMappings();
+        DesktopDriveProgressChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task SetDesktopDriveLaunchAtLoginAsync(
+        DesktopDriveMapping mapping,
+        bool launchAtLogin)
+    {
+        await _cloudDrives.SetLaunchAtLoginAsync(mapping, launchAtLogin)
+            .ConfigureAwait(true);
+        RefreshDesktopDriveMappings();
+        DesktopDriveProgressChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task RemoveDesktopDriveAsync(DesktopDriveMapping mapping)
+    {
+        await _cloudDrives.RemoveAsync(mapping.Id).ConfigureAwait(true);
+        RefreshDesktopDriveMappings();
+    }
+
+    public void RevealDesktopDrive(DesktopDriveMapping mapping) =>
+        _cloudDrives.Reveal(mapping);
+
+    public Task ClearDesktopDriveCacheAsync(DesktopDriveMapping mapping) =>
+        _cloudDrives.ClearLocalCacheAsync(mapping);
+
+    public DesktopDriveCacheSummary DesktopDriveCacheSummary(
+        DesktopDriveMapping mapping) =>
+        _cloudDrives.CacheSummary(mapping);
+
+    public string DesktopDriveCacheVolumeName(
+        DesktopDriveMapping mapping) =>
+        _cloudDrives.CacheVolumeName(mapping);
+
+    public DesktopDriveMappingRuntime DesktopDriveRuntime(
+        DesktopDriveMapping mapping) =>
+        _cloudDrives.Runtime(mapping);
+
+    public DesktopDriveOfflineProgress? DesktopDriveProgress(
+        DesktopDriveMapping mapping) =>
+        _desktopDriveProgress.GetValueOrDefault(mapping.Id);
+
+    public DesktopDrivePlanningProgress? DesktopDrivePlanning(
+        DesktopDriveMapping mapping) =>
+        _desktopDrivePlanning.GetValueOrDefault(mapping.Id);
+
+    public Task KeepDesktopDriveOfflineAsync(DesktopDriveMapping mapping) =>
+        KeepDesktopDriveOfflineCoreAsync(mapping, null);
+
+    public Task KeepDesktopDriveItemsOfflineAsync(
+        IReadOnlyList<FileItem> items)
+    {
+        var mapping = _cloudDrives.MappingContaining(items.Select(item => item.Path))
+            ?? throw new InvalidOperationException("CloudDriveNotMapped");
+        return KeepDesktopDriveOfflineCoreAsync(mapping, items);
+    }
+
+    private async Task KeepDesktopDriveOfflineCoreAsync(
+        DesktopDriveMapping mapping,
+        IReadOnlyList<FileItem>? items)
+    {
+        if (Repository is null || _desktopDriveTasks.ContainsKey(mapping.Id))
+        {
+            return;
+        }
+        var cancellation = new CancellationTokenSource();
+        _desktopDriveTasks[mapping.Id] = cancellation;
+        var progress = new Progress<DesktopDriveOfflineProgress>(value =>
+        {
+            _desktopDriveProgress[mapping.Id] = value;
+            DesktopDriveProgressChanged?.Invoke(this, EventArgs.Empty);
+        });
+        var planning = new Progress<DesktopDrivePlanningProgress>(value =>
+        {
+            _desktopDrivePlanning[mapping.Id] = value;
+            DesktopDriveProgressChanged?.Invoke(this, EventArgs.Empty);
+        });
+        try
+        {
+            if (items is null)
+            {
+                await _cloudDrives.KeepOfflineAsync(
+                    mapping,
+                    Repository,
+                    progress,
+                    planning,
+                    cancellation.Token).ConfigureAwait(true);
+            }
+            else
+            {
+                await _cloudDrives.KeepOfflineAsync(
+                    mapping,
+                    Repository,
+                    items,
+                    progress,
+                    planning,
+                    cancellation.Token).ConfigureAwait(true);
+            }
+        }
+        finally
+        {
+            _desktopDriveTasks.Remove(mapping.Id);
+            DesktopDriveProgressChanged?.Invoke(this, EventArgs.Empty);
+            cancellation.Dispose();
+        }
+    }
+
+    public bool CanManageDesktopDriveItems(IReadOnlyList<FileItem> items) =>
+        items.Count > 0 &&
+        _cloudDrives.MappingContaining(items.Select(item => item.Path)) is not null;
+
+    public bool DesktopDriveItemsAreKeptOffline(
+        IReadOnlyList<FileItem> items)
+    {
+        var mapping = _cloudDrives.MappingContaining(items.Select(item => item.Path));
+        return mapping is not null &&
+            items.Count > 0 &&
+            items.All(item => _cloudDrives.Runtime(mapping).KeepsOffline(item.Path));
+    }
+
+    public async Task ReleaseDesktopDriveItemsOfflineAsync(
+        IReadOnlyList<FileItem> items)
+    {
+        var mapping = _cloudDrives.MappingContaining(items.Select(item => item.Path))
+            ?? throw new InvalidOperationException("CloudDriveNotMapped");
+        CancelDesktopDriveTask(mapping);
+        await _cloudDrives.ReleaseOfflineAsync(mapping, items).ConfigureAwait(true);
+        DesktopDriveProgressChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void CancelDesktopDriveTask(DesktopDriveMapping mapping)
+    {
+        if (_desktopDriveTasks.TryGetValue(mapping.Id, out var cancellation))
+        {
+            cancellation.Cancel();
+        }
+    }
+
+    public async Task ReleaseDesktopDriveOfflineAsync(
+        DesktopDriveMapping mapping)
+    {
+        CancelDesktopDriveTask(mapping);
+        await _cloudDrives.ReleaseOfflineAsync(mapping).ConfigureAwait(true);
+        _desktopDriveProgress.Remove(mapping.Id);
+        _desktopDrivePlanning.Remove(mapping.Id);
+        DesktopDriveProgressChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task PauseDesktopDriveAsync(DesktopDriveMapping mapping)
+    {
+        CancelDesktopDriveTask(mapping);
+        await _cloudDrives.PauseAsync(mapping).ConfigureAwait(true);
+        DesktopDriveProgressChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task ResumeDesktopDriveAsync(DesktopDriveMapping mapping)
+    {
+        if (Repository is null)
+        {
+            throw new InvalidOperationException("CloudDriveSignInRequired");
+        }
+        await _cloudDrives.ResumeAsync(mapping, Repository).ConfigureAwait(true);
+        DesktopDriveProgressChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public bool IsDesktopDrivePaused(DesktopDriveMapping mapping) =>
+        _cloudDrives.Runtime(mapping).IsManuallyPaused;
+
+    public int CurrentDesktopDriveCount =>
+        ActiveProfile is { } profile
+            ? _cloudDrives.Mappings.Count(item => item.ProfileId == profile.Id)
+            : 0;
+
+    public bool AreCurrentDesktopDrivesPaused =>
+        ActiveProfile is { } profile &&
+        _cloudDrives.Mappings
+            .Where(item => item.ProfileId == profile.Id)
+            .ToArray() is { Length: > 0 } mappings &&
+        mappings.All(mapping =>
+            _cloudDrives.Runtime(mapping).IsManuallyPaused);
+
+    public int CurrentDesktopDriveIssueCount =>
+        ActiveProfile is { } profile
+            ? _cloudDrives.Mappings
+                .Where(item => item.ProfileId == profile.Id)
+                .Count(mapping =>
+                    _cloudDrives.Runtime(mapping).State is not
+                        (DesktopDriveMappingState.Available or
+                         DesktopDriveMappingState.Paused or
+                         DesktopDriveMappingState.Checking))
+            : 0;
+
+    public async Task ToggleCurrentDesktopDrivesAsync()
+    {
+        if (ActiveProfile is not { } profile)
+        {
+            return;
+        }
+        var mappings = _cloudDrives.Mappings
+            .Where(item => item.ProfileId == profile.Id)
+            .ToArray();
+        if (mappings.Length == 0)
+        {
+            return;
+        }
+        if (mappings.All(mapping =>
+                _cloudDrives.Runtime(mapping).IsManuallyPaused))
+        {
+            var repository = Repository
+                ?? throw new InvalidOperationException(
+                    "CloudDriveSignInRequired");
+            foreach (var mapping in mappings)
+            {
+                await _cloudDrives.ResumeAsync(mapping, repository)
+                    .ConfigureAwait(true);
+            }
+        }
+        else
+        {
+            foreach (var mapping in mappings)
+            {
+                await _cloudDrives.PauseAsync(mapping).ConfigureAwait(true);
+            }
+        }
+        DesktopDriveProgressChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void Shutdown()
+    {
+        StopDesktopDriveRecovery();
+        foreach (var cancellation in _desktopDriveTasks.Values)
+        {
+            cancellation.Cancel();
+            cancellation.Dispose();
+        }
+        _desktopDriveTasks.Clear();
+        _cloudDrives.Dispose();
     }
 
     private void CompleteConnection(
@@ -406,5 +716,83 @@ public sealed class AppViewModel : ObservableObject
             temporaryPath,
             JsonSerializer.Serialize(Profiles.ToArray()));
         File.Move(temporaryPath, _profilesPath, overwrite: true);
+    }
+
+    private void RefreshDesktopDriveMappings()
+    {
+        DesktopDriveMappings.Clear();
+        foreach (var mapping in _cloudDrives.Mappings)
+        {
+            DesktopDriveMappings.Add(mapping);
+        }
+    }
+
+    private async Task TryActivateDesktopDrivesAsync(Guid profileId)
+    {
+        try
+        {
+            await _cloudDrives.ActivateAsync(profileId, Repository!).ConfigureAwait(true);
+        }
+        catch
+        {
+            // 云盘位置稍后可重试，不能把已经成功的 NAS 登录判定为失败。
+        }
+        StartDesktopDriveRecovery(profileId);
+    }
+
+    private void StartDesktopDriveRecovery(Guid profileId)
+    {
+        StopDesktopDriveRecovery();
+        var cancellation = new CancellationTokenSource();
+        _desktopDriveRecoveryCancellation = cancellation;
+        _desktopDriveRecoveryTask = Task.Run(async () =>
+        {
+            var delaySeconds = 15;
+            while (!cancellation.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(
+                        TimeSpan.FromSeconds(
+                            delaySeconds + Random.Shared.Next(0, 6)),
+                        cancellation.Token).ConfigureAwait(false);
+                    if (ActiveProfile?.Id != profileId ||
+                        Repository is not { } repository)
+                    {
+                        continue;
+                    }
+                    await _cloudDrives.ActivateAsync(profileId, repository)
+                        .ConfigureAwait(false);
+                    var mappings = _cloudDrives.Mappings
+                        .Where(item => item.ProfileId == profileId)
+                        .ToArray();
+                    var hasIssue = mappings.Any(mapping =>
+                        _cloudDrives.Runtime(mapping).State is not
+                            (DesktopDriveMappingState.Available or
+                             DesktopDriveMappingState.Paused));
+                    delaySeconds = hasIssue
+                        ? Math.Min(delaySeconds * 2, 300)
+                        : 300;
+                    DesktopDriveProgressChanged?.Invoke(this, EventArgs.Empty);
+                }
+                catch (OperationCanceledException)
+                    when (cancellation.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch
+                {
+                    delaySeconds = Math.Min(delaySeconds * 2, 300);
+                }
+            }
+        }, cancellation.Token);
+    }
+
+    private void StopDesktopDriveRecovery()
+    {
+        _desktopDriveRecoveryCancellation?.Cancel();
+        _desktopDriveRecoveryCancellation?.Dispose();
+        _desktopDriveRecoveryCancellation = null;
+        _desktopDriveRecoveryTask = null;
     }
 }

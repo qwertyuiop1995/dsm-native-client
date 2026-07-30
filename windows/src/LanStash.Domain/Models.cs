@@ -288,6 +288,14 @@ public interface IDsmApiClient
         string method,
         IReadOnlyDictionary<string, string>? parameters = null,
         CancellationToken cancellationToken = default);
+    Task<byte[]> ReadFileRangeAsync(
+        NasProfile profile,
+        DsmSession session,
+        ApiCapability capability,
+        string remotePath,
+        long offset,
+        long length,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IDsmRepository
@@ -295,6 +303,16 @@ public interface IDsmRepository
     IReadOnlyList<AppModule> AvailableModules { get; }
     Task<FilePage> ListFilesAsync(
         string path,
+        CancellationToken cancellationToken = default);
+    Task<FilePage> ListFilesAsync(
+        string path,
+        int offset,
+        int limit,
+        CancellationToken cancellationToken = default);
+    Task<byte[]> ReadFileRangeAsync(
+        string remotePath,
+        long offset,
+        long length,
         CancellationToken cancellationToken = default);
     Task<IReadOnlyList<FileItem>> SearchFilesAsync(
         string path,

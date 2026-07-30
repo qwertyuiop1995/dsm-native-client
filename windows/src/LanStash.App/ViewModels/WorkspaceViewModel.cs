@@ -139,6 +139,15 @@ public sealed class WorkspaceViewModel(AppViewModel app) : ObservableObject
              WorkspaceCategory.Networks or
              WorkspaceCategory.Images));
 
+    public bool CanManageOffline =>
+        Module == AppModule.Files &&
+        SelectedItem?.Payload is FileItem file &&
+        app.CanManageDesktopDriveItems([file]);
+
+    public bool SelectedFileIsKeptOffline =>
+        SelectedItem?.Payload is FileItem file &&
+        app.DesktopDriveItemsAreKeptOffline([file]);
+
     public async Task ShowModuleAsync(AppModule module)
     {
         Module = module;
@@ -314,6 +323,16 @@ public sealed class WorkspaceViewModel(AppViewModel app) : ObservableObject
         });
     }
 
+    public Task KeepSelectedOfflineAsync() =>
+        SelectedItem?.Payload is FileItem file
+            ? app.KeepDesktopDriveItemsOfflineAsync([file])
+            : Task.CompletedTask;
+
+    public Task ReleaseSelectedOfflineAsync() =>
+        SelectedItem?.Payload is FileItem file
+            ? app.ReleaseDesktopDriveItemsOfflineAsync([file])
+            : Task.CompletedTask;
+
     private async Task<IReadOnlyList<WorkspaceRow>> LoadRowsAsync(
         IDsmRepository repository,
         string? search)
@@ -426,7 +445,11 @@ public sealed class WorkspaceViewModel(AppViewModel app) : ObservableObject
         new(
             item.Path,
             item.Name,
-            item.IsDirectory ? LocalizationService.Current.Get("ItemFolder") : FormatBytes(item.Size),
+            item.IsDirectory
+                ? LocalizationService.Current.Get("ItemFolder")
+                : item.Size >= 0
+                    ? FormatBytes(item.Size)
+                    : LocalizationService.Current.Get("UnknownValue"),
             item.ModifiedAt?.ToLocalTime().ToString("g") ?? string.Empty,
             item.IsDirectory ? "\uE8B7" : "\uE8A5",
             item);
@@ -549,6 +572,8 @@ public sealed class WorkspaceViewModel(AppViewModel app) : ObservableObject
         RaisePropertyChanged(nameof(CanRename));
         RaisePropertyChanged(nameof(CanControl));
         RaisePropertyChanged(nameof(CanDelete));
+        RaisePropertyChanged(nameof(CanManageOffline));
+        RaisePropertyChanged(nameof(SelectedFileIsKeptOffline));
     }
 }
 

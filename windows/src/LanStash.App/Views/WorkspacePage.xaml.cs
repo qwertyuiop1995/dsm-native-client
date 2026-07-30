@@ -153,6 +153,12 @@ public sealed partial class WorkspacePage : Page
         }
     }
 
+    private async void KeepOffline_Click(object sender, RoutedEventArgs e) =>
+        await RunAsync(_viewModel.KeepSelectedOfflineAsync);
+
+    private async void ReleaseOffline_Click(object sender, RoutedEventArgs e) =>
+        await RunAsync(_viewModel.ReleaseSelectedOfflineAsync);
+
     private ContentDialog CreateDialog(string title, object content, string primaryText) =>
         new()
         {
@@ -211,6 +217,14 @@ public sealed partial class WorkspacePage : Page
         StartButton.Visibility = _viewModel.CanControl ? Visibility.Visible : Visibility.Collapsed;
         StopButton.Visibility = _viewModel.CanControl ? Visibility.Visible : Visibility.Collapsed;
         DeleteButton.IsEnabled = _viewModel.CanDelete;
+        KeepOfflineButton.Visibility =
+            _viewModel.CanManageOffline && !_viewModel.SelectedFileIsKeptOffline
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        ReleaseOfflineButton.Visibility =
+            _viewModel.CanManageOffline && _viewModel.SelectedFileIsKeptOffline
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         LoadingIndicator.IsActive = _viewModel.IsLoading;
         LoadingIndicator.Visibility = _viewModel.IsLoading ? Visibility.Visible : Visibility.Collapsed;
         EmptyState.Visibility = !_viewModel.IsLoading && _viewModel.HasMessage

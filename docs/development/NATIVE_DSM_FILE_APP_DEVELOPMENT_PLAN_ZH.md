@@ -1,108 +1,59 @@
-# 岚仓（LanStash）当前开发与验收计划
+# 岚仓（LanStash）当前开发与验收入口
 
-> 最后更新：2026-07-28
-> 当前里程碑：macOS 文件客户端实机验收与稳定性收敛
-> 目标平台：macOS、iPhone、iPad、Android、Windows
+> 最后更新：2026-07-30
+> 当前状态：[当前开发进度](../progress/STATUS.md)
+> 后续优先级：[产品路线图](../progress/ROADMAP.md)
 > 历史规格：[第一阶段开发文档归档](../archive/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_V1_ARCHIVE_ZH.md)
 
 ## 文档用途
 
-本文只记录当前仍有效的开发边界、交付状态和验收顺序。已经完成的第一阶段详细设计、早期取舍和接口研究已完整归档；API 参数、兼容性和安全规则分别以 API 参考、兼容矩阵和安全基线为准，避免在多份文档中重复维护。
+本文只定义跨模块共同适用的验收顺序和发布出口，不重复记录功能完成情况、API 参数、平台差异或专项设计。相关事实分别由当前进度、API 参考、平台矩阵、安全基线、兼容矩阵和专项开发计划维护。
 
-## 当前产品边界
+## 当前验收顺序
 
-- 客户端直接连接用户自己的 Synology NAS，不增加中转服务器。
-- macOS、iPhone 和 iPad 使用 Apple 原生技术栈并共享 Swift Package；Android 与 Windows 保留独立原生实现。
-- 优先使用 Synology 官方公开 API；内部 API 必须标注、隔离并经过指定 DSM 版本实机验证。
-- 不自动修改 NAS 防火墙、共享目录、HTTPS、回收站或管理员设置。
-- 不提交密码、会话、证书私钥、真实地址、未脱敏响应或用户文件。
-- 删除、覆盖、恢复等危险写操作必须具备确认、权限检查、重复提交保护和结果校验。
+| 优先级 | 工作 | 验收出口 |
+| --- | --- | --- |
+| P0 | macOS 文件客户端与真实 NAS 回归 | 登录、浏览、预览、传输和危险写操作形成带版本信息的脱敏记录 |
+| P0 | macOS Finder 云盘位置 | 正式签名后完成 File Provider、按需读取、离线保留、清理、重启和退出行为验收 |
+| P0 | Windows 客户端与云盘位置 | 在 Windows x64/arm64 完成 WinUI 构建、Cloud Files、资源管理器、重启和安装/卸载验收 |
+| P0 | 移动端登录恢复 | iPhone、iPad 和 Android 分别完成真实设备完整登录、恢复与显式退出验证 |
+| P1 | 照片、Chat 与 NAS 设置 | 按各专项计划完成真实套件、权限、性能和写操作验收 |
 
-## macOS 当前基线
+功能是否已经实现、测试数量和当前阻塞项只在[当前开发进度](../progress/STATUS.md)更新。
 
-macOS 端已经形成可构建、可测试的文件客户端实现，主要包括：
+## 真实 NAS 验收要求
 
-- 多 NAS、QuickConnect、证书核对、密码与 OTP 登录、可选记住密码和自动登录。
-- 共享目录浏览、图标与列表视图、排序和分组、搜索、收藏、最近访问、账号可见空间及远程位置管理。
-- 图片、文本、PDF、音乐和视频预览；常见文本文件可以编辑、保存和整理格式。
-- 文件及文件夹上传、下载、ZIP 下载、断点续传和传输中心。
-- 创建目录、重命名、复制、移动、拖拽、框选、限时撤销和同名冲突处理。
-- NAS 端压缩与解压、加密压缩包密码处理、分享链接创建与取消。
-- 文件详情、文件夹大小、系统通知、连接方式提示和应用存储清理。
+1. 记录 DSM build、相关套件完整版本、日期、连接方式类别、证书类型和权限类别，不记录真实地址、账号或路径。
+2. 覆盖局域网、公网直连和 QuickConnect 可用场景；验证会话过期、网络切换和证书变化。
+3. 覆盖中文、特殊字符、深层目录、大目录分页、大文件、空间不足和权限不足。
+4. 写操作必须验证确认、权限检查、防重复提交、取消或超时处理以及最终状态复查。
+5. 内部 API 按发现规范记录证据等级；未验证的新 build 默认关闭内部写能力。
+6. 结果写入[DSM 兼容矩阵](../compatibility/DSM_COMPATIBILITY_MATRIX.md)，自动化测试不能替代实机证据。
 
-“已经实现”只表示代码和自动化测试具备对应路径，不等于所有 DSM 版本均已通过真实 NAS 验收。具体状态以[当前开发进度](../progress/STATUS.md)为准。
+## 发布共同出口
 
-## 已识别但未纳入当前基线的功能
+- 目标平台的正式测试、Release 构建和安装启动通过。
+- 用户凭据、会话、证书、日志、缓存和诊断信息符合[安全与隐私基线](../security/SECURITY_BASELINE.md)。
+- 新增用户文案具备英语和简体中文资源，本地化完整性与硬编码扫描通过。
+- 浅色/深色模式、键盘或触控、VoiceOver/屏幕阅读器、动态文字和降低动态效果完成检查。
+- 危险写操作具备确认、权限检查、防重复提交和结果校验。
+- 当前进度、平台矩阵、兼容矩阵和变更记录与同一源码版本同步。
+- 一次性调试文件、日志、构建产物和测试账号资料已经清理。
 
-以下功能已从源码、`DsmCapabilityDiscovery` 已声明的 API 清单以及 `docs/api/DSM_WEB_API_REFERENCE_ZH.md` 中梳理出来，尚未进入当前 macOS 文件客户端里程碑，后续按 DSM build 和套件版本逐项接入：
+## 专项计划
 
-### File Station 扩展
-- `SYNO.FileStation.BackgroundTask` 后台任务汇总
-- `SYNO.FileStation.DirSize` 异步目录大小
-- `SYNO.FileStation.MD5` 异步文件 MD5
-- `SYNO.FileStation.VFS.Connection` / `SYNO.Entry.Request` 批量与 VFS 扩展
-- 照片页回收站恢复直接入口
+- [桌面端 NAS 云盘映射与按需缓存](NATIVE_DSM_DESKTOP_CLOUD_DRIVE_DEVELOPMENT_PLAN_ZH.md)
+- [照片管理](NATIVE_DSM_PHOTOS_DEVELOPMENT_PLAN_ZH.md)
+- [Synology Chat](NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)
+- [DSM 套件管理](NATIVE_DSM_SERVICE_MANAGEMENT_PLAN_ZH.md)
+- [统一存储管理](NATIVE_DSM_STORAGE_MANAGEMENT_PLAN_ZH.md)
 
-### DSM 套件与系统能力
-- **Download Station**：`SYNO.DownloadStation.*` 官方接口与 `SYNO.DownloadStation2.*` 内部适配
-- **Virtual Machine Manager**：`SYNO.Virtualization.API.*` / `SYNO.Virtualization.*` 虚拟机生命周期、电源控制、镜像管理
-- **Container Manager / Docker**：`SYNO.Docker.*` 容器、镜像、网络、项目管理
-- **系统与硬件**：系统信息/利用率/进程/连接/日志、存储/硬盘/SMART、风扇/LED/蜂鸣器/电源计划/UPS、网络/DDNS/代理/防火墙、用户/群组/共享/配额、套件启停安装、计划任务、SSH/Telnet 终端
-- **其他套件**：Audio Station、Video Station、Note Station、Synology Drive、Calendar、Contacts、Surveillance Station、Hyper Backup / Active Backup、Synology Office
+专项计划只维护范围、长期约束、未完成工作和验收条件；实时状态统一回到当前进度文档。
 
-### 跨平台与移动能力
-- iPhone、iPad、Android、Windows 原生客户端工程
-- 系统照片库自动备份、后台上传、释放设备空间、离线任务恢复
-
-接入原则：优先使用官方公开 API；内部 API 必须标注、能力发现、版本契约测试和功能开关保护，默认关闭，失败可降级。
-
-## 当前工作顺序
-
-### 1. 真实 NAS 验收
-
-1. 记录 DSM build、File Station 版本、连接方式和证书类型，不记录真实地址或账号。
-2. 验证局域网、公网直连和 QuickConnect 中继下的登录、OTP、自动登录及退出。
-3. 验证中文、特殊字符、深层目录、大目录分页和目录大小统计。
-4. 验证上传、下载、暂停、继续、取消、重试、文件夹 ZIP 下载和任务通知。
-5. 验证重命名、复制、移动、拖拽、压缩、解压、分享、删除、远程位置管理和结果校验；内部挂载接口必须记录 DSM build 与账号权限。
-6. 验证图片、文本、PDF、音频和视频预览，特别是 Range 请求、格式识别和关闭窗口后的资源释放。
-7. 将结果写入[DSM 兼容矩阵](../compatibility/DSM_COMPATIBILITY_MATRIX.md)。
-
-### 2. 稳定性与安全收敛
-
-- 为写操作补齐重复提交、取消、超时、会话过期和网络切换测试。
-- 对预览缓存、下载分片、通知权限和应用退出行为进行回归测试。
-- 仅在目标 DSM build 验证通过后开放受兼容开关保护的能力。
-- 发布前完成日志与产物脱敏检查，不保留一次性调试文件和测试账号资料。
-
-### 3. 其他平台
-
-- iPhone 和 iPad 复用 Apple 共享业务层，单独实现适合触控和小屏的原生界面。
-- Android 使用 Kotlin 与 Jetpack Compose，Windows 使用 C# 与 WinUI 3。
-- iPhone、iPad、Android 与 Windows 已统一接入 QuickConnect ID 解析、可信直连候选探测、安全中继身份核对，以及保存会话恢复时的重新解析；原始 ID 只作为用户配置保存，解析地址只在当前连接期间使用。
-- iPhone、iPad、Android 与 Windows 已统一保留最后使用的 NAS 名称、原始地址和账号；密码默认不保存，仅在用户明确选择后进入平台系统安全存储，自动登录必须以已保存密码为前提。
-- 各端可选 HTTPS 端口均放在默认收起的“高级连接设置”中；留空时继续使用地址内端口或安全的自动选择规则。
-- QuickConnect 地址发现和 `SYNO.API.Info` 能力探测不得携带账号、密码、OTP、SID 或 SynoToken；只有可信候选通过能力发现后才允许登录。
-- 三端后续实现容量与远程位置 UI 时必须沿用“账号可见容量”语义和能力探测边界；不得改用内部存储接口扩权，也不得持久化远程共享密码。
-- 三端共同遵循 `contracts/`、API 错误语义和危险操作规则，不共享跨平台 UI 运行时。
-
-## 验收出口
-
-macOS 里程碑只有同时满足以下条件才能标记完成：
-
-- Swift Package 测试和 Xcode 构建通过。
-- 关键读写流程在至少一台记录版本信息的测试 NAS 上通过。
-- 危险操作具备确认、权限检查、重复提交保护和结果校验。
-- 密码、会话、证书和日志符合安全基线。
-- 可见文案面向普通用户，并完成浅色/深色模式、键盘、VoiceOver 和降低动态效果检查。
-- 兼容矩阵、平台矩阵、当前状态和变更记录同步更新。
-
-## 关联文档
+## 工程事实来源
 
 - [DSM Web API 参考](../api/DSM_WEB_API_REFERENCE_ZH.md)
-- [当前开发进度](../progress/STATUS.md)
-- [产品路线图](../progress/ROADMAP.md)
+- [私有 API 发现规范](../api/discovery/README.md)
 - [平台功能矩阵](../progress/PLATFORM_MATRIX.md)
 - [总体架构](../architecture/ARCHITECTURE.md)
-- [DSM 兼容矩阵](../compatibility/DSM_COMPATIBILITY_MATRIX.md)
 - [安全与隐私基线](../security/SECURITY_BASELINE.md)

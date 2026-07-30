@@ -29,6 +29,66 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="12">
+                <StackPanel Spacing="12">
+                    <TextBlock
+                        x:Name="CloudDriveTitle"
+                        Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <TextBlock
+                        x:Name="CloudDriveDescription"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                    <TextBox x:Name="MappingNameTextBox" />
+                    <TextBox
+                        x:Name="FolderPathTextBox"
+                        Header=""
+                        PlaceholderText=""
+                        AutomationProperties.Name="" />
+                    <ComboBox
+                        x:Name="CacheLimitSelector"
+                        MinWidth="220"
+                        DisplayMemberPath="DisplayName" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock
+                            x:Name="CacheDiskText"
+                            VerticalAlignment="Center" />
+                        <Button
+                            x:Name="ChooseCacheDiskButton"
+                            Click="ChooseCacheDiskButton_Click" />
+                        <Button
+                            x:Name="UseDefaultCacheDiskButton"
+                            Click="UseDefaultCacheDiskButton_Click"
+                            Visibility="Collapsed" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button
+                            x:Name="AddNasButton"
+                            Click="AddNasButton_Click"
+                            Style="{StaticResource AccentButtonStyle}" />
+                        <Button
+                            x:Name="AddFolderButton"
+                            Click="AddFolderButton_Click" />
+                        <ProgressRing
+                            x:Name="CloudDriveProgress"
+                            Width="20"
+                            Height="20"
+                            IsActive="False"
+                            Visibility="Collapsed" />
+                    </StackPanel>
+                    <InfoBar
+                        x:Name="CloudDriveMessage"
+                        IsOpen="False"
+                        IsClosable="True" />
+                    <StackPanel
+                        x:Name="CloudDriveList"
+                        Spacing="8" />
+                </StackPanel>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </Page>

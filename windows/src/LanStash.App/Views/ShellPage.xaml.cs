@@ -43,7 +43,7 @@ public sealed partial class ShellPage : Page
     {
         if (args.IsSettingsSelected)
         {
-            ContentFrame.Content = new LanguageSettingsPage();
+            ContentFrame.Content = new LanguageSettingsPage(_app);
             return;
         }
         if (args.SelectedItem == LogoutItem)

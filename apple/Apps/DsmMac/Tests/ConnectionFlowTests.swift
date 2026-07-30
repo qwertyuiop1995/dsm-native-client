@@ -186,7 +186,70 @@ private actor MemoryPasswordStore: PasswordSecureStoring {
     }
 }
 
+private actor MemorySessionStore: SessionSecureStoring {
+    private var sessions: [UUID: AuthSession] = [:]
+
+    func save(_ session: AuthSession, for profileID: UUID) async throws {
+        sessions[profileID] = session
+    }
+
+    func load(for profileID: UUID) async throws -> AuthSession? {
+        sessions[profileID]
+    }
+
+    func remove(for profileID: UUID) async throws {
+        sessions[profileID] = nil
+    }
+}
+
 final class ConnectionFlowTests: XCTestCase {
+    func test临时签名缺少扩展或共享容器时云盘能力不可用() {
+        let containerURL = URL(fileURLWithPath: "/tmp/test-app-group")
+
+        XCTAssertFalse(
+            DesktopCloudDriveAvailability.evaluate(
+                hasFileProviderExtension: false,
+                sharedContainerURL: containerURL
+            )
+        )
+        XCTAssertFalse(
+            DesktopCloudDriveAvailability.evaluate(
+                hasFileProviderExtension: true,
+                sharedContainerURL: nil
+            )
+        )
+        XCTAssertTrue(
+            DesktopCloudDriveAvailability.evaluate(
+                hasFileProviderExtension: true,
+                sharedContainerURL: containerURL
+            )
+        )
+    }
+
+    func test云盘会话桥接只发布并清理当前会话() async throws {
+        let profileID = UUID()
+        let session = AuthSession(
+            sid: "test-session",
+            synoToken: "test-token",
+            did: nil,
+            isPortalPort: false
+        )
+        let store = MemorySessionStore()
+        let bridge = DesktopDriveSessionBridge(
+            profileID: profileID,
+            session: session,
+            store: store
+        )
+
+        try await bridge.publish()
+        let published = try await store.load(for: profileID)
+        XCTAssertEqual(published, session)
+
+        try await bridge.remove()
+        let removed = try await store.load(for: profileID)
+        XCTAssertNil(removed)
+    }
+
     @MainActor
     func test登录后修改NAS显示名称并同步工作区() async throws {
         let suiteName = "ConnectionFlowTests.\(UUID().uuidString)"
@@ -541,21 +604,33 @@ final class ConnectionFlowTests: XCTestCase {
     }
 
     @MainActor
-    func test文件会话失效时返回登录页但不执行远程退出() async {
+    func test文件会话失效时返回登录页但不执行远程退出() async throws {
         let suiteName = "ConnectionFlowTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let resolver = RecordingQuickConnectResolver()
         let repository = RecordingAuthRepository()
+        let desktopDriveSessionStore = MemorySessionStore()
         let model = AppModel(
             profileStore: NasProfileStore(defaults: defaults),
             authRepository: repository,
-            quickConnectResolver: resolver
+            quickConnectResolver: resolver,
+            desktopDriveSessionStore: desktopDriveSessionStore
         )
         model.host = "family-nas"
         model.account = "user"
         model.password = "password"
         await model.connect()
+        let profileID = try XCTUnwrap(model.selectedProfileID)
+        try await desktopDriveSessionStore.save(
+            AuthSession(
+                sid: "shared-session",
+                synoToken: nil,
+                did: nil,
+                isPortalPort: false
+            ),
+            for: profileID
+        )
 
         await model.returnToLoginAfterSessionIssue(message: "登录状态已失效，请重新登录。")
 
@@ -566,5 +641,49 @@ final class ConnectionFlowTests: XCTestCase {
         XCTAssertEqual(model.statusMessage, "登录状态已失效，请重新登录。")
         XCTAssertEqual(clearCount, 1)
         XCTAssertEqual(logoutCount, 0)
+        let sharedSession = try? await desktopDriveSessionStore.load(
+            for: profileID
+        )
+        XCTAssertNil(sharedSession)
+    }
+
+    @MainActor
+    func test主动退出清理云盘共享会话但保留应用内密码() async throws {
+        let suiteName = "ConnectionFlowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let passwordStore = MemoryPasswordStore()
+        let desktopDriveSessionStore = MemorySessionStore()
+        let model = AppModel(
+            profileStore: NasProfileStore(defaults: defaults),
+            authRepository: RecordingAuthRepository(),
+            passwordStore: passwordStore,
+            desktopDriveSessionStore: desktopDriveSessionStore
+        )
+        model.host = "home-nas.local"
+        model.account = "user"
+        model.password = "local-test-password"
+        model.rememberPassword = true
+        await model.connect()
+        let profileID = try XCTUnwrap(model.selectedProfileID)
+        try await desktopDriveSessionStore.save(
+            AuthSession(
+                sid: "shared-session",
+                synoToken: nil,
+                did: nil,
+                isPortalPort: false
+            ),
+            for: profileID
+        )
+
+        await model.logout()
+
+        let sharedSession = try await desktopDriveSessionStore.load(
+            for: profileID
+        )
+        let savedPassword = try await passwordStore.load(for: profileID)
+        XCTAssertNil(sharedSession)
+        XCTAssertEqual(savedPassword, "local-test-password")
+        XCTAssertEqual(model.password, "local-test-password")
     }
 }

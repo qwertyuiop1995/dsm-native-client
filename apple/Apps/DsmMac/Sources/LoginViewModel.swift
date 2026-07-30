@@ -158,6 +158,10 @@ final class AppModel {
     private let authRepository: any AuthRepository
     private let quickConnectResolver: any QuickConnectResolving
     private let passwordStore: any PasswordSecureStoring
+    private let desktopDriveSessionStore: any SessionSecureStoring
+    private let secureStoreRollbackMigrator:
+        DesktopSecureStoreRollbackMigrator?
+    private let desktopDriveStore: DesktopDriveConfigurationStore
     private var selectedProfile: NasProfile?
     private var activeConnectionProfile: NasProfile?
     private var capabilities: CapabilitySet?
@@ -179,14 +183,34 @@ final class AppModel {
 
     init(
         profileStore: NasProfileStore = NasProfileStore(),
-        authRepository: any AuthRepository = DsmAuthRepository(),
+        authRepository: (any AuthRepository)? = nil,
         quickConnectResolver: any QuickConnectResolving = DsmQuickConnectResolver(),
-        passwordStore: any PasswordSecureStoring = LocalFileSecureStore()
+        passwordStore: (any PasswordSecureStoring)? = nil,
+        desktopDriveSessionStore: (any SessionSecureStoring)? = nil,
+        secureStoreRollbackMigrator:
+            DesktopSecureStoreRollbackMigrator? = nil,
+        desktopDriveStore: DesktopDriveConfigurationStore = .init()
     ) {
+        let usesProductionSecureStore = authRepository == nil && passwordStore == nil
+        let localSecureStore = LocalFileSecureStore()
+        let sharedSessionStore = SharedKeychainSessionStore()
         self.profileStore = profileStore
-        self.authRepository = authRepository
+        self.authRepository = authRepository ?? DsmAuthRepository(
+            sessionStore: localSecureStore
+        )
         self.quickConnectResolver = quickConnectResolver
-        self.passwordStore = passwordStore
+        self.passwordStore = passwordStore ?? localSecureStore
+        self.desktopDriveSessionStore =
+            desktopDriveSessionStore ?? sharedSessionStore
+        self.secureStoreRollbackMigrator = secureStoreRollbackMigrator
+            ?? (usesProductionSecureStore
+                ? DesktopSecureStoreRollbackMigrator(
+                    localStore: localSecureStore,
+                    sharedSessionStore: sharedSessionStore,
+                    configurationStore: desktopDriveStore
+                )
+                : nil)
+        self.desktopDriveStore = desktopDriveStore
     }
 
     func load() {
@@ -462,7 +486,7 @@ final class AppModel {
                 autoLoginEnabled && rememberPassword && !passwordStorageFailed,
                 for: updated.id
             )
-            try openWorkspace(
+            try await openWorkspace(
                 profile: updated,
                 connectionProfile: connection.profile,
                 capabilities: connection.capabilities,
@@ -544,8 +568,9 @@ final class AppModel {
         guard let profile = selectedProfile else {
             return
         }
-        try? await authRepository.clearSession(for: profile.id)
+        await clearStoredSessions(profileID: profile.id)
         try? await passwordStore.remove(for: profile.id)
+        try? await desktopDriveStore.removeConnection(profileID: profile.id)
         profileStore.removeAutoLoginPreference(for: profile.id)
         workspacesByProfileID[profile.id]?.cancelAllWork()
         workspacesByProfileID[profile.id] = nil
@@ -578,6 +603,8 @@ final class AppModel {
             statusMessage = L10n.string("ui.6e827a1b34d124ce")
             return
         }
+
+        try? await desktopDriveSessionStore.remove(for: profile.id)
 
         // 主动退出只停用自动登录；已记住的密码保留并重新加载到登录界面，
         // 避免下次需要重新输入。
@@ -623,7 +650,7 @@ final class AppModel {
         requiresOTP = false
 
         if let profile {
-            try? await authRepository.clearSession(for: profile.id)
+            await clearStoredSessions(profileID: profile.id)
         }
 
         statusIsError = true
@@ -685,6 +712,9 @@ final class AppModel {
     }
 
     private func loadSavedPassword(for profile: NasProfile) async {
+        await secureStoreRollbackMigrator?.migrateIfNeeded(
+            profileID: profile.id
+        )
         do {
             let storedPassword = try await passwordStore.load(for: profile.id)
             guard selectedProfile?.id == profile.id else {
@@ -716,6 +746,9 @@ final class AppModel {
         statusMessage = L10n.string("ui.39887059b5ec8c20")
         defer { isBusy = false }
         do {
+            await secureStoreRollbackMigrator?.migrateIfNeeded(
+                profileID: profile.id
+            )
             guard let restored = try await authRepository.restoreSession(for: profile.id) else {
                 statusMessage = L10n.string("ui.7eb96b663a116103")
                 return .credentialsNeeded
@@ -729,13 +762,13 @@ final class AppModel {
                 capabilities: connection.capabilities,
                 session: restored
             )) {
-                try? await authRepository.clearSession(for: profile.id)
+                await clearStoredSessions(profileID: profile.id)
                 statusIsError = true
                 statusMessage = L10n.string("ui.5cdb81f9cb8e5cd7")
                 return .credentialsNeeded
             }
 
-            try openWorkspace(
+            try await openWorkspace(
                 profile: profile,
                 connectionProfile: connection.profile,
                 capabilities: connection.capabilities,
@@ -763,7 +796,7 @@ final class AppModel {
         } catch {
             statusIsError = true
             statusMessage = L10n.string("ui.5cdb81f9cb8e5cd7")
-            try? await authRepository.clearSession(for: profile.id)
+            await clearStoredSessions(profileID: profile.id)
             return .credentialsNeeded
         }
     }
@@ -792,7 +825,21 @@ final class AppModel {
         capabilities: CapabilitySet,
         session: AuthSession,
         route: ConnectionRoute
-    ) throws {
+    ) async throws {
+        let desktopDriveSessionBridge: DesktopDriveSessionBridge?
+        if DesktopCloudDriveAvailability.isAvailable {
+            try? await desktopDriveStore.saveConnection(
+                profile: connectionProfile,
+                capabilities: capabilities
+            )
+            desktopDriveSessionBridge = DesktopDriveSessionBridge(
+                profileID: profile.id,
+                session: session,
+                store: desktopDriveSessionStore
+            )
+        } else {
+            desktopDriveSessionBridge = nil
+        }
         let repository = try DsmFileRepository(
             profile: connectionProfile,
             capabilities: capabilities,
@@ -819,7 +866,8 @@ final class AppModel {
             repository: repository,
             chatRepository: chatRepository,
             nasSettingsRepository: administrationRepository,
-            serviceManagementRepository: serviceManagementRepository
+            serviceManagementRepository: serviceManagementRepository,
+            desktopDriveSessionBridge: desktopDriveSessionBridge
         )
         workspacesByProfileID[profile.id] = openedWorkspace
         connectionContextsByProfileID[profile.id] = ConnectionContext(
@@ -831,6 +879,11 @@ final class AppModel {
         workspace = openedWorkspace
         statusIsError = false
         statusMessage = L10n.string("ui.49263fcae6b8dce3", String(describing: profile.displayName))
+    }
+
+    private func clearStoredSessions(profileID: UUID) async {
+        try? await authRepository.clearSession(for: profileID)
+        try? await desktopDriveSessionStore.remove(for: profileID)
     }
 
     private func makeProfile() throws -> NasProfile {

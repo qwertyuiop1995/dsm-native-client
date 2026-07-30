@@ -1,14 +1,12 @@
 # DSM 套件管理三端实现计划
 
+> 当前完成情况和验证结果以[当前开发进度](../progress/STATUS.md)为准。本文只维护范围、契约、安全门槛、未完成工作和验收条件。
+
 ## 1. 范围
 
 本计划覆盖 Download Station、Virtual Machine Manager 和 Container Manager。目标是在 macOS、移动端与 Windows 上共享同一领域契约、安全门槛和兼容矩阵，同时保持各平台原生界面。
 
-macOS 第一阶段已实现：
-
-- Download Station：任务列表、总速率、NAS 保存目录选择、链接/磁力任务创建、`.torrent`/`.nzb`/网址文本文件上传、基础设置与计划读取保存、暂停、继续、结束、删除。
-- Container Manager：总览、容器、映像、网络、项目、活动记录；Docker Hub 映像搜索、标签选择、映像拉取/删除、容器启停/重启/删除和网络创建/删除。
-- Virtual Machine Manager：虚拟机、主机、存储、网络、映像、保护计划和日志；分步创建、常规设置修改、独立可全屏 noVNC 远程控制台、启动、正常关机、重启、强制断电和删除。
+三个模块分别覆盖 Download Station 任务与设置、Container Manager 容器与资源，以及 Virtual Machine Manager 虚拟机生命周期与控制台。各平台具体已实现范围不在本文重复维护。
 
 ## 2. 契约与接口优先级
 

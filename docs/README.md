@@ -1,18 +1,33 @@
 # 项目文档
 
-## 核心文档
+文档按职责维护，避免在多处重复记录实现状态：
 
-- [DSM Web API 参考](api/DSM_WEB_API_REFERENCE_ZH.md)
-- [DSM 与套件私有 API 发现规范](api/discovery/README.md)
+- 当前完成情况、测试结果和阻塞项以[当前开发进度](progress/STATUS.md)为准。
+- 后续优先级以[产品路线图](progress/ROADMAP.md)为准。
+- 各平台能力差异以[平台功能矩阵](progress/PLATFORM_MATRIX.md)为准。
+- API、安全、兼容和架构文档保存长期有效的工程事实。
+
+## 当前状态与计划
+
+- [当前开发进度](progress/STATUS.md)
+- [产品路线图](progress/ROADMAP.md)
+- [平台功能矩阵](progress/PLATFORM_MATRIX.md)
 - [当前开发与验收计划](development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)
+
+## 专项开发计划
+
+- [桌面端 NAS 云盘映射与按需缓存开发计划](development/NATIVE_DSM_DESKTOP_CLOUD_DRIVE_DEVELOPMENT_PLAN_ZH.md)
 - [照片管理开发计划](development/NATIVE_DSM_PHOTOS_DEVELOPMENT_PLAN_ZH.md)
 - [Synology Chat 原生聊天功能开发计划](development/NATIVE_DSM_CHAT_DEVELOPMENT_PLAN_ZH.md)
 - [DSM 套件管理三端实现计划](development/NATIVE_DSM_SERVICE_MANAGEMENT_PLAN_ZH.md)
 - [“统一存储管理”新功能三端实现计划](development/NATIVE_DSM_STORAGE_MANAGEMENT_PLAN_ZH.md)
-- [UI UX Pro Max 项目接入说明](development/UI_UX_PRO_MAX_INTEGRATION_ZH.md)
-- [当前开发进度](progress/STATUS.md)
-- [产品路线图](progress/ROADMAP.md)
-- [平台功能矩阵](progress/PLATFORM_MATRIX.md)
+
+专项计划只保存范围、设计约束、未完成工作和验收条件，不作为当前完成状态的事实来源。
+
+## 工程参考
+
+- [DSM Web API 参考](api/DSM_WEB_API_REFERENCE_ZH.md)
+- [DSM 与套件私有 API 发现规范](api/discovery/README.md)
 - [总体架构](architecture/ARCHITECTURE.md)
 - [DSM 兼容矩阵](compatibility/DSM_COMPATIBILITY_MATRIX.md)
 - [社区兼容性计划（中文）](compatibility/COMMUNITY_COMPATIBILITY_PROGRAM_ZH.md)
@@ -25,6 +40,8 @@
 
 - [第一阶段开发文档（2026-07-16）](archive/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_V1_ARCHIVE_ZH.md)
 
+归档只用于追溯，不代表当前实现。完成有效设计迁移、清除活动引用并建立可追溯版本标签后，可以从当前文档树移除归档全文。
+
 ## 架构决策
 
 - [ADR-0001：使用单仓库](architecture/decisions/0001-monorepo.md)
@@ -32,4 +49,4 @@
 - [ADR-0003：官方 API 优先](architecture/decisions/0003-official-api-first.md)
 - [ADR-0004：应用身份与首个参考平台](architecture/decisions/0004-app-identity-and-reference-platform.md)
 
-文档与源码放在同一个 Git 提交中维护，功能状态以 `progress/STATUS.md` 为准。
+文档与源码放在同一个 Git 提交中维护。

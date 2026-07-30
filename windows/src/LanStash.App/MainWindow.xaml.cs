@@ -12,6 +12,9 @@ namespace LanStash.App;
 public sealed partial class MainWindow : Window
 {
     private readonly AppViewModel _viewModel = new();
+    private readonly AppWindow _appWindow;
+    private readonly TrayIcon _trayIcon;
+    private bool _isExplicitExit;
 
     public MainWindow()
     {
@@ -19,9 +22,28 @@ public sealed partial class MainWindow : Window
         Title = LocalizationService.Current.Get("AppName");
         var windowHandle = WindowNative.GetWindowHandle(this);
         var windowId = Win32Interop.GetWindowIdFromWindow(windowHandle);
-        var window = AppWindow.GetFromWindowId(windowId);
-        window.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
-        window.Resize(new Windows.Graphics.SizeInt32(1280, 820));
+        _appWindow = AppWindow.GetFromWindowId(windowId);
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        _appWindow.SetIcon(iconPath);
+        _appWindow.Resize(new Windows.Graphics.SizeInt32(1280, 820));
+        _appWindow.Closing += OnWindowClosing;
+        _trayIcon = new TrayIcon(
+            windowHandle,
+            iconPath,
+            LocalizationService.Current.Get("TrayTooltip"),
+            LocalizationService.Current.Get("TrayOpenApp"),
+            LocalizationService.Current.Get("TrayPauseCloudDrives"),
+            LocalizationService.Current.Get("TrayResumeCloudDrives"),
+            LocalizationService.Current.Get("TrayCloudDriveIssues"),
+            LocalizationService.Current.Get("TrayExitApp"),
+            () => _viewModel.CurrentDesktopDriveCount,
+            () => _viewModel.AreCurrentDesktopDrivesPaused,
+            () => _viewModel.CurrentDesktopDriveIssueCount,
+            ShowMainWindow,
+            ToggleCloudDrives,
+            ShowCloudDriveIssues,
+            RequestExit);
+        _appWindow.Destroying += (_, _) => _trayIcon.Dispose();
 
         _viewModel.ConnectionChanged += OnConnectionChanged;
         LocalizationService.Current.LanguageChanged += OnLanguageChanged;
@@ -34,6 +56,13 @@ public sealed partial class MainWindow : Window
         DispatcherQueue.TryEnqueue(() =>
         {
             Title = LocalizationService.Current.Get("AppName");
+            _trayIcon.UpdateText(
+                LocalizationService.Current.Get("TrayTooltip"),
+                LocalizationService.Current.Get("TrayOpenApp"),
+                LocalizationService.Current.Get("TrayPauseCloudDrives"),
+                LocalizationService.Current.Get("TrayResumeCloudDrives"),
+                LocalizationService.Current.Get("TrayCloudDriveIssues"),
+                LocalizationService.Current.Get("TrayExitApp"));
             RootFrame.Content = _viewModel.Repository is null
                 ? new LoginPage(_viewModel)
                 : new ShellPage(_viewModel);
@@ -49,4 +78,50 @@ public sealed partial class MainWindow : Window
                 : new LoginPage(_viewModel);
         });
     }
+
+    private void OnWindowClosing(
+        AppWindow sender,
+        AppWindowClosingEventArgs args)
+    {
+        if (_isExplicitExit)
+        {
+            return;
+        }
+        args.Cancel = true;
+        sender.Hide();
+    }
+
+    private void ShowMainWindow()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _appWindow.Show();
+            Activate();
+        });
+    }
+
+    private void RequestExit()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _isExplicitExit = true;
+            _viewModel.Shutdown();
+            _trayIcon.Dispose();
+            Close();
+        });
+    }
+
+    private async void ToggleCloudDrives()
+    {
+        try
+        {
+            await _viewModel.ToggleCurrentDesktopDrivesAsync();
+        }
+        catch
+        {
+            ShowMainWindow();
+        }
+    }
+
+    private void ShowCloudDriveIssues() => ShowMainWindow();
 }

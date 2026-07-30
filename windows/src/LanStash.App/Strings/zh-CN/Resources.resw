@@ -69,7 +69,7 @@
   <data name="ActionStart.Label" xml:space="preserve"><value>启动</value></data>
   <data name="ActionStop.Label" xml:space="preserve"><value>停止</value></data>
   <data name="ActionDelete.Label" xml:space="preserve"><value>删除</value></data>
-  <data name="ActionDelete" xml:space="preserve"><value>删除</value></data>
+  <data name="ActionDeleteText" xml:space="preserve"><value>删除</value></data>
   <data name="ActionRefresh.Label" xml:space="preserve"><value>刷新</value></data>
   <data name="WorkspaceResourceList.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>项目</value></data>
   <data name="ActionReload.Content" xml:space="preserve"><value>重新加载</value></data>

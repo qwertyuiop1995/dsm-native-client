@@ -145,7 +145,7 @@ public sealed partial class WorkspacePage : Page
         var dialog = CreateDialog(
             L.Get("DialogConfirmDelete"),
             panel,
-            L.Get("ActionDelete"));
+            L.Get("ActionDeleteText"));
         dialog.DefaultButton = ContentDialogButton.Close;
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {

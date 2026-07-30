@@ -720,12 +720,18 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
     }
 
     func test账号删除回读确认目标消失时返回确认成功() async throws {
+        let initialDirectory = response(
+            #"{"success":true,"data":{"users":[{"name":"new-user","can_delete":true}],"groups":[]}}"#
+        )
+        let emptyDirectory = response(
+            #"{"success":true,"data":{"users":[],"groups":[]}}"#
+        )
         let transport = MockHTTPTransport(responses: [
-            response(#"{"success":true,"data":{"users":[{"name":"new-user","can_delete":true}]}}"#),
-            response(#"{"success":true,"data":{"groups":[]}}"#),
+            initialDirectory,
+            initialDirectory,
             response(#"{"success":true}"#),
-            response(#"{"success":true,"data":{"users":[]}}"#),
-            response(#"{"success":true,"data":{"groups":[]}}"#)
+            emptyDirectory,
+            emptyDirectory
         ])
         let repository = try makeRepository(
             apiNames: [DsmAPIName.coreUser, DsmAPIName.coreGroup],
@@ -739,13 +745,19 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertFalse(result.requiresRefresh)
         let requests = await transport.recordedRequests()
         XCTAssertEqual(requests.count, 5)
-        XCTAssertEqual(requestValue("method", in: requests[2]), "delete")
+        let deleteRequest = try XCTUnwrap(
+            requests.first { requestValue("method", in: $0) == "delete" }
+        )
+        XCTAssertEqual(requestValue("api", in: deleteRequest), DsmAPIName.coreUser)
     }
 
     func test账号删除提交时断网保留未确认语义且不重放() async throws {
+        let initialDirectory = response(
+            #"{"success":true,"data":{"users":[{"name":"new-user","can_delete":true}],"groups":[]}}"#
+        )
         let transport = MockHTTPTransport(steps: [
-            .response(response(#"{"success":true,"data":{"users":[{"name":"new-user","can_delete":true}]}}"#)),
-            .response(response(#"{"success":true,"data":{"groups":[]}}"#)),
+            .response(initialDirectory),
+            .response(initialDirectory),
             .urlError(.timedOut)
         ])
         let repository = try makeRepository(
@@ -761,7 +773,10 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertEqual(result.localizationKey, "account.delete.unverified")
         let requests = await transport.recordedRequests()
         XCTAssertEqual(requests.count, 3)
-        XCTAssertEqual(requestValue("method", in: requests[2]), "delete")
+        let deleteRequest = try XCTUnwrap(
+            requests.first { requestValue("method", in: $0) == "delete" }
+        )
+        XCTAssertEqual(requestValue("api", in: deleteRequest), DsmAPIName.coreUser)
     }
 
     func test受保护账号删除在提交前被拒绝() async throws {
@@ -780,12 +795,18 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
     }
 
     func test群组删除回读确认目标消失时返回确认成功() async throws {
+        let initialDirectory = response(
+            #"{"success":true,"data":{"users":[],"groups":[{"name":"media-team","can_delete":true}]}}"#
+        )
+        let emptyDirectory = response(
+            #"{"success":true,"data":{"users":[],"groups":[]}}"#
+        )
         let transport = MockHTTPTransport(responses: [
-            response(#"{"success":true,"data":{"users":[]}}"#),
-            response(#"{"success":true,"data":{"groups":[{"name":"media-team","can_delete":true}]}}"#),
+            initialDirectory,
+            initialDirectory,
             response(#"{"success":true}"#),
-            response(#"{"success":true,"data":{"users":[]}}"#),
-            response(#"{"success":true,"data":{"groups":[]}}"#)
+            emptyDirectory,
+            emptyDirectory
         ])
         let repository = try makeRepository(
             apiNames: [DsmAPIName.coreUser, DsmAPIName.coreGroup],
@@ -798,8 +819,10 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertTrue(result.submitted)
         let requests = await transport.recordedRequests()
         XCTAssertEqual(requests.count, 5)
-        XCTAssertEqual(requestValue("api", in: requests[2]), DsmAPIName.coreGroup)
-        XCTAssertEqual(requestValue("method", in: requests[2]), "delete")
+        let deleteRequest = try XCTUnwrap(
+            requests.first { requestValue("method", in: $0) == "delete" }
+        )
+        XCTAssertEqual(requestValue("api", in: deleteRequest), DsmAPIName.coreGroup)
     }
 
     func test文件服务设置只提交真实变化并回读确认() async throws {

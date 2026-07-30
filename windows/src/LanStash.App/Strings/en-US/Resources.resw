@@ -69,7 +69,7 @@
   <data name="ActionStart.Label" xml:space="preserve"><value>Start</value></data>
   <data name="ActionStop.Label" xml:space="preserve"><value>Stop</value></data>
   <data name="ActionDelete.Label" xml:space="preserve"><value>Delete</value></data>
-  <data name="ActionDelete" xml:space="preserve"><value>Delete</value></data>
+  <data name="ActionDeleteText" xml:space="preserve"><value>Delete</value></data>
   <data name="ActionRefresh.Label" xml:space="preserve"><value>Refresh</value></data>
   <data name="WorkspaceResourceList.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Items</value></data>
   <data name="ActionReload.Content" xml:space="preserve"><value>Reload</value></data>

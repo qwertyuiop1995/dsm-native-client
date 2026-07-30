@@ -109,6 +109,7 @@ final class DesktopCloudDriveManager {
     private let repository: any FileRepository
     private let store: DesktopDriveConfigurationStore
     private let sessionBridge: DesktopDriveSessionBridge?
+    private let domainController = DesktopDriveDomainController()
     @ObservationIgnored private var offlineTasks: [UUID: Task<Void, Never>] = [:]
 
     init(
@@ -222,7 +223,8 @@ final class DesktopCloudDriveManager {
             return L10n.string("desktopDrive.cache.location.system")
         case .eligibleVolume(let identifier):
             guard #available(macOS 15.0, *),
-                  let volumeURL = Self.mountedVolumeURL(identifier: identifier),
+                  let volumeURL = DesktopDriveDomainController
+                    .mountedVolumeURL(identifier: identifier),
                   let volumeName = try? volumeURL.resourceValues(
                     forKeys: [.volumeNameKey]
                   ).volumeName else {
@@ -241,7 +243,9 @@ final class DesktopCloudDriveManager {
         isBusy = true
         defer { isBusy = false }
         do {
-            try await removeDomain(domain(for: mapping))
+            try await domainController.remove(
+                domainController.domain(for: mapping)
+            )
             try await store.removeMapping(id: mapping.id)
             mappings.removeAll { $0.id == mapping.id }
             if mappings.isEmpty {
@@ -258,12 +262,14 @@ final class DesktopCloudDriveManager {
     }
 
     func reveal(_ mapping: DesktopDriveMapping) async {
-        guard let manager = NSFileProviderManager(for: domain(for: mapping)) else {
+        guard let manager = domainController.manager(for: mapping) else {
             setError("desktopDrive.error.open")
             return
         }
         do {
-            let url = try await userVisibleURL(manager: manager)
+            let url = try await domainController.userVisibleURL(
+                manager: manager
+            )
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } catch {
             setError("desktopDrive.error.open")
@@ -272,7 +278,7 @@ final class DesktopCloudDriveManager {
 
     func clearCache(_ mapping: DesktopDriveMapping) async {
         guard !isBusy,
-              let manager = NSFileProviderManager(for: domain(for: mapping)) else {
+              let manager = domainController.manager(for: mapping) else {
             setError("desktopDrive.error.clearCache")
             return
         }
@@ -287,7 +293,7 @@ final class DesktopCloudDriveManager {
             var failureCount = 0
             for path in paths {
                 do {
-                    try await evict(
+                    try await domainController.evict(
                         identifier: itemIdentifier(path: path, mapping: mapping),
                         manager: manager
                     )
@@ -338,7 +344,7 @@ final class DesktopCloudDriveManager {
     }
 
     func enforceTemporaryLimit(_ mapping: DesktopDriveMapping) async {
-        guard let manager = NSFileProviderManager(for: domain(for: mapping)),
+        guard let manager = domainController.manager(for: mapping),
               let runtime = try? await store.runtime(mappingID: mapping.id) else {
             return
         }
@@ -353,7 +359,7 @@ final class DesktopCloudDriveManager {
         var released: [String] = []
         for path in paths {
             do {
-                try await evict(
+                try await domainController.evict(
                     identifier: itemIdentifier(path: path, mapping: mapping),
                     manager: manager
                 )
@@ -415,7 +421,7 @@ final class DesktopCloudDriveManager {
     func releaseOffline(_ items: [FileItem]) async {
         guard !items.isEmpty,
               let mapping = mapping(containing: items.map(\.path)),
-              let manager = NSFileProviderManager(for: domain(for: mapping)) else {
+              let manager = domainController.manager(for: mapping) else {
             setError("desktopDrive.error.notMapped")
             return
         }
@@ -452,12 +458,12 @@ final class DesktopCloudDriveManager {
                 }
                 .map(\.remotePath)
             try await store.setPinnedPaths(remainingPins, mappingID: mapping.id)
-            try await signalRoot(manager)
+            try await domainController.signalRoot(manager)
             var released: [String] = []
             var failureCount = 0
             for path in cachedPaths {
                 do {
-                    try await evict(
+                    try await domainController.evict(
                         identifier: itemIdentifier(path: path, mapping: mapping),
                         manager: manager
                     )
@@ -506,6 +512,23 @@ final class DesktopCloudDriveManager {
         offlineTasks[mapping.id] != nil
     }
 
+    func diagnosticPreview() throws -> String {
+        let data = try DesktopDriveDiagnosticExporter.makeData(
+            isProviderAvailable: isAvailable,
+            mappings: mappings,
+            runtimes: runtimes,
+            activeOfflineOperationCount: offlineTasks.count
+        )
+        guard let value = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileWriteInapplicableStringEncoding)
+        }
+        return value
+    }
+
+    func reportDiagnosticFailure() {
+        setError("desktopDrive.diagnostics.prepareFailed")
+    }
+
     func itemsAreKeptOffline(_ items: [FileItem]) -> Bool {
         guard !items.isEmpty,
               let mapping = mapping(containing: items.map(\.path)),
@@ -540,7 +563,7 @@ final class DesktopCloudDriveManager {
 
     func releaseOffline(_ mapping: DesktopDriveMapping) async {
         guard !isBusy,
-              let manager = NSFileProviderManager(for: domain(for: mapping)) else {
+              let manager = domainController.manager(for: mapping) else {
             setError("desktopDrive.error.releaseOffline")
             return
         }
@@ -553,12 +576,12 @@ final class DesktopCloudDriveManager {
                 .filter { $0.kind == .keptOffline }
                 .map(\.remotePath)
             try await store.setPinnedPaths([], mappingID: mapping.id)
-            try await signalRoot(manager)
+            try await domainController.signalRoot(manager)
             var released: [String] = []
             var failureCount = 0
             for path in keptPaths {
                 do {
-                    try await evict(
+                    try await domainController.evict(
                         identifier: itemIdentifier(path: path, mapping: mapping),
                         manager: manager
                     )
@@ -583,13 +606,16 @@ final class DesktopCloudDriveManager {
     }
 
     func pause(_ mapping: DesktopDriveMapping) async {
-        guard let manager = NSFileProviderManager(for: domain(for: mapping)) else {
+        guard let manager = domainController.manager(for: mapping) else {
             setError("desktopDrive.error.pause")
             return
         }
         cancelOffline(mapping)
         do {
-            try await disconnect(manager)
+            try await domainController.disconnect(
+                manager,
+                reason: L10n.string("desktopDrive.pause.reason")
+            )
             try await store.setMappingPaused(true, mappingID: mapping.id)
             await refreshRuntime(mapping)
             setSuccess("desktopDrive.status.paused")
@@ -599,12 +625,12 @@ final class DesktopCloudDriveManager {
     }
 
     func resume(_ mapping: DesktopDriveMapping) async {
-        guard let manager = NSFileProviderManager(for: domain(for: mapping)) else {
+        guard let manager = domainController.manager(for: mapping) else {
             setError("desktopDrive.error.resume")
             return
         }
         do {
-            try await reconnect(manager)
+            try await domainController.reconnect(manager)
             try await store.setMappingPaused(false, mappingID: mapping.id)
             try await verifyReadable(mapping)
             try await store.setMappingState(
@@ -645,7 +671,7 @@ final class DesktopCloudDriveManager {
         do {
             try await verifyReadable(mapping)
             try await sessionBridge.publish()
-            let newDomain = try domainForCreation(mapping)
+            let newDomain = try domainController.domainForCreation(mapping)
             if newDomain.identifier.rawValue != mapping.id.uuidString {
                 mapping = mapping.replacing(
                     providerDomainIdentifier: newDomain.identifier.rawValue
@@ -658,7 +684,7 @@ final class DesktopCloudDriveManager {
                 successfulCheckAt: Date()
             )
             do {
-                try await addDomain(newDomain)
+                try await domainController.add(newDomain)
             } catch {
                 try? await store.removeMapping(id: mapping.id)
                 throw error
@@ -674,100 +700,6 @@ final class DesktopCloudDriveManager {
                 try? await sessionBridge.remove()
             }
             setError("desktopDrive.error.add")
-        }
-    }
-
-    private func domain(
-        for mapping: DesktopDriveMapping
-    ) -> NSFileProviderDomain {
-        NSFileProviderDomain(
-            identifier: NSFileProviderDomainIdentifier(
-                mapping.providerDomainIdentifier ?? mapping.id.uuidString
-            ),
-            displayName: mapping.displayName
-        )
-    }
-
-    private func domainForCreation(
-        _ mapping: DesktopDriveMapping
-    ) throws -> NSFileProviderDomain {
-        switch mapping.cachePolicy.location {
-        case .systemDefault:
-            return domain(for: mapping)
-        case .eligibleVolume(let identifier):
-            guard #available(macOS 15.0, *),
-                  let volumeURL = Self.mountedVolumeURL(
-                    identifier: identifier
-                  ) else {
-                throw CocoaError(.fileNoSuchFile)
-            }
-            guard case .eligible =
-                    try NSFileProviderManager.checkDomainsCanBeStoredOnVolume(
-                        at: volumeURL
-                    ) else {
-                throw CocoaError(.fileWriteUnsupportedScheme)
-            }
-            return NSFileProviderDomain(
-                displayName: mapping.displayName,
-                userInfo: ["mappingID": mapping.id.uuidString],
-                volumeURL: volumeURL
-            )
-        }
-    }
-
-    @available(macOS 15.0, *)
-    private static func mountedVolumeURL(
-        identifier: String
-    ) -> URL? {
-        let keys: [URLResourceKey] = [.volumeUUIDStringKey]
-        return FileManager.default.mountedVolumeURLs(
-            includingResourceValuesForKeys: keys,
-            options: [.skipHiddenVolumes]
-        )?.first {
-            (try? $0.resourceValues(forKeys: Set(keys)).volumeUUIDString)
-                == identifier
-        }
-    }
-
-    private func addDomain(_ domain: NSFileProviderDomain) async throws {
-        try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<Void, Error>) in
-            NSFileProviderManager.add(domain) { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            }
-        }
-    }
-
-    private func removeDomain(_ domain: NSFileProviderDomain) async throws {
-        try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<Void, Error>) in
-            NSFileProviderManager.remove(domain) { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            }
-        }
-    }
-
-    private func userVisibleURL(
-        manager: NSFileProviderManager
-    ) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            manager.getUserVisibleURL(for: .rootContainer) { url, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let url {
-                    continuation.resume(returning: url)
-                } else {
-                    continuation.resume(throwing: CocoaError(.fileNoSuchFile))
-                }
-            }
         }
     }
 
@@ -799,40 +731,6 @@ final class DesktopCloudDriveManager {
         runtimes[mapping.id] = runtime
     }
 
-    private func evict(
-        identifier: NSFileProviderItemIdentifier,
-        manager: NSFileProviderManager
-    ) async throws {
-        try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<Void, Error>) in
-            manager.evictItem(identifier: identifier) { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            }
-        }
-    }
-
-    private func requestDownload(
-        identifier: NSFileProviderItemIdentifier,
-        manager: NSFileProviderManager
-    ) async throws {
-        try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<Void, Error>) in
-            manager.requestDownloadForItem(
-                withIdentifier: identifier,
-                requestedRange: NSRange(location: NSNotFound, length: 0)
-            ) { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            }
-        }
-    }
 
     private func setSuccess(_ key: String) {
         statusIsError = false
@@ -894,11 +792,13 @@ final class DesktopCloudDriveManager {
                 await refreshRuntime(mapping)
                 return
             }
-            guard let manager = NSFileProviderManager(for: domain(for: mapping)) else {
+            guard let manager = domainController.manager(for: mapping) else {
                 throw CocoaError(.fileNoSuchFile)
             }
             offlineProgress[mapping.id]?.phase = .checkingSpace
-            let rootURL = try await userVisibleURL(manager: manager)
+            let rootURL = try await domainController.userVisibleURL(
+                manager: manager
+            )
             let volume = try rootURL.resourceValues(forKeys: [
                 .volumeNameKey,
                 .volumeTotalCapacityKey,
@@ -951,14 +851,14 @@ final class DesktopCloudDriveManager {
             )
             try await store.setPinnedPaths(allPins, mappingID: mapping.id)
             try await store.setMappingState(.checking, mappingID: mapping.id)
-            try await signalRoot(manager)
+            try await domainController.signalRoot(manager)
 
             offlineProgress[mapping.id]?.phase = .requesting
             offlineProgress[mapping.id]?.totalFiles = plan.files.count
             offlineProgress[mapping.id]?.totalBytes = plan.totalBytes
             for (index, file) in plan.files.enumerated() {
                 try Task.checkCancellation()
-                try await requestDownload(
+                try await domainController.requestDownload(
                     identifier: itemIdentifier(
                         path: file.remotePath,
                         mapping: mapping
@@ -1009,8 +909,8 @@ final class DesktopCloudDriveManager {
                 previousRuntime.pinnedPaths,
                 mappingID: mapping.id
             )
-            if let manager = NSFileProviderManager(for: domain(for: mapping)) {
-                try? await signalRoot(manager)
+            if let manager = domainController.manager(for: mapping) {
+                try? await domainController.signalRoot(manager)
             }
             offlineProgress[mapping.id]?.phase = .cancelled
             try? await store.setMappingState(.available, mappingID: mapping.id)
@@ -1026,16 +926,19 @@ final class DesktopCloudDriveManager {
 
     private func restoreDomains() async {
         for mapping in mappings {
-            guard let manager = NSFileProviderManager(for: domain(for: mapping)),
+            guard let manager = domainController.manager(for: mapping),
                   let runtime = runtimes[mapping.id] else {
                 continue
             }
             if runtime.isManuallyPaused {
-                try? await disconnect(manager)
+                try? await domainController.disconnect(
+                    manager,
+                    reason: L10n.string("desktopDrive.pause.reason")
+                )
                 continue
             }
             do {
-                try await reconnect(manager)
+                try await domainController.reconnect(manager)
                 try await verifyReadable(mapping)
                 try await store.setMappingState(
                     .available,
@@ -1089,45 +992,4 @@ final class DesktopCloudDriveManager {
         )
     }
 
-    private func signalRoot(_ manager: NSFileProviderManager) async throws {
-        try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<Void, Error>) in
-            manager.signalEnumerator(for: .rootContainer) { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            }
-        }
-    }
-
-    private func disconnect(_ manager: NSFileProviderManager) async throws {
-        try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<Void, Error>) in
-            manager.disconnect(
-                reason: L10n.string("desktopDrive.pause.reason"),
-                options: [.temporary]
-            ) { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            }
-        }
-    }
-
-    private func reconnect(_ manager: NSFileProviderManager) async throws {
-        try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<Void, Error>) in
-            manager.reconnect { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            }
-        }
-    }
 }

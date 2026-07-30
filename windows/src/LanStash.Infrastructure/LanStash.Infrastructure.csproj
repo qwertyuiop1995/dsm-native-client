@@ -6,4 +6,7 @@
   <ItemGroup>
     <ProjectReference Include="..\LanStash.Domain\LanStash.Domain.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="LanStash.Tests" />
+  </ItemGroup>
 </Project>

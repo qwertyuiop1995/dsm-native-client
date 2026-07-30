@@ -218,9 +218,11 @@ def validate_capabilities(data: Any) -> dict[str, dict[str, Any]]:
         "capabilities",
         {"schemaVersion", "testSuiteVersion", "capabilities"},
     )
-    if root["schemaVersion"] != 1 or root["testSuiteVersion"] != 1:
+    if root["schemaVersion"] != 1 or root["testSuiteVersion"] != 2:
         raise ValidationError(
-            "能力注册表版本必须为 1 / capability registry versions must be 1"
+            "能力注册表 schemaVersion 必须为 1，testSuiteVersion 必须为 2 / "
+            "capability registry schemaVersion must be 1 and "
+            "testSuiteVersion must be 2"
         )
 
     registered: dict[str, dict[str, Any]] = {}
@@ -293,9 +295,10 @@ def validate_report(
     )
     if report["$schema"] != "../../schemas/community-compatibility-report.schema.json":
         raise ValidationError(f"{source}: $schema 路径无效 / path is invalid")
-    if report["schemaVersion"] != 1 or report["testSuiteVersion"] != 1:
+    if report["schemaVersion"] != 1 or report["testSuiteVersion"] not in {1, 2}:
         raise ValidationError(
-            f"{source}: schemaVersion 和 testSuiteVersion 必须为 1 / must be 1"
+            f"{source}: schemaVersion 必须为 1，testSuiteVersion 必须为 1 或 2 / "
+            "schemaVersion must be 1 and testSuiteVersion must be 1 or 2"
         )
 
     report_id = require_pattern(report["reportId"], f"{source}.reportId", REPORT_ID_PATTERN)

@@ -3,13 +3,23 @@ import DsmNetwork
 import FileProvider
 import Foundation
 
+struct ProviderRequestedVersion: Equatable, Sendable {
+    let content: Data
+    let metadata: Data
+}
+
 actor ProviderRuntime {
     private let mappingID: UUID?
     private let configurationStore = DesktopDriveConfigurationStore()
     private let sessionStore = SharedKeychainSessionStore()
+    private let metadata = DesktopDriveMetadataCoordinator()
 
     init(mappingIdentifier: String) {
         mappingID = UUID(uuidString: mappingIdentifier)
+    }
+
+    func invalidate() async {
+        await metadata.invalidate(cancelInFlight: true)
     }
 
     func item(
@@ -29,7 +39,9 @@ actor ProviderRuntime {
             )
         }
         let path = try await remotePath(for: identifier)
-        guard let item = try await context.repository.getInfo(paths: [path]).first else {
+        guard let item = try await metadata.item(path: path, loader: {
+            try await context.repository.getInfo(paths: [path]).first
+        }) else {
             throw NSFileProviderError(.noSuchItem)
         }
         return ProviderItem(
@@ -48,27 +60,35 @@ actor ProviderRuntime {
         let runtime = try await configurationStore.runtime(
             mappingID: context.configuration.mapping.id
         )
-        let page: FilePage
-        if containerIdentifier == .rootContainer {
+        let folderPath = containerIdentifier == .rootContainer
+            ? nil
+            : try await remotePath(for: containerIdentifier)
+        let pageKey = DesktopDriveMetadataCoordinator.PageKey(
+            containerIdentifier: containerIdentifier.rawValue,
+            offset: offset,
+            limit: limit
+        )
+        let page = try await metadata.page(key: pageKey) {
+            if let folderPath {
+                return try await context.repository.listFolder(
+                    path: folderPath,
+                    offset: offset,
+                    limit: limit
+                )
+            }
             switch context.configuration.mapping.scope {
             case .allShares:
-                page = try await context.repository.listShares(
+                return try await context.repository.listShares(
                     offset: offset,
                     limit: limit
                 )
             case .folder(let path):
-                page = try await context.repository.listFolder(
+                return try await context.repository.listFolder(
                     path: path,
                     offset: offset,
                     limit: limit
                 )
             }
-        } else {
-            page = try await context.repository.listFolder(
-                path: try await remotePath(for: containerIdentifier),
-                offset: offset,
-                limit: limit
-            )
         }
         try await configurationStore.registerItemPaths(
             mappingID: context.configuration.mapping.id,
@@ -88,17 +108,65 @@ actor ProviderRuntime {
     }
 
     func fetchContents(
-        for identifier: NSFileProviderItemIdentifier
+        for identifier: NSFileProviderItemIdentifier,
+        requestedVersion: ProviderRequestedVersion?,
+        progress: @escaping FileTransferProgress
     ) async throws -> (URL, ProviderItem) {
         let context = try await makeContext()
         let path = try await remotePath(for: identifier)
-        guard let remoteItem = try await context.repository.getInfo(paths: [path]).first,
+        guard let remoteItem = try await metadata.item(path: path, ttl: 0, loader: {
+            try await context.repository.getInfo(paths: [path]).first
+        }),
               !remoteItem.isDirectory else {
             throw NSFileProviderError(.noSuchItem)
         }
-        let temporaryURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        let providerItem = ProviderItem(
+            fileItem: remoteItem,
+            mapping: context.configuration.mapping,
+            keptOffline: false
+        )
+        let currentVersion = ProviderRequestedVersion(
+            content: providerItem.itemVersion.contentVersion,
+            metadata: providerItem.itemVersion.metadataVersion
+        )
+        if let requestedVersion, requestedVersion != currentVersion {
+            throw NSFileProviderError(.versionNoLongerAvailable)
+        }
+        guard let fileName = DesktopDriveStagingIdentity.contentFileName(
+            mappingID: context.configuration.mapping.id,
+            remotePath: path,
+            sizeBytes: remoteItem.sizeBytes,
+            modifiedAt: remoteItem.times?.modifiedAt
+        ) else {
+            throw NSFileProviderError(.noSuchItem)
+        }
+        let domain = Self.domain(for: context.configuration.mapping)
+        guard let manager = NSFileProviderManager(for: domain) else {
+            throw NSFileProviderError(.providerNotFound)
+        }
+        let stagingDirectory = try manager.temporaryDirectoryURL()
+            .appendingPathComponent("LanStashStaging", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: stagingDirectory,
+            withIntermediateDirectories: true
+        )
+        let temporaryURL = stagingDirectory
+            .appendingPathComponent(fileName, isDirectory: false)
+        progress(0, remoteItem.sizeBytes)
         do {
+            if try isCompleteFile(
+                at: temporaryURL,
+                expectedSize: remoteItem.sizeBytes
+            ) {
+                let result = try await recordMaterializedFile(
+                    at: temporaryURL,
+                    remoteItem: remoteItem,
+                    remotePath: path,
+                    configuration: context.configuration
+                )
+                progress(result.sizeBytes, remoteItem.sizeBytes)
+                return (temporaryURL, result.item)
+            }
             try ensureCacheSpace(
                 expectedSize: remoteItem.sizeBytes,
                 at: temporaryURL.deletingLastPathComponent()
@@ -107,44 +175,78 @@ actor ProviderRuntime {
                 remotePath: path,
                 to: temporaryURL,
                 expectedSize: remoteItem.sizeBytes,
-                progress: { _, _ in }
+                progress: progress
             )
-            let values = try temporaryURL.resourceValues(
-                forKeys: [.fileSizeKey, .fileAllocatedSizeKey]
-            )
-            let actualSize = Int64(values.fileSize ?? 0)
-            if let expectedSize = remoteItem.sizeBytes,
-               actualSize != expectedSize {
-                throw CocoaError(.fileReadCorruptFile)
-            }
-            let runtime = try await configurationStore.runtime(
-                mappingID: context.configuration.mapping.id
-            )
-            let entry = DesktopDriveCacheEntry(
+            let result = try await recordMaterializedFile(
+                at: temporaryURL,
+                remoteItem: remoteItem,
                 remotePath: path,
-                kind: runtime.keepsOffline(path) ? .keptOffline : .temporary,
-                logicalSizeBytes: actualSize,
-                allocatedSizeBytes: Int64(values.fileAllocatedSize ?? values.fileSize ?? 0)
-            )
-            try await configurationStore.recordCacheEntry(
-                entry,
-                mappingID: context.configuration.mapping.id
+                configuration: context.configuration
             )
             scheduleTemporaryCacheMaintenance(
                 mapping: context.configuration.mapping
             )
-            return (
-                temporaryURL,
-                ProviderItem(
-                    fileItem: remoteItem,
-                    mapping: context.configuration.mapping,
-                    keptOffline: runtime.keepsOffline(path)
-                )
-            )
+            return (temporaryURL, result.item)
         } catch {
-            try? FileManager.default.removeItem(at: temporaryURL)
+            if !(error is CancellationError),
+               (error as? AppError)?.category != .cancelled {
+                try? FileManager.default.removeItem(at: temporaryURL)
+            }
             throw error
         }
+    }
+
+    private func isCompleteFile(
+        at url: URL,
+        expectedSize: Int64?
+    ) throws -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return false
+        }
+        guard let expectedSize else {
+            return false
+        }
+        let values = try url.resourceValues(forKeys: [.fileSizeKey])
+        return Int64(values.fileSize ?? -1) == expectedSize
+    }
+
+    private func recordMaterializedFile(
+        at url: URL,
+        remoteItem: FileItem,
+        remotePath: String,
+        configuration: DesktopDriveProviderConfiguration
+    ) async throws -> (item: ProviderItem, sizeBytes: Int64) {
+        let values = try url.resourceValues(
+            forKeys: [.fileSizeKey, .fileAllocatedSizeKey]
+        )
+        let actualSize = Int64(values.fileSize ?? 0)
+        if let expectedSize = remoteItem.sizeBytes,
+           actualSize != expectedSize {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let runtime = try await configurationStore.runtime(
+            mappingID: configuration.mapping.id
+        )
+        let entry = DesktopDriveCacheEntry(
+            remotePath: remotePath,
+            kind: runtime.keepsOffline(remotePath) ? .keptOffline : .temporary,
+            logicalSizeBytes: actualSize,
+            allocatedSizeBytes: Int64(
+                values.fileAllocatedSize ?? values.fileSize ?? 0
+            )
+        )
+        try await configurationStore.recordCacheEntry(
+            entry,
+            mappingID: configuration.mapping.id
+        )
+        return (
+            ProviderItem(
+                fileItem: remoteItem,
+                mapping: configuration.mapping,
+                keptOffline: runtime.keepsOffline(remotePath)
+            ),
+            actualSize
+        )
     }
 
     private func scheduleTemporaryCacheMaintenance(
@@ -169,12 +271,7 @@ actor ProviderRuntime {
             limitBytes: mapping.cachePolicy.temporaryLimitBytes
         )
         guard !paths.isEmpty else { return }
-        let domain = NSFileProviderDomain(
-            identifier: NSFileProviderDomainIdentifier(
-                mapping.providerDomainIdentifier ?? mapping.id.uuidString
-            ),
-            displayName: mapping.displayName
-        )
+        let domain = Self.domain(for: mapping)
         guard let manager = NSFileProviderManager(for: domain) else { return }
         var released: [String] = []
         for path in paths {
@@ -304,5 +401,16 @@ actor ProviderRuntime {
         case .folder(let path):
             return DesktopDrivePath.normalized(path) ?? "/"
         }
+    }
+
+    private static func domain(
+        for mapping: DesktopDriveMapping
+    ) -> NSFileProviderDomain {
+        NSFileProviderDomain(
+            identifier: NSFileProviderDomainIdentifier(
+                mapping.providerDomainIdentifier ?? mapping.id.uuidString
+            ),
+            displayName: mapping.displayName
+        )
     }
 }

@@ -28,7 +28,7 @@
   "connectionType": "unknown",
   "accountRole": "unknown",
   "certificateType": "unknown",
-  "testSuiteVersion": 1,
+  "testSuiteVersion": 2,
   "results": [
     {
       "capabilityId": "connection.resolve",

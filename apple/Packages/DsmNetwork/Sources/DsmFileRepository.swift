@@ -238,6 +238,30 @@ private struct FileTimePayload: Decodable, Sendable {
     let mtime: Int64?
     let crtime: Int64?
     let atime: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case mtime, crtime, atime
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mtime = Self.integer(in: container, forKey: .mtime)
+        crtime = Self.integer(in: container, forKey: .crtime)
+        atime = Self.integer(in: container, forKey: .atime)
+    }
+
+    private static func integer(
+        in container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) -> Int64? {
+        if let value = try? container.decode(Int64.self, forKey: key) {
+            return value
+        }
+        if let value = try? container.decode(String.self, forKey: key) {
+            return Int64(value)
+        }
+        return nil
+    }
 }
 
 private struct FileOwnerPayload: Decodable, Sendable {
@@ -681,49 +705,29 @@ public actor DsmFileRepository: FileRepository {
             try? FileManager.default.removeItem(at: partURL)
             completed = 0
         }
-        
-        if completed == 0 {
-            // ==================== 直接一次性下载（非续传） ====================
-            do {
-                let response = try await transport.download(baseRequest, to: partURL, progress: progress)
-                let contentType = response.headers["content-type"]?.lowercased() ?? ""
-                let needsErrorInspection = contentType.contains("application/json") || contentType.contains("text/html")
-                let inspectionData: Data
-                if needsErrorInspection {
-                    let handle = try FileHandle(forReadingFrom: partURL)
-                    inspectionData = try handle.read(upToCount: 1_048_576) ?? Data()
-                    try handle.close()
-                } else {
-                    inspectionData = Data()
-                }
-                try validateBinaryResponse(response, data: inspectionData)
-                
-                try Self.safeReplaceFile(from: partURL, to: localURL)
-                try? FileManager.default.removeItem(at: partURL)
-            } catch {
-                try? FileManager.default.removeItem(at: partURL)
-                throw translate(error)
-            }
-        } else {
-            // ==================== 分片续传下载（续传） ====================
-            let savedChunkSize = UserDefaults.standard.integer(forKey: "LanStash_DownloadChunkSize")
+
+        if let expectedSize, expectedSize > 0 {
+            let savedChunkSize = UserDefaults.standard.integer(
+                forKey: "LanStash_DownloadChunkSize"
+            )
             let chunkSize: Int64 = (savedChunkSize >= 4 && savedChunkSize <= 64)
-                ? Int64(savedChunkSize) * 1024 * 1024
-                : 8 * 1024 * 1024
+                ? Int64(savedChunkSize) * 1_024 * 1_024
+                : 8 * 1_024 * 1_024
             progress(completed, expectedSize)
-            
+
             do {
-                repeat {
+                while completed < expectedSize {
                     try Task.checkCancellation()
                     let segmentURL = FileManager.default.temporaryDirectory
                         .appendingPathComponent(".\(UUID().uuidString).lanstash.segment")
                     defer { try? FileManager.default.removeItem(at: segmentURL) }
 
                     var request = baseRequest
-                    if let expectedSize, expectedSize > 0 {
-                        let end = min(expectedSize - 1, completed + chunkSize - 1)
-                        request.setValue("bytes=\(completed)-\(end)", forHTTPHeaderField: "Range")
-                    }
+                    let end = min(expectedSize - 1, completed + chunkSize - 1)
+                    request.setValue(
+                        "bytes=\(completed)-\(end)",
+                        forHTTPHeaderField: "Range"
+                    )
                     let completedBeforeRequest = completed
                     let response = try await transport.download(request, to: segmentURL) { value, _ in
                         progress(completedBeforeRequest + value, expectedSize)
@@ -746,12 +750,12 @@ public actor DsmFileRepository: FileRepository {
                     completed = Self.fileSize(at: partURL)
                     progress(completed, expectedSize)
 
-                    if response.statusCode != 206 || expectedSize == nil || expectedSize == 0 {
+                    if response.statusCode != 206 {
                         break
                     }
-                } while completed < (expectedSize ?? 0)
+                }
 
-                if let expectedSize, expectedSize > 0, completed != expectedSize {
+                if completed != expectedSize {
                     throw AppError(
                         category: .partialFailure,
                         isRetryable: true,
@@ -761,6 +765,24 @@ public actor DsmFileRepository: FileRepository {
                 try Self.safeReplaceFile(from: partURL, to: localURL)
                 try? FileManager.default.removeItem(at: partURL)
             } catch {
+                throw translate(error)
+            }
+        } else {
+            do {
+                let response = try await transport.download(
+                    baseRequest,
+                    to: partURL,
+                    progress: progress
+                )
+                let inspectionData = try binaryInspectionData(
+                    response: response,
+                    fileURL: partURL
+                )
+                try validateBinaryResponse(response, data: inspectionData)
+                try Self.safeReplaceFile(from: partURL, to: localURL)
+                try? FileManager.default.removeItem(at: partURL)
+            } catch {
+                try? FileManager.default.removeItem(at: partURL)
                 throw translate(error)
             }
         }

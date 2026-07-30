@@ -660,28 +660,7 @@ class DsmRepository(
     }
 
     private fun filePage(data: JsonObject, root: String): FilePage {
-        val items = data.elements(root).mapNotNull { element ->
-            val item = element as? JsonObject ?: return@mapNotNull null
-            val additional = item.objectValue("additional")
-            val time = additional?.objectValue("time")
-            val permission = additional?.objectValue("perm")
-            FileItem(
-                path = item.string("path") ?: return@mapNotNull null,
-                name = item.string("name") ?: item.string("path")?.substringAfterLast('/').orEmpty(),
-                isDirectory = item.bool("isdir") ?: false,
-                size = item.long("size") ?: additional?.long("size") ?: 0,
-                modifiedAtEpochSeconds = time?.long("mtime") ?: item.long("mtime"),
-                owner = additional?.objectValue("owner")?.string("user") ?: additional?.string("owner"),
-                canRead = permission?.bool("read") ?: true,
-                canWrite = permission?.bool("write") ?: false,
-                canDelete = permission?.bool("delete") ?: false,
-            )
-        }
-        return FilePage(
-            items = items,
-            total = data.int("total") ?: items.size,
-            offset = data.int("offset") ?: 0,
-        )
+        return parseFilePageFixture(data, root)
     }
 
     private fun systemSummary(data: JsonObject) = SystemSummary(
@@ -824,6 +803,34 @@ class DsmRepository(
         if (parent.endsWith('/')) "$parent$child" else "$parent/$child"
 }
 
+/**
+ * 将 File Station 列表数据转换为稳定领域语义，供生产请求和脱敏 Fixture 共用。
+ */
+internal fun parseFilePageFixture(data: JsonObject, root: String = "files"): FilePage {
+    val items = data.elements(root).mapNotNull { element ->
+        val item = element as? JsonObject ?: return@mapNotNull null
+        val additional = item.objectValue("additional")
+        val time = additional?.objectValue("time")
+        val permission = additional?.objectValue("perm")
+        FileItem(
+            path = item.string("path") ?: return@mapNotNull null,
+            name = item.string("name") ?: item.string("path")?.substringAfterLast('/').orEmpty(),
+            isDirectory = item.bool("isdir") ?: false,
+            size = item.long("size") ?: additional?.long("size") ?: 0,
+            modifiedAtEpochSeconds = time?.long("mtime") ?: item.long("mtime"),
+            owner = additional?.objectValue("owner")?.string("user") ?: additional?.string("owner"),
+            canRead = permission?.bool("read") ?: true,
+            canWrite = permission?.bool("write") ?: false,
+            canDelete = permission?.bool("delete") ?: false,
+        )
+    }
+    return FilePage(
+        items = items,
+        total = data.int("total") ?: items.size,
+        offset = data.int("offset") ?: 0,
+    )
+}
+
 internal fun parseVirtualizationLogs(data: JsonObject): List<LogEntry> =
     sequenceOf("logs", "log", "events", "records", "entries", "items", "data", "list")
         .flatMap { data.elements(it).asSequence() }
@@ -874,4 +881,13 @@ private fun JsonObject.elements(key: String): List<JsonElement> =
     (this[key] as? JsonArray)?.toList().orEmpty()
 
 private fun JsonObject.bool(key: String): Boolean? =
-    this[key]?.jsonPrimitive?.booleanOrNull
+    this[key]?.jsonPrimitive?.let { primitive ->
+        primitive.booleanOrNull
+            ?: primitive.contentOrNull?.let { value ->
+                when (value.lowercase()) {
+                    "1", "true" -> true
+                    "0", "false" -> false
+                    else -> null
+                }
+            }
+    }

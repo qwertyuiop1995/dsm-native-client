@@ -257,6 +257,35 @@ final class DesktopCloudDriveTests: XCTestCase {
         XCTAssertFalse(first?.contains("预算") == true)
     }
 
+    func test暂存文件身份对同一版本稳定且不暴露路径() {
+        let mappingID = UUID()
+        let modifiedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = DesktopDriveStagingIdentity.contentFileName(
+            mappingID: mappingID,
+            remotePath: "/share/财务/预算.xlsx",
+            sizeBytes: 8_192,
+            modifiedAt: modifiedAt
+        )
+        let second = DesktopDriveStagingIdentity.contentFileName(
+            mappingID: mappingID,
+            remotePath: "//share/财务/预算.xlsx",
+            sizeBytes: 8_192,
+            modifiedAt: modifiedAt
+        )
+        let changed = DesktopDriveStagingIdentity.contentFileName(
+            mappingID: mappingID,
+            remotePath: "/share/财务/预算.xlsx",
+            sizeBytes: 8_193,
+            modifiedAt: modifiedAt
+        )
+
+        XCTAssertEqual(first, second)
+        XCTAssertNotEqual(first, changed)
+        XCTAssertTrue(first?.hasSuffix(".content") == true)
+        XCTAssertFalse(first?.contains("share") == true)
+        XCTAssertFalse(first?.contains("预算") == true)
+    }
+
     func test离线保留目录覆盖全部后代但不覆盖相邻目录() {
         let runtime = DesktopDriveMappingRuntime(
             pinnedPaths: ["/share/projects"]

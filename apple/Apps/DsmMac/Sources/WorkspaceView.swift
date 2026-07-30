@@ -4008,6 +4008,8 @@ private struct SettingsView: View {
     @State private var storageMessage: String?
     @State private var mappingToRemove: DesktopDriveMapping?
     @State private var showsMappingCreator = false
+    @State private var showsDiagnosticPreview = false
+    @State private var diagnosticPreview = ""
 
     init(
         model: WorkspaceModel,
@@ -4252,6 +4254,17 @@ private struct SettingsView: View {
                             desktopDriveManager.isBusy
                                 || !desktopDriveManager.isAvailable
                         )
+                        Button(
+                            L10n.string("desktopDrive.diagnostics.preview")
+                        ) {
+                            do {
+                                diagnosticPreview =
+                                    try desktopDriveManager.diagnosticPreview()
+                                showsDiagnosticPreview = true
+                            } catch {
+                                desktopDriveManager.reportDiagnosticFailure()
+                            }
+                        }
                         Spacer()
                         if desktopDriveManager.isBusy {
                             ProgressView()
@@ -4468,6 +4481,9 @@ private struct SettingsView: View {
                 profileName: model.profile.displayName,
                 currentPath: model.currentPath
             )
+        }
+        .sheet(isPresented: $showsDiagnosticPreview) {
+            DesktopDriveDiagnosticExportSheet(preview: diagnosticPreview)
         }
         .alert(L10n.string("ui.baa1159c128223dd"), isPresented: $showsRenamePrompt) {
             TextField(L10n.string("ui.65d8f92232ae77b0"), text: $renamedNAS)

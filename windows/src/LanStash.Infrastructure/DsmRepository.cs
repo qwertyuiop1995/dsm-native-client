@@ -4,7 +4,7 @@ using LanStash.Domain;
 
 namespace LanStash.Infrastructure;
 
-public sealed class DsmRepository(
+public sealed partial class DsmRepository(
     NasProfile profile,
     DsmSession session,
     IDsmApiClient api,
@@ -813,6 +813,15 @@ public sealed class DsmRepository(
     }
 
     private FilePage ParseFilePage(JsonObject data, string root)
+        => DsmFixtureParser.ParseFilePage(data, root);
+}
+
+internal static class DsmFixtureParser
+{
+    /// <summary>
+    /// 将 File Station 列表数据转换为稳定领域语义，供生产请求和脱敏 Fixture 共用。
+    /// </summary>
+    public static FilePage ParseFilePage(JsonObject data, string root = "files")
     {
         var items = data.Array(root).OfType<JsonObject>().Select(item =>
         {
@@ -836,7 +845,10 @@ public sealed class DsmRepository(
             data.Int("total") ?? items.Length,
             data.Int("offset") ?? 0);
     }
+}
 
+public sealed partial class DsmRepository
+{
     private static IReadOnlyList<ResourceItem> ParseResources(
         JsonObject data,
         params string[] roots)
@@ -975,13 +987,34 @@ internal static class JsonExtensions
         value[key] is JsonValue node && node.TryGetValue<string>(out var result) ? result : null;
 
     public static int? Int(this JsonObject value, string key) =>
-        value[key] is JsonValue node && node.TryGetValue<int>(out var result) ? result : null;
+        value[key] is JsonValue node
+            ? node.TryGetValue<int>(out var result)
+                ? result
+                : int.TryParse(node.ToString().Trim('"'), out result)
+                    ? result
+                    : null
+            : null;
 
     public static long? Long(this JsonObject value, string key) =>
-        value[key] is JsonValue node && node.TryGetValue<long>(out var result) ? result : null;
+        value[key] is JsonValue node
+            ? node.TryGetValue<long>(out var result)
+                ? result
+                : long.TryParse(node.ToString().Trim('"'), out result)
+                    ? result
+                    : null
+            : null;
 
     public static bool? Bool(this JsonObject value, string key) =>
-        value[key] is JsonValue node && node.TryGetValue<bool>(out var result) ? result : null;
+        value[key] is JsonValue node
+            ? node.TryGetValue<bool>(out var result)
+                ? result
+                : node.ToString().Trim('"').ToLowerInvariant() switch
+                {
+                    "1" or "true" => true,
+                    "0" or "false" => false,
+                    _ => null,
+                }
+            : null;
 
     public static DateTimeOffset? Date(this JsonObject value, string key)
     {

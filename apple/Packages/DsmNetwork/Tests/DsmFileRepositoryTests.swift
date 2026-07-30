@@ -5,6 +5,24 @@ import XCTest
 @testable import DsmNetwork
 
 final class DsmFileRepositoryTests: XCTestCase {
+    func test三端共享Fixture兼容字符串数字和异常附加信息() async throws {
+        let stringNumbers = try await pageFromFixture("synthetic-string-numbers")
+        XCTAssertEqual(stringNumbers.total, 2)
+        XCTAssertEqual(stringNumbers.items.count, 2)
+        XCTAssertEqual(stringNumbers.items.first?.sizeBytes, 5)
+        XCTAssertEqual(
+            stringNumbers.items.first?.times?.modifiedAt,
+            Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        let missingAdditional = try await pageFromFixture("synthetic-missing-additional")
+        XCTAssertEqual(missingAdditional.items.count, 1)
+        XCTAssertEqual(missingAdditional.items.first?.isDirectory, false)
+
+        let malformedAdditional = try await pageFromFixture("synthetic-malformed-additional")
+        XCTAssertEqual(malformedAdditional.items.count, 2)
+    }
+
     func test使用官方接口计算文件校验值且不在地址暴露路径() async throws {
         let transport = MockHTTPTransport(responses: [
             DsmHTTPResponse(
@@ -36,6 +54,28 @@ final class DsmFileRepositoryTests: XCTestCase {
         XCTAssertEqual(requestParameter("file_path", in: requests[0]), "/共享/示例.zip")
         XCTAssertEqual(requestParameter("method", in: requests[1]), "status")
         XCTAssertFalse(requests.contains { $0.url?.absoluteString.contains("/共享/示例.zip") == true })
+    }
+
+    private func pageFromFixture(_ fixtureID: String) async throws -> FilePage {
+        var repositoryRoot = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 {
+            repositoryRoot.deleteLastPathComponent()
+        }
+        let responseURL = repositoryRoot
+            .appendingPathComponent("contracts/fixtures-redacted/file-station/list-folder")
+            .appendingPathComponent(fixtureID)
+            .appendingPathComponent("response.json")
+        let response = DsmHTTPResponse(
+            data: try Data(contentsOf: responseURL),
+            statusCode: 200
+        )
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationList: capability(DsmAPIName.fileStationList, version: 2)
+            ]),
+            transport: MockHTTPTransport(responses: [response])
+        )
+        return try await repository.listFolder(path: "/fixture", offset: 0, limit: 500)
     }
 
     func test解析共享文件夹与附加信息() async throws {
@@ -138,6 +178,7 @@ final class DsmFileRepositoryTests: XCTestCase {
         let requests = await transport.recordedRequests()
         let request = try XCTUnwrap(requests.first)
         XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Range"), "bytes=0-4")
         XCTAssertNotNil(request.url?.query)
         XCTAssertTrue(request.url?.absoluteString.contains("api=SYNO.FileStation.Download") == true)
     }
@@ -207,6 +248,68 @@ final class DsmFileRepositoryTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Range"), "bytes=2-4")
         try? FileManager.default.removeItem(at: destination)
         try? FileManager.default.removeItem(at: partURL)
+    }
+
+    func test分段下载失败后保留已完成分片供下次续传() async throws {
+        let chunkSize = 8 * 1_024 * 1_024
+        let response = DsmHTTPResponse(
+            data: Data(repeating: 0x41, count: chunkSize),
+            statusCode: 206,
+            headers: ["content-type": "application/octet-stream"]
+        )
+        let transport = MockHTTPTransport(responses: [response])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDownload: capability(
+                    DsmAPIName.fileStationDownload,
+                    version: 2
+                )
+            ]),
+            transport: transport
+        )
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "DsmFileRepositoryTests-Interrupted-\(UUID().uuidString).bin"
+            )
+        let expectedSize = Int64(chunkSize + 1)
+        let identity = "\(repository.profileID.uuidString)|/projects/large.bin|\(expectedSize)"
+        let digest = SHA256.hash(data: Data(identity.utf8))
+        let suffix = digest.prefix(8).map {
+            String(format: "%02x", $0)
+        }.joined()
+        let partURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                ".\(destination.lastPathComponent).\(suffix).lanstash.part"
+            )
+        defer {
+            try? FileManager.default.removeItem(at: destination)
+            try? FileManager.default.removeItem(at: partURL)
+        }
+
+        do {
+            try await repository.download(
+                remotePath: "/projects/large.bin",
+                to: destination,
+                expectedSize: expectedSize
+            ) { _, _ in }
+            XCTFail("第二个分段没有响应时应失败")
+        } catch {
+            XCTAssertEqual(
+                try partURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                chunkSize
+            )
+        }
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(
+            requests[0].value(forHTTPHeaderField: "Range"),
+            "bytes=0-\(chunkSize - 1)"
+        )
+        XCTAssertEqual(
+            requests[1].value(forHTTPHeaderField: "Range"),
+            "bytes=\(chunkSize)-\(chunkSize)"
+        )
     }
 
     func test删除下载任务会清理对应分片() async throws {

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "synthetic-malformed-additional",
+  "sourceKind": "synthetic",
+  "environment": {
+    "alias": "synthetic",
+    "dsmVersion": "7.2.2",
+    "build": "00000",
+    "update": "none",
+    "architecture": "unknown"
+  },
+  "accountRole": "standard",
+  "connectionType": "unknown",
+  "evidenceLevel": "static",
+  "api": {
+    "name": "SYNO.FileStation.List",
+    "path": "entry.cgi",
+    "version": 2,
+    "method": "list"
+  },
+  "scenario": "单个项目的 additional 类型异常，不应导致整个目录解析失败。",
+  "redactedFields": []
+}

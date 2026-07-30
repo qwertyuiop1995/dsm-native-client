@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "data": {
+    "offset": 0,
+    "total": 1,
+    "files": [
+      {
+        "name": "item-1.unknown",
+        "path": "/fixture/share-1/item-1.unknown",
+        "isdir": "0",
+        "type": "future-kind"
+      }
+    ]
+  }
+}

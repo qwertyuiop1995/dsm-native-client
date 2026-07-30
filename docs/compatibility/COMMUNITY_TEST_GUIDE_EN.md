@@ -2,7 +2,7 @@
 
 [简体中文](COMMUNITY_TEST_GUIDE_ZH.md)
 
-This guide corresponds to `testSuiteVersion: 1`. The goal is to check user-visible LanStash behavior for a version combination. It is not a private-API discovery process and does not require network captures or diagnostic logs.
+This guide corresponds to `testSuiteVersion: 2`. The goal is to check user-visible LanStash behavior for a version combination. It is not a private-API discovery process and does not require network captures or diagnostic logs. Version 1 reports remain valid but do not include desktop cloud-drive checks.
 
 ## Before testing
 
@@ -33,6 +33,48 @@ For `failed` and `partial`, also select one fixed failure category:
 - `unknown`
 
 Do not paste a raw error, log, path, or screenshot.
+
+## macOS desktop cloud-drive tests
+
+These capabilities apply only to macOS. iPhone, iPad, Android, and Windows
+reports should record `not-supported`; regular file browsing cannot substitute
+for a Finder cloud-drive result. Use a dedicated test folder containing no real
+data. Adding and removing a mapping changes local Finder state but should not
+modify NAS files.
+
+### `desktop-drive.mount`: add and remove a mapping
+
+Map the dedicated test folder, confirm that it appears in Finder with the
+expected name, then remove it and confirm that the Finder entry disappears. Do
+not record the mapping name or local path.
+
+### `desktop-drive.browse`: browse a large folder
+
+Open a folder with at least 1,000 synthetic items, scroll continuously, and
+switch between subfolders. The list should remain responsive and should stop
+loading after cancellation or navigation. Record only a size category for
+10,000- or 100,000-item tests, never file names.
+
+### `desktop-drive.download-resume`: interrupt and resume
+
+Open a disposable large test file, interrupt the network or stop reading during
+download, then open it again. The transfer should resume from existing progress
+and the final content should match the NAS test file. Do not submit checksums or
+file names.
+
+### `desktop-drive.keep-offline`: local-copy lifecycle
+
+Start keeping the test folder offline, observe progress, and cancel. Start again
+and wait for completion, verify reading while disconnected, then release local
+copies. An out-of-space state should explain what happened and the next action
+without breaking other mappings.
+
+### `desktop-drive.upgrade-restore`: upgrade recovery
+
+Install the candidate over the previous public version without removing the
+mapping first. After signing in again, confirm that the mapping, pause state,
+and cache-location policy remain and browsing works. Recreating a deleted
+mapping is not an upgrade-recovery result.
 
 ## Read-only and sign-in tests
 

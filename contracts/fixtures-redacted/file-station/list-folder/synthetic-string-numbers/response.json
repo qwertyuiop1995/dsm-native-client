@@ -1,0 +1,30 @@
+{
+  "success": true,
+  "data": {
+    "offset": "0",
+    "total": "2",
+    "files": [
+      {
+        "name": "item-1.txt",
+        "path": "/fixture/share-1/item-1.txt",
+        "isdir": false,
+        "additional": {
+          "size": "5",
+          "time": {
+            "mtime": "1700000000"
+          },
+          "perm": {
+            "read": true,
+            "write": false,
+            "delete": false
+          }
+        }
+      },
+      {
+        "name": "folder-2",
+        "path": "/fixture/share-1/folder-2",
+        "isdir": true
+      }
+    ]
+  }
+}

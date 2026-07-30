@@ -139,7 +139,7 @@ body:
     id: readonly_results
     attributes:
       label: 只读与登录测试 / Read-only and sign-in tests
-      description: 测试指南对应 testSuiteVersion 1。 / The test guide corresponds to testSuiteVersion 1.
+      description: 测试指南对应 testSuiteVersion 2；旧版报告仍可保留。 / The test guide corresponds to testSuiteVersion 2; older reports remain valid.
       value: |
         connection.resolve: skipped
         authentication.password: skipped

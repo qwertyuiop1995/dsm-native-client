@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "synthetic-string-numbers",
+  "sourceKind": "synthetic",
+  "environment": {
+    "alias": "synthetic",
+    "dsmVersion": "7.2.2",
+    "build": "00000",
+    "update": "none",
+    "architecture": "unknown"
+  },
+  "accountRole": "standard",
+  "connectionType": "unknown",
+  "evidenceLevel": "static",
+  "api": {
+    "name": "SYNO.FileStation.List",
+    "path": "entry.cgi",
+    "version": 2,
+    "method": "list"
+  },
+  "scenario": "分页和文件大小使用数字字符串，additional 包含正常字段。",
+  "redactedFields": []
+}

@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dsm-native-client/fixture-metadata.schema.json",
+  "title": "RedactedFixtureMetadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "fixtureId",
+    "sourceKind",
+    "environment",
+    "accountRole",
+    "connectionType",
+    "evidenceLevel",
+    "api",
+    "scenario",
+    "redactedFields"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "fixtureId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+    },
+    "sourceKind": {
+      "enum": ["synthetic", "real-redacted"]
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alias", "dsmVersion", "build", "update", "architecture"],
+      "properties": {
+        "alias": {
+          "type": "string",
+          "pattern": "^(?:synthetic|lab-[a-z])$"
+        },
+        "dsmVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+(?:\\.[0-9]+){1,3}$"
+        },
+        "build": {
+          "type": "string",
+          "pattern": "^[0-9]{4,8}$"
+        },
+        "update": {
+          "type": "string",
+          "pattern": "^(?:[0-9]{1,3}|none|unknown)$"
+        },
+        "architecture": {
+          "enum": ["x86_64", "aarch64", "armv7", "unknown"]
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,79}$"
+        }
+      }
+    },
+    "accountRole": {
+      "enum": ["standard", "administrator", "unknown"]
+    },
+    "connectionType": {
+      "enum": [
+        "lan",
+        "quickconnect-direct",
+        "quickconnect-relay",
+        "reverse-proxy",
+        "unknown"
+      ]
+    },
+    "evidenceLevel": {
+      "enum": [
+        "static",
+        "observed",
+        "read-verified",
+        "behavior-verified",
+        "failed"
+      ]
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "version", "method"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^SYNO\\.[A-Za-z0-9_.]+$"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.cgi$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "method": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,79}$"
+        }
+      }
+    },
+    "scenario": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "redactedFields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      },
+      "uniqueItems": true
+    }
+  }
+}

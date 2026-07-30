@@ -53,7 +53,7 @@ class CommunityCompatibilityValidationTests(unittest.TestCase):
     def test_repository_data_passes_validation(self) -> None:
         capabilities, reports = validator.load_and_validate_all()
         registry = validator.load_json(validator.CAPABILITIES_PATH)
-        self.assertEqual(1, registry["testSuiteVersion"])
+        self.assertEqual(2, registry["testSuiteVersion"])
         self.assertGreaterEqual(len(capabilities), 1)
         self.assertIsInstance(reports, list)
 

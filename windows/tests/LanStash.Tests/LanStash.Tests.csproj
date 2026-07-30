@@ -16,4 +16,9 @@
     <ProjectReference Include="..\..\src\LanStash.Domain\LanStash.Domain.csproj" />
     <ProjectReference Include="..\..\src\LanStash.Infrastructure\LanStash.Infrastructure.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\..\contracts\fixtures-redacted\file-station\list-folder\**\response.json"
+          Link="Fixtures\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

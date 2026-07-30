@@ -54,3 +54,15 @@ OTP 只保留在登录界面的内存状态中。密码默认不保存；只有�
 新 DMG 成功生成并通过完整性验证后，脚本会自动删除 `dist` 中更早版本的安装包；同一版本的不同架构会保留。构建或验证失败时不会清理已有安装包。
 
 临时签名产物适合在本机开发测试，不应作为公开下载版本发布。使用 Developer ID 正式签名后，公开分发前仍需完成 Apple 公证。
+
+正式签名的 DMG 可使用以下流程提交公证。公证凭据必须预先保存在钥匙串中，不得
+写入仓库或命令行历史：
+
+```bash
+LANSTASH_NOTARY_PROFILE="钥匙串配置名" \
+  ./notarize.sh ./dist/LanStash-<版本>-<架构>.dmg
+```
+
+脚本会等待公证结果、装订票据，并调用
+`tools/release/verify_macos_distribution.sh` 校验 Developer ID 签名、File
+Provider 扩展、受限权限、Gatekeeper、DMG 和票据。

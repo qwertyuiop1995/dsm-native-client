@@ -2150,6 +2150,15 @@
 "ui.ffdb53bb11165394" = "Automatically starts after power is restored";
 "unit.kilobytes_per_second" = "KB/s";
 "desktopDrive.title" = "Cloud drive locations";
+"desktopDrive.diagnostics.title" = "Diagnostic summary";
+"desktopDrive.diagnostics.description" = "Review the summary before saving. It contains app, system, mapping-state, and cache totals only. It does not include NAS names, addresses, accounts, mapping identifiers, file paths, file names, or log contents.";
+"desktopDrive.diagnostics.preview" = "Preview diagnostic summary";
+"desktopDrive.diagnostics.export" = "Save Summary…";
+"desktopDrive.diagnostics.close" = "Close";
+"desktopDrive.diagnostics.saveTitle" = "Save Diagnostic Summary";
+"desktopDrive.diagnostics.exported" = "The diagnostic summary was saved to the location you selected.";
+"desktopDrive.diagnostics.exportFailed" = "The summary could not be saved. Choose another writable location and try again.";
+"desktopDrive.diagnostics.prepareFailed" = "The diagnostic summary could not be prepared. Reload this page and try again.";
 "desktopDrive.description" = "Show this NAS in Finder as a read-only cloud location. Files stay online until you open them or choose to keep them downloaded.";
 "desktopDrive.addAll" = "Add entire NAS";
 "desktopDrive.addCurrentFolder" = "Add current folder";

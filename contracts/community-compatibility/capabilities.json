@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "testSuiteVersion": 1,
+  "testSuiteVersion": 2,
   "capabilities": [
     {
       "id": "connection.resolve",
@@ -140,6 +140,56 @@
       "name": {
         "zh-Hans": "恢复测试项目",
         "en": "Restore a test item"
+      }
+    },
+    {
+      "id": "desktop-drive.mount",
+      "module": "desktop-drive",
+      "operation": "controlled-write",
+      "required": false,
+      "name": {
+        "zh-Hans": "在 Finder 中添加和移除云盘映射",
+        "en": "Add and remove a cloud-drive mapping in Finder"
+      }
+    },
+    {
+      "id": "desktop-drive.browse",
+      "module": "desktop-drive",
+      "operation": "read",
+      "required": false,
+      "name": {
+        "zh-Hans": "在 Finder 中浏览大目录",
+        "en": "Browse a large folder in Finder"
+      }
+    },
+    {
+      "id": "desktop-drive.download-resume",
+      "module": "desktop-drive",
+      "operation": "read",
+      "required": false,
+      "name": {
+        "zh-Hans": "按需下载、中断和继续下载",
+        "en": "Download on demand, interrupt, and resume"
+      }
+    },
+    {
+      "id": "desktop-drive.keep-offline",
+      "module": "desktop-drive",
+      "operation": "controlled-write",
+      "required": false,
+      "name": {
+        "zh-Hans": "保留离线、取消和释放本地副本",
+        "en": "Keep offline, cancel, and release local copies"
+      }
+    },
+    {
+      "id": "desktop-drive.upgrade-restore",
+      "module": "desktop-drive",
+      "operation": "read",
+      "required": false,
+      "name": {
+        "zh-Hans": "升级 App 后恢复云盘映射",
+        "en": "Restore cloud-drive mappings after an app upgrade"
       }
     }
   ]

@@ -1,0 +1,24 @@
+{
+  "success": true,
+  "data": {
+    "offset": 0,
+    "total": 2,
+    "files": [
+      {
+        "name": "item-1.bin",
+        "path": "/fixture/share-1/item-1.bin",
+        "isdir": false,
+        "additional": []
+      },
+      {
+        "name": "item-2.bin",
+        "path": "/fixture/share-1/item-2.bin",
+        "isdir": false,
+        "additional": {
+          "size": null,
+          "time": null
+        }
+      }
+    ]
+  }
+}

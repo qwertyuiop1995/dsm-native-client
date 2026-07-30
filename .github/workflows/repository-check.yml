@@ -36,6 +36,12 @@ jobs:
       - name: 校验 Codex Skill 引导脚本
         run: python -m unittest discover -s tools/codex/tests -p 'test_*.py'
 
+      - name: 校验 Fixture 脱敏与契约工具
+        run: |
+          python -m unittest discover -s tools/fixture-sanitization/tests -p 'test_*.py'
+          python -m unittest discover -s tools/contract-validation/tests -p 'test_*.py'
+          python tools/contract-validation/validate_fixtures.py
+
       - name: 校验双语资源与可见文案硬编码
         run: python tools/localization/check_localization.py
 

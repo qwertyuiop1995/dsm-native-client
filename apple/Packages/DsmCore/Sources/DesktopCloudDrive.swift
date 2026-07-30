@@ -292,6 +292,27 @@ public enum DesktopDriveItemIdentity {
     }
 }
 
+public enum DesktopDriveStagingIdentity {
+    public static func contentFileName(
+        mappingID: UUID,
+        remotePath: String,
+        sizeBytes: Int64?,
+        modifiedAt: Date?
+    ) -> String? {
+        guard let path = DesktopDrivePath.normalized(remotePath) else {
+            return nil
+        }
+        let value = [
+            mappingID.uuidString.lowercased(),
+            path,
+            String(sizeBytes ?? -1),
+            String(modifiedAt?.timeIntervalSince1970 ?? 0),
+        ].joined(separator: "\u{0}")
+        let digest = SHA256.hash(data: Data(value.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined() + ".content"
+    }
+}
+
 public struct DesktopDriveCacheCandidate: Equatable, Sendable {
     public let sizeBytes: Int64?
     public let locallyAvailableBytes: Int64

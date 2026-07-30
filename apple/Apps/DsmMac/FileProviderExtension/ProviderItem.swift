@@ -127,11 +127,14 @@ final class ProviderItem: NSObject, NSFileProviderItem, @unchecked Sendable {
         size: Int64?,
         modifiedAt: Date?
     ) -> NSFileProviderItemVersion {
-        let value = "\(path)|\(size ?? -1)|\(modifiedAt?.timeIntervalSince1970 ?? 0)"
-        let data = Data(value.utf8)
+        let value = DesktopDriveItemVersionStrategy.make(
+            path: path,
+            sizeBytes: size,
+            modifiedAt: modifiedAt
+        )
         return NSFileProviderItemVersion(
-            contentVersion: data,
-            metadataVersion: data
+            contentVersion: value.content,
+            metadataVersion: value.metadata
         )
     }
 }

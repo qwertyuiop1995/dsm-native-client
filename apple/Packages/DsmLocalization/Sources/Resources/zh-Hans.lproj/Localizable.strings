@@ -2150,6 +2150,15 @@
 "ui.ffd6030d3f286b7d" = "正在读取运行记录…";
 "ui.ffdb53bb11165394" = "恢复供电后自动启动";
 "desktopDrive.title" = "云盘位置";
+"desktopDrive.diagnostics.title" = "诊断摘要";
+"desktopDrive.diagnostics.description" = "保存前请先检查摘要。它只包含 App、系统、映射状态和缓存统计，不包含 NAS 名称、地址、账号、映射标识、文件路径、文件名或日志正文。";
+"desktopDrive.diagnostics.preview" = "预览诊断摘要";
+"desktopDrive.diagnostics.export" = "保存摘要…";
+"desktopDrive.diagnostics.close" = "关闭";
+"desktopDrive.diagnostics.saveTitle" = "保存诊断摘要";
+"desktopDrive.diagnostics.exported" = "诊断摘要已保存到你选择的位置。";
+"desktopDrive.diagnostics.exportFailed" = "无法保存摘要。请选择其他可写入的位置，然后重试。";
+"desktopDrive.diagnostics.prepareFailed" = "无法准备诊断摘要。请重新载入此页面后重试。";
 "desktopDrive.description" = "将这台 NAS 作为只读云盘位置显示在 Finder 中。文件默认保持在线，只有打开或选择保留后才会下载。";
 "desktopDrive.addAll" = "添加整个 NAS";
 "desktopDrive.addCurrentFolder" = "添加当前文件夹";

@@ -4,6 +4,7 @@ import Foundation
 final class ProviderEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Sendable {
     private let containerIdentifier: NSFileProviderItemIdentifier
     private let runtime: ProviderRuntime
+    private let operations = ProviderOperationRegistry()
     private let pageSize = 500
     private let anchor = NSFileProviderSyncAnchor(Data("v1".utf8))
 
@@ -16,7 +17,9 @@ final class ProviderEnumerator: NSObject, NSFileProviderEnumerator, @unchecked S
         super.init()
     }
 
-    func invalidate() {}
+    func invalidate() {
+        operations.cancelAll()
+    }
 
     func enumerateItems(
         for observer: NSFileProviderEnumerationObserver,
@@ -24,7 +27,9 @@ final class ProviderEnumerator: NSObject, NSFileProviderEnumerator, @unchecked S
     ) {
         let offset = Int(String(data: page.rawValue, encoding: .utf8) ?? "") ?? 0
         let observerBox = UncheckedSendableBox(observer)
-        Task {
+        let operationID = UUID()
+        let operation = Task {
+            defer { operations.remove(operationID) }
             do {
                 let result = try await runtime.enumerate(
                     containerIdentifier: containerIdentifier,
@@ -40,6 +45,7 @@ final class ProviderEnumerator: NSObject, NSFileProviderEnumerator, @unchecked S
                 observerBox.value.finishEnumeratingWithError(error)
             }
         }
+        operations.insert(operation, id: operationID)
     }
 
     func enumerateChanges(

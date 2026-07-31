@@ -657,9 +657,10 @@ force_complete=false
 | API | 方法 | 主要参数/用途 | 风险 |
 | --- | --- | --- | --- |
 | `SYNO.Core.System` | `info` | 系统与网络信息；源码出现 v1/v3 | 低 |
+| `SYNO.Core.System` | `shutdown`, `reboot` | 无业务参数；正常关机与重启 | 关键 |
 | `SYNO.Core.System.Utilization` | `get` | `resource`, `type`；CPU、内存、网络等 | 低 |
-| `SYNO.Core.System.Process` | `list` | 进程列表 | 中 |
-| `SYNO.Core.System.ProcessGroup` | `list`, `service_info` | 服务进程组 | 中 |
+| `SYNO.Core.System.Process` | `list` | 进程列表；客户端仅接受运行时发现的 v1，并只保留编号、名称、状态和服务组标识 | 中 |
+| `SYNO.Core.System.ProcessGroup` | `list`, `service_info` | `list` 作为可失败降级的服务组摘要；`service_info` 参数与隐私边界未验证，保持关闭 | 中 |
 | `SYNO.Core.CurrentConnection` | `list`, `download`, `kick_connection` | `list` 使用 `start`、`limit`、`sort_by` 和 `sort_direction` 读取当前连接；`kick_connection` 按网页会话和服务会话分别提交目标；导出未接入 | 高 |
 | `SYNO.Core.FileHandle` | `kickable_list`, `export`, `delete_db` | 打开的文件、导出与强制断开 | 高 |
 | `SYNO.Core.Service` | `get` | 服务状态 | 低 |
@@ -687,6 +688,12 @@ force_complete=false
 
 性能页每 2 秒读取一次当前采样，只在内存中保存最近 120 个点并绘制处理器、内存、网络与存储趋势。用户可暂停更新；离开页面、关闭模块或断开 NAS 后停止读取。刷新期间保留上一次成功结果，不提前显示空状态。原始响应、连接地址和日志正文不写入本地持久化存储。
 
+关机与重启先调用 `System.info` 检查当前会话、权限和 API 可达性，再只发送一次
+`shutdown` 或 `reboot`。明确成功只表示 DSM 已接受请求；关机不能据此宣称设备已经
+完全断电，重启不能据此宣称设备已经重新上线。提交阶段断线、超时或取消均按结果未知
+处理，提示用户检查设备或等待重新连接，禁止自动重放。完整稳定记录见
+[`dsm-system-power-actions.md`](discovery/endpoints/dsm-system-power-actions.md)。
+
 ### 8.4 存储、硬盘与硬件控制 - 内部
 
 | API | 方法 | 用途 | 风险 |
@@ -701,7 +708,7 @@ force_complete=false
 | `SYNO.Core.Hardware.FanSpeed` | `get`, `set` | 风扇模式 | 高 |
 | `SYNO.Core.Hardware.Led.Brightness` | `get`, `set` | LED 亮度 | 中 |
 | `SYNO.Core.Hardware.Hibernation` | `get`, `set` | 休眠设置 | 中 |
-| `SYNO.Core.Hardware.PowerSchedule` | `load`, `save` | 电源计划 | 高 |
+| `SYNO.Core.Hardware.PowerSchedule` | `load`, `save` | 客户端仅候选接入运行时发现的 v1 `load`，最多读取 128 条白名单摘要；`save` 保持关闭 | 高 |
 | `SYNO.Core.ExternalDevice.UPS` | `get`, `set` | UPS 设置 | 高 |
 | `SYNO.Core.ExternalDevice.Storage.USB` | `list`, `eject` | USB 设备与安全弹出 | 高 |
 | `SYNO.Core.ExternalDevice.Storage.eSATA` | `list` | eSATA 设备 | 低 |
@@ -732,13 +739,28 @@ S.M.A.R.T. 检测使用能力发现返回的 `SYNO.Core.Storage.Disk` v1。`Stor
 | `SYNO.Core.Package.Uninstallation` | `uninstall` | 卸载套件 | 高 |
 | `SYNO.Core.TaskScheduler` | `list`, `run`, `delete`, `set_enable`, `view`, `result_list`, `result_get_file` | 计划任务及结果 | 高 |
 | `SYNO.Core.EventScheduler` | `run`, `delete`, `set_enable`, `result_list`, `result_get_file` | 事件计划任务 | 高 |
-| `SYNO.Core.Upgrade.Server` | `check` | DSM 更新检查 | 中 |
+| `SYNO.Core.Upgrade.Server` | `check` | DSM 更新检查；客户端使用 v3，只读参数为 `user_reading=true`、`need_auto_smallupdate=true`、`need_promotion=false` | 中 |
 
-套件安装 URL、计划任务脚本和任务结果都可能包含秘密。源码中存在直接安装/执行能力，不应在普通功能页静默触发。
+套件安装 URL、计划任务脚本和任务结果都可能包含秘密。源码中存在直接安装/执行能力，不应在普通功能页静默触发。系统更新当前只读取 `System.info` 与 `Upgrade.Server.check`；候选版本为空或与当前版本相同时不宣告更新，下载、安装、取消和重启任务没有稳定契约，保持关闭。
 
 当前 macOS 使用 `Package.list` v2，并请求 `status`、`description`、`install_type`、`startable`、`dsm_apps`、`available_operation` 和 `ctl_uninstall` 附加字段，展示真实套件名称、版本、状态与说明。套件图标使用 `Package.Thumb.get` v1 读取，认证信息只放在 Cookie 与请求头，不写入图片 URL；响应限制为图片且不超过 2 MiB，失败时使用本地通用图标。
 
-启动与暂停先调用 `Package.feasibility_check` v2，再分别调用 `Package.Control.start/stop` v1；卸载先检查可行性和系统套件限制，再调用 `Package.Uninstallation.uninstall` v1。界面具备明确确认、同一套件重复提交保护、操作中禁用和操作后列表状态复查。当前 DSM 7.2.1-69057 Update 12 的能力发现与官方网页前端静态请求已核对，但本轮没有为验证而停止或卸载真实套件；发布兼容结论仍需使用专用测试套件完成管理员、普通账号、依赖阻止、超时和 QuickConnect 场景的行为验收。安装和升级需要来源、空间、依赖与安装队列流程，当前保持关闭。
+`available_operation` 明确包含 `upgrade` 时，macOS 只显示“DSM 中有可用更新”的只读
+提示，`canUpgrade` 仍保持关闭。`Package.Server.list` 和
+`Package.Installation.install/status/get_queue/cancel` 目前只有静态方法目录，没有
+版本化来源、参数、队列响应、取消和最终版本回读证据，客户端不探测也不调用。
+
+启动与暂停每次都先重新调用 `Package.list` v2，按稳定套件 ID 核对目标仍存在且
+`canStart/canStop` 与当前状态一致，再调用 `Package.feasibility_check` v2 和
+`Package.Control.start/stop` v1。同一套件 ID 的启动、停止与卸载在 Repository 和
+macOS 模型两层防重复；界面提交前说明影响并确认，执行中显示进度且禁用重复操作。
+写请求明确成功后最多轮询列表十次；提交超时、断线或响应无效时只读取列表核对，不重放
+原写请求。只有列表确认目标达到运行或停止状态才显示完成，无法确认时要求先刷新，确认
+前不得再次执行同一动作。卸载继续使用独立的破坏性结果链路，先检查可行性和系统套件
+限制，再调用 `Package.Uninstallation.uninstall` v1。当前 DSM 7.2.1-69057 Update 12
+的能力发现与官方网页前端静态请求已核对，但本轮没有为验证而启动、停止或卸载真实套件；
+发布兼容结论仍需使用专用测试套件完成管理员、普通账号、依赖阻止、超时和 QuickConnect
+场景的行为验收。安装和升级需要来源、空间、依赖与安装队列流程，当前保持关闭。
 
 计划任务列表继续使用 `TaskScheduler.list` v3 的 `start/limit` 分页字段；详情、新建和修改按 DSM 前端契约使用 `get/create/set` v4，运行、启停和删除使用 v3。运行记录使用 `EventScheduler.result_list(task_name)` v1，选择记录后再调用 `result_get_file(task_name,result_id)` v1 读取执行内容和输出；结果只保留在当前窗口内，不写入磁盘或日志。客户端必须按方法选择版本，不能把整个 API 一律升级到 v4。脚本任务界面具备详情、创建、修改、启停、立即运行、删除和运行记录入口，危险动作均要求确认并防止重复提交；脚本内容和通知地址只在当前请求中使用，不写入日志。
 
@@ -758,7 +780,7 @@ S.M.A.R.T. 检测使用能力发现返回的 `SYNO.Core.Storage.Disk` v1。`Stor
 | `SYNO.Core.Share` | `list`, `get`, `add`, `set`, `delete`, `get_all_move_task`, `move_status` | 高 |
 | `SYNO.Core.RecycleBin` | `start` | 清理回收站 | 高 |
 
-当前 macOS 使用 `User.list` 与 `Group.list` 展示当前账号有权查看的账号、群组、说明、邮件地址、停用状态和数字标识，并分别保留账号与群组结果。账号与群组的新建、修改和删除已接入专用接口，密码只用于当次请求，所有删除均确认、防重复并回读。共享文件夹的加密、权限、WORM、配额、移动和删除存在相互依赖；在完成 `validate_set`、权限复合提交与移动任务轮询前不提供不完整写入口。
+当前 macOS 使用 `User.list` 与 `Group.list` 展示当前账号有权查看的账号、群组、说明、邮件地址、停用状态和数字标识，并分别保留账号与群组结果。账号与群组的新建、修改和删除已接入专用接口，密码只用于当次请求，所有删除均确认、防重复并回读。共享访问页面只使用公开 `SYNO.FileStation.List.list_share` 展示登录账号可见共享文件夹的有效读写权限；不可见条目不推断为拒绝访问，内部 `Share.Permission.list_by_user` 因缺少版本化参数与响应证据保持关闭。共享文件夹的加密、权限、WORM、配额、移动和删除存在相互依赖；在完成 `validate_set`、权限复合提交与移动任务轮询前不提供不完整写入口。
 
 这些接口涉及账号、权限与数据删除。原生客户端应要求重新确认，并只发送用户改变的字段，避免把完整对象回写导致覆盖新设置。
 
@@ -786,7 +808,7 @@ S.M.A.R.T. 检测使用能力发现返回的 `SYNO.Core.Storage.Disk` v1。`Stor
 | `SYNO.Core.Security.Firewall.Rules.Serv` | `policy_check` | 中 |
 | `SYNO.Backup.Service.NetworkBackup` | `get` | 中 |
 | `SYNO.Core.DDNS.Provider` | `list` | 低 |
-| `SYNO.Core.DDNS.Record` | `list`, `set`, `update_ip_address`, `delete`, `test` | 高 |
+| `SYNO.Core.DDNS.Record` | `list`, `test`, `create`, `set`, `update_ip_address`, `delete` | 高 |
 | `SYNO.Core.DDNS.ExtIP` | `list` | 中 |
 | `SYNO.Core.DDNS.Synology` | `get_myds_account` | 高 |
 | `SYNO.Core.QuickConnect` | `get` v2、`set` v2、`check_availability` v3、`get_misc_config` v3、`set_server_alias` v2、`status` v1 | 高 |
@@ -795,13 +817,22 @@ S.M.A.R.T. 检测使用能力发现返回的 `SYNO.Core.Storage.Disk` v1。`Stor
 
 网络与 DDNS 响应可能包含公网 IP、域名、账号和代理配置。抓包样本必须删除这些字段后才能共享。
 
-当前 macOS 已将 SMB、NFS、FTP/FTPS、SFTP、互联网代理、物理网卡、DDNS 和防火墙基础控制加入运行时能力发现。物理网卡编辑支持 DHCP/静态 IPv4、网关、DNS、默认网关、MTU 与 VLAN；提交前明确提示可能断开当前连接，提交时只发送目标网卡 `configs`，随后按 `ifname` 回读。DDNS 支持真实服务商与记录列表、新建、编辑、删除和立即更新；密码/密钥仅用于当次请求，新建与编辑先调用 `test`，写入后重新列出记录。防火墙支持启停当前配置和端口扫描防护；启用通过 `Profile.Apply` 任务轮询，失败或超时不报告成功。完整防火墙规则编辑仍需服务端口、网卡策略、配置保存和应用任务组成原子流程，当前不提供半成品入口。
+当前 macOS 已将 SMB、NFS、FTP/FTPS、SFTP、互联网代理、物理网卡、DDNS 和防火墙基础控制加入运行时能力发现。物理网卡编辑支持 DHCP/静态 IPv4、网关、DNS、默认网关、MTU 与 VLAN；提交前明确提示可能断开当前连接，提交时只发送目标网卡 `configs`，随后按 `ifname` 回读。DDNS 将服务商连接测试、记录新建/编辑、立即更新和删除拆为四个独立操作；密码/密钥仅用于当次测试或保存请求，保存和删除后重新列出记录核对，测试成功不代表已经保存，立即更新被接受也不代表公网 DNS 已完成传播。防火墙支持启停当前配置和端口扫描防护；启用通过 `Profile.Apply` 任务轮询，失败或超时不报告成功。完整防火墙规则编辑仍需服务端口、网卡策略、配置保存和应用任务组成原子流程，当前不提供半成品入口。
 
 局域网服务发现同时接入 `SYNO.Core.Web.DSM` v2 的 `enable_ssdp`、`enable_avahi` 与 `SYNO.Core.FileServ.ServiceDiscovery` v1 的 `enable_smb_time_machine`，按实际变化分别提交并回读。
 
 ### 8.7.1 区域与时间 - 内部
 
-`SYNO.Core.Region.NTP` 使用 v3 `get/set` 读取和保存日期格式、时间格式、时区、手动时间或网络校时方式；时区选项使用 v1 `listzone` 的真实 `zonedata`。网络校时保存前使用 v2 `sync(servers)` 验证最多三个服务器。手动改时要求高风险确认，并携带用户明确选择的日期、时、分、秒；保存后回读时区、格式和模式。客户端不会用 Mac 当前时间替代 NAS 返回值。
+`SYNO.Core.Region.NTP` 使用 v3 `get/set` 读取和保存日期格式、时间格式、时区、手动时间或网络校时方式；时区选项使用 v1 `listzone` 的真实 `zonedata`。客户端先保存并逐字段回读配置，只有网络校时模式或最多三个服务器发生变化且配置完整确认后，才调用 v2 `sync(servers)` 立即校时并再次回读配置。`sync` 成功只证明 DSM 接受请求且设置仍被保留，不证明 NAS 时钟已经达到权威时间精度。手动改时要求高风险确认；用户没有编辑时间时使用本次预检刚从 NAS 读取的值，不使用 Mac 当前时间或页面打开时的旧值。提交超时、断线或取消均不得自动重放。
+
+### 8.7.2 DDNS - 内部
+
+`SYNO.Core.DDNS.Provider` 与 `SYNO.Core.DDNS.Record` 使用 v1。连接测试只调用 `test`；
+保存只调用 `create` 或 `set` 并按服务商、主机名、账号、启用状态和心跳设置回读；
+立即更新调用 `update_ip_address` 后只确认 DSM 接受请求且记录列表可重新载入；删除调用
+`delete` 后确认目标记录消失。保存或删除超时后仅允许一次列表回读，能够确认目标状态
+时不重放请求，无法确认时提示用户重新读取。完整稳定记录见
+[`dsm-ddns-settings.md`](discovery/endpoints/dsm-ddns-settings.md)。
 
 ### 8.8 Container Manager/Docker - 内部
 

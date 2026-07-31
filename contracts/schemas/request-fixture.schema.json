@@ -80,7 +80,7 @@
     },
     "parameters": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -175,7 +175,7 @@
           "enum": ["read", "standardWrite", "highRisk", "destructive"]
         },
         "readbackPolicy": {
-          "enum": ["none", "required", "taskPoll"]
+          "enum": ["none", "required", "taskPoll", "unavailable"]
         }
       }
     },

@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "ddns.create-record.synthetic-record",
+  "module": "ddns",
+  "operation": "createRecord",
+  "api": {
+    "name": "SYNO.Core.DDNS.Record",
+    "method": "create",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "enable",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "heartbeat",
+      "valueType": "boolean",
+      "encodedValue": "false"
+    },
+    {
+      "name": "hostname",
+      "valueType": "string",
+      "redacted": true
+    },
+    {
+      "name": "interface_v4",
+      "valueType": "string",
+      "encodedValue": "<synthetic-interface-v4>"
+    },
+    {
+      "name": "interface_v6",
+      "valueType": "string",
+      "encodedValue": "<synthetic-interface-v6>"
+    },
+    {
+      "name": "ip",
+      "valueType": "string",
+      "encodedValue": "<synthetic-ipv4>"
+    },
+    {
+      "name": "ipv6",
+      "valueType": "string",
+      "encodedValue": "<synthetic-ipv6>"
+    },
+    {
+      "name": "net",
+      "valueType": "string",
+      "encodedValue": "auto"
+    },
+    {
+      "name": "passwd",
+      "valueType": "string",
+      "redacted": true
+    },
+    {
+      "name": "provider",
+      "valueType": "string",
+      "encodedValue": "Example"
+    },
+    {
+      "name": "username",
+      "valueType": "string",
+      "redacted": true
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

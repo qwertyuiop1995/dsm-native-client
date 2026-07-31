@@ -61,6 +61,12 @@ class RequestContractValidationTests(unittest.TestCase):
 
         validator.validate_request_fixture(request, self.request_path)
 
+    def test_accepts_request_without_business_parameters(self) -> None:
+        request = copy.deepcopy(self.request)
+        request["parameters"] = []
+
+        validator.validate_request_fixture(request, self.request_path)
+
     def test_rejects_redacted_marker_for_non_sensitive_parameter(self) -> None:
         request = copy.deepcopy(self.request)
         request["parameters"][0].pop("encodedValue")
@@ -83,6 +89,22 @@ class RequestContractValidationTests(unittest.TestCase):
         request = copy.deepcopy(self.request)
         request["policy"]["retryPolicy"] = "readOnlyAutomatic"
         with self.assertRaisesRegex(validator.ValidationError, "不得启用"):
+            validator.validate_request_fixture(request, self.request_path)
+
+    def test_accepts_destructive_write_with_unavailable_readback_and_no_retry(
+        self,
+    ) -> None:
+        request = copy.deepcopy(self.request)
+        request["policy"]["readbackPolicy"] = "unavailable"
+        request["policy"]["retryPolicy"] = "never"
+
+        validator.validate_request_fixture(request, self.request_path)
+
+    def test_rejects_retry_when_dangerous_write_cannot_be_read_back(self) -> None:
+        request = copy.deepcopy(self.request)
+        request["policy"]["readbackPolicy"] = "unavailable"
+        request["policy"]["retryPolicy"] = "queryStateBeforeDecision"
+        with self.assertRaisesRegex(validator.ValidationError, "必须禁止重试"):
             validator.validate_request_fixture(request, self.request_path)
 
     def test_rejects_unverified_result_without_refresh(self) -> None:

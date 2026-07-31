@@ -85,6 +85,10 @@ public enum DsmAPIName {
     // 以下均为 DSM 内部只读接口，仅在能力发现明确返回时使用。
     public static let coreSystem = "SYNO.Core.System"
     public static let coreSystemUtilization = "SYNO.Core.System.Utilization"
+    /// DSM 资源监控内部进程列表；只读取经过白名单筛选的最小字段。
+    public static let coreSystemProcess = "SYNO.Core.System.Process"
+    /// DSM 资源监控内部服务进程组；`service_info` 尚未接入。
+    public static let coreSystemProcessGroup = "SYNO.Core.System.ProcessGroup"
     public static let storageOverview = "SYNO.Storage.CGI.Storage"
     public static let storageSmart = "SYNO.Storage.CGI.Smart"
     public static let storageVolume = "SYNO.Core.Storage.Volume"
@@ -121,6 +125,8 @@ public enum DsmAPIName {
     public static let coreNetworkProxy = "SYNO.Core.Network.Proxy"
     /// DSM 控制面板内部接口：断电恢复。
     public static let coreHardwarePowerRecovery = "SYNO.Core.Hardware.PowerRecovery"
+    /// DSM 控制面板内部电源计划；当前客户端仅启用只读 `load`。
+    public static let coreHardwarePowerSchedule = "SYNO.Core.Hardware.PowerSchedule"
     /// DSM 控制面板内部接口：设备灯光亮度。
     public static let coreHardwareLEDBrightness = "SYNO.Core.Hardware.Led.Brightness"
     /// DSM 控制面板内部接口：风扇模式。
@@ -247,6 +253,8 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.dockerLog,
         DsmAPIName.coreSystem,
         DsmAPIName.coreSystemUtilization,
+        DsmAPIName.coreSystemProcess,
+        DsmAPIName.coreSystemProcessGroup,
         DsmAPIName.storageOverview,
         DsmAPIName.storageSmart,
         DsmAPIName.storageVolume,
@@ -270,6 +278,7 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.coreFileServiceSFTP,
         DsmAPIName.coreNetworkProxy,
         DsmAPIName.coreHardwarePowerRecovery,
+        DsmAPIName.coreHardwarePowerSchedule,
         DsmAPIName.coreHardwareLEDBrightness,
         DsmAPIName.coreHardwareFanSpeed,
         DsmAPIName.coreHardwareBeepControl,
@@ -438,6 +447,9 @@ public struct DsmCapabilityDiscovery: Sendable {
         // 内部接口版本以运行时能力发现为准；这里仅限制已知的兼容区间。
         DsmAPIName.coreSystem: 1...3,
         DsmAPIName.coreSystemUtilization: 1...1,
+        // 静态目录尚未给出版本矩阵；客户端仅接受最小 v1 范围并要求运行时发现。
+        DsmAPIName.coreSystemProcess: 1...1,
+        DsmAPIName.coreSystemProcessGroup: 1...1,
         DsmAPIName.storageOverview: 1...1,
         DsmAPIName.storageSmart: 1...1,
         DsmAPIName.storageVolume: 1...1,
@@ -461,6 +473,8 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.coreFileServiceSFTP: 1...1,
         DsmAPIName.coreNetworkProxy: 1...1,
         DsmAPIName.coreHardwarePowerRecovery: 1...1,
+        // 静态目录尚未给出版本矩阵；客户端仅接受最小 v1 范围并要求运行时发现。
+        DsmAPIName.coreHardwarePowerSchedule: 1...1,
         DsmAPIName.coreHardwareLEDBrightness: 1...1,
         DsmAPIName.coreHardwareFanSpeed: 1...1,
         DsmAPIName.coreHardwareBeepControl: 1...1,

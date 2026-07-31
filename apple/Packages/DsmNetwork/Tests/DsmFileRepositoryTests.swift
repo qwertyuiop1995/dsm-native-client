@@ -105,6 +105,39 @@ final class DsmFileRepositoryTests: XCTestCase {
         XCTAssertEqual(share.mountPointType, "cifs")
     }
 
+    func test当前账号共享访问分页去重并排除远程挂载() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(
+                #"{"success":true,"data":{"offset":0,"total":4,"shares":[{"name":"资料","path":"/data","isdir":true,"additional":{"mount_point_type":"normal","perm":{"adv_right":{"read":true,"write":false,"delete":false}}}},{"name":"项目","path":"/projects","isdir":true,"additional":{"mount_point_type":"normal","perm":{"adv_right":{"read":true,"write":true,"delete":true}}}},{"name":"远程位置","path":"/remote","isdir":true,"additional":{"mount_point_type":"cifs","perm":{"adv_right":{"read":true,"write":true,"delete":true}}}}]}}"#
+            ),
+            response(
+                #"{"success":true,"data":{"offset":3,"total":4,"shares":[{"name":"资料","path":"/data","isdir":true,"additional":{"mount_point_type":"normal","perm":{"adv_right":{"read":true,"write":true,"delete":false}}}}]}}"#
+            )
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationList: capability(DsmAPIName.fileStationList, version: 2)
+            ]),
+            transport: transport
+        )
+        let accessRepository = FileStationShareAccessRepository(repository: repository)
+
+        let directory = try await accessRepository.loadShareAccess()
+
+        XCTAssertEqual(Set(directory.shares.map(\.name)), Set(["资料", "项目"]))
+        XCTAssertEqual(directory.shares.count, 2)
+        let dataShare = try XCTUnwrap(directory.shares.first { $0.name == "资料" })
+        XCTAssertEqual(dataShare.accessLevel, .readWrite)
+        XCTAssertFalse(dataShare.canDelete)
+        let projectShare = try XCTUnwrap(directory.shares.first { $0.name == "项目" })
+        XCTAssertEqual(projectShare.accessLevel, .readWrite)
+        XCTAssertTrue(projectShare.canDelete)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requestParameter("method", in: requests[0]), "list_share")
+        XCTAssertEqual(requestParameter("offset", in: requests[1]), "3")
+    }
+
     func test目录列表容忍字符串分页字段和异常附加信息() async throws {
         let response = DsmHTTPResponse(
             data: Data(

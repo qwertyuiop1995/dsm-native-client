@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "region.set-settings.synthetic-settings",
+  "module": "region",
+  "operation": "setRegionSettings",
+  "api": {
+    "name": "SYNO.Core.Region.NTP",
+    "method": "set",
+    "preferredVersion": 3,
+    "resolvedVersion": 3,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "date_format",
+      "valueType": "string",
+      "encodedValue": "Y/m/d"
+    },
+    {
+      "name": "enable_ntp",
+      "valueType": "string",
+      "encodedValue": "ntp"
+    },
+    {
+      "name": "server",
+      "valueType": "string",
+      "encodedValue": "time.example.invalid"
+    },
+    {
+      "name": "time_format",
+      "valueType": "string",
+      "encodedValue": "H:i"
+    },
+    {
+      "name": "timezone",
+      "valueType": "string",
+      "encodedValue": "UTC"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

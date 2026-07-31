@@ -167,7 +167,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     private let isConnectedThroughQuickConnectRelay: Bool
     private var packageControlMetadata: [String: PackageControlMetadata] = [:]
     private var packageIconCache: [String: Data] = [:]
-    private var activePackageUninstallIDs: Set<String> = []
+    private var activePackageMutationIDs: Set<String> = []
     private var activeAccountDeletionNames: Set<String> = []
     private var activeGroupDeletionNames: Set<String> = []
     private var activeEthernetUpdateIDs: Set<String> = []
@@ -177,6 +177,10 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     private var isSecuritySettingsUpdateActive = false
     private var isHardwareSettingsUpdateActive = false
     private var isRemoteAccessSettingsUpdateActive = false
+    private var isRegionSettingsUpdateActive = false
+    private var activeDDNSProviderIDs: Set<String> = []
+    private var isDDNSRefreshActive = false
+    private var isPowerActionActive = false
     private var activeDiskTestIDs: Set<String> = []
     private var storageDisks: [String: NasDisk] = [:]
     private var diskTestHistories: [String: DiskTestHistorySnapshot] = [:]
@@ -222,6 +226,16 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         case enabled
         case host
         case port
+    }
+
+    private enum RegionSettingsMutationStep: Sendable {
+        case dateFormat
+        case timeFormat
+        case timeZone
+        case mode
+        case servers
+        case manualDate
+        case synchronize
     }
 
     public init(
@@ -2564,6 +2578,58 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             ]),
             isAutomaticPowerOffEnabled: hibernation?.boolean(["auto_poweroff_enable"]),
             ups: Self.upsSettings(from: ups)
+        )
+    }
+
+    public func loadPowerSchedule() async throws -> NasPowerScheduleSnapshot {
+        let value = try await call(
+            DsmAPIName.coreHardwarePowerSchedule,
+            method: "load",
+            version: 1
+        )
+        let primaryRows = value.objects("schedules")
+        let rows = primaryRows.isEmpty ? value.objects("items") : primaryRows
+        let maximumEntries = 128
+        var seenIDs = Set<String>()
+        let entries = rows.prefix(maximumEntries).enumerated().compactMap {
+            index, raw -> NasPowerScheduleEntry? in
+            let item = DsmDynamicJSON.object(raw)
+            guard let hour = item.integer(["hour"]).flatMap({
+                $0 >= 0 && $0 <= 23 ? Int($0) : nil
+            }),
+            let minute = item.integer(["minute"]).flatMap({
+                $0 >= 0 && $0 <= 59 ? Int($0) : nil
+            }) else {
+                return nil
+            }
+            let serverID = Self.safePowerScheduleIdentifier(
+                item.string(["id", "schedule_id"])
+            )
+            let id = serverID ?? "power-schedule-\(index)"
+            guard seenIDs.insert(id).inserted else { return nil }
+            return NasPowerScheduleEntry(
+                id: id,
+                action: Self.powerScheduleAction(
+                    item.string(["action", "type", "operation"])
+                ),
+                isEnabled: item.boolean(["enabled", "is_enabled"]),
+                hour: hour,
+                minute: minute,
+                recurrence: Self.powerScheduleRecurrence(item)
+            )
+        }
+        let reportedTotal = value.integer(["total", "total_count"]).flatMap {
+            $0 >= 0 && $0 <= 1_000_000 ? Int($0) : nil
+        }
+        let total = max(entries.count, reportedTotal ?? rows.count)
+        return NasPowerScheduleSnapshot(
+            entries: entries,
+            timeZoneIdentifier: Self.safePowerScheduleTimeZone(
+                value.string(["timezone", "time_zone"])
+            ),
+            total: total,
+            isTruncated: rows.count > maximumEntries
+                || (reportedTotal.map { $0 > rows.count } ?? false)
         )
     }
 
@@ -4985,45 +5051,194 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     }
 
     public func saveRegionSettings(_ settings: NasRegionSettings) async throws {
-        let current = try await loadRegionSettings()
-        let dateFormat = settings.dateFormat.trimmingCharacters(in: .whitespacesAndNewlines)
-        let timeFormat = settings.timeFormat.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !dateFormat.isEmpty, !timeFormat.isEmpty else {
-            throw verificationError(L10n.string("shared.eabfe94b8908b899"))
+        let result = try await saveRegionSettingsResult(settings)
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw regionSettingsError(for: result)
         }
-        guard settings.timeZones.contains(where: { $0.id == settings.timeZone }) else {
-            throw verificationError(L10n.string("shared.0504b45ed9ebedd1"))
+    }
+
+    /// 先保存并回读区域配置，再执行必要的网络校时；提交后的未知结果不得自动重放。
+    public func saveRegionSettingsResult(
+        _ settings: NasRegionSettings
+    ) async throws -> MutationResult {
+        let operation = "regionSettingsUpdate"
+        let prefix = "region.settings"
+        if Task.isCancelled {
+            return try regionMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
         }
-        let servers = settings.timeServers
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        guard servers.count <= 3 else {
-            throw verificationError(L10n.string("shared.2c6b003fd894a371"))
+        guard !isRegionSettingsUpdateActive else {
+            return try regionMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).duplicate-submission"
+            )
         }
-        if settings.isNetworkTimeEnabled {
-            guard !servers.isEmpty, servers.allSatisfy(Self.isValidTimeServer) else {
-                throw verificationError(L10n.string("shared.915c3cdb096109ad"))
-            }
-            if !current.isNetworkTimeEnabled || current.timeServers != servers {
-                try await callVoid(
-                    DsmAPIName.coreRegionNTP,
-                    method: "sync",
-                    version: 2,
-                    parameters: ["servers": .stringArray(servers)]
-                )
-            }
+        isRegionSettingsUpdateActive = true
+        defer { isRegionSettingsUpdateActive = false }
+
+        guard !settings.normalizedDateFormat.isEmpty,
+              !settings.normalizedTimeFormat.isEmpty,
+              settings.timeZones.contains(where: { $0.id == settings.timeZone }),
+              settings.normalizedTimeServers.count <= 3,
+              !settings.isNetworkTimeEnabled
+                || (!settings.normalizedTimeServers.isEmpty
+                    && settings.normalizedTimeServers.allSatisfy(
+                        NasRegionSettings.isValidTimeServer
+                    )) else {
+            return try regionMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).invalid",
+                diagnosticTag: "\(prefix).invalid-input"
+            )
+        }
+        guard capabilitySupports(DsmAPIName.coreRegionNTP, version: 3) else {
+            return try regionMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+
+        let current: NasRegionSettings
+        do {
+            current = try await loadRegionSettings()
+        } catch let error as AppError {
+            return try regionPreflightResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try regionMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).preflight-unknown"
+            )
+        }
+        let manualDate = settings.isNetworkTimeEnabled
+            ? settings.manualDate
+            : (settings.manualDate ?? current.manualDate)
+        let normalized = NasRegionSettings(
+            dateFormat: settings.normalizedDateFormat,
+            timeFormat: settings.normalizedTimeFormat,
+            timeZone: settings.timeZone,
+            isNetworkTimeEnabled: settings.isNetworkTimeEnabled,
+            timeServers: settings.normalizedTimeServers,
+            manualDate: manualDate,
+            timeZones: current.timeZones
+        )
+        guard normalized.isNetworkTimeEnabled || normalized.manualDate != nil else {
+            return try regionMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).invalid",
+                diagnosticTag: "\(prefix).missing-manual-date"
+            )
+        }
+        let configurationSteps = Self.regionMutationSteps(
+            from: current,
+            to: normalized,
+            updatesManualDate: settings.manualDate != nil
+        )
+        let needsSynchronization = normalized.isNetworkTimeEnabled
+            && (!current.isNetworkTimeEnabled
+                || current.timeServers != normalized.timeServers)
+        var allSteps = configurationSteps
+        if needsSynchronization {
+            allSteps.append(.synchronize)
+        }
+        guard !allSteps.isEmpty else {
+            return try regionMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).no-changes"
+            )
+        }
+        if Task.isCancelled {
+            return try regionMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
         }
 
         var parameters: [String: DsmParameterValue] = [
-            "date_format": .string(dateFormat),
-            "time_format": .string(timeFormat),
-            "timezone": .string(settings.timeZone),
-            "enable_ntp": .string(settings.isNetworkTimeEnabled ? "ntp" : "manual"),
-            "server": .string(servers.joined(separator: ","))
+            "date_format": .string(normalized.dateFormat),
+            "time_format": .string(normalized.timeFormat),
+            "timezone": .string(normalized.timeZone),
+            "enable_ntp": .string(normalized.isNetworkTimeEnabled ? "ntp" : "manual"),
+            "server": .string(normalized.timeServers.joined(separator: ","))
         ]
-        if !settings.isNetworkTimeEnabled {
-            guard let manualDate = settings.manualDate else {
-                throw verificationError(L10n.string("shared.e580ef4793aaf3d6"))
+        if !normalized.isNetworkTimeEnabled {
+            guard let manualDate = normalized.manualDate else {
+                return try regionMutationResult(
+                    status: .confirmedFailure,
+                    operation: operation,
+                    submitted: false,
+                    requiresRefresh: false,
+                    succeeded: 0,
+                    failed: 1,
+                    unknown: 0,
+                    errorCategory: .validation,
+                    localizationKey: "\(prefix).invalid",
+                    diagnosticTag: "\(prefix).missing-manual-date"
+                )
             }
             let calendar = Calendar(identifier: .gregorian)
             let parts = calendar.dateComponents(
@@ -5032,36 +5247,588 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             )
             guard let year = parts.year, let month = parts.month, let day = parts.day,
                   let hour = parts.hour, let minute = parts.minute, let second = parts.second else {
-                throw verificationError(L10n.string("shared.286f4090dc75cccc"))
+                return try regionMutationResult(
+                    status: .confirmedFailure,
+                    operation: operation,
+                    submitted: false,
+                    requiresRefresh: false,
+                    succeeded: 0,
+                    failed: 1,
+                    unknown: 0,
+                    errorCategory: .validation,
+                    localizationKey: "\(prefix).invalid",
+                    diagnosticTag: "\(prefix).invalid-manual-date"
+                )
             }
             parameters["date"] = .string("\(year)/\(month)/\(day)")
             parameters["hour"] = .integer(hour)
             parameters["minute"] = .integer(minute)
             parameters["second"] = .integer(second)
         }
-        guard current.dateFormat != dateFormat
-                || current.timeFormat != timeFormat
-                || current.timeZone != settings.timeZone
-                || current.isNetworkTimeEnabled != settings.isNetworkTimeEnabled
-                || current.timeServers != servers
-                || (!settings.isNetworkTimeEnabled
-                    && current.manualDate != settings.manualDate) else {
-            return
+
+        do {
+            try await callVoid(
+                DsmAPIName.coreRegionNTP,
+                method: "set",
+                version: 3,
+                parameters: parameters
+            )
+        } catch let error as AppError {
+            return try await regionSubmissionFailureResult(
+                error,
+                expected: normalized,
+                configurationSteps: configurationSteps,
+                includesPendingSynchronization: needsSynchronization,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try await regionUnknownSubmissionResult(
+                expected: normalized,
+                configurationSteps: configurationSteps,
+                includesPendingSynchronization: needsSynchronization,
+                operation: operation,
+                prefix: prefix
+            )
         }
-        try await callVoid(
-            DsmAPIName.coreRegionNTP,
-            method: "set",
-            version: 3,
-            parameters: parameters
+        if Task.isCancelled {
+            return try regionMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: allSteps.count,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-before-readback"
+            )
+        }
+
+        let verifiedConfiguration: NasRegionSettings
+        do {
+            verifiedConfiguration = try await loadRegionSettings()
+        } catch let error as AppError {
+            return try regionMutationResult(
+                status: error.category == .cancelled
+                    ? .cancellationRequestedAfterSubmission
+                    : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: allSteps.count,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unverified"
+            )
+        } catch {
+            return try regionMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: allSteps.count,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
+        }
+        let configurationResult = try regionVerifiedResult(
+            verifiedConfiguration,
+            expected: normalized,
+            steps: configurationSteps,
+            operation: operation,
+            prefix: prefix
         )
-        let verified = try await loadRegionSettings()
-        guard verified.dateFormat == dateFormat,
-              verified.timeFormat == timeFormat,
-              verified.timeZone == settings.timeZone,
-              verified.isNetworkTimeEnabled == settings.isNetworkTimeEnabled,
-              (!settings.isNetworkTimeEnabled || verified.timeServers == servers) else {
-            throw verificationError(L10n.string("shared.6c186cb11546be49"))
+        guard configurationResult.status == .confirmedSuccess else {
+            return configurationResult
         }
+        guard needsSynchronization else {
+            return configurationResult
+        }
+
+        do {
+            try await callVoid(
+                DsmAPIName.coreRegionNTP,
+                method: "sync",
+                version: 2,
+                parameters: [
+                    "servers": .stringArray(normalized.timeServers)
+                ]
+            )
+        } catch let error as AppError {
+            return try regionSynchronizationFailureResult(
+                error,
+                succeeded: configurationSteps.count,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try regionMutationResult(
+                status: .partialSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: configurationSteps.count,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).partial",
+                diagnosticTag: "\(prefix).sync-unknown"
+            )
+        }
+        if Task.isCancelled {
+            return try regionMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: configurationSteps.count,
+                failed: 0,
+                unknown: 1,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-after-sync"
+            )
+        }
+        do {
+            let verified = try await loadRegionSettings()
+            return try regionVerifiedResult(
+                verified,
+                expected: normalized,
+                steps: allSteps,
+                synchronizationAccepted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try regionMutationResult(
+                status: .partialSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: configurationSteps.count,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).partial",
+                diagnosticTag: "\(prefix).sync-readback-unverified"
+            )
+        }
+    }
+
+    private static func regionMutationSteps(
+        from current: NasRegionSettings,
+        to expected: NasRegionSettings,
+        updatesManualDate: Bool
+    ) -> [RegionSettingsMutationStep] {
+        var steps: [RegionSettingsMutationStep] = []
+        if current.dateFormat != expected.dateFormat {
+            steps.append(.dateFormat)
+        }
+        if current.timeFormat != expected.timeFormat {
+            steps.append(.timeFormat)
+        }
+        if current.timeZone != expected.timeZone {
+            steps.append(.timeZone)
+        }
+        if current.isNetworkTimeEnabled != expected.isNetworkTimeEnabled {
+            steps.append(.mode)
+        }
+        if expected.isNetworkTimeEnabled,
+           current.timeServers != expected.timeServers {
+            steps.append(.servers)
+        }
+        if !expected.isNetworkTimeEnabled, updatesManualDate,
+           !regionDatesMatch(current.manualDate, expected.manualDate) {
+            steps.append(.manualDate)
+        }
+        return steps
+    }
+
+    private static func regionDatesMatch(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        guard let lhs, let rhs else { return lhs == nil && rhs == nil }
+        return abs(lhs.timeIntervalSince(rhs)) <= 120
+    }
+
+    private static func regionMutationStep(
+        _ step: RegionSettingsMutationStep,
+        matches actual: NasRegionSettings,
+        expected: NasRegionSettings,
+        synchronizationAccepted: Bool
+    ) -> Bool {
+        switch step {
+        case .dateFormat:
+            actual.dateFormat == expected.dateFormat
+        case .timeFormat:
+            actual.timeFormat == expected.timeFormat
+        case .timeZone:
+            actual.timeZone == expected.timeZone
+        case .mode:
+            actual.isNetworkTimeEnabled == expected.isNetworkTimeEnabled
+        case .servers:
+            actual.timeServers == expected.timeServers
+        case .manualDate:
+            regionDatesMatch(actual.manualDate, expected.manualDate)
+        case .synchronize:
+            synchronizationAccepted
+        }
+    }
+
+    private func regionVerifiedResult(
+        _ actual: NasRegionSettings,
+        expected: NasRegionSettings,
+        steps: [RegionSettingsMutationStep],
+        synchronizationAccepted: Bool = false,
+        includesPendingSynchronization: Bool = false,
+        operation: String,
+        prefix: String,
+        failureCategory: AppErrorCategory? = nil,
+        treatsMismatchAsUnknown: Bool = false
+    ) throws -> MutationResult {
+        let succeeded = steps.filter {
+            Self.regionMutationStep(
+                $0,
+                matches: actual,
+                expected: expected,
+                synchronizationAccepted: synchronizationAccepted
+            )
+        }.count
+        let pendingSynchronization = includesPendingSynchronization ? 1 : 0
+        let unmatched = steps.count - succeeded
+        let unknown = treatsMismatchAsUnknown ? unmatched : 0
+        let totalUnknown = unknown + pendingSynchronization
+        let failed = unmatched - unknown
+        if succeeded == steps.count, pendingSynchronization == 0 {
+            return try regionMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: succeeded,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).confirmed"
+            )
+        }
+        if succeeded > 0 {
+            return try regionMutationResult(
+                status: .partialSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: succeeded,
+                failed: failed,
+                unknown: totalUnknown,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).partial",
+                diagnosticTag: "\(prefix).partial"
+            )
+        }
+        if totalUnknown > 0 {
+            return try regionMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: failed,
+                unknown: totalUnknown,
+                errorCategory: failureCategory.map {
+                    packageMutationErrorCategory(for: $0)
+                },
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
+        }
+        if let failureCategory {
+            return try regionRejectedResult(
+                AppError(
+                    category: failureCategory,
+                    isRetryable: false,
+                    safeUserMessage: L10n.string("region.settings.failed")
+                ),
+                totalCount: max(1, steps.count),
+                submitted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        return try regionMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: max(1, failed),
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationKey: "\(prefix).failed",
+            diagnosticTag: "\(prefix).readback-mismatch"
+        )
+    }
+
+    private func regionSubmissionFailureResult(
+        _ submissionError: AppError,
+        expected: NasRegionSettings,
+        configurationSteps: [RegionSettingsMutationStep],
+        includesPendingSynchronization: Bool,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        if submissionError.category == .cancelled {
+            return try regionMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: configurationSteps.count
+                    + (includesPendingSynchronization ? 1 : 0),
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-during-submission"
+            )
+        }
+        let ambiguous = switch submissionError.category {
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            true
+        default:
+            false
+        }
+        do {
+            let verified = try await loadRegionSettings()
+            return try regionVerifiedResult(
+                verified,
+                expected: expected,
+                steps: configurationSteps,
+                includesPendingSynchronization: ambiguous
+                    && includesPendingSynchronization,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: submissionError.category,
+                treatsMismatchAsUnknown: ambiguous
+            )
+        } catch {
+            if ambiguous {
+                return try regionMutationResult(
+                    status: .submittedButUnverified,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: true,
+                    succeeded: 0,
+                    failed: 0,
+                    unknown: configurationSteps.count
+                        + (includesPendingSynchronization ? 1 : 0),
+                    errorCategory: packageMutationErrorCategory(
+                        for: submissionError.category
+                    ),
+                    localizationKey: "\(prefix).unverified",
+                    diagnosticTag: "\(prefix).readback-unverified"
+                )
+            }
+            return try regionRejectedResult(
+                submissionError,
+                totalCount: max(1, configurationSteps.count),
+                submitted: true,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+    }
+
+    private func regionUnknownSubmissionResult(
+        expected: NasRegionSettings,
+        configurationSteps: [RegionSettingsMutationStep],
+        includesPendingSynchronization: Bool,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        do {
+            let verified = try await loadRegionSettings()
+            return try regionVerifiedResult(
+                verified,
+                expected: expected,
+                steps: configurationSteps,
+                includesPendingSynchronization: includesPendingSynchronization,
+                operation: operation,
+                prefix: prefix,
+                failureCategory: .unknown,
+                treatsMismatchAsUnknown: true
+            )
+        } catch {
+            return try regionMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: configurationSteps.count
+                    + (includesPendingSynchronization ? 1 : 0),
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unknown"
+            )
+        }
+    }
+
+    private func regionSynchronizationFailureResult(
+        _ error: AppError,
+        succeeded: Int,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        if error.category == .cancelled {
+            return try regionMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: succeeded,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).cancelled-during-sync"
+            )
+        }
+        let ambiguous = switch error.category {
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            true
+        default:
+            false
+        }
+        return try regionMutationResult(
+            status: .partialSuccess,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: succeeded,
+            failed: ambiguous ? 0 : 1,
+            unknown: ambiguous ? 1 : 0,
+            errorCategory: packageMutationErrorCategory(for: error.category),
+            localizationKey: "\(prefix).partial",
+            diagnosticTag: "\(prefix).sync-failed"
+        )
+    }
+
+    private func regionRejectedResult(
+        _ error: AppError,
+        totalCount: Int,
+        submitted: Bool,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        let status: MutationResultStatus
+        let localizationKey: String
+        let category: MutationErrorCategory
+        switch error.category {
+        case .permissionDenied, .authenticationRequired:
+            status = .permissionDenied
+            localizationKey = "\(prefix).permission-denied"
+            category = .permission
+        case .apiUnavailable, .versionUnsupported:
+            status = .unsupported
+            localizationKey = "\(prefix).unsupported"
+            category = .unsupported
+        default:
+            status = .confirmedFailure
+            localizationKey = "\(prefix).failed"
+            category = packageMutationErrorCategory(for: error.category)
+        }
+        return try regionMutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: totalCount,
+            unknown: 0,
+            errorCategory: category,
+            localizationKey: localizationKey,
+            diagnosticTag: "\(prefix).rejected"
+        )
+    }
+
+    private func regionPreflightResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        if error.category == .cancelled {
+            return try regionMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        }
+        return try regionRejectedResult(
+            error,
+            totalCount: 1,
+            submitted: false,
+            operation: operation,
+            prefix: prefix
+        )
+    }
+
+    private func regionMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func regionSettingsError(for result: MutationResult) -> AppError {
+        let category: AppErrorCategory = switch result.status {
+        case .permissionDenied:
+            .permissionDenied
+        case .unsupported:
+            .apiUnavailable
+        case .partialSuccess:
+            .partialFailure
+        case .cancelledBeforeSubmission, .cancellationRequestedAfterSubmission:
+            .cancelled
+        case .confirmedSuccess, .confirmedFailure, .submittedButUnverified:
+            .unknown
+        }
+        return AppError(
+            category: category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? "region.settings.failed"
+            )
+        )
     }
 
     public func loadDDNS() async throws -> NasDDNSDirectory {
@@ -5132,76 +5899,983 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         return NasDDNSDirectory(providers: providers, records: records)
     }
 
-    public func saveDDNS(_ draft: NasDDNSDraft) async throws {
-        let directory = try await loadDDNS()
-        guard directory.providers.contains(where: { $0.id == draft.providerID }) else {
-            throw verificationError(L10n.string("shared.1ba0507d4c0c3090"))
+    public func testDDNSResult(
+        _ draft: NasDDNSDraft
+    ) async throws -> MutationResult {
+        let operation = "ddnsProviderTest"
+        let prefix = "ddns.test"
+        if Task.isCancelled {
+            return try ddnsMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                localizationKey: "\(prefix).cancelled",
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
         }
-        let hostname = draft.hostname.trimmingCharacters(in: .whitespacesAndNewlines)
-        let username = draft.username.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Self.isValidHostname(hostname) else {
-            throw verificationError(L10n.string("shared.9e1b725d1515431e"))
+        guard draft.isValidForSubmission else {
+            return try ddnsInvalidResult(operation: operation, prefix: prefix)
         }
-        guard !username.isEmpty else {
-            throw verificationError(L10n.string("shared.888eb410ef3a01da"))
+        guard ddnsCapabilitiesAreAvailable else {
+            return try ddnsUnsupportedResult(operation: operation, prefix: prefix)
         }
-        if draft.originalProviderID == nil {
-            guard draft.providerID == "Synology" || !draft.password.isEmpty else {
-                throw verificationError(L10n.string("shared.bc264628bb87388d"))
-            }
-            guard !directory.records.contains(where: { $0.providerID == draft.providerID }) else {
-                throw AppError(
-                    category: .conflict,
-                    isRetryable: false,
-                    safeUserMessage: L10n.string("shared.864f876a4eadf507")
+        let providerID = draft.normalizedProviderID
+        guard !isDDNSRefreshActive,
+              activeDDNSProviderIDs.insert(providerID).inserted else {
+            return try ddnsBusyResult(operation: operation, prefix: prefix)
+        }
+        defer { activeDDNSProviderIDs.remove(providerID) }
+
+        let directory: NasDDNSDirectory
+        do {
+            directory = try await loadDDNS()
+        } catch let error as AppError {
+            return try ddnsRejectedResult(
+                error,
+                operation: operation,
+                prefix: prefix,
+                submitted: false
+            )
+        } catch {
+            return try ddnsUnknownPreflightResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        guard directory.providers.contains(where: { $0.id == providerID }),
+              draft.originalProviderID == nil
+                || draft.originalProviderID == providerID else {
+            return try ddnsInvalidResult(operation: operation, prefix: prefix)
+        }
+        if Task.isCancelled {
+            return try ddnsMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                localizationKey: "\(prefix).cancelled",
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
+        let parameters = Self.ddnsParameters(
+            draft,
+            hostname: draft.normalizedHostname,
+            username: draft.normalizedUsername
+        )
+        do {
+            try await callVoid(
+                DsmAPIName.coreDDNSRecord,
+                method: "test",
+                parameters: parameters
+            )
+            if Task.isCancelled {
+                return try ddnsCancellationAfterSubmissionResult(
+                    operation: operation,
+                    prefix: prefix
                 )
             }
+            return try ddnsMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 1,
+                failed: 0,
+                unknown: 0,
+                localizationKey: "\(prefix).completed",
+                diagnosticTag: "\(prefix).accepted"
+            )
+        } catch let error as AppError {
+            if error.category == .cancelled {
+                return try ddnsCancellationAfterSubmissionResult(
+                    operation: operation,
+                    prefix: prefix
+                )
+            }
+            if ddnsSubmissionIsAmbiguous(error.category) {
+                return try ddnsUnverifiedResult(
+                    operation: operation,
+                    prefix: prefix,
+                    category: error.category,
+                    diagnosticTag: "\(prefix).submission-unverified"
+                )
+            }
+            return try ddnsRejectedResult(
+                error,
+                operation: operation,
+                prefix: prefix,
+                submitted: true
+            )
+        } catch {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                diagnosticTag: "\(prefix).submission-unknown"
+            )
         }
-        var parameters = Self.ddnsParameters(draft, hostname: hostname, username: username)
-        if draft.password.isEmpty, draft.providerID != "Synology" {
+    }
+
+    public func saveDDNS(_ draft: NasDDNSDraft) async throws {
+        let result = try await saveDDNSResult(draft)
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw ddnsOperationError(for: result, fallbackKey: "ddns.save.failed")
+        }
+    }
+
+    public func saveDDNSResult(
+        _ draft: NasDDNSDraft
+    ) async throws -> MutationResult {
+        let operation = "ddnsRecordSave"
+        let prefix = "ddns.save"
+        if Task.isCancelled {
+            return try ddnsCancelledBeforeSubmissionResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        guard draft.isValidForSubmission else {
+            return try ddnsInvalidResult(operation: operation, prefix: prefix)
+        }
+        guard ddnsCapabilitiesAreAvailable else {
+            return try ddnsUnsupportedResult(operation: operation, prefix: prefix)
+        }
+        let providerID = draft.normalizedProviderID
+        guard !isDDNSRefreshActive,
+              activeDDNSProviderIDs.insert(providerID).inserted else {
+            return try ddnsBusyResult(operation: operation, prefix: prefix)
+        }
+        defer { activeDDNSProviderIDs.remove(providerID) }
+
+        let directory: NasDDNSDirectory
+        do {
+            directory = try await loadDDNS()
+        } catch let error as AppError {
+            return try ddnsRejectedResult(
+                error,
+                operation: operation,
+                prefix: prefix,
+                submitted: false
+            )
+        } catch {
+            return try ddnsUnknownPreflightResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        guard directory.providers.contains(where: { $0.id == providerID }) else {
+            return try ddnsInvalidResult(operation: operation, prefix: prefix)
+        }
+        if let original = draft.originalProviderID {
+            guard original == providerID,
+                  directory.records.contains(where: { $0.providerID == original }) else {
+                return try ddnsConflictResult(
+                    operation: operation,
+                    prefix: prefix,
+                    diagnosticTag: "\(prefix).missing-original"
+                )
+            }
+        } else if directory.records.contains(where: { $0.providerID == providerID }) {
+            return try ddnsConflictResult(
+                operation: operation,
+                prefix: prefix,
+                diagnosticTag: "\(prefix).duplicate-provider"
+            )
+        }
+        if Task.isCancelled {
+            return try ddnsCancelledBeforeSubmissionResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        var parameters = Self.ddnsParameters(
+            draft,
+            hostname: draft.normalizedHostname,
+            username: draft.normalizedUsername
+        )
+        if draft.password.isEmpty, providerID != "Synology" {
             parameters.removeValue(forKey: "passwd")
         }
-        try await callVoid(
-            DsmAPIName.coreDDNSRecord,
-            method: "test",
-            parameters: parameters
-        )
-        try await callVoid(
-            DsmAPIName.coreDDNSRecord,
-            method: draft.originalProviderID == nil ? "create" : "set",
-            parameters: parameters
-        )
-        try await callVoid(
-            DsmAPIName.coreDDNSRecord,
-            method: "update_ip_address",
-            parameters: ["id": .string(draft.providerID)]
-        )
-        let verified = try await loadDDNS()
-        guard let saved = verified.records.first(where: { $0.providerID == draft.providerID }),
-              saved.hostname == hostname,
-              saved.username == username,
-              saved.isEnabled == draft.isEnabled else {
-            throw verificationError(L10n.string("shared.dd472a06a448e1b0"))
+        do {
+            try await callVoid(
+                DsmAPIName.coreDDNSRecord,
+                method: draft.originalProviderID == nil ? "create" : "set",
+                parameters: parameters
+            )
+        } catch let error as AppError {
+            return try await ddnsSaveSubmissionFailureResult(
+                error,
+                draft: draft,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try await ddnsSaveUnknownSubmissionResult(
+                draft: draft,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        if Task.isCancelled {
+            return try ddnsCancellationAfterSubmissionResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        do {
+            let verified = try await loadDDNS()
+            return try ddnsSavedRecordResult(
+                directory: verified,
+                draft: draft,
+                operation: operation,
+                prefix: prefix,
+                treatsMismatchAsUnknown: false
+            )
+        } catch let error as AppError {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                category: error.category,
+                diagnosticTag: "\(prefix).readback-unverified"
+            )
+        } catch {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
         }
     }
 
     public func deleteDDNS(providerID: String) async throws {
-        let current = try await loadDDNS()
-        guard current.records.contains(where: { $0.providerID == providerID }) else { return }
-        try await callVoid(
-            DsmAPIName.coreDDNSRecord,
-            method: "delete",
-            parameters: ["id": .stringArray([providerID])]
+        let result = try await deleteDDNSResult(providerID: providerID)
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw ddnsOperationError(
+                for: result,
+                fallbackKey: "ddns.delete.failed"
+            )
+        }
+    }
+
+    public func deleteDDNSResult(
+        providerID: String
+    ) async throws -> MutationResult {
+        let operation = "ddnsRecordDelete"
+        let prefix = "ddns.delete"
+        let normalizedID = providerID.trimmingCharacters(
+            in: .whitespacesAndNewlines
         )
-        let verified = try await loadDDNS()
-        guard !verified.records.contains(where: { $0.providerID == providerID }) else {
-            throw verificationError(L10n.string("shared.60be7160962c7372"))
+        if Task.isCancelled {
+            return try ddnsCancelledBeforeSubmissionResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        guard !normalizedID.isEmpty else {
+            return try ddnsInvalidResult(operation: operation, prefix: prefix)
+        }
+        guard ddnsCapabilitiesAreAvailable else {
+            return try ddnsUnsupportedResult(operation: operation, prefix: prefix)
+        }
+        guard !isDDNSRefreshActive,
+              activeDDNSProviderIDs.insert(normalizedID).inserted else {
+            return try ddnsBusyResult(operation: operation, prefix: prefix)
+        }
+        defer { activeDDNSProviderIDs.remove(normalizedID) }
+
+        do {
+            let current = try await loadDDNS()
+            guard current.records.contains(where: {
+                $0.providerID == normalizedID
+            }) else {
+                return try ddnsConflictResult(
+                    operation: operation,
+                    prefix: prefix,
+                    diagnosticTag: "\(prefix).missing-record"
+                )
+            }
+        } catch let error as AppError {
+            return try ddnsRejectedResult(
+                error,
+                operation: operation,
+                prefix: prefix,
+                submitted: false
+            )
+        } catch {
+            return try ddnsUnknownPreflightResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        if Task.isCancelled {
+            return try ddnsCancelledBeforeSubmissionResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        do {
+            try await callVoid(
+                DsmAPIName.coreDDNSRecord,
+                method: "delete",
+                parameters: ["id": .stringArray([normalizedID])]
+            )
+        } catch let error as AppError {
+            return try await ddnsDeleteSubmissionFailureResult(
+                error,
+                providerID: normalizedID,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try await ddnsDeleteUnknownSubmissionResult(
+                providerID: normalizedID,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        if Task.isCancelled {
+            return try ddnsCancellationAfterSubmissionResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        do {
+            let verified = try await loadDDNS()
+            return try ddnsDeletedRecordResult(
+                directory: verified,
+                providerID: normalizedID,
+                operation: operation,
+                prefix: prefix,
+                treatsPresenceAsUnknown: false
+            )
+        } catch let error as AppError {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                category: error.category,
+                diagnosticTag: "\(prefix).readback-unverified"
+            )
+        } catch {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
         }
     }
 
     public func refreshDDNS() async throws {
-        try await callVoid(DsmAPIName.coreDDNSRecord, method: "update_ip_address")
-        _ = try await loadDDNS()
+        let result = try await refreshDDNSResult()
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw ddnsOperationError(
+                for: result,
+                fallbackKey: "ddns.refresh.failed"
+            )
+        }
+    }
+
+    public func refreshDDNSResult() async throws -> MutationResult {
+        let operation = "ddnsAddressRefresh"
+        let prefix = "ddns.refresh"
+        if Task.isCancelled {
+            return try ddnsCancelledBeforeSubmissionResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        guard ddnsCapabilitiesAreAvailable else {
+            return try ddnsUnsupportedResult(operation: operation, prefix: prefix)
+        }
+        guard !isDDNSRefreshActive, activeDDNSProviderIDs.isEmpty else {
+            return try ddnsBusyResult(operation: operation, prefix: prefix)
+        }
+        isDDNSRefreshActive = true
+        defer { isDDNSRefreshActive = false }
+
+        do {
+            let current = try await loadDDNS()
+            guard !current.records.isEmpty else {
+                return try ddnsConflictResult(
+                    operation: operation,
+                    prefix: prefix,
+                    diagnosticTag: "\(prefix).no-records"
+                )
+            }
+        } catch let error as AppError {
+            return try ddnsRejectedResult(
+                error,
+                operation: operation,
+                prefix: prefix,
+                submitted: false
+            )
+        } catch {
+            return try ddnsUnknownPreflightResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        if Task.isCancelled {
+            return try ddnsCancelledBeforeSubmissionResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        do {
+            try await callVoid(
+                DsmAPIName.coreDDNSRecord,
+                method: "update_ip_address"
+            )
+        } catch let error as AppError {
+            if error.category == .cancelled {
+                return try ddnsCancellationAfterSubmissionResult(
+                    operation: operation,
+                    prefix: prefix
+                )
+            }
+            if ddnsSubmissionIsAmbiguous(error.category) {
+                return try ddnsUnverifiedResult(
+                    operation: operation,
+                    prefix: prefix,
+                    category: error.category,
+                    diagnosticTag: "\(prefix).submission-unverified"
+                )
+            }
+            return try ddnsRejectedResult(
+                error,
+                operation: operation,
+                prefix: prefix,
+                submitted: true
+            )
+        } catch {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                diagnosticTag: "\(prefix).submission-unknown"
+            )
+        }
+        if Task.isCancelled {
+            return try ddnsCancellationAfterSubmissionResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        do {
+            _ = try await loadDDNS()
+            return try ddnsMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 1,
+                failed: 0,
+                unknown: 0,
+                localizationKey: "\(prefix).completed",
+                diagnosticTag: "\(prefix).accepted-and-reloaded"
+            )
+        } catch let error as AppError {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                category: error.category,
+                diagnosticTag: "\(prefix).readback-unverified"
+            )
+        } catch {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                diagnosticTag: "\(prefix).readback-unknown"
+            )
+        }
+    }
+
+    private var ddnsCapabilitiesAreAvailable: Bool {
+        capabilitySupports(DsmAPIName.coreDDNSProvider, version: 1)
+            && capabilitySupports(DsmAPIName.coreDDNSRecord, version: 1)
+    }
+
+    private func ddnsSaveSubmissionFailureResult(
+        _ submissionError: AppError,
+        draft: NasDDNSDraft,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        if submissionError.category == .cancelled {
+            return try ddnsCancellationAfterSubmissionResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        let ambiguous = ddnsSubmissionIsAmbiguous(submissionError.category)
+        do {
+            let verified = try await loadDDNS()
+            let result = try ddnsSavedRecordResult(
+                directory: verified,
+                draft: draft,
+                operation: operation,
+                prefix: prefix,
+                treatsMismatchAsUnknown: ambiguous
+            )
+            if result.status == .confirmedSuccess || ambiguous {
+                return result
+            }
+        } catch {
+            if ambiguous {
+                return try ddnsUnverifiedResult(
+                    operation: operation,
+                    prefix: prefix,
+                    category: submissionError.category,
+                    diagnosticTag: "\(prefix).readback-unverified"
+                )
+            }
+        }
+        return try ddnsRejectedResult(
+            submissionError,
+            operation: operation,
+            prefix: prefix,
+            submitted: true
+        )
+    }
+
+    private func ddnsSaveUnknownSubmissionResult(
+        draft: NasDDNSDraft,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        do {
+            let verified = try await loadDDNS()
+            return try ddnsSavedRecordResult(
+                directory: verified,
+                draft: draft,
+                operation: operation,
+                prefix: prefix,
+                treatsMismatchAsUnknown: true
+            )
+        } catch {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                diagnosticTag: "\(prefix).submission-unknown"
+            )
+        }
+    }
+
+    private func ddnsDeleteSubmissionFailureResult(
+        _ submissionError: AppError,
+        providerID: String,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        if submissionError.category == .cancelled {
+            return try ddnsCancellationAfterSubmissionResult(
+                operation: operation,
+                prefix: prefix
+            )
+        }
+        let ambiguous = ddnsSubmissionIsAmbiguous(submissionError.category)
+        do {
+            let verified = try await loadDDNS()
+            let result = try ddnsDeletedRecordResult(
+                directory: verified,
+                providerID: providerID,
+                operation: operation,
+                prefix: prefix,
+                treatsPresenceAsUnknown: ambiguous
+            )
+            if result.status == .confirmedSuccess || ambiguous {
+                return result
+            }
+        } catch {
+            if ambiguous {
+                return try ddnsUnverifiedResult(
+                    operation: operation,
+                    prefix: prefix,
+                    category: submissionError.category,
+                    diagnosticTag: "\(prefix).readback-unverified"
+                )
+            }
+        }
+        return try ddnsRejectedResult(
+            submissionError,
+            operation: operation,
+            prefix: prefix,
+            submitted: true
+        )
+    }
+
+    private func ddnsDeleteUnknownSubmissionResult(
+        providerID: String,
+        operation: String,
+        prefix: String
+    ) async throws -> MutationResult {
+        do {
+            let verified = try await loadDDNS()
+            return try ddnsDeletedRecordResult(
+                directory: verified,
+                providerID: providerID,
+                operation: operation,
+                prefix: prefix,
+                treatsPresenceAsUnknown: true
+            )
+        } catch {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                diagnosticTag: "\(prefix).submission-unknown"
+            )
+        }
+    }
+
+    private func ddnsSavedRecordResult(
+        directory: NasDDNSDirectory,
+        draft: NasDDNSDraft,
+        operation: String,
+        prefix: String,
+        treatsMismatchAsUnknown: Bool
+    ) throws -> MutationResult {
+        if let record = directory.records.first(where: {
+            $0.providerID == draft.normalizedProviderID
+        }), Self.ddnsRecord(record, matches: draft) {
+            return try ddnsMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 1,
+                failed: 0,
+                unknown: 0,
+                localizationKey: "\(prefix).completed",
+                diagnosticTag: "\(prefix).readback-confirmed"
+            )
+        }
+        if treatsMismatchAsUnknown {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                diagnosticTag: "\(prefix).readback-mismatch"
+            )
+        }
+        return try ddnsMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 1,
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationKey: "\(prefix).failed",
+            diagnosticTag: "\(prefix).readback-mismatch"
+        )
+    }
+
+    private func ddnsDeletedRecordResult(
+        directory: NasDDNSDirectory,
+        providerID: String,
+        operation: String,
+        prefix: String,
+        treatsPresenceAsUnknown: Bool
+    ) throws -> MutationResult {
+        if !directory.records.contains(where: { $0.providerID == providerID }) {
+            return try ddnsMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 1,
+                failed: 0,
+                unknown: 0,
+                localizationKey: "\(prefix).completed",
+                diagnosticTag: "\(prefix).readback-confirmed"
+            )
+        }
+        if treatsPresenceAsUnknown {
+            return try ddnsUnverifiedResult(
+                operation: operation,
+                prefix: prefix,
+                diagnosticTag: "\(prefix).readback-still-present"
+            )
+        }
+        return try ddnsMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 1,
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationKey: "\(prefix).failed",
+            diagnosticTag: "\(prefix).readback-still-present"
+        )
+    }
+
+    private static func ddnsRecord(
+        _ actual: NasDDNSRecord,
+        matches expected: NasDDNSDraft
+    ) -> Bool {
+        actual.providerID == expected.normalizedProviderID
+            && actual.hostname.lowercased() == expected.normalizedHostname
+            && actual.username == expected.normalizedUsername
+            && actual.isEnabled == expected.isEnabled
+            && actual.heartbeat == expected.heartbeat
+    }
+
+    private func ddnsSubmissionIsAmbiguous(
+        _ category: AppErrorCategory
+    ) -> Bool {
+        switch category {
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            true
+        default:
+            false
+        }
+    }
+
+    private func ddnsCancelledBeforeSubmissionResult(
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        try ddnsMutationResult(
+            status: .cancelledBeforeSubmission,
+            operation: operation,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 0,
+            unknown: 0,
+            localizationKey: "\(prefix).cancelled",
+            diagnosticTag: "\(prefix).cancelled-before-submission"
+        )
+    }
+
+    private func ddnsCancellationAfterSubmissionResult(
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        try ddnsMutationResult(
+            status: .cancellationRequestedAfterSubmission,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: 1,
+            errorCategory: .unknown,
+            localizationKey: "\(prefix).unverified",
+            diagnosticTag: "\(prefix).cancelled-after-submission"
+        )
+    }
+
+    private func ddnsInvalidResult(
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        try ddnsMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 1,
+            unknown: 0,
+            errorCategory: .validation,
+            localizationKey: "\(prefix).invalid",
+            diagnosticTag: "\(prefix).invalid-input"
+        )
+    }
+
+    private func ddnsConflictResult(
+        operation: String,
+        prefix: String,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try ddnsMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 1,
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationKey: "\(prefix).failed",
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func ddnsBusyResult(
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        try ddnsMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 1,
+            unknown: 0,
+            errorCategory: .conflict,
+            localizationKey: "ddns.operation.busy",
+            diagnosticTag: "\(prefix).duplicate-submission"
+        )
+    }
+
+    private func ddnsUnsupportedResult(
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        try ddnsMutationResult(
+            status: .unsupported,
+            operation: operation,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 1,
+            unknown: 0,
+            errorCategory: .unsupported,
+            localizationKey: "ddns.operation.unsupported",
+            diagnosticTag: "\(prefix).unsupported"
+        )
+    }
+
+    private func ddnsUnknownPreflightResult(
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        try ddnsMutationResult(
+            status: .confirmedFailure,
+            operation: operation,
+            submitted: false,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 1,
+            unknown: 0,
+            errorCategory: .unknown,
+            localizationKey: "\(prefix).failed",
+            diagnosticTag: "\(prefix).preflight-unknown"
+        )
+    }
+
+    private func ddnsUnverifiedResult(
+        operation: String,
+        prefix: String,
+        category: AppErrorCategory? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try ddnsMutationResult(
+            status: .submittedButUnverified,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: 1,
+            errorCategory: category.map {
+                packageMutationErrorCategory(for: $0)
+            },
+            localizationKey: "\(prefix).unverified",
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func ddnsRejectedResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String,
+        submitted: Bool
+    ) throws -> MutationResult {
+        let status: MutationResultStatus
+        let localizationKey: String
+        let category: MutationErrorCategory
+        switch error.category {
+        case .permissionDenied, .authenticationRequired:
+            status = .permissionDenied
+            localizationKey = "ddns.operation.permission-denied"
+            category = .permission
+        case .apiUnavailable, .versionUnsupported:
+            status = .unsupported
+            localizationKey = "ddns.operation.unsupported"
+            category = .unsupported
+        default:
+            status = .confirmedFailure
+            localizationKey = "\(prefix).failed"
+            category = packageMutationErrorCategory(for: error.category)
+        }
+        return try ddnsMutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: false,
+            succeeded: 0,
+            failed: 1,
+            unknown: 0,
+            errorCategory: category,
+            localizationKey: localizationKey,
+            diagnosticTag: "\(prefix).rejected"
+        )
+    }
+
+    private func ddnsMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        requiresRefresh: Bool,
+        succeeded: Int,
+        failed: Int,
+        unknown: Int,
+        errorCategory: MutationErrorCategory? = nil,
+        localizationKey: String? = nil,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: requiresRefresh,
+            counts: MutationResultCounts(
+                succeeded: succeeded,
+                failed: failed,
+                unknown: unknown
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
+        )
+    }
+
+    private func ddnsOperationError(
+        for result: MutationResult,
+        fallbackKey: String
+    ) -> AppError {
+        let category: AppErrorCategory = switch result.status {
+        case .permissionDenied:
+            .permissionDenied
+        case .unsupported:
+            .apiUnavailable
+        case .partialSuccess:
+            .partialFailure
+        case .cancelledBeforeSubmission, .cancellationRequestedAfterSubmission:
+            .cancelled
+        case .confirmedSuccess, .confirmedFailure, .submittedButUnverified:
+            .unknown
+        }
+        return AppError(
+            category: category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? fallbackKey
+            )
+        )
     }
 
     public func loadPerformanceSnapshot() async throws -> NasPerformanceSnapshot {
@@ -5244,6 +6918,126 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             diskUtilization: Self.percent(diskTotal.number(["utilization"]) ?? 0),
             nfsReadOperationsPerSecond: nfsRows.reduce(0) { $0 + ($1.integer(["read_OPS"]) ?? 0) },
             nfsWriteOperationsPerSecond: nfsRows.reduce(0) { $0 + ($1.integer(["write_OPS"]) ?? 0) }
+        )
+    }
+
+    public func loadSystemProcesses(
+        start: Int,
+        limit: Int
+    ) async throws -> NasProcessDirectory {
+        let safeStart = max(0, start)
+        let safeLimit = min(500, max(1, limit))
+        let processValue = try await call(
+            DsmAPIName.coreSystemProcess,
+            method: "list",
+            parameters: [
+                "start": .integer(safeStart),
+                "limit": .integer(safeLimit)
+            ]
+        )
+        let primaryProcessRows = processValue.objects("processes")
+        let processRows = primaryProcessRows.isEmpty
+            ? processValue.objects("items")
+            : primaryProcessRows
+        var seenProcessIDs = Set<String>()
+        let processes = processRows.compactMap { raw -> NasSystemProcess? in
+            let item = DsmDynamicJSON.object(raw)
+            guard let processID = Self.safeProcessID(
+                item.string(["pid", "process_id"])
+            ),
+            let name = Self.safeProcessDisplayName(
+                item.string(["name", "process_name"])
+            ) else {
+                return nil
+            }
+            let id = "process:\(processID)"
+            guard seenProcessIDs.insert(id).inserted else { return nil }
+            return NasSystemProcess(
+                id: id,
+                processID: processID,
+                name: name,
+                status: Self.safeProcessText(item.string(["status"]), maximumLength: 80),
+                groupID: Self.safeProcessGroupIdentifier(
+                    item.string(["group_id", "group", "service"])
+                )
+            )
+        }
+        .sorted {
+            let order = $0.name.localizedStandardCompare($1.name)
+            return order == .orderedSame
+                ? $0.processID.localizedStandardCompare($1.processID) == .orderedAscending
+                : order == .orderedAscending
+        }
+
+        var groups: [NasProcessGroup] = []
+        var groupsAreUnavailable = !capabilitySupports(
+            DsmAPIName.coreSystemProcessGroup,
+            version: 1
+        )
+        if !groupsAreUnavailable {
+            do {
+                let groupValue = try await call(
+                    DsmAPIName.coreSystemProcessGroup,
+                    method: "list",
+                    version: 1,
+                    parameters: [
+                        "start": .integer(0),
+                        "limit": .integer(safeLimit)
+                    ]
+                )
+                let primaryGroupRows = groupValue.objects("groups")
+                let groupRows = primaryGroupRows.isEmpty
+                    ? groupValue.objects("items")
+                    : primaryGroupRows
+                var seenGroupIDs = Set<String>()
+                groups = groupRows.compactMap { raw -> NasProcessGroup? in
+                    let item = DsmDynamicJSON.object(raw)
+                    guard let id = Self.safeProcessGroupIdentifier(
+                        item.string(["id", "group_id", "service"])
+                    ),
+                    seenGroupIDs.insert(id).inserted,
+                    let name = Self.safeProcessDisplayName(
+                        item.string(["display_name", "name", "service"])
+                    ) else {
+                        return nil
+                    }
+                    let count = item.integer(["process_count", "count"]).flatMap {
+                        $0 >= 0 && $0 <= 1_000_000 ? Int($0) : nil
+                    }
+                    return NasProcessGroup(
+                        id: id,
+                        name: name,
+                        status: Self.safeProcessText(
+                            item.string(["status"]),
+                            maximumLength: 80
+                        ),
+                        processCount: count
+                    )
+                }
+                .sorted {
+                    $0.name.localizedStandardCompare($1.name) == .orderedAscending
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as AppError where error.category == .cancelled {
+                throw CancellationError()
+            } catch {
+                // 服务进程组是可选只读补充，失败不得阻断进程列表。
+                groupsAreUnavailable = true
+            }
+        }
+
+        let reportedTotal = processValue.integer(["total", "total_count"]).flatMap {
+            $0 >= 0 && $0 <= 1_000_000 ? Int($0) : nil
+        }
+        let total = max(processes.count, reportedTotal ?? processes.count)
+        return NasProcessDirectory(
+            processes: processes,
+            groups: groups,
+            total: total,
+            isTruncated: safeStart + processes.count < total
+                || (processes.count == safeLimit && total == processes.count),
+            groupsAreUnavailable: groupsAreUnavailable
         )
     }
 
@@ -5796,6 +7590,12 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     }
 
     public func loadPackages() async throws -> [NasPackage] {
+        try await loadPackages(includingIcons: true)
+    }
+
+    private func loadPackages(
+        includingIcons: Bool
+    ) async throws -> [NasPackage] {
         let value = try await call(
             DsmAPIName.corePackage,
             method: "list",
@@ -5836,6 +7636,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             let canUninstall = installType?.lowercased() != "system"
                 && (additional.boolean(["ctl_uninstall"]) ?? true)
                 && (!hasOperationList || availableOperations.contains("uninstall"))
+            let isUpgradeAvailable = availableOperations.contains("upgrade")
 
             metadata[id] = PackageControlMetadata(
                 dsmApps: additional.strings(["dsm_apps"])
@@ -5859,6 +7660,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 canStart: canStart,
                 canStop: canStop,
                 canUninstall: canUninstall,
+                isUpgradeAvailable: isUpgradeAvailable,
                 // 更新需要安装来源、空间与依赖检查，不能复用列表接口直接触发。
                 canUpgrade: false
             )
@@ -5866,6 +7668,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         packageControlMetadata = metadata
 
+        guard includingIcons else { return packages }
         guard let iconCapability = capabilities[DsmAPIName.corePackageThumb],
               let iconVersion = iconCapability.selectedVersion else {
             return packages
@@ -5920,67 +7723,258 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     }
 
     public func controlPackage(id: String, action: NasPackageAction) async throws {
-        let normalizedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedID.isEmpty else {
+        let result = try await controlPackageResult(id: id, action: action)
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
             throw AppError(
-                category: .notFound,
+                category: packageControlAppErrorCategory(for: result),
                 isRetryable: false,
-                safeUserMessage: L10n.string("shared.86d86e549eb9d8ba")
+                safeUserMessage: L10n.string(
+                    result.localizationKey ?? "package.control.failed"
+                )
             )
         }
-        guard action != .upgrade else {
-            throw AppError(
-                category: .apiUnavailable,
-                isRetryable: false,
-                safeUserMessage: L10n.string("shared.c6caf25d12b5e5da")
-            )
+    }
+
+    /// 套件启动与停止按稳定套件 ID 去重；写请求不自动重放，只通过列表状态确认结果。
+    public func controlPackageResult(
+        id: String,
+        action: NasPackageAction
+    ) async throws -> MutationResult {
+        if action == .uninstall {
+            return try await uninstallPackageResult(id: id)
         }
 
+        let operation: String
+        let prefix: String
         let checkType: String
-        switch action {
-        case .start: checkType = "start_check"
-        case .stop: checkType = "stop_check"
-        case .uninstall: checkType = "uninstall_check"
-        case .upgrade: return
-        }
-        try await callVoid(
-            DsmAPIName.corePackage,
-            method: "feasibility_check",
-            parameters: [
-                "type": .string(checkType),
-                "packages": .stringArray([normalizedID])
-            ]
-        )
-
-        let metadata = packageControlMetadata[normalizedID]
+        let method: String
         switch action {
         case .start:
-            try await callVoid(
-                DsmAPIName.corePackageControl,
-                method: "start",
-                parameters: [
-                    "id": .string(normalizedID),
-                    "dsm_apps": .stringArray(metadata?.dsmApps ?? [])
-                ]
-            )
+            operation = "packageStart"
+            prefix = "package.start"
+            checkType = "start_check"
+            method = "start"
         case .stop:
-            try await callVoid(
-                DsmAPIName.corePackageControl,
-                method: "stop",
-                parameters: ["id": .string(normalizedID)]
-            )
+            operation = "packageStop"
+            prefix = "package.stop"
+            checkType = "stop_check"
+            method = "stop"
         case .uninstall:
+            operation = "packageUninstall"
+            prefix = "package.uninstall"
+            checkType = "uninstall_check"
+            method = "uninstall"
+        case .upgrade:
+            return try packageMutationResult(
+                status: .unsupported,
+                operation: "packageUpgrade",
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "package.upgrade.unsupported",
+                diagnosticTag: "package.upgrade.unsupported"
+            )
+        }
+
+        if Task.isCancelled {
+            return try packageMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                localizationKey: "package.control.cancelled",
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
+        }
+
+        let normalizedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedID.isEmpty else {
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .validation,
+                localizationKey: "package.control.not-found",
+                diagnosticTag: "\(prefix).invalid-id"
+            )
+        }
+        guard capabilities[DsmAPIName.corePackage]?.selectedVersion != nil,
+              capabilities[DsmAPIName.corePackageControl]?.selectedVersion != nil else {
+            return try packageMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "package.control.unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+        guard activePackageMutationIDs.insert(normalizedID).inserted else {
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "package.control.busy",
+                diagnosticTag: "\(prefix).duplicate-submission"
+            )
+        }
+        defer { activePackageMutationIDs.remove(normalizedID) }
+
+        let packages: [NasPackage]
+        do {
+            packages = try await loadPackages(includingIcons: false)
+        } catch let error as AppError {
+            return try packageControlPreflightResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unknown,
+                localizationKey: "package.control.failed",
+                diagnosticTag: "\(prefix).list-preflight-unknown"
+            )
+        }
+        guard let package = packages.first(where: { $0.id == normalizedID }) else {
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "package.control.not-found",
+                diagnosticTag: "\(prefix).not-found"
+            )
+        }
+        let isAvailable = action == .start ? package.canStart : package.canStop
+        guard isAvailable else {
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .conflict,
+                localizationKey: "\(prefix).unavailable",
+                diagnosticTag: "\(prefix).state-rejected"
+            )
+        }
+
+        do {
             try await callVoid(
-                DsmAPIName.corePackageUninstallation,
-                method: "uninstall",
+                DsmAPIName.corePackage,
+                method: "feasibility_check",
                 parameters: [
-                    "id": .string(normalizedID),
-                    "dsm_apps": .stringArray(metadata?.dsmApps ?? [])
+                    "type": .string(checkType),
+                    "packages": .stringArray([normalizedID])
                 ]
             )
-        case .upgrade:
-            return
+        } catch let error as AppError {
+            return try packageControlPreflightResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
         }
+
+        if Task.isCancelled {
+            return try packageMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                localizationKey: "package.control.cancelled",
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
+
+        var parameters: [String: DsmParameterValue] = [
+            "id": .string(normalizedID)
+        ]
+        if action == .start {
+            parameters["dsm_apps"] = .stringArray(
+                packageControlMetadata[normalizedID]?.dsmApps ?? []
+            )
+        }
+        do {
+            try await callVoid(
+                DsmAPIName.corePackageControl,
+                method: method,
+                parameters: parameters
+            )
+        } catch let error as AppError {
+            if packageControlSubmissionMayBeAmbiguous(error.category) {
+                return try await reconcilePackageControlAfterAmbiguousSubmission(
+                    id: normalizedID,
+                    action: action,
+                    operation: operation,
+                    prefix: prefix,
+                    submissionError: error
+                )
+            }
+            return try packageControlSubmissionResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try packageMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: .unknown,
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submission-unknown"
+            )
+        }
+
+        return try await pollPackageControlState(
+            id: normalizedID,
+            action: action,
+            operation: operation,
+            prefix: prefix,
+            maximumAttempts: 10
+        )
     }
 
     /// 套件卸载属于破坏性操作；请求提交后必须通过套件列表回读确认，未知结果不得自动重放。
@@ -6029,7 +8023,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 diagnosticTag: "package.uninstall.unsupported"
             )
         }
-        guard activePackageUninstallIDs.insert(normalizedID).inserted else {
+        guard activePackageMutationIDs.insert(normalizedID).inserted else {
             return try packageMutationResult(
                 status: .confirmedFailure,
                 operation: operation,
@@ -6043,7 +8037,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 diagnosticTag: "package.uninstall.duplicate-submission"
             )
         }
-        defer { activePackageUninstallIDs.remove(normalizedID) }
+        defer { activePackageMutationIDs.remove(normalizedID) }
 
         do {
             try await callVoid(
@@ -6055,7 +8049,11 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 ]
             )
         } catch let error as AppError {
-            return try packagePreflightResult(error, operation: operation)
+            return try packagePreflightResult(
+                error,
+                operation: operation,
+                prefix: "package.uninstall"
+            )
         }
 
         if Task.isCancelled {
@@ -6083,7 +8081,11 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 ]
             )
         } catch let error as AppError {
-            return try packageSubmissionResult(error, operation: operation)
+            return try packageSubmissionResult(
+                error,
+                operation: operation,
+                prefix: "package.uninstall"
+            )
         }
 
         if Task.isCancelled {
@@ -6101,7 +8103,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         }
 
         do {
-            let packages = try await loadPackages()
+            let packages = try await loadPackages(includingIcons: false)
             if packages.contains(where: { $0.id == normalizedID }) {
                 return try packageMutationResult(
                     status: .submittedButUnverified,
@@ -6158,19 +8160,296 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
     }
 
     public func performPowerAction(_ action: NasPowerAction) async throws {
+        let result = try await performPowerActionResult(action)
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw AppError(
+                category: powerAppErrorCategory(for: result),
+                isRetryable: false,
+                safeUserMessage: L10n.string(
+                    result.localizationKey ?? "power.action.rejected"
+                )
+            )
+        }
+    }
+
+    /// 电源请求无法安全回读；明确响应只表示 DSM 已接受，提交阶段断线不得自动重放。
+    public func performPowerActionResult(
+        _ action: NasPowerAction
+    ) async throws -> MutationResult {
+        let operation = action == .shutdown ? "nasShutdown" : "nasReboot"
+        let prefix = action == .shutdown ? "power.shutdown" : "power.reboot"
+        if Task.isCancelled {
+            return try powerMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                errorCategory: nil,
+                localizationKey: "power.action.cancelled",
+                diagnosticTag: "\(prefix).cancelled-before-submission"
+            )
+        }
+        guard capabilities[DsmAPIName.coreSystem]?.selectedVersion != nil else {
+            return try powerMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                errorCategory: .unsupported,
+                localizationKey: "power.action.unsupported",
+                diagnosticTag: "\(prefix).unsupported"
+            )
+        }
+        guard !isPowerActionActive else {
+            return try powerMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                errorCategory: .conflict,
+                localizationKey: "power.action.busy",
+                diagnosticTag: "\(prefix).duplicate"
+            )
+        }
+        isPowerActionActive = true
+        defer { isPowerActionActive = false }
+
+        do {
+            _ = try await call(DsmAPIName.coreSystem, method: "info")
+        } catch let error as AppError {
+            return try powerPreflightFailureResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try powerMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                errorCategory: .unknown,
+                localizationKey: "power.action.preflight-failed",
+                diagnosticTag: "\(prefix).preflight-unknown"
+            )
+        }
+
+        if Task.isCancelled {
+            return try powerMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                errorCategory: nil,
+                localizationKey: "power.action.cancelled",
+                diagnosticTag: "\(prefix).cancelled-after-preflight"
+            )
+        }
+
         let method: String
         switch action {
         case .shutdown: method = "shutdown"
         case .reboot: method = "reboot"
         }
-        _ = try await call(
-            DsmAPIName.coreSystem,
-            method: method,
-            parameters: [:]
+        do {
+            try await callVoid(
+                DsmAPIName.coreSystem,
+                method: method,
+                parameters: [:]
+            )
+            return try powerMutationResult(
+                status: .confirmedSuccess,
+                operation: operation,
+                submitted: true,
+                errorCategory: nil,
+                localizationKey: "\(prefix).accepted",
+                diagnosticTag: "\(prefix).accepted"
+            )
+        } catch let error as AppError {
+            return try powerSubmissionFailureResult(
+                error,
+                operation: operation,
+                prefix: prefix
+            )
+        } catch {
+            return try powerMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                errorCategory: .unknown,
+                localizationKey: "power.action.unverified",
+                diagnosticTag: "\(prefix).submission-unknown"
+            )
+        }
+    }
+
+    private func powerPreflightFailureResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        switch error.category {
+        case .cancelled:
+            return try powerMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                errorCategory: nil,
+                localizationKey: "power.action.cancelled",
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        case .permissionDenied:
+            return try powerMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: false,
+                errorCategory: .permission,
+                localizationKey: "power.action.permission-denied",
+                diagnosticTag: "\(prefix).preflight-permission-denied"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try powerMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                errorCategory: .unsupported,
+                localizationKey: "power.action.unsupported",
+                diagnosticTag: "\(prefix).preflight-unsupported"
+            )
+        case .authenticationRequired, .otpRequired:
+            return try powerMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                errorCategory: .authentication,
+                localizationKey: "power.action.session-expired",
+                diagnosticTag: "\(prefix).preflight-authentication"
+            )
+        default:
+            return try powerMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "power.action.preflight-failed",
+                diagnosticTag: "\(prefix).preflight-failed"
+            )
+        }
+    }
+
+    private func powerSubmissionFailureResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        switch error.category {
+        case .cancelled:
+            return try powerMutationResult(
+                status: .cancellationRequestedAfterSubmission,
+                operation: operation,
+                submitted: true,
+                errorCategory: .unknown,
+                localizationKey: "power.action.unverified",
+                diagnosticTag: "\(prefix).cancelled-during-submission"
+            )
+        case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            return try powerMutationResult(
+                status: .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "power.action.unverified",
+                diagnosticTag: "\(prefix).submitted-unverified"
+            )
+        case .permissionDenied:
+            return try powerMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: true,
+                errorCategory: .permission,
+                localizationKey: "power.action.permission-denied",
+                diagnosticTag: "\(prefix).permission-denied"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try powerMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: true,
+                errorCategory: .unsupported,
+                localizationKey: "power.action.unsupported",
+                diagnosticTag: "\(prefix).unsupported-response"
+            )
+        case .authenticationRequired, .otpRequired:
+            return try powerMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: true,
+                errorCategory: .authentication,
+                localizationKey: "power.action.session-expired",
+                diagnosticTag: "\(prefix).authentication-rejected"
+            )
+        default:
+            return try powerMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: true,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "power.action.rejected",
+                diagnosticTag: "\(prefix).rejected"
+            )
+        }
+    }
+
+    private func powerMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        submitted: Bool,
+        errorCategory: MutationErrorCategory?,
+        localizationKey: String,
+        diagnosticTag: String
+    ) throws -> MutationResult {
+        let isUnknown = status == .submittedButUnverified
+            || status == .cancellationRequestedAfterSubmission
+        return try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: isUnknown,
+            counts: MutationResultCounts(
+                succeeded: status == .confirmedSuccess ? 1 : 0,
+                failed: [
+                    .confirmedFailure,
+                    .permissionDenied,
+                    .unsupported
+                ].contains(status) ? 1 : 0,
+                unknown: isUnknown ? 1 : 0
+            ),
+            errorCategory: errorCategory,
+            localizationKey: localizationKey,
+            diagnosticTag: diagnosticTag
         )
     }
 
+    private func powerAppErrorCategory(
+        for result: MutationResult
+    ) -> AppErrorCategory {
+        switch result.status {
+        case .permissionDenied:
+            .permissionDenied
+        case .unsupported:
+            .apiUnavailable
+        case .cancelledBeforeSubmission, .cancellationRequestedAfterSubmission:
+            .cancelled
+        case .partialSuccess:
+            .partialFailure
+        case .confirmedSuccess, .confirmedFailure, .submittedButUnverified:
+            .unknown
+        }
+    }
+
     public func checkSystemUpdate() async throws -> NasSystemUpdateInfo {
+        func normalized(_ value: String?) -> String? {
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
         let system = try await call(
             DsmAPIName.coreSystem,
             method: "info",
@@ -6187,17 +8466,19 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             ]
         )
         let update = updateResponse["update"] ?? .null
-        let latestVersion = update.string(["version"])
+        let currentVersion = normalized(system.string(["firmware_ver", "version"]))
+        let latestVersion = normalized(update.string(["version"]))
+        let releaseNotes = normalized(update.string([
+            "release_note",
+            "release_notes",
+            "whats_new",
+            "description"
+        ]))
         return NasSystemUpdateInfo(
-            isUpdateAvailable: latestVersion?.isEmpty == false,
-            currentVersion: system.string(["firmware_ver", "version"]),
+            isUpdateAvailable: latestVersion != nil && latestVersion != currentVersion,
+            currentVersion: currentVersion,
             latestVersion: latestVersion,
-            releaseNotes: update.string([
-                "release_note",
-                "release_notes",
-                "whats_new",
-                "description"
-            ])
+            releaseNotes: releaseNotes
         )
     }
 
@@ -7715,7 +9996,8 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
 
     private func packagePreflightResult(
         _ error: AppError,
-        operation: String
+        operation: String,
+        prefix: String
     ) throws -> MutationResult {
         let status: MutationResultStatus
         let localizationKey: String
@@ -7729,17 +10011,17 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 succeeded: 0,
                 failed: 0,
                 unknown: 0,
-                diagnosticTag: "package.uninstall.preflight-cancelled"
+                diagnosticTag: "\(prefix).preflight-cancelled"
             )
         case .permissionDenied, .authenticationRequired:
             status = .permissionDenied
-            localizationKey = "package.uninstall.permission-denied"
+            localizationKey = "\(prefix).permission-denied"
         case .apiUnavailable, .versionUnsupported:
             status = .unsupported
-            localizationKey = "package.uninstall.unsupported"
+            localizationKey = "\(prefix).unsupported"
         default:
             status = .confirmedFailure
-            localizationKey = "package.uninstall.failed"
+            localizationKey = "\(prefix).failed"
         }
         return try packageMutationResult(
             status: status,
@@ -7751,13 +10033,14 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             unknown: 0,
             errorCategory: packageMutationErrorCategory(for: error.category),
             localizationKey: localizationKey,
-            diagnosticTag: "package.uninstall.preflight-rejected"
+            diagnosticTag: "\(prefix).preflight-rejected"
         )
     }
 
     private func packageSubmissionResult(
         _ error: AppError,
-        operation: String
+        operation: String,
+        prefix: String
     ) throws -> MutationResult {
         switch error.category {
         case .cancelled:
@@ -7769,8 +10052,8 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 succeeded: 0,
                 failed: 0,
                 unknown: 1,
-                localizationKey: "package.uninstall.unverified",
-                diagnosticTag: "package.uninstall.submission-cancelled"
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submission-cancelled"
             )
         case .permissionDenied, .authenticationRequired:
             return try packageMutationResult(
@@ -7782,8 +10065,8 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 failed: 1,
                 unknown: 0,
                 errorCategory: .permission,
-                localizationKey: "package.uninstall.permission-denied",
-                diagnosticTag: "package.uninstall.permission-denied"
+                localizationKey: "\(prefix).permission-denied",
+                diagnosticTag: "\(prefix).permission-denied"
             )
         case .apiUnavailable, .versionUnsupported:
             return try packageMutationResult(
@@ -7795,8 +10078,8 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 failed: 1,
                 unknown: 0,
                 errorCategory: .unsupported,
-                localizationKey: "package.uninstall.unsupported",
-                diagnosticTag: "package.uninstall.unsupported-response"
+                localizationKey: "\(prefix).unsupported",
+                diagnosticTag: "\(prefix).unsupported-response"
             )
         case .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
             return try packageMutationResult(
@@ -7808,8 +10091,8 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 failed: 0,
                 unknown: 1,
                 errorCategory: packageMutationErrorCategory(for: error.category),
-                localizationKey: "package.uninstall.unverified",
-                diagnosticTag: "package.uninstall.submitted-unverified"
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unverified"
             )
         default:
             return try packageMutationResult(
@@ -7821,9 +10104,350 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
                 failed: 1,
                 unknown: 0,
                 errorCategory: packageMutationErrorCategory(for: error.category),
-                localizationKey: "package.uninstall.failed",
-                diagnosticTag: "package.uninstall.rejected"
+                localizationKey: "\(prefix).failed",
+                diagnosticTag: "\(prefix).rejected"
             )
+        }
+    }
+
+    private func packageControlPreflightResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        switch error.category {
+        case .cancelled:
+            return try packageMutationResult(
+                status: .cancelledBeforeSubmission,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 0,
+                unknown: 0,
+                localizationKey: "package.control.cancelled",
+                diagnosticTag: "\(prefix).preflight-cancelled"
+            )
+        case .permissionDenied:
+            return try packageMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationKey: "package.control.permission-denied",
+                diagnosticTag: "\(prefix).preflight-permission-denied"
+            )
+        case .authenticationRequired, .otpRequired:
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .authentication,
+                localizationKey: "package.control.session-expired",
+                diagnosticTag: "\(prefix).preflight-authentication"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try packageMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "package.control.unsupported",
+                diagnosticTag: "\(prefix).preflight-unsupported"
+            )
+        default:
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: false,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "package.control.failed",
+                diagnosticTag: "\(prefix).preflight-failed"
+            )
+        }
+    }
+
+    private func packageControlSubmissionResult(
+        _ error: AppError,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        switch error.category {
+        case .permissionDenied:
+            return try packageMutationResult(
+                status: .permissionDenied,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .permission,
+                localizationKey: "package.control.permission-denied",
+                diagnosticTag: "\(prefix).permission-denied"
+            )
+        case .authenticationRequired, .otpRequired:
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .authentication,
+                localizationKey: "package.control.session-expired",
+                diagnosticTag: "\(prefix).authentication-rejected"
+            )
+        case .apiUnavailable, .versionUnsupported:
+            return try packageMutationResult(
+                status: .unsupported,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: .unsupported,
+                localizationKey: "package.control.unsupported",
+                diagnosticTag: "\(prefix).unsupported-response"
+            )
+        case .cancelled, .networkUnavailable, .timeout, .serverBusy, .invalidResponse, .unknown:
+            return try packageMutationResult(
+                status: error.category == .cancelled
+                    ? .cancellationRequestedAfterSubmission
+                    : .submittedButUnverified,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: true,
+                succeeded: 0,
+                failed: 0,
+                unknown: 1,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "\(prefix).unverified",
+                diagnosticTag: "\(prefix).submitted-unverified"
+            )
+        default:
+            return try packageMutationResult(
+                status: .confirmedFailure,
+                operation: operation,
+                submitted: true,
+                requiresRefresh: false,
+                succeeded: 0,
+                failed: 1,
+                unknown: 0,
+                errorCategory: packageMutationErrorCategory(for: error.category),
+                localizationKey: "package.control.failed",
+                diagnosticTag: "\(prefix).rejected"
+            )
+        }
+    }
+
+    private func packageControlSubmissionMayBeAmbiguous(
+        _ category: AppErrorCategory
+    ) -> Bool {
+        switch category {
+        case .cancelled, .networkUnavailable, .timeout, .serverBusy,
+             .invalidResponse, .unknown:
+            true
+        default:
+            false
+        }
+    }
+
+    private func reconcilePackageControlAfterAmbiguousSubmission(
+        id: String,
+        action: NasPackageAction,
+        operation: String,
+        prefix: String,
+        submissionError: AppError
+    ) async throws -> MutationResult {
+        if submissionError.category == .cancelled || Task.isCancelled {
+            let readback = await Task.detached {
+                try await self.loadPackages(includingIcons: false)
+            }.result
+            if case let .success(packages) = readback,
+               packageControlStateMatches(
+                   packages: packages,
+                   id: id,
+                   action: action
+               ) {
+                return try packageMutationResult(
+                    status: .confirmedSuccess,
+                    operation: operation,
+                    submitted: true,
+                    requiresRefresh: false,
+                    succeeded: 1,
+                    failed: 0,
+                    unknown: 0,
+                    localizationKey: "\(prefix).completed",
+                    diagnosticTag: "\(prefix).confirmed-after-cancellation"
+                )
+            }
+            return try packageControlSubmissionResult(
+                submissionError,
+                operation: operation,
+                prefix: prefix
+            )
+        }
+
+        return try await pollPackageControlState(
+            id: id,
+            action: action,
+            operation: operation,
+            prefix: prefix,
+            maximumAttempts: 3,
+            fallbackErrorCategory: packageMutationErrorCategory(
+                for: submissionError.category
+            )
+        )
+    }
+
+    private func pollPackageControlState(
+        id: String,
+        action: NasPackageAction,
+        operation: String,
+        prefix: String,
+        maximumAttempts: Int,
+        fallbackErrorCategory: MutationErrorCategory? = nil
+    ) async throws -> MutationResult {
+        var lastErrorCategory = fallbackErrorCategory
+        for attempt in 0..<maximumAttempts {
+            do {
+                let packages = try await loadPackages(includingIcons: false)
+                if packageControlStateMatches(
+                    packages: packages,
+                    id: id,
+                    action: action
+                ) {
+                    return try packageMutationResult(
+                        status: .confirmedSuccess,
+                        operation: operation,
+                        submitted: true,
+                        requiresRefresh: false,
+                        succeeded: 1,
+                        failed: 0,
+                        unknown: 0,
+                        localizationKey: "\(prefix).completed",
+                        diagnosticTag: "\(prefix).confirmed"
+                    )
+                }
+            } catch let error as AppError {
+                if error.category == .cancelled {
+                    return try packageMutationResult(
+                        status: .cancellationRequestedAfterSubmission,
+                        operation: operation,
+                        submitted: true,
+                        requiresRefresh: true,
+                        succeeded: 0,
+                        failed: 0,
+                        unknown: 1,
+                        errorCategory: .unknown,
+                        localizationKey: "\(prefix).unverified",
+                        diagnosticTag: "\(prefix).readback-cancelled"
+                    )
+                }
+                lastErrorCategory = packageMutationErrorCategory(
+                    for: error.category
+                )
+            } catch {
+                lastErrorCategory = .unknown
+            }
+
+            if attempt < maximumAttempts - 1 {
+                do {
+                    try await Task.sleep(for: .seconds(1))
+                } catch {
+                    return try packageMutationResult(
+                        status: .cancellationRequestedAfterSubmission,
+                        operation: operation,
+                        submitted: true,
+                        requiresRefresh: true,
+                        succeeded: 0,
+                        failed: 0,
+                        unknown: 1,
+                        errorCategory: .unknown,
+                        localizationKey: "\(prefix).unverified",
+                        diagnosticTag: "\(prefix).poll-cancelled"
+                    )
+                }
+            }
+        }
+
+        return try packageMutationResult(
+            status: .submittedButUnverified,
+            operation: operation,
+            submitted: true,
+            requiresRefresh: true,
+            succeeded: 0,
+            failed: 0,
+            unknown: 1,
+            errorCategory: lastErrorCategory ?? .conflict,
+            localizationKey: "\(prefix).unverified",
+            diagnosticTag: "\(prefix).poll-timeout"
+        )
+    }
+
+    private func packageControlStateMatches(
+        packages: [NasPackage],
+        id: String,
+        action: NasPackageAction
+    ) -> Bool {
+        guard let package = packages.first(where: { $0.id == id }) else {
+            return false
+        }
+        let status = package.status?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        switch action {
+        case .start:
+            return package.canStop
+                || status == "running"
+                || status == "active"
+        case .stop:
+            return package.canStart
+                || status == "stopped"
+                || status == "inactive"
+                || status == "disabled"
+        case .uninstall, .upgrade:
+            return false
+        }
+    }
+
+    private func packageControlAppErrorCategory(
+        for result: MutationResult
+    ) -> AppErrorCategory {
+        switch result.status {
+        case .permissionDenied:
+            .permissionDenied
+        case .unsupported:
+            .apiUnavailable
+        case .cancelledBeforeSubmission, .cancellationRequestedAfterSubmission:
+            .cancelled
+        case .partialSuccess:
+            .partialFailure
+        case .confirmedSuccess:
+            .unknown
+        case .confirmedFailure:
+            result.errorCategory == .conflict ? .conflict : .unknown
+        case .submittedButUnverified:
+            .unknown
         }
     }
 
@@ -7931,28 +10555,6 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         components.minute = minute ?? 0
         components.second = second ?? 0
         return components.date
-    }
-
-    private static func isValidTimeServer(_ value: String) -> Bool {
-        guard value.count <= 253, !value.isEmpty,
-              value.unicodeScalars.allSatisfy({
-                  CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:")
-                      .contains($0)
-              }) else {
-            return false
-        }
-        return !value.hasPrefix(".") && !value.hasSuffix(".") && !value.contains("..")
-    }
-
-    private static func isValidHostname(_ value: String) -> Bool {
-        guard value.count <= 253, !value.isEmpty,
-              value.unicodeScalars.allSatisfy({
-                  CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
-                      .contains($0)
-              }) else {
-            return false
-        }
-        return !value.hasPrefix(".") && !value.hasSuffix(".") && !value.contains("..")
     }
 
     private static func ddnsParameters(
@@ -8097,6 +10699,7 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             canStart: package.canStart,
             canStop: package.canStop,
             canUninstall: package.canUninstall,
+            isUpgradeAvailable: package.isUpgradeAvailable,
             canUpgrade: package.canUpgrade
         )
     }
@@ -8180,6 +10783,157 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         let parts = value.split(separator: ":").compactMap { Int64($0) }
         guard parts.count == 3 else { return nil }
         return parts[0] * 3_600 + parts[1] * 60 + parts[2]
+    }
+
+    private static func safeProcessID(_ raw: String?) -> String? {
+        guard let value = safeProcessText(raw, maximumLength: 32),
+              value.allSatisfy(\.isNumber) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func safeProcessGroupIdentifier(_ raw: String?) -> String? {
+        guard let value = safeProcessText(raw, maximumLength: 128),
+              value.unicodeScalars.allSatisfy({
+                  CharacterSet.alphanumerics.union(
+                      CharacterSet(charactersIn: "._-:")
+                  ).contains($0)
+              }) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func safeProcessDisplayName(_ raw: String?) -> String? {
+        guard let value = safeProcessText(raw, maximumLength: 512) else {
+            return nil
+        }
+        let components = value.split { $0 == "/" || $0 == "\\" }
+        return safeProcessText(
+            components.last.map(String.init) ?? value,
+            maximumLength: 160
+        )
+    }
+
+    private static func safeProcessText(
+        _ raw: String?,
+        maximumLength: Int
+    ) -> String? {
+        guard let raw else { return nil }
+        let normalized = raw
+            .components(separatedBy: .newlines)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        return String(normalized.prefix(maximumLength))
+    }
+
+    private static func safePowerScheduleIdentifier(_ raw: String?) -> String? {
+        guard let value = safeProcessText(raw, maximumLength: 128),
+              value.unicodeScalars.allSatisfy({
+                  CharacterSet.alphanumerics.union(
+                      CharacterSet(charactersIn: "._-:")
+                  ).contains($0)
+              }) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func safePowerScheduleTimeZone(_ raw: String?) -> String? {
+        guard let value = safeProcessText(raw, maximumLength: 128),
+              value.unicodeScalars.allSatisfy({
+                  CharacterSet.alphanumerics.union(
+                      CharacterSet(charactersIn: "_/+-")
+                  ).contains($0)
+              }) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func powerScheduleAction(_ raw: String?) -> NasPowerScheduleAction {
+        switch raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "startup", "start", "poweron", "power_on", "boot":
+            return .startup
+        case "shutdown", "stop", "poweroff", "power_off":
+            return .shutdown
+        case "restart", "reboot":
+            return .restart
+        default:
+            return .unknown
+        }
+    }
+
+    private static func powerScheduleRecurrence(
+        _ item: DsmDynamicJSON
+    ) -> NasPowerScheduleRecurrence {
+        if let date = powerScheduleDate(item.string(["date", "run_date"])) {
+            return .once(date)
+        }
+
+        let rawWeekdays = item.strings(["weekdays", "days"])
+        let tokens: [String]
+        if rawWeekdays.isEmpty {
+            tokens = item.string(["weekdays", "days", "repeat"])
+                .map {
+                    $0.split { character in
+                        character == "," || character == " " || character == ";"
+                    }.map(String.init)
+                } ?? []
+        } else {
+            tokens = rawWeekdays
+        }
+        let weekdays = Set(tokens.compactMap(powerScheduleWeekday))
+        guard weekdays.count == tokens.count, !weekdays.isEmpty else {
+            return .unknown
+        }
+        if weekdays.count == NasWeekday.allCases.count {
+            return .daily
+        }
+        return .weekly(weekdays.sorted { $0.rawValue < $1.rawValue })
+    }
+
+    private static func powerScheduleWeekday(_ raw: String) -> NasWeekday? {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "mon", "monday": .monday
+        case "tue", "tues", "tuesday": .tuesday
+        case "wed", "wednesday": .wednesday
+        case "thu", "thur", "thurs", "thursday": .thursday
+        case "fri", "friday": .friday
+        case "sat", "saturday": .saturday
+        case "sun", "sunday": .sunday
+        default: nil
+        }
+    }
+
+    private static func powerScheduleDate(_ raw: String?) -> NasPowerScheduleDate? {
+        guard let raw else { return nil }
+        let parts = raw.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3,
+              (1970...9999).contains(parts[0]),
+              (1...12).contains(parts[1]),
+              (1...31).contains(parts[2]) else {
+            return nil
+        }
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.year = parts[0]
+        components.month = parts[1]
+        components.day = parts[2]
+        guard let resolvedDate = components.date else { return nil }
+        let resolved = components.calendar?.dateComponents(
+            [.year, .month, .day],
+            from: resolvedDate
+        )
+        guard resolved?.year == parts[0],
+              resolved?.month == parts[1],
+              resolved?.day == parts[2] else {
+            return nil
+        }
+        return NasPowerScheduleDate(year: parts[0], month: parts[1], day: parts[2])
     }
 
     private static func date(from value: String?) -> Date? {

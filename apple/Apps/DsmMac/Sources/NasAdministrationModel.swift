@@ -11,6 +11,7 @@ enum NasSettingsPage: String, CaseIterable, Identifiable {
     case network
     case interfaces
     case hardware
+    case powerSchedule
     case remoteAccess
     case security
     case region
@@ -18,6 +19,8 @@ enum NasSettingsPage: String, CaseIterable, Identifiable {
     case packages
     case tasks
     case accounts
+    case shareAccess
+    case processes
     case logs
     case connections
 
@@ -304,6 +307,9 @@ actor UnavailableNasAdministrationRepository: NasSettingsRepository {
     func loadPackages() async throws -> [NasPackage] { throw unavailable() }
     func loadScheduledTasks() async throws -> [NasScheduledTask] { throw unavailable() }
     func loadAccountsAndGroups() async throws -> NasAccountDirectory { throw unavailable() }
+    func loadSystemProcesses(start: Int, limit: Int) async throws -> NasProcessDirectory {
+        throw unavailable()
+    }
     func loadLogs(offset: Int, limit: Int) async throws -> NasLogPage { throw unavailable() }
     func loadConnections(offset: Int, limit: Int) async throws -> NasConnectionPage { throw unavailable() }
 }
@@ -330,6 +336,7 @@ final class NasSettingsModel {
     private(set) var proxy: NasProxySettings?
     private(set) var ethernetInterfaces: [NasEthernetInterface] = []
     private(set) var hardware: NasHardwareSettings?
+    private(set) var powerSchedule: NasPowerScheduleSnapshot?
     private(set) var remoteAccess: NasRemoteAccessSettings?
     private(set) var security: NasSecuritySettings?
     private(set) var region: NasRegionSettings?
@@ -338,6 +345,8 @@ final class NasSettingsModel {
     private(set) var packages: [NasPackage] = []
     private(set) var tasks: [NasScheduledTask] = []
     private(set) var accounts: NasAccountDirectory?
+    private(set) var shareAccess: NasShareAccessDirectory?
+    private(set) var processDirectory: NasProcessDirectory?
     private(set) var logs: NasLogPage?
     private(set) var connections: NasConnectionPage?
     private(set) var packageOperationIDs: Set<String> = []
@@ -349,6 +358,7 @@ final class NasSettingsModel {
     private(set) var networkOperationIDs: Set<String> = []
     private(set) var performanceIsLoading = false
     private(set) var isSavingServiceSettings = false
+    private(set) var isPerformingPowerAction = false
     private(set) var isModuleEnabled = false
     private var loadingPages: Set<NasSettingsPage> = []
     private var loadedPages: Set<NasSettingsPage> = []
@@ -356,16 +366,25 @@ final class NasSettingsModel {
 
     @ObservationIgnored private let repository: any NasSettingsRepository
     @ObservationIgnored private let storageAnalysisEngine: StorageAnalysisEngine?
+    @ObservationIgnored private let shareAccessRepository: (any NasShareAccessRepository)?
     @ObservationIgnored private var storageAnalysisTask: Task<Void, Never>?
     @ObservationIgnored private var requestGenerations: [NasSettingsPage: Int] = [:]
     @ObservationIgnored private var performanceGeneration = 0
 
     init(
         repository: any NasSettingsRepository = UnavailableNasAdministrationRepository(),
-        fileRepository: (any FileRepository)? = nil
+        fileRepository: (any FileRepository)? = nil,
+        shareAccessRepository: (any NasShareAccessRepository)? = nil
     ) {
         self.repository = repository
         self.storageAnalysisEngine = fileRepository.map(StorageAnalysisEngine.init(repository:))
+        if let shareAccessRepository {
+            self.shareAccessRepository = shareAccessRepository
+        } else if let fileRepository {
+            self.shareAccessRepository = FileStationShareAccessRepository(repository: fileRepository)
+        } else {
+            self.shareAccessRepository = nil
+        }
     }
 
     func setModuleEnabled(_ enabled: Bool) {
@@ -390,6 +409,7 @@ final class NasSettingsModel {
         storageAnalysisProgress = nil
         storageAnalysisError = nil
         isSavingServiceSettings = false
+        isPerformingPowerAction = false
         performanceIsLoading = false
         errors.removeAll()
     }
@@ -451,6 +471,10 @@ final class NasSettingsModel {
             await loadPage(.hardware, operation: { [repository] in
                 try await repository.loadHardwareSettings()
             }, apply: { hardware = $0 })
+        case .powerSchedule:
+            await loadPage(.powerSchedule, operation: { [repository] in
+                try await repository.loadPowerSchedule()
+            }, apply: { powerSchedule = $0 })
         case .remoteAccess:
             await loadPage(.remoteAccess, operation: { [repository] in
                 try await repository.loadRemoteAccessSettings()
@@ -479,6 +503,21 @@ final class NasSettingsModel {
             await loadPage(.accounts, operation: { [repository] in
                 try await repository.loadAccountsAndGroups()
             }, apply: { accounts = $0 })
+        case .shareAccess:
+            await loadPage(.shareAccess, operation: { [shareAccessRepository] in
+                guard let shareAccessRepository else {
+                    throw AppError(
+                        category: .apiUnavailable,
+                        isRetryable: false,
+                        safeUserMessage: L10n.string("share-access.unavailable")
+                    )
+                }
+                return try await shareAccessRepository.loadShareAccess()
+            }, apply: { shareAccess = $0 })
+        case .processes:
+            await loadPage(.processes, operation: { [repository] in
+                try await repository.loadSystemProcesses(start: 0, limit: 500)
+            }, apply: { processDirectory = $0 })
         case .logs:
             await fetchLogs(page: logCurrentPage, pageSize: logPageSize)
         case .connections:
@@ -805,7 +844,10 @@ final class NasSettingsModel {
         )
     }
 
-    func controlPackage(id: String, action: NasPackageAction) async throws {
+    func controlPackage(
+        id: String,
+        action: NasPackageAction
+    ) async throws -> MutationResult {
         guard packageOperationIDs.insert(id).inserted else {
             throw AppError(
                 category: .serverBusy,
@@ -830,7 +872,11 @@ final class NasSettingsModel {
         case .uninstall where !package.canUninstall:
             throw unavailablePackageAction(L10n.string("ui.8e3cf87f70acf631"))
         case .upgrade where !package.canUpgrade:
-            throw unavailablePackageAction(L10n.string("ui.40a27587a6302b95"))
+            throw AppError(
+                category: .apiUnavailable,
+                isRetryable: false,
+                safeUserMessage: L10n.string("ui.40a27587a6302b95")
+            )
         default:
             break
         }
@@ -843,7 +889,7 @@ final class NasSettingsModel {
             if packageActionIsVerified(id: id, action: action)
                 || result.status == .confirmedSuccess
                 || result.status == .cancelledBeforeSubmission {
-                return
+                return result
             }
             let feedback = Self.packageUninstallFeedback(for: result.status)
             throw AppError(
@@ -853,21 +899,91 @@ final class NasSettingsModel {
             )
         }
 
-        try await repository.controlPackage(id: id, action: action)
-        for attempt in 0..<10 {
-            await activate(.packages, force: true)
-            if packageActionIsVerified(id: id, action: action) {
-                return
-            }
-            if attempt < 9 {
-                try await Task.sleep(for: .seconds(1))
-            }
-        }
-        throw AppError(
-            category: .invalidResponse,
-            isRetryable: true,
-            safeUserMessage: L10n.string("ui.3b66d9f42d866bf0")
+        let result = try await repository.controlPackageResult(
+            id: id,
+            action: action
         )
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.packages, force: true)
+        }
+        if result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return result
+        }
+        if packageActionIsVerified(id: id, action: action) {
+            let prefix = action == .start ? "package.start" : "package.stop"
+            return try MutationResult(
+                status: .confirmedSuccess,
+                operation: action == .start ? "packageStart" : "packageStop",
+                submitted: true,
+                requiresRefresh: false,
+                counts: MutationResultCounts(
+                    succeeded: 1,
+                    failed: 0,
+                    unknown: 0
+                ),
+                localizationKey: "\(prefix).completed",
+                diagnosticTag: "\(prefix).confirmed-after-model-refresh"
+            )
+        }
+        let feedback = Self.packageControlFeedback(
+            for: result.status,
+            action: action
+        )
+        throw AppError(
+            category: feedback.category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(feedback.resourceKey)
+        )
+    }
+
+    struct PackageControlFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func packageControlFeedback(
+        for status: MutationResultStatus,
+        action: NasPackageAction
+    ) -> PackageControlFeedback {
+        let prefix = action == .start ? "package.start" : "package.stop"
+        return switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            PackageControlFeedback(
+                resourceKey: "\(prefix).unverified",
+                category: .unknown
+            )
+        case .permissionDenied:
+            PackageControlFeedback(
+                resourceKey: "package.control.permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            PackageControlFeedback(
+                resourceKey: "package.control.unsupported",
+                category: .apiUnavailable
+            )
+        case .partialSuccess:
+            PackageControlFeedback(
+                resourceKey: "\(prefix).unverified",
+                category: .partialFailure
+            )
+        case .confirmedFailure:
+            PackageControlFeedback(
+                resourceKey: "package.control.failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            PackageControlFeedback(
+                resourceKey: "\(prefix).completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            PackageControlFeedback(
+                resourceKey: "package.control.cancelled",
+                category: .cancelled
+            )
+        }
     }
 
     struct PackageUninstallFeedback: Equatable {
@@ -917,8 +1033,13 @@ final class NasSettingsModel {
         }
     }
 
-    func performPowerAction(_ action: NasPowerAction) async throws {
-        try await repository.performPowerAction(action)
+    func performPowerAction(
+        _ action: NasPowerAction
+    ) async throws -> MutationResult {
+        guard !isPerformingPowerAction else { throw settingsBusyError() }
+        isPerformingPowerAction = true
+        defer { isPerformingPowerAction = false }
+        return try await repository.performPowerActionResult(action)
     }
 
     func disconnectConnection(_ connection: NasConnection) async throws {
@@ -1806,49 +1927,197 @@ final class NasSettingsModel {
         guard !isSavingServiceSettings else { throw settingsBusyError() }
         isSavingServiceSettings = true
         defer { isSavingServiceSettings = false }
-        try await repository.saveRegionSettings(settings)
-        await activate(.region, force: true)
-        guard region?.dateFormat == settings.dateFormat.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        ),
-        region?.timeFormat == settings.timeFormat.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        ),
-        region?.timeZone == settings.timeZone,
-        region?.isNetworkTimeEnabled == settings.isNetworkTimeEnabled else {
-            throw settingsVerificationError()
+        let result = try await repository.saveRegionSettingsResult(settings)
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.region, force: true)
         }
+        if region.map({
+            Self.regionSettings($0, match: settings)
+        }) == true
+            || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        let feedback = Self.regionSettingsFeedback(for: result.status)
+        throw AppError(
+            category: feedback.category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? feedback.resourceKey
+            )
+        )
+    }
+
+    struct RegionSettingsFeedback: Equatable {
+        let resourceKey: String
+        let category: AppErrorCategory
+    }
+
+    static func regionSettingsFeedback(
+        for status: MutationResultStatus
+    ) -> RegionSettingsFeedback {
+        switch status {
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            RegionSettingsFeedback(
+                resourceKey: "region.settings.unverified",
+                category: .unknown
+            )
+        case .partialSuccess:
+            RegionSettingsFeedback(
+                resourceKey: "region.settings.partial",
+                category: .partialFailure
+            )
+        case .permissionDenied:
+            RegionSettingsFeedback(
+                resourceKey: "region.settings.permission-denied",
+                category: .permissionDenied
+            )
+        case .unsupported:
+            RegionSettingsFeedback(
+                resourceKey: "region.settings.unsupported",
+                category: .apiUnavailable
+            )
+        case .confirmedFailure:
+            RegionSettingsFeedback(
+                resourceKey: "region.settings.failed",
+                category: .conflict
+            )
+        case .confirmedSuccess:
+            RegionSettingsFeedback(
+                resourceKey: "region.settings.completed",
+                category: .unknown
+            )
+        case .cancelledBeforeSubmission:
+            RegionSettingsFeedback(
+                resourceKey: "region.settings.cancelled",
+                category: .cancelled
+            )
+        }
+    }
+
+    private static func regionSettings(
+        _ actual: NasRegionSettings,
+        match expected: NasRegionSettings
+    ) -> Bool {
+        actual.dateFormat == expected.normalizedDateFormat
+            && actual.timeFormat == expected.normalizedTimeFormat
+            && actual.timeZone == expected.timeZone
+            && actual.isNetworkTimeEnabled == expected.isNetworkTimeEnabled
+            && (!expected.isNetworkTimeEnabled
+                || actual.timeServers == expected.normalizedTimeServers)
+    }
+
+    func testDDNS(_ draft: NasDDNSDraft) async throws -> MutationResult {
+        let operationID = draft.normalizedProviderID
+        guard !ddnsOperationIDs.contains("refresh"),
+              ddnsOperationIDs.insert(operationID).inserted else {
+            throw settingsBusyError()
+        }
+        defer { ddnsOperationIDs.remove(operationID) }
+        let result = try await repository.testDDNSResult(draft)
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw Self.ddnsOperationError(
+                result,
+                fallbackKey: "ddns.test.failed"
+            )
+        }
+        return result
     }
 
     func saveDDNS(_ draft: NasDDNSDraft) async throws {
-        let operationID = draft.originalProviderID ?? "new:\(draft.providerID)"
-        guard ddnsOperationIDs.insert(operationID).inserted else { throw settingsBusyError() }
-        defer { ddnsOperationIDs.remove(operationID) }
-        try await repository.saveDDNS(draft)
-        await activate(.ddns, force: true)
-        guard ddns?.records.contains(where: {
-            $0.providerID == draft.providerID
-                && $0.hostname == draft.hostname.trimmingCharacters(in: .whitespacesAndNewlines)
-        }) == true else {
-            throw settingsVerificationError()
+        let operationID = draft.normalizedProviderID
+        guard !ddnsOperationIDs.contains("refresh"),
+              ddnsOperationIDs.insert(operationID).inserted else {
+            throw settingsBusyError()
         }
+        defer { ddnsOperationIDs.remove(operationID) }
+        let result = try await repository.saveDDNSResult(draft)
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.ddns, force: true)
+        }
+        if ddns?.records.contains(where: {
+            $0.providerID == draft.normalizedProviderID
+                && $0.hostname.lowercased() == draft.normalizedHostname
+                && $0.username == draft.normalizedUsername
+                && $0.isEnabled == draft.isEnabled
+                && $0.heartbeat == draft.heartbeat
+        }) == true
+            || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        throw Self.ddnsOperationError(
+            result,
+            fallbackKey: "ddns.save.failed"
+        )
     }
 
     func deleteDDNS(_ record: NasDDNSRecord) async throws {
-        guard ddnsOperationIDs.insert(record.id).inserted else { throw settingsBusyError() }
-        defer { ddnsOperationIDs.remove(record.id) }
-        try await repository.deleteDDNS(providerID: record.providerID)
-        await activate(.ddns, force: true)
-        guard ddns?.records.contains(where: { $0.providerID == record.providerID }) == false else {
-            throw settingsVerificationError()
+        guard !ddnsOperationIDs.contains("refresh"),
+              ddnsOperationIDs.insert(record.providerID).inserted else {
+            throw settingsBusyError()
         }
+        defer { ddnsOperationIDs.remove(record.providerID) }
+        let result = try await repository.deleteDDNSResult(
+            providerID: record.providerID
+        )
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.ddns, force: true)
+        }
+        if ddns?.records.contains(where: {
+            $0.providerID == record.providerID
+        }) == false
+            || result.status == .confirmedSuccess
+            || result.status == .cancelledBeforeSubmission {
+            return
+        }
+        throw Self.ddnsOperationError(
+            result,
+            fallbackKey: "ddns.delete.failed"
+        )
     }
 
     func refreshDDNS() async throws {
-        guard ddnsOperationIDs.insert("refresh").inserted else { throw settingsBusyError() }
+        guard ddnsOperationIDs.isEmpty else { throw settingsBusyError() }
+        ddnsOperationIDs.insert("refresh")
         defer { ddnsOperationIDs.remove("refresh") }
-        try await repository.refreshDDNS()
-        await activate(.ddns, force: true)
+        let result = try await repository.refreshDDNSResult()
+        if result.requiresRefresh || result.status == .confirmedSuccess {
+            await activate(.ddns, force: true)
+        }
+        guard result.status == .confirmedSuccess
+                || result.status == .cancelledBeforeSubmission else {
+            throw Self.ddnsOperationError(
+                result,
+                fallbackKey: "ddns.refresh.failed"
+            )
+        }
+    }
+
+    private static func ddnsOperationError(
+        _ result: MutationResult,
+        fallbackKey: String
+    ) -> AppError {
+        let category: AppErrorCategory = switch result.status {
+        case .permissionDenied:
+            .permissionDenied
+        case .unsupported:
+            .apiUnavailable
+        case .partialSuccess:
+            .partialFailure
+        case .cancelledBeforeSubmission, .cancellationRequestedAfterSubmission:
+            .cancelled
+        case .confirmedSuccess, .confirmedFailure, .submittedButUnverified:
+            .unknown
+        }
+        return AppError(
+            category: category,
+            isRetryable: false,
+            safeUserMessage: L10n.string(
+                result.localizationKey ?? fallbackKey
+            )
+        )
     }
 
     private func settingsBusyError() -> AppError {

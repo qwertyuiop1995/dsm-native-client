@@ -31,11 +31,20 @@
 - API 与当前确认：
   - `SYNO.Core.System`：`info` v3。
   - `SYNO.Core.System.Utilization`：`get` v1。
+  - `SYNO.Core.System.Process`：客户端保守范围 v1，`list` 只读适配等待真实响应验证。
+  - `SYNO.Core.System.ProcessGroup`：客户端保守范围 v1，`list` 可选降级；
+    `service_info` 保持关闭。
   - `SYNO.Core.CurrentConnection`：`list` / `kick_connection` v1；只读列表已核对，断开未执行。
   - `SYNO.Core.SyslogClient.Log`：`list` v1。
   - `SYNO.Core.Upgrade.Server`：`check` v3。
   - `SYNO.LogCenter.History`：客户端范围 v1；无记录时允许空结果。
 - 降级：性能、连接、日志或更新检查失败时各自显示不可用，不阻断其他 NAS 管理能力。
+- 电源动作稳定记录：[DSM 关机与重启内部 API](dsm-system-power-actions.md)。
+- 系统更新检查稳定记录：[DSM 系统更新检查内部 API](dsm-system-update-check.md)。当前
+  仅允许 `check` 只读请求，下载、安装、取消和重启任务保持关闭。
+- 系统进程稳定记录：[DSM 系统进程与服务进程组内部 API](dsm-system-processes.md)。
+  当前只展示字段白名单后的单次快照，不读取命令行、路径、账号或网络地址，也不提供
+  结束进程操作。
 
 ### `dsm-storage-hardware`
 
@@ -46,9 +55,13 @@
   - `SYNO.Core.Storage.Volume` v1。
   - `SYNO.Core.Storage.Disk` v1。
   - `SYNO.Core.Hardware.PowerRecovery`、`Led.Brightness`、`FanSpeed`、`BeepControl`、`Hibernation` v1。
+  - `SYNO.Core.Hardware.PowerSchedule`：客户端保守范围 v1；仅启用 `load`，
+    `save` 保持关闭。
   - `SYNO.Core.ExternalDevice.UPS` v1。
 - S.M.A.R.T. 稳定记录：[DSM S.M.A.R.T. 检测内部 API](dsm-smart-test.md)。
 - 硬件设置稳定记录：[DSM 硬件与 UPS 设置内部 API](dsm-hardware-settings.md)。
+- 电源计划稳定记录：[DSM 电源计划内部 API](dsm-power-schedule.md)。当前只读取动作、
+  启用状态、时间、命名星期、一次日期和可选时区，最多 128 条，不发送 `save`。
 - 当前确认：`Storage.load_info` v1 与硬盘检测读取结构已核对；`Storage.Volume.list` 在当前环境返回错误 `101`；S.M.A.R.T. 启停和硬件设置没有为发现而执行。
 - 降级：以 `load_info` 为主，不使用失败的 `Volume.list` 覆盖有效结果；写入口按能力与权限逐项关闭。
 
@@ -73,6 +86,15 @@
 - 文件服务稳定记录：[DSM 文件服务设置内部 API](dsm-file-service-settings.md)。
 - 远程终端稳定记录：[DSM 远程终端设置内部 API](dsm-terminal-settings.md)。
 - 互联网代理稳定记录：[DSM 互联网代理设置内部 API](dsm-proxy-settings.md)。
+- 区域与时间稳定记录：[DSM 区域与时间设置内部 API](dsm-region-time-settings.md)。
+- DDNS 稳定记录：[DSM DDNS 设置内部 API](dsm-ddns-settings.md)。
+- 套件启动与停止稳定记录：[DSM 套件启动与停止内部 API](dsm-package-control.md)。
+- 套件安装与升级边界：[DSM 套件安装与升级内部 API 边界](dsm-package-installation.md)。
+  当前只解释 `Package.list` 明确返回的 `upgrade` 为非交互提示；
+  `Package.Server` 与 `Package.Installation` 保持关闭。
+- 共享访问稳定记录：[DSM 共享文件夹访问权限契约](dsm-share-access.md)。当前仅使用公开
+  File Station `list_share` 展示登录账号可见的有效权限；内部
+  `SYNO.Core.Share.Permission.list_by_user` 只有静态方法名证据，保持关闭。
 - 当前证据：只读结构、网页请求和能力发现已分项记录；套件启停/卸载、任务写入、网络、防火墙等不得仅凭同一端点组标记为行为验证。
 
 ### `dsm-account-directory`

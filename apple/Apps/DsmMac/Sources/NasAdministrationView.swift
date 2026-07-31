@@ -56,7 +56,10 @@ struct NasSettingsView: View {
                     isPaused: $model.isLiveUpdatesPaused,
                     refresh: { await model.activate(.overview, force: true) },
                     onNavigateToConnections: { model.selectedPage = .connections },
-                    onPerformPowerAction: { action in try await model.performPowerAction(action) },
+                    isPowerActionBusy: model.isPerformingPowerAction,
+                    onPerformPowerAction: { action in
+                        try await model.performPowerAction(action)
+                    },
                     onCheckSystemUpdate: { try await model.checkSystemUpdate() }
                 )
             }
@@ -185,6 +188,24 @@ struct NasSettingsView: View {
                     .id(settings)
                 }
             }
+        case .powerSchedule:
+            AdministrationPageContainer(
+                isLoading: model.isLoading(.powerSchedule),
+                hasLoaded: model.hasLoaded(.powerSchedule),
+                hasContent: !(model.powerSchedule?.entries.isEmpty ?? true),
+                errorMessage: model.errorMessage(for: .powerSchedule),
+                emptyTitle: L10n.string("power-schedule.empty-title"),
+                emptyDescription: L10n.string("power-schedule.empty-description"),
+                retry: { await model.activate(.powerSchedule, force: true) }
+            ) {
+                if let snapshot = model.powerSchedule {
+                    PowerScheduleView(
+                        snapshot: snapshot,
+                        isRefreshing: model.isLoading(.powerSchedule),
+                        refresh: { await model.activate(.powerSchedule, force: true) }
+                    )
+                }
+            }
         case .remoteAccess:
             AdministrationPageContainer(
                 isLoading: model.isLoading(.remoteAccess),
@@ -256,6 +277,7 @@ struct NasSettingsView: View {
                     DDNSSettingsView(
                         directory: directory,
                         busyIDs: model.ddnsOperationIDs,
+                        onTest: { _ = try await model.testDDNS($0) },
                         onSave: { try await model.saveDDNS($0) },
                         onDelete: { try await model.deleteDDNS($0) },
                         onRefresh: { try await model.refreshDDNS() }
@@ -277,7 +299,9 @@ struct NasSettingsView: View {
                     packages: model.packages,
                     title: L10n.string("ui.7467e8310073e980"),
                     busyPackageIDs: model.packageOperationIDs,
-                    onControlPackage: { id, action in try await model.controlPackage(id: id, action: action) }
+                    onControlPackage: { id, action in
+                        _ = try await model.controlPackage(id: id, action: action)
+                    }
                 )
             }
         case .tasks:
@@ -324,6 +348,40 @@ struct NasSettingsView: View {
                     onSaveGroup: { draft in try await model.saveGroup(draft) },
                     onDeleteGroup: { group in try await model.deleteGroup(group) }
                 )
+            }
+        case .shareAccess:
+            AdministrationPageContainer(
+                isLoading: model.isLoading(.shareAccess),
+                hasLoaded: model.hasLoaded(.shareAccess),
+                hasContent: !(model.shareAccess?.shares.isEmpty ?? true),
+                errorMessage: model.errorMessage(for: .shareAccess),
+                emptyTitle: L10n.string("share-access.empty-title"),
+                emptyDescription: L10n.string("share-access.empty-description"),
+                retry: { await model.activate(.shareAccess, force: true) }
+            ) {
+                if let directory = model.shareAccess {
+                    ShareAccessView(directory: directory)
+                }
+            }
+        case .processes:
+            AdministrationPageContainer(
+                isLoading: model.isLoading(.processes),
+                hasLoaded: model.hasLoaded(.processes),
+                hasContent: model.processDirectory.map {
+                    !$0.processes.isEmpty || !$0.groups.isEmpty
+                } ?? false,
+                errorMessage: model.errorMessage(for: .processes),
+                emptyTitle: L10n.string("processes.empty-title"),
+                emptyDescription: L10n.string("processes.empty-description"),
+                retry: { await model.activate(.processes, force: true) }
+            ) {
+                if let directory = model.processDirectory {
+                    ProcessActivityView(
+                        directory: directory,
+                        isRefreshing: model.isLoading(.processes),
+                        refresh: { await model.activate(.processes, force: true) }
+                    )
+                }
             }
         case .logs:
             AdministrationPageContainer(
@@ -374,6 +432,10 @@ struct NasSettingsView: View {
         case .network: (L10n.string("ui.841fb4ce271a4e64"), "network")
         case .interfaces: (L10n.string("ui.f4964357f24503a7"), "cable.connector")
         case .hardware: (L10n.string("ui.64979ca5c76a8342"), "powerplug")
+        case .powerSchedule: (
+            L10n.string("power-schedule.navigation-title"),
+            "calendar.badge.clock"
+        )
         case .remoteAccess: (L10n.string("ui.ce5a7298821d8644"), "network.badge.shield.half.filled")
         case .security: (L10n.string("ui.e09822e61214bb5f"), "lock.shield")
         case .region: (L10n.string("ui.6038c1b4b9e464f1"), "clock.badge.checkmark")
@@ -381,9 +443,617 @@ struct NasSettingsView: View {
         case .packages: (L10n.string("ui.58be5abb3cf57752"), "shippingbox")
         case .tasks: (L10n.string("ui.b61129b1fbb2deea"), "calendar.badge.clock")
         case .accounts: (L10n.string("ui.4dc833d6dbb9f615"), "person.2")
+        case .shareAccess: (L10n.string("share-access.navigation-title"), "folder.badge.person.crop")
+        case .processes: (L10n.string("processes.navigation-title"), "gearshape.2")
         case .logs: (L10n.string("ui.366ada1d2fcfc4b3"), "doc.text.magnifyingglass")
         case .connections: (L10n.string("ui.e403ba5798ba13a4"), "network")
         }
+    }
+}
+
+private struct PowerScheduleView: View {
+    private enum Filter: String, CaseIterable, Identifiable {
+        case all
+        case enabled
+        case disabled
+
+        var id: Self { self }
+    }
+
+    let snapshot: NasPowerScheduleSnapshot
+    let isRefreshing: Bool
+    let refresh: () async -> Void
+
+    @State private var filter: Filter = .all
+
+    private var filteredEntries: [NasPowerScheduleEntry] {
+        switch filter {
+        case .all:
+            snapshot.entries
+        case .enabled:
+            snapshot.entries.filter { $0.isEnabled == true }
+        case .disabled:
+            snapshot.entries.filter { $0.isEnabled == false }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+
+            if filteredEntries.isEmpty {
+                ContentUnavailableView(
+                    L10n.string("power-schedule.filtered-empty-title"),
+                    systemImage: "line.3.horizontal.decrease.circle",
+                    description: Text(
+                        L10n.string("power-schedule.filtered-empty-description")
+                    )
+                )
+                .fillsAvailableContentArea()
+            } else {
+                List {
+                    Section(L10n.string("power-schedule.list-title")) {
+                        ForEach(filteredEntries) { entry in
+                            scheduleRow(entry)
+                        }
+                    }
+                }
+                .listStyle(.inset)
+            }
+        }
+        .fillsAvailableContentArea(alignment: .topLeading)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.string("power-schedule.title"))
+                        .font(.title2.weight(.semibold))
+                    Text(L10n.string("power-schedule.description"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isRefreshing {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Text(L10n.string("power-schedule.refresh"))
+                    }
+                }
+                .disabled(isRefreshing)
+                .help(L10n.string("power-schedule.refresh-help"))
+            }
+
+            HStack(spacing: 8) {
+                Label(
+                    L10n.string("power-schedule.read-only"),
+                    systemImage: "eye"
+                )
+                .font(.caption.weight(.medium))
+
+                Text(
+                    L10n.string(
+                        "power-schedule.count",
+                        String(describing: snapshot.total)
+                    )
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Divider()
+                    .frame(height: 12)
+                    .accessibilityHidden(true)
+
+                Text(timeZoneDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            Picker(L10n.string("power-schedule.filter-title"), selection: $filter) {
+                ForEach(Filter.allCases) { item in
+                    Text(filterLabel(item)).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 420)
+
+            if snapshot.isTruncated {
+                Label(
+                    L10n.string("power-schedule.truncated"),
+                    systemImage: "list.bullet.rectangle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+    }
+
+    private var timeZoneDescription: String {
+        if let timeZoneIdentifier = snapshot.timeZoneIdentifier {
+            return L10n.string("power-schedule.time-zone", timeZoneIdentifier)
+        }
+        return L10n.string("power-schedule.time-zone-unavailable")
+    }
+
+    private func filterLabel(_ filter: Filter) -> String {
+        switch filter {
+        case .all: L10n.string("power-schedule.filter-all")
+        case .enabled: L10n.string("power-schedule.filter-enabled")
+        case .disabled: L10n.string("power-schedule.filter-disabled")
+        }
+    }
+
+    private func scheduleRow(_ entry: NasPowerScheduleEntry) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: actionIcon(entry.action))
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(actionLabel(entry.action))
+                    .font(.body.weight(.medium))
+                Text(recurrenceLabel(entry.recurrence))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            Text(timeLabel(hour: entry.hour, minute: entry.minute))
+                .font(.body.monospacedDigit().weight(.medium))
+
+            statusLabel(entry.isEnabled)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            L10n.string(
+                "power-schedule.row-accessibility",
+                actionLabel(entry.action),
+                timeLabel(hour: entry.hour, minute: entry.minute),
+                recurrenceLabel(entry.recurrence),
+                statusText(entry.isEnabled)
+            )
+        )
+    }
+
+    private func actionIcon(_ action: NasPowerScheduleAction) -> String {
+        switch action {
+        case .startup: "power"
+        case .shutdown: "power.circle"
+        case .restart: "arrow.clockwise.circle"
+        case .unknown: "questionmark.circle"
+        }
+    }
+
+    private func actionLabel(_ action: NasPowerScheduleAction) -> String {
+        switch action {
+        case .startup: L10n.string("power-schedule.action-startup")
+        case .shutdown: L10n.string("power-schedule.action-shutdown")
+        case .restart: L10n.string("power-schedule.action-restart")
+        case .unknown: L10n.string("power-schedule.action-unknown")
+        }
+    }
+
+    private func statusLabel(_ enabled: Bool?) -> some View {
+        Label(statusText(enabled), systemImage: statusIcon(enabled))
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+    }
+
+    private func statusText(_ enabled: Bool?) -> String {
+        switch enabled {
+        case true: L10n.string("power-schedule.status-enabled")
+        case false: L10n.string("power-schedule.status-disabled")
+        case nil: L10n.string("power-schedule.status-unknown")
+        }
+    }
+
+    private func statusIcon(_ enabled: Bool?) -> String {
+        switch enabled {
+        case true: "checkmark.circle"
+        case false: "pause.circle"
+        case nil: "questionmark.circle"
+        }
+    }
+
+    private func recurrenceLabel(_ recurrence: NasPowerScheduleRecurrence) -> String {
+        switch recurrence {
+        case .daily:
+            return L10n.string("power-schedule.recurrence-daily")
+        case .weekly(let weekdays):
+            return weekdays.map(weekdayLabel).joined(
+                separator: L10n.string("power-schedule.weekday-separator")
+            )
+        case .once(let date):
+            return dateLabel(date)
+        case .unknown:
+            return L10n.string("power-schedule.recurrence-unknown")
+        }
+    }
+
+    private func weekdayLabel(_ weekday: NasWeekday) -> String {
+        switch weekday {
+        case .monday: L10n.string("power-schedule.weekday-monday")
+        case .tuesday: L10n.string("power-schedule.weekday-tuesday")
+        case .wednesday: L10n.string("power-schedule.weekday-wednesday")
+        case .thursday: L10n.string("power-schedule.weekday-thursday")
+        case .friday: L10n.string("power-schedule.weekday-friday")
+        case .saturday: L10n.string("power-schedule.weekday-saturday")
+        case .sunday: L10n.string("power-schedule.weekday-sunday")
+        }
+    }
+
+    private func timeLabel(hour: Int, minute: Int) -> String {
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.year = 2001
+        components.month = 1
+        components.day = 1
+        components.hour = hour
+        components.minute = minute
+        guard let date = components.date else {
+            return String(format: "%02d:%02d", hour, minute)
+        }
+        var style = Date.FormatStyle(date: .omitted, time: .shortened)
+            .locale(AppLanguageStore.shared.locale)
+        style.timeZone = TimeZone(secondsFromGMT: 0)!
+        return date.formatted(style)
+    }
+
+    private func dateLabel(_ value: NasPowerScheduleDate) -> String {
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.year = value.year
+        components.month = value.month
+        components.day = value.day
+        guard let date = components.date else {
+            return L10n.string("power-schedule.recurrence-unknown")
+        }
+        var style = Date.FormatStyle(date: .abbreviated, time: .omitted)
+            .locale(AppLanguageStore.shared.locale)
+        style.timeZone = TimeZone(secondsFromGMT: 0)!
+        return date.formatted(style)
+    }
+}
+
+private struct ProcessActivityView: View {
+    let directory: NasProcessDirectory
+    let isRefreshing: Bool
+    let refresh: () async -> Void
+
+    @State private var searchText = ""
+
+    private var normalizedSearch: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var filteredProcesses: [NasSystemProcess] {
+        guard !normalizedSearch.isEmpty else { return directory.processes }
+        return directory.processes.filter { process in
+            [
+                process.name,
+                process.processID,
+                process.status,
+                process.groupID
+            ]
+            .compactMap { $0?.lowercased() }
+            .contains { $0.contains(normalizedSearch) }
+        }
+    }
+
+    private var filteredGroups: [NasProcessGroup] {
+        guard !normalizedSearch.isEmpty else { return directory.groups }
+        return directory.groups.filter { group in
+            [group.name, group.id, group.status]
+                .compactMap { $0?.lowercased() }
+                .contains { $0.contains(normalizedSearch) }
+        }
+    }
+
+    private var hasFilteredContent: Bool {
+        !filteredProcesses.isEmpty || !filteredGroups.isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            processHeader
+            Divider()
+
+            if hasFilteredContent {
+                List {
+                    if !filteredGroups.isEmpty {
+                        Section(L10n.string("processes.groups-title")) {
+                            ForEach(filteredGroups) { group in
+                                processGroupRow(group)
+                            }
+                        }
+                    }
+
+                    if !filteredProcesses.isEmpty {
+                        Section(L10n.string("processes.list-title")) {
+                            ForEach(filteredProcesses) { process in
+                                processRow(process)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.inset)
+            } else {
+                ContentUnavailableView(
+                    L10n.string("processes.filtered-empty-title"),
+                    systemImage: "magnifyingglass",
+                    description: Text(L10n.string("processes.filtered-empty-description"))
+                )
+                .fillsAvailableContentArea()
+            }
+        }
+        .fillsAvailableContentArea(alignment: .topLeading)
+        .searchable(
+            text: $searchText,
+            placement: .toolbar,
+            prompt: L10n.string("processes.search-prompt")
+        )
+    }
+
+    private var processHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.string("processes.title"))
+                        .font(.title2.weight(.semibold))
+                    Text(L10n.string("processes.privacy-description"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isRefreshing {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Text(L10n.string("processes.refresh"))
+                    }
+                }
+                .disabled(isRefreshing)
+                .help(L10n.string("processes.refresh-help"))
+            }
+
+            HStack(spacing: 8) {
+                Label(
+                    L10n.string("processes.read-only"),
+                    systemImage: "eye"
+                )
+                .font(.caption.weight(.medium))
+
+                Text(
+                    L10n.string(
+                        "processes.count",
+                        String(describing: directory.total)
+                    )
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if directory.isTruncated {
+                processNotice(
+                    L10n.string("processes.truncated"),
+                    systemImage: "list.bullet.rectangle"
+                )
+            }
+
+            if directory.groupsAreUnavailable {
+                processNotice(
+                    L10n.string("processes.groups-unavailable"),
+                    systemImage: "info.circle"
+                )
+            }
+        }
+        .padding(16)
+    }
+
+    private func processNotice(
+        _ message: String,
+        systemImage: String
+    ) -> some View {
+        Label(message, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .combine)
+    }
+
+    private func processRow(_ process: NasSystemProcess) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "gearshape")
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(process.name)
+                    .font(.body.weight(.medium))
+                    .textSelection(.enabled)
+
+                HStack(spacing: 8) {
+                    Text(
+                        L10n.string(
+                            "processes.process-id",
+                            String(describing: process.processID)
+                        )
+                    )
+                    if let groupID = process.groupID {
+                        Text(
+                            L10n.string(
+                                "processes.group-name",
+                                String(describing: groupID)
+                            )
+                        )
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+
+            Spacer()
+
+            if let status = process.status {
+                processStatus(status)
+            }
+        }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func processGroupRow(_ group: NasProcessGroup) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "square.stack.3d.up")
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(group.name)
+                    .font(.body.weight(.medium))
+                    .textSelection(.enabled)
+                if let processCount = group.processCount {
+                    Text(
+                        L10n.string(
+                            "processes.group-count",
+                            String(describing: processCount)
+                        )
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            if let status = group.status {
+                processStatus(status)
+            }
+        }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func processStatus(_ status: String) -> some View {
+        Text(status)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(.quaternary, in: Capsule())
+            .textSelection(.enabled)
+    }
+}
+
+private struct ShareAccessView: View {
+    let directory: NasShareAccessDirectory
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(
+                        L10n.string("share-access.scope-title"),
+                        systemImage: "person.crop.circle.badge.checkmark"
+                    )
+                    .font(.headline)
+                    Text(L10n.string("share-access.scope-description"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section(L10n.string("share-access.list-title")) {
+                ForEach(directory.shares) { share in
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: icon(for: share.accessLevel))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(share.name)
+                                .font(.body.weight(.medium))
+                                .textSelection(.enabled)
+                            Text(accessText(for: share.accessLevel))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer(minLength: 12)
+
+                        if share.canDelete {
+                            Label(
+                                L10n.string("share-access.can-delete"),
+                                systemImage: "trash"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(accessibilityLabel(for: share))
+                }
+            }
+        }
+        .listStyle(.inset)
+        .fillsAvailableContentArea(alignment: .topLeading)
+    }
+
+    private func icon(for accessLevel: NasShareAccessLevel) -> String {
+        switch accessLevel {
+        case .readWrite: "pencil.and.outline"
+        case .readOnly: "eye"
+        case .unknown: "questionmark.circle"
+        }
+    }
+
+    private func accessText(for accessLevel: NasShareAccessLevel) -> String {
+        switch accessLevel {
+        case .readWrite: L10n.string("share-access.read-write")
+        case .readOnly: L10n.string("share-access.read-only")
+        case .unknown: L10n.string("share-access.unknown")
+        }
+    }
+
+    private func accessibilityLabel(for share: NasShareAccessEntry) -> String {
+        let key = share.canDelete
+            ? "share-access.row-accessibility-delete"
+            : "share-access.row-accessibility"
+        return L10n.string(key, share.name, accessText(for: share.accessLevel))
     }
 }
 
@@ -548,6 +1218,7 @@ private struct EthernetInterfaceEditor: View {
 private struct DDNSSettingsView: View {
     let directory: NasDDNSDirectory
     let busyIDs: Set<String>
+    let onTest: (NasDDNSDraft) async throws -> Void
     let onSave: (NasDDNSDraft) async throws -> Void
     let onDelete: (NasDDNSRecord) async throws -> Void
     let onRefresh: () async throws -> Void
@@ -564,9 +1235,16 @@ private struct DDNSSettingsView: View {
                 Button {
                     refresh()
                 } label: {
+                    if busyIDs.contains("refresh") {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(
+                                L10n.string("ddns.refresh.updating")
+                            )
+                    }
                     Label(L10n.string("ui.12487befb4ba483c"), systemImage: "arrow.clockwise")
                 }
-                .disabled(busyIDs.contains("refresh"))
+                .disabled(!busyIDs.isEmpty || directory.records.isEmpty)
                 Button {
                     guard let provider = availableProviders.first else { return }
                     presentedDraft = NasDDNSDraft(
@@ -578,7 +1256,7 @@ private struct DDNSSettingsView: View {
                     Label(L10n.string("ui.50ef2f4cf6a46924"), systemImage: "plus")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(availableProviders.isEmpty)
+                .disabled(availableProviders.isEmpty || !busyIDs.isEmpty)
             }
             .padding()
 
@@ -619,11 +1297,11 @@ private struct DDNSSettingsView: View {
                         Button(L10n.string("ui.051836569928a9f9")) {
                             presentedDraft = draft(from: record)
                         }
-                        .disabled(busyIDs.contains(record.id))
+                        .disabled(!busyIDs.isEmpty)
                         Button(L10n.string("ui.2f9daa828907b93f"), role: .destructive) {
                             deleteTarget = record
                         }
-                        .disabled(busyIDs.contains(record.id))
+                        .disabled(!busyIDs.isEmpty)
                     }
                     .padding(.vertical, 5)
                 }
@@ -635,6 +1313,7 @@ private struct DDNSSettingsView: View {
                     draft: draft,
                     providers: directory.providers,
                     onCancel: { presentedDraft = nil },
+                    onTest: onTest,
                     onSave: { value in
                         try await onSave(value)
                         presentedDraft = nil
@@ -719,21 +1398,28 @@ private struct DDNSSettingsView: View {
 
 private struct DDNSRecordEditor: View {
     @State private var draft: NasDDNSDraft
+    @State private var isTesting = false
     @State private var isSaving = false
+    @State private var testSucceeded = false
     @State private var errorMessage: String?
+    private let originalDraft: NasDDNSDraft
     let providers: [NasDDNSProvider]
     let onCancel: () -> Void
+    let onTest: (NasDDNSDraft) async throws -> Void
     let onSave: (NasDDNSDraft) async throws -> Void
 
     init(
         draft: NasDDNSDraft,
         providers: [NasDDNSProvider],
         onCancel: @escaping () -> Void,
+        onTest: @escaping (NasDDNSDraft) async throws -> Void,
         onSave: @escaping (NasDDNSDraft) async throws -> Void
     ) {
         _draft = State(initialValue: draft)
+        originalDraft = draft
         self.providers = providers
         self.onCancel = onCancel
+        self.onTest = onTest
         self.onSave = onSave
     }
 
@@ -749,20 +1435,43 @@ private struct DDNSRecordEditor: View {
                     }
                     .disabled(draft.originalProviderID != nil)
                     TextField(L10n.string("ui.bc96b2e90db406b4"), text: $draft.hostname)
+                    if !draft.normalizedHostname.isEmpty,
+                       !NasDDNSDraft.isValidHostname(draft.normalizedHostname) {
+                        validationMessage("ddns.editor.hostname-invalid")
+                    }
                     TextField(L10n.string("ui.311bb313fdeca6aa"), text: $draft.username)
+                    if !draft.normalizedHostname.isEmpty,
+                       draft.normalizedUsername.isEmpty {
+                        validationMessage("ddns.editor.username-required")
+                    }
                     if draft.providerID != "Synology" {
                         SecureField(
                             draft.originalProviderID == nil ? L10n.string("ui.24c5488c934b87c5") : L10n.string("ui.5eaa08672ba4bc26"),
                             text: $draft.password
                         )
+                        if draft.originalProviderID == nil,
+                           !draft.normalizedHostname.isEmpty,
+                           draft.password.isEmpty {
+                            validationMessage("ddns.editor.password-required")
+                        }
                     } else {
                         Text(L10n.string("ui.69dc28bba545cf6b"))
                             .foregroundStyle(.secondary)
                     }
                     Toggle(L10n.string("ui.0db7eb6a90823c63"), isOn: $draft.heartbeat)
+                    if testSucceeded {
+                        Label(
+                            L10n.string("ddns.test.completed"),
+                            systemImage: "checkmark.circle.fill"
+                        )
+                        .foregroundStyle(.green)
+                        .accessibilityLabel(
+                            L10n.string("ddns.test.completed")
+                        )
+                    }
                 }
                 Section {
-                    Text(L10n.string("ui.03ebb07bb59ddce2"))
+                    Text(L10n.string("ddns.editor.privacy-note"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -770,22 +1479,32 @@ private struct DDNSRecordEditor: View {
             .formStyle(.grouped)
             Divider()
             HStack {
+                if isTesting || isSaving {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel(
+                            L10n.string(
+                                isTesting
+                                    ? "ddns.test.testing"
+                                    : "ddns.save.saving"
+                            )
+                        )
+                }
                 Spacer()
                 Button(L10n.string("ui.2cd0f3be8738a86c"), action: onCancel)
+                    .disabled(isTesting || isSaving)
+                Button(L10n.string("ddns.test.action")) { testConnection() }
+                    .disabled(isTesting || isSaving || !draft.isValidForSubmission)
                 Button(L10n.string("ui.a3030bf8f16dc63c")) { save() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(
-                        isSaving
-                            || draft.hostname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || draft.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || (draft.originalProviderID == nil
-                                && draft.providerID != "Synology"
-                                && draft.password.isEmpty)
-                    )
+                    .disabled(isTesting || isSaving || !hasChanges || !draft.isValidForSubmission)
             }
             .padding()
         }
         .frame(minWidth: 520, minHeight: 420)
+        .onChange(of: draft) {
+            testSucceeded = false
+        }
         .alert(L10n.string("ui.57f2ad2106e6d63e"), isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
@@ -796,23 +1515,61 @@ private struct DDNSRecordEditor: View {
         }
     }
 
+    private var hasChanges: Bool {
+        normalized(draft) != normalized(originalDraft)
+    }
+
+    private func normalized(_ value: NasDDNSDraft) -> NasDDNSDraft {
+        var result = value
+        result.providerID = value.normalizedProviderID
+        result.hostname = value.normalizedHostname
+        result.username = value.normalizedUsername
+        return result
+    }
+
+    private func testConnection() {
+        guard !isTesting, !isSaving else { return }
+        isTesting = true
+        testSucceeded = false
+        Task {
+            defer { isTesting = false }
+            do {
+                try await onTest(normalized(draft))
+                testSucceeded = true
+            } catch {
+                errorMessage = userMessage(
+                    for: error,
+                    fallback: L10n.string("ddns.test.failed")
+                )
+            }
+        }
+    }
+
     private func save() {
-        guard !isSaving else { return }
+        guard !isTesting, !isSaving else { return }
         isSaving = true
         Task {
             defer { isSaving = false }
             do {
-                try await onSave(draft)
+                try await onSave(normalized(draft))
             } catch {
                 errorMessage = userMessage(for: error, fallback: L10n.string("ui.dc241cd7d0e88310"))
             }
         }
+    }
+
+    private func validationMessage(_ key: String) -> some View {
+        Text(L10n.string(key))
+            .font(.caption)
+            .foregroundStyle(.red)
+            .accessibilityLabel(L10n.string(key))
     }
 }
 
 private struct RegionSettingsView: View {
     @State private var draft: NasRegionSettings
     @State private var serverText: String
+    @State private var hasEditedManualDate = false
     @State private var isConfirming = false
     @State private var errorMessage: String?
     let original: NasRegionSettings
@@ -835,7 +1592,13 @@ private struct RegionSettingsView: View {
         Form {
             Section(L10n.string("ui.d7f9a4bfc466ae21")) {
                 TextField(L10n.string("ui.7530fa1a195df77e"), text: $draft.dateFormat)
+                if draft.normalizedDateFormat.isEmpty {
+                    validationMessage("region.settings.format-required")
+                }
                 TextField(L10n.string("ui.1a83bdb917697ede"), text: $draft.timeFormat)
+                if draft.normalizedTimeFormat.isEmpty {
+                    validationMessage("region.settings.format-required")
+                }
                 Picker(L10n.string("ui.b5d72c5c00f2d88e"), selection: $draft.timeZone) {
                     ForEach(draft.timeZones) { zone in
                         Text(zone.displayName).tag(zone.id)
@@ -849,14 +1612,23 @@ private struct RegionSettingsView: View {
                     Text(L10n.string("ui.4a467d3c2e8fdeda"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if !serversAreValid {
+                        validationMessage("region.settings.server-invalid")
+                    }
                 } else {
                     DatePicker(
                         L10n.string("ui.18f2e0e937c97c4c"),
                         selection: Binding(
                             get: { draft.manualDate ?? Date() },
-                            set: { draft.manualDate = $0 }
+                            set: {
+                                draft.manualDate = $0
+                                hasEditedManualDate = true
+                            }
                         )
                     )
+                    if draft.manualDate == nil {
+                        validationMessage("region.settings.manual-date-required")
+                    }
                     Text(L10n.string("ui.1a85229361b0dc6d"))
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -864,15 +1636,23 @@ private struct RegionSettingsView: View {
             }
             Section {
                 HStack {
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(
+                                L10n.string("region.settings.saving")
+                            )
+                    }
                     Spacer()
                     Button(L10n.string("ui.e0534b8a4e46a0cb")) {
                         draft = original
                         serverText = original.timeServers.joined(separator: ", ")
+                        hasEditedManualDate = false
                     }
                     .disabled(!hasChanges || isSaving)
                     Button(L10n.string("ui.741f0c0de7ebbbf8")) { isConfirming = true }
                         .buttonStyle(.borderedProminent)
-                        .disabled(!hasChanges || isSaving)
+                        .disabled(!hasChanges || isSaving || !isValid)
                 }
             }
         }
@@ -889,7 +1669,7 @@ private struct RegionSettingsView: View {
         } message: {
             Text(
                 draft.isNetworkTimeEnabled
-                    ? L10n.string("ui.e622903e0efd3e33")
+                    ? L10n.string("region.settings.ntp-warning")
                     : L10n.string("ui.f4537a9c032bbfff")
             )
         }
@@ -905,6 +1685,20 @@ private struct RegionSettingsView: View {
             .split(separator: ",", omittingEmptySubsequences: true)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    private var serversAreValid: Bool {
+        !normalizedServers.isEmpty
+            && normalizedServers.count <= 3
+            && normalizedServers.allSatisfy(
+                NasRegionSettings.isValidTimeServer
+            )
+    }
+
+    private var isValid: Bool {
+        var candidate = draft
+        candidate.timeServers = normalizedServers
+        return candidate.isValidForSaving
     }
 
     private var hasChanges: Bool {
@@ -923,12 +1717,24 @@ private struct RegionSettingsView: View {
     private func save() {
         Task {
             do {
-                draft.timeServers = normalizedServers
-                try await onSave(draft)
+                var candidate = draft
+                candidate.timeServers = normalizedServers
+                if !candidate.isNetworkTimeEnabled,
+                   !hasEditedManualDate {
+                    // 未编辑手动时间时由 Repository 使用刚回读的 NAS 时间，避免回写旧秒数。
+                    candidate.manualDate = nil
+                }
+                try await onSave(candidate)
             } catch {
                 errorMessage = userMessage(for: error, fallback: L10n.string("ui.f8f49516c226e6b7"))
             }
         }
+    }
+
+    private func validationMessage(_ key: String) -> some View {
+        Text(L10n.string(key))
+            .font(.caption)
+            .foregroundStyle(.red)
     }
 }
 
@@ -3323,14 +4129,18 @@ private struct PerformanceDashboard: View {
     @Binding var isPaused: Bool
     let refresh: () async -> Void
     let onNavigateToConnections: () -> Void
-    let onPerformPowerAction: ((NasPowerAction) async throws -> Void)?
+    let isPowerActionBusy: Bool
+    let onPerformPowerAction: (
+        (NasPowerAction) async throws -> MutationResult
+    )?
     let onCheckSystemUpdate: (() async throws -> NasSystemUpdateInfo)?
 
     @State private var showShutdownConfirm = false
     @State private var showRebootConfirm = false
-    @State private var isPerformingPowerAction = false
     @State private var isCheckingSystemUpdate = false
-    @State private var actionMessage: String? = nil
+    @State private var powerActionAlertTitle = ""
+    @State private var powerActionAlertMessage = ""
+    @State private var showPowerActionAlert = false
     @State private var updateAlertTitle: String = L10n.string("ui.101da319b2a7ef1c")
     @State private var updateAlertMessage: String? = nil
     @State private var showUpdateAlert = false
@@ -3395,17 +4205,7 @@ private struct PerformanceDashboard: View {
         }
         .confirmationDialog(L10n.string("ui.8195cd7121749f82"), isPresented: $showShutdownConfirm, titleVisibility: .visible) {
             Button(L10n.string("ui.bc9f788c6c9933bd"), role: .destructive) {
-                Task {
-                    guard !isPerformingPowerAction else { return }
-                    isPerformingPowerAction = true
-                    defer { isPerformingPowerAction = false }
-                    do {
-                        try await onPerformPowerAction?(.shutdown)
-                        actionMessage = L10n.string("ui.ffb3f3679c6343f0")
-                    } catch {
-                        actionMessage = L10n.string("ui.170bef6bf5746898", String(describing: powerActionError(error)))
-                    }
-                }
+                performPowerAction(.shutdown)
             }
             Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
@@ -3413,25 +4213,16 @@ private struct PerformanceDashboard: View {
         }
         .confirmationDialog(L10n.string("ui.6a46e64958540614"), isPresented: $showRebootConfirm, titleVisibility: .visible) {
             Button(L10n.string("ui.4a7dfba7106183fc"), role: .destructive) {
-                Task {
-                    guard !isPerformingPowerAction else { return }
-                    isPerformingPowerAction = true
-                    defer { isPerformingPowerAction = false }
-                    do {
-                        try await onPerformPowerAction?(.reboot)
-                        updateAlertTitle = L10n.string("ui.6bf34903da08500c")
-                        updateAlertMessage = L10n.string("ui.2dbb39e958cd5cfd")
-                        showUpdateAlert = true
-                    } catch {
-                        updateAlertTitle = L10n.string("ui.a24adb66a42645c8")
-                        updateAlertMessage = powerActionError(error)
-                        showUpdateAlert = true
-                    }
-                }
+                performPowerAction(.reboot)
             }
             Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
         } message: {
             Text(L10n.string("ui.2d2b6c1494a654d7"))
+        }
+        .alert(powerActionAlertTitle, isPresented: $showPowerActionAlert) {
+            Button(L10n.string("ui.fac2a67ad87807c4"), role: .cancel) {}
+        } message: {
+            Text(powerActionAlertMessage)
         }
         .alert(updateAlertTitle, isPresented: $showUpdateAlert) {
             Button(L10n.string("ui.fac2a67ad87807c4"), role: .cancel) {}
@@ -3473,7 +4264,10 @@ private struct PerformanceDashboard: View {
                     Button {
                         checkSystemUpdate()
                     } label: {
-                        Label(L10n.string("ui.48954b3a9a918624"), systemImage: "arrow.down.circle")
+                        Label(
+                            L10n.string("ui.48954b3a9a918624"),
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -3492,11 +4286,26 @@ private struct PerformanceDashboard: View {
                             Label(L10n.string("ui.5acf2082d7fd4f9e"), systemImage: "power")
                         }
                     } label: {
-                        Label(L10n.string("ui.ec8d59ceec9ed48e"), systemImage: "power")
+                        if isPowerActionBusy {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(L10n.string("power.action.sending"))
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(
+                                L10n.string("power.action.sending")
+                            )
+                        } else {
+                            Label(
+                                L10n.string("ui.ec8d59ceec9ed48e"),
+                                systemImage: "power"
+                            )
+                        }
                     }
                     .menuStyle(.borderedButton)
                     .controlSize(.small)
-                    .disabled(isPerformingPowerAction || isCheckingSystemUpdate)
+                    .disabled(isPowerActionBusy || isCheckingSystemUpdate)
 
                     Button {
                         isPaused.toggle()
@@ -3542,6 +4351,36 @@ private struct PerformanceDashboard: View {
             ?? L10n.string("ui.115497be67470c77")
     }
 
+    private func performPowerAction(_ action: NasPowerAction) {
+        guard !isPowerActionBusy, let onPerformPowerAction else { return }
+        Task {
+            do {
+                let result = try await onPerformPowerAction(action)
+                powerActionAlertTitle = switch result.status {
+                case .confirmedSuccess:
+                    L10n.string("power.action.accepted-title")
+                case .submittedButUnverified,
+                     .cancellationRequestedAfterSubmission,
+                     .partialSuccess:
+                    L10n.string("power.action.attention-title")
+                case .cancelledBeforeSubmission:
+                    L10n.string("power.action.cancelled-title")
+                case .confirmedFailure, .permissionDenied, .unsupported:
+                    L10n.string("power.action.failed-title")
+                }
+                powerActionAlertMessage = L10n.string(
+                    result.localizationKey ?? "power.action.rejected"
+                )
+            } catch {
+                powerActionAlertTitle = L10n.string(
+                    "power.action.failed-title"
+                )
+                powerActionAlertMessage = powerActionError(error)
+            }
+            showPowerActionAlert = true
+        }
+    }
+
     private func checkSystemUpdate() {
         guard !isCheckingSystemUpdate, let onCheckSystemUpdate else { return }
         isCheckingSystemUpdate = true
@@ -3550,9 +4389,21 @@ private struct PerformanceDashboard: View {
             do {
                 let info = try await onCheckSystemUpdate()
                 if info.isUpdateAvailable {
-                    let version = info.latestVersion.map { " \($0)" } ?? ""
                     updateAlertTitle = L10n.string("ui.ac217e4d1ca410f1")
-                    updateAlertMessage = L10n.string("ui.63a3e6c253c5323b", String(describing: version))
+                    let version = info.latestVersion
+                        ?? L10n.string("system-update.version-unknown")
+                    if let releaseNotes = info.releaseNotes {
+                        updateAlertMessage = L10n.string(
+                            "system-update.available-with-notes",
+                            version,
+                            releaseNotes
+                        )
+                    } else {
+                        updateAlertMessage = L10n.string(
+                            "system-update.available",
+                            version
+                        )
+                    }
                 } else if let current = info.currentVersion {
                     updateAlertTitle = L10n.string("ui.bc310480b4ce9236")
                     updateAlertMessage = L10n.string("ui.2744a3e4d928c6d6", String(describing: current))
@@ -3620,6 +4471,11 @@ private struct PerformanceDashboard: View {
 }
 
 private struct PackageList: View {
+    private struct PendingControl {
+        let package: NasPackage
+        let action: NasPackageAction
+    }
+
     let packages: [NasPackage]
     let title: String
     let busyPackageIDs: Set<String>
@@ -3658,6 +4514,7 @@ private struct PackageList: View {
 
     @State private var searchText = ""
     @State private var packageToUninstall: NasPackage? = nil
+    @State private var pendingControl: PendingControl? = nil
     @State private var actionError: String? = nil
     @AppStorage("packageDisplayMode") private var displayModeRaw: String = DisplayMode.grid.rawValue
 
@@ -3762,6 +4619,35 @@ private struct PackageList: View {
                 Text(L10n.string("ui.f1ff4c701fff6787", String(describing: pkg.name)))
             }
         }
+        .alert(controlConfirmationTitle, isPresented: Binding(
+            get: { pendingControl != nil },
+            set: { if !$0 { pendingControl = nil } }
+        )) {
+            if let pendingControl {
+                Button(
+                    controlConfirmationButton(pendingControl.action),
+                    role: pendingControl.action == .stop ? .destructive : nil
+                ) {
+                    self.pendingControl = nil
+                    performControl(
+                        package: pendingControl.package,
+                        action: pendingControl.action
+                    )
+                }
+            }
+            Button(L10n.string("ui.2cd0f3be8738a86c"), role: .cancel) {}
+        } message: {
+            if let pendingControl {
+                Text(
+                    L10n.string(
+                        pendingControl.action == .start
+                            ? "package.start.confirm-message"
+                            : "package.stop.confirm-message",
+                        String(describing: pendingControl.package.name)
+                    )
+                )
+            }
+        }
         .alert(L10n.string("ui.e147727c86db353b"), isPresented: Binding(
             get: { actionError != nil },
             set: { if !$0 { actionError = nil } }
@@ -3779,6 +4665,17 @@ private struct PackageList: View {
             packageToUninstall = package
             return
         }
+        if action == .upgrade {
+            performControl(package: package, action: action)
+            return
+        }
+        pendingControl = PendingControl(package: package, action: action)
+    }
+
+    private func performControl(
+        package: NasPackage,
+        action: NasPackageAction
+    ) {
         Task {
             do {
                 try await onControlPackage?(package.id, action)
@@ -3791,6 +4688,25 @@ private struct PackageList: View {
                 )
             }
         }
+    }
+
+    private var controlConfirmationTitle: String {
+        guard let pendingControl else { return "" }
+        return L10n.string(
+            pendingControl.action == .start
+                ? "package.start.confirm-title"
+                : "package.stop.confirm-title"
+        )
+    }
+
+    private func controlConfirmationButton(
+        _ action: NasPackageAction
+    ) -> String {
+        L10n.string(
+            action == .start
+                ? "package.start.confirm-button"
+                : "package.stop.confirm-button"
+        )
     }
 
     private func packageActionError(
@@ -3844,11 +4760,18 @@ private struct PackageCard: View {
                     isWarning: isWarning(package.status)
                 )
 
+                if package.isUpgradeAvailable {
+                    PackageUpgradeAvailabilityLabel()
+                }
+
                 Spacer()
 
                 if isBusy {
                     ProgressView()
                         .controlSize(.small)
+                        .accessibilityLabel(
+                            L10n.string("package.control.in-progress")
+                        )
                 } else {
                     HStack(spacing: 6) {
                         if package.canUpgrade {
@@ -3948,8 +4871,16 @@ private struct PackageRow: View {
                 isWarning: isWarning(package.status)
             )
 
+            if package.isUpgradeAvailable {
+                PackageUpgradeAvailabilityLabel()
+            }
+
             if isBusy {
-                ProgressView().controlSize(.small)
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel(
+                        L10n.string("package.control.in-progress")
+                    )
             } else {
                 HStack(spacing: 6) {
                     if package.canUpgrade {
@@ -4006,6 +4937,23 @@ private struct PackageRow: View {
     private func triggerAction(_ action: NasPackageAction) {
         guard !isBusy else { return }
         onControl(action)
+    }
+}
+
+private struct PackageUpgradeAvailabilityLabel: View {
+    var body: some View {
+        Label(
+            L10n.string("package.upgrade.available-in-dsm"),
+            systemImage: "arrow.triangle.2.circlepath"
+        )
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(.quaternary, in: Capsule())
+        .help(L10n.string("package.upgrade.read-only-help"))
+        .accessibilityLabel(L10n.string("package.upgrade.available-in-dsm"))
+        .accessibilityHint(L10n.string("package.upgrade.read-only-help"))
     }
 }
 

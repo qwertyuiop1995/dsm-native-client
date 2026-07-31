@@ -380,6 +380,7 @@ public struct NasPackage: Identifiable, Equatable, Sendable {
     public let canStart: Bool
     public let canStop: Bool
     public let canUninstall: Bool
+    public let isUpgradeAvailable: Bool
     public let canUpgrade: Bool
 
     public init(
@@ -395,6 +396,7 @@ public struct NasPackage: Identifiable, Equatable, Sendable {
         canStart: Bool = true,
         canStop: Bool = true,
         canUninstall: Bool = false,
+        isUpgradeAvailable: Bool = false,
         canUpgrade: Bool = false
     ) {
         self.id = id
@@ -409,6 +411,7 @@ public struct NasPackage: Identifiable, Equatable, Sendable {
         self.canStart = canStart
         self.canStop = canStop
         self.canUninstall = canUninstall
+        self.isUpgradeAvailable = isUpgradeAvailable
         self.canUpgrade = canUpgrade
     }
 }
@@ -529,6 +532,43 @@ public struct NasAccountDirectory: Equatable, Sendable {
         self.users = users
         self.groups = groups
     }
+}
+
+public enum NasShareAccessLevel: String, Equatable, Sendable {
+    case readWrite
+    case readOnly
+    case unknown
+}
+
+public struct NasShareAccessEntry: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let accessLevel: NasShareAccessLevel
+    public let canDelete: Bool
+
+    public init(
+        id: String,
+        name: String,
+        accessLevel: NasShareAccessLevel,
+        canDelete: Bool
+    ) {
+        self.id = id
+        self.name = name
+        self.accessLevel = accessLevel
+        self.canDelete = canDelete
+    }
+}
+
+public struct NasShareAccessDirectory: Equatable, Sendable {
+    public let shares: [NasShareAccessEntry]
+
+    public init(shares: [NasShareAccessEntry]) {
+        self.shares = shares
+    }
+}
+
+public protocol NasShareAccessRepository: Sendable {
+    func loadShareAccess() async throws -> NasShareAccessDirectory
 }
 
 public struct NasAccount: Identifiable, Equatable, Sendable {
@@ -664,6 +704,151 @@ public struct NasLogEntry: Identifiable, Equatable, Sendable {
         self.level = level
         self.account = account
         self.message = message
+    }
+}
+
+/// 系统进程只读目录。命令行、路径、账号与网络地址不得进入领域模型。
+public struct NasProcessDirectory: Equatable, Sendable {
+    public let processes: [NasSystemProcess]
+    public let groups: [NasProcessGroup]
+    public let total: Int
+    public let isTruncated: Bool
+    public let groupsAreUnavailable: Bool
+
+    public init(
+        processes: [NasSystemProcess],
+        groups: [NasProcessGroup],
+        total: Int,
+        isTruncated: Bool,
+        groupsAreUnavailable: Bool
+    ) {
+        self.processes = processes
+        self.groups = groups
+        self.total = total
+        self.isTruncated = isTruncated
+        self.groupsAreUnavailable = groupsAreUnavailable
+    }
+}
+
+public struct NasSystemProcess: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let processID: String
+    public let name: String
+    public let status: String?
+    public let groupID: String?
+
+    public init(
+        id: String,
+        processID: String,
+        name: String,
+        status: String?,
+        groupID: String?
+    ) {
+        self.id = id
+        self.processID = processID
+        self.name = name
+        self.status = status
+        self.groupID = groupID
+    }
+}
+
+public struct NasProcessGroup: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let status: String?
+    public let processCount: Int?
+
+    public init(
+        id: String,
+        name: String,
+        status: String?,
+        processCount: Int?
+    ) {
+        self.id = id
+        self.name = name
+        self.status = status
+        self.processCount = processCount
+    }
+}
+
+/// 电源计划只读快照。原始命令、路径、账号和地址不得进入领域模型。
+public struct NasPowerScheduleSnapshot: Equatable, Sendable {
+    public let entries: [NasPowerScheduleEntry]
+    public let timeZoneIdentifier: String?
+    public let total: Int
+    public let isTruncated: Bool
+
+    public init(
+        entries: [NasPowerScheduleEntry],
+        timeZoneIdentifier: String?,
+        total: Int,
+        isTruncated: Bool
+    ) {
+        self.entries = entries
+        self.timeZoneIdentifier = timeZoneIdentifier
+        self.total = total
+        self.isTruncated = isTruncated
+    }
+}
+
+public struct NasPowerScheduleEntry: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let action: NasPowerScheduleAction
+    public let isEnabled: Bool?
+    public let hour: Int
+    public let minute: Int
+    public let recurrence: NasPowerScheduleRecurrence
+
+    public init(
+        id: String,
+        action: NasPowerScheduleAction,
+        isEnabled: Bool?,
+        hour: Int,
+        minute: Int,
+        recurrence: NasPowerScheduleRecurrence
+    ) {
+        self.id = id
+        self.action = action
+        self.isEnabled = isEnabled
+        self.hour = hour
+        self.minute = minute
+        self.recurrence = recurrence
+    }
+}
+
+public enum NasPowerScheduleAction: Equatable, Sendable {
+    case startup
+    case shutdown
+    case restart
+    case unknown
+}
+
+public enum NasPowerScheduleRecurrence: Equatable, Sendable {
+    case daily
+    case weekly([NasWeekday])
+    case once(NasPowerScheduleDate)
+    case unknown
+}
+
+public enum NasWeekday: Int, CaseIterable, Equatable, Sendable {
+    case monday = 1
+    case tuesday
+    case wednesday
+    case thursday
+    case friday
+    case saturday
+    case sunday
+}
+
+public struct NasPowerScheduleDate: Equatable, Sendable {
+    public let year: Int
+    public let month: Int
+    public let day: Int
+
+    public init(year: Int, month: Int, day: Int) {
+        self.year = year
+        self.month = month
+        self.day = day
     }
 }
 
@@ -1027,6 +1212,51 @@ public struct NasRegionSettings: Hashable, Sendable {
         self.manualDate = manualDate
         self.timeZones = timeZones
     }
+
+    public var normalizedDateFormat: String {
+        dateFormat.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var normalizedTimeFormat: String {
+        timeFormat.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var normalizedTimeServers: [String] {
+        timeServers
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    public var isValidForSaving: Bool {
+        guard !normalizedDateFormat.isEmpty,
+              !normalizedTimeFormat.isEmpty,
+              timeZones.contains(where: { $0.id == timeZone }) else {
+            return false
+        }
+        if isNetworkTimeEnabled {
+            let servers = normalizedTimeServers
+            return !servers.isEmpty
+                && servers.count <= 3
+                && servers.allSatisfy(Self.isValidTimeServer)
+        }
+        return manualDate != nil
+    }
+
+    /// 时间服务器只接受主机名或 IP，不接受协议、路径、用户信息或空白。
+    public static func isValidTimeServer(_ value: String) -> Bool {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count <= 253, !normalized.isEmpty,
+              normalized.unicodeScalars.allSatisfy({
+                  CharacterSet(
+                      charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:"
+                  ).contains($0)
+              }) else {
+            return false
+        }
+        return !normalized.hasPrefix(".")
+            && !normalized.hasSuffix(".")
+            && !normalized.contains("..")
+    }
 }
 
 public struct NasDDNSProvider: Identifiable, Hashable, Sendable {
@@ -1143,6 +1373,43 @@ public struct NasDDNSDraft: Hashable, Sendable {
         self.interfaceV6 = interfaceV6
         self.heartbeat = heartbeat
     }
+
+    public var normalizedProviderID: String {
+        providerID.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var normalizedHostname: String {
+        hostname.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    public var normalizedUsername: String {
+        username.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var isValidForSubmission: Bool {
+        !normalizedProviderID.isEmpty
+            && Self.isValidHostname(normalizedHostname)
+            && !normalizedUsername.isEmpty
+            && (originalProviderID != nil
+                || normalizedProviderID == "Synology"
+                || !password.isEmpty)
+    }
+
+    /// DDNS 主机名不接受协议、路径、用户信息、端口或空白。
+    public static func isValidHostname(_ value: String) -> Bool {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count <= 253, !normalized.isEmpty,
+              normalized.unicodeScalars.allSatisfy({
+                  CharacterSet(
+                      charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-"
+                  ).contains($0)
+              }) else {
+            return false
+        }
+        return !normalized.hasPrefix(".")
+            && !normalized.hasSuffix(".")
+            && !normalized.contains("..")
+    }
 }
 
 /// NAS 设置主要使用 DSM 内部接口。写操作必须先完成能力、权限与目标状态检查。
@@ -1178,6 +1445,7 @@ public protocol NasSettingsRepository: Sendable {
     func deleteGroup(name: String) async throws
     func deleteGroupResult(name: String) async throws -> MutationResult
     func loadLogs(offset: Int, limit: Int) async throws -> NasLogPage
+    func loadSystemProcesses(start: Int, limit: Int) async throws -> NasProcessDirectory
     func loadConnections(offset: Int, limit: Int) async throws -> NasConnectionPage
     func disconnectConnection(_ connection: NasConnection) async throws
     func loadFileServiceSettings() async throws -> NasFileServiceSettings
@@ -1201,6 +1469,7 @@ public protocol NasSettingsRepository: Sendable {
         _ interface: NasEthernetInterface
     ) async throws -> MutationResult
     func loadHardwareSettings() async throws -> NasHardwareSettings
+    func loadPowerSchedule() async throws -> NasPowerScheduleSnapshot
     func saveHardwareSettings(_ settings: NasHardwareSettings) async throws
     func saveHardwareSettingsResult(
         _ settings: NasHardwareSettings
@@ -1217,17 +1486,35 @@ public protocol NasSettingsRepository: Sendable {
     ) async throws -> MutationResult
     func loadRegionSettings() async throws -> NasRegionSettings
     func saveRegionSettings(_ settings: NasRegionSettings) async throws
+    func saveRegionSettingsResult(
+        _ settings: NasRegionSettings
+    ) async throws -> MutationResult
     func loadDDNS() async throws -> NasDDNSDirectory
+    func testDDNSResult(_ draft: NasDDNSDraft) async throws -> MutationResult
     func saveDDNS(_ draft: NasDDNSDraft) async throws
+    func saveDDNSResult(_ draft: NasDDNSDraft) async throws -> MutationResult
     func deleteDDNS(providerID: String) async throws
+    func deleteDDNSResult(providerID: String) async throws -> MutationResult
     func refreshDDNS() async throws
+    func refreshDDNSResult() async throws -> MutationResult
     func controlPackage(id: String, action: NasPackageAction) async throws
+    func controlPackageResult(
+        id: String,
+        action: NasPackageAction
+    ) async throws -> MutationResult
     func uninstallPackageResult(id: String) async throws -> MutationResult
     func performPowerAction(_ action: NasPowerAction) async throws
+    func performPowerActionResult(
+        _ action: NasPowerAction
+    ) async throws -> MutationResult
     func checkSystemUpdate() async throws -> NasSystemUpdateInfo
 }
 
 public extension NasSettingsRepository {
+    func loadSystemProcesses(start: Int, limit: Int) async throws -> NasProcessDirectory {
+        throw unsupportedManagementOperation()
+    }
+
     func loadDiskTestStatus(diskID: String) async throws -> NasDiskTestStatus {
         throw AppError(
             category: .apiUnavailable,
@@ -1281,6 +1568,40 @@ public extension NasSettingsRepository {
     }
     func controlPackage(id: String, action: NasPackageAction) async throws {
         throw unsupportedManagementOperation()
+    }
+    func controlPackageResult(
+        id: String,
+        action: NasPackageAction
+    ) async throws -> MutationResult {
+        if action == .uninstall {
+            return try await uninstallPackageResult(id: id)
+        }
+        let operation: String
+        let prefix: String
+        switch action {
+        case .start:
+            operation = "packageStart"
+            prefix = "package.start"
+        case .stop:
+            operation = "packageStop"
+            prefix = "package.stop"
+        case .uninstall:
+            operation = "packageUninstall"
+            prefix = "package.uninstall"
+        case .upgrade:
+            operation = "packageUpgrade"
+            prefix = "package.upgrade"
+        }
+        return try MutationResult(
+            status: .unsupported,
+            operation: operation,
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "\(prefix).unsupported",
+            diagnosticTag: "\(prefix).unsupported"
+        )
     }
     func uninstallPackageResult(id: String) async throws -> MutationResult {
         try MutationResult(
@@ -1444,6 +1765,9 @@ public extension NasSettingsRepository {
     func loadHardwareSettings() async throws -> NasHardwareSettings {
         throw unsupportedManagementOperation()
     }
+    func loadPowerSchedule() async throws -> NasPowerScheduleSnapshot {
+        throw unsupportedManagementOperation()
+    }
     func saveHardwareSettings(_ settings: NasHardwareSettings) async throws {
         throw unsupportedManagementOperation()
     }
@@ -1507,20 +1831,60 @@ public extension NasSettingsRepository {
     func saveRegionSettings(_ settings: NasRegionSettings) async throws {
         throw unsupportedManagementOperation()
     }
+    func saveRegionSettingsResult(
+        _ settings: NasRegionSettings
+    ) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: "regionSettingsUpdate",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "region.settings.unsupported",
+            diagnosticTag: "region.settings.unsupported"
+        )
+    }
     func loadDDNS() async throws -> NasDDNSDirectory {
         throw unsupportedManagementOperation()
+    }
+    func testDDNSResult(_ draft: NasDDNSDraft) async throws -> MutationResult {
+        try unsupportedDDNSResult(operation: "ddnsProviderTest")
     }
     func saveDDNS(_ draft: NasDDNSDraft) async throws {
         throw unsupportedManagementOperation()
     }
+    func saveDDNSResult(_ draft: NasDDNSDraft) async throws -> MutationResult {
+        try unsupportedDDNSResult(operation: "ddnsRecordSave")
+    }
     func deleteDDNS(providerID: String) async throws {
         throw unsupportedManagementOperation()
+    }
+    func deleteDDNSResult(providerID: String) async throws -> MutationResult {
+        try unsupportedDDNSResult(operation: "ddnsRecordDelete")
     }
     func refreshDDNS() async throws {
         throw unsupportedManagementOperation()
     }
+    func refreshDDNSResult() async throws -> MutationResult {
+        try unsupportedDDNSResult(operation: "ddnsAddressRefresh")
+    }
     func performPowerAction(_ action: NasPowerAction) async throws {
         throw unsupportedManagementOperation()
+    }
+    func performPowerActionResult(
+        _ action: NasPowerAction
+    ) async throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: action == .shutdown ? "nasShutdown" : "nasReboot",
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "power.action.unsupported",
+            diagnosticTag: "power.action.unsupported"
+        )
     }
     func checkSystemUpdate() async throws -> NasSystemUpdateInfo {
         throw unsupportedManagementOperation()
@@ -1531,6 +1895,19 @@ public extension NasSettingsRepository {
             category: .apiUnavailable,
             isRetryable: false,
             safeUserMessage: L10n.string("shared.89527fd77aba1533")
+        )
+    }
+
+    private func unsupportedDDNSResult(operation: String) throws -> MutationResult {
+        try MutationResult(
+            status: .unsupported,
+            operation: operation,
+            submitted: false,
+            requiresRefresh: false,
+            counts: MutationResultCounts(succeeded: 0, failed: 1, unknown: 0),
+            errorCategory: .unsupported,
+            localizationKey: "ddns.operation.unsupported",
+            diagnosticTag: "ddns.operation.unsupported"
         )
     }
 }

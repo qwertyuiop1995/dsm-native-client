@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "ddns.update-address.synthetic-record",
+  "module": "ddns",
+  "operation": "updateAddress",
+  "api": {
+    "name": "SYNO.Core.DDNS.Record",
+    "method": "update_ip_address",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

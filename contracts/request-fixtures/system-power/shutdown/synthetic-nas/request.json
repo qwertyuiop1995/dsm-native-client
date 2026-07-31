@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "system-power.shutdown.synthetic-nas",
+  "module": "system-power",
+  "operation": "shutdown",
+  "api": {
+    "name": "SYNO.Core.System",
+    "method": "shutdown",
+    "preferredVersion": 3,
+    "resolvedVersion": 3,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "never",
+    "risk": "destructive",
+    "readbackPolicy": "unavailable"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

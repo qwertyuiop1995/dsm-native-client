@@ -61,6 +61,77 @@ final class NasAdministrationModelTests: XCTestCase {
         XCTAssertEqual(model.connections?.connections, [])
     }
 
+    func test共享访问页面只展示当前账号有效权限() async {
+        let shareRepository = ShareAccessRepositoryStub(
+            directory: NasShareAccessDirectory(shares: [
+                NasShareAccessEntry(
+                    id: "synthetic-read-only",
+                    name: "只读资料",
+                    accessLevel: .readOnly,
+                    canDelete: false
+                ),
+                NasShareAccessEntry(
+                    id: "synthetic-unknown",
+                    name: "待确认资料",
+                    accessLevel: .unknown,
+                    canDelete: false
+                )
+            ])
+        )
+        let model = NasSettingsModel(shareAccessRepository: shareRepository)
+        model.setModuleEnabled(true)
+
+        await model.activate(.shareAccess)
+
+        XCTAssertTrue(model.hasLoaded(.shareAccess))
+        XCTAssertEqual(model.shareAccess?.shares.map(\.accessLevel), [.readOnly, .unknown])
+        XCTAssertNil(model.errorMessage(for: .shareAccess))
+        let requestCount = await shareRepository.requestCount()
+        XCTAssertEqual(requestCount, 1)
+    }
+
+    func test缺少FileStation连接时共享访问明确降级() async {
+        let model = NasSettingsModel()
+        model.setModuleEnabled(true)
+
+        await model.activate(.shareAccess)
+
+        XCTAssertFalse(model.hasLoaded(.shareAccess))
+        XCTAssertNil(model.shareAccess)
+        XCTAssertEqual(
+            model.errorMessage(for: .shareAccess),
+            L10n.string("share-access.unavailable")
+        )
+    }
+
+    func test系统活动页面读取只读进程目录() async {
+        let repository = NasAdministrationRepositoryStub()
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+
+        await model.activate(.processes)
+
+        XCTAssertTrue(model.hasLoaded(.processes))
+        XCTAssertEqual(model.processDirectory?.processes.map(\.name), ["service-worker"])
+        XCTAssertEqual(model.processDirectory?.groups.map(\.name), ["Example Service"])
+        XCTAssertEqual(model.processDirectory?.total, 1)
+        XCTAssertNil(model.errorMessage(for: .processes))
+    }
+
+    func test电源计划页面读取只读快照() async {
+        let repository = NasAdministrationRepositoryStub()
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+
+        await model.activate(.powerSchedule)
+
+        XCTAssertTrue(model.hasLoaded(.powerSchedule))
+        XCTAssertEqual(model.powerSchedule?.entries.count, 1)
+        XCTAssertEqual(model.powerSchedule?.entries.first?.action, .startup)
+        XCTAssertEqual(model.powerSchedule?.timeZoneIdentifier, "Asia/Shanghai")
+        XCTAssertNil(model.errorMessage(for: .powerSchedule))
+    }
+
     func test暂停套件后刷新并确认最终状态() async throws {
         let repository = NasAdministrationRepositoryStub(packages: [
             package(status: "running", canStart: false, canStop: true, canUninstall: true)
@@ -69,12 +140,120 @@ final class NasAdministrationModelTests: XCTestCase {
         model.setModuleEnabled(true)
         await model.activate(.packages)
 
-        try await model.controlPackage(id: "Example", action: .stop)
+        let result = try await model.controlPackage(
+            id: "Example",
+            action: .stop
+        )
 
+        XCTAssertEqual(result.status, .confirmedSuccess)
         XCTAssertEqual(model.packages.first?.status, "stopped")
         XCTAssertFalse(model.packageOperationIDs.contains("Example"))
         let requestCount = await repository.packageControlRequestCount()
         XCTAssertEqual(requestCount, 1)
+    }
+
+    func test套件停止未确认时保留状态并提示先刷新() async {
+        let repository = NasAdministrationRepositoryStub(
+            packages: [
+                package(
+                    status: "running",
+                    canStart: false,
+                    canStop: true,
+                    canUninstall: true
+                )
+            ],
+            packageControlStatus: .submittedButUnverified
+        )
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.packages)
+
+        do {
+            _ = try await model.controlPackage(id: "Example", action: .stop)
+            XCTFail("未确认的停止操作不应显示为完成")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .unknown)
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("package.stop.unverified")
+            )
+            XCTAssertFalse(error.isRetryable)
+        } catch {
+            XCTFail("返回了非统一错误：\(error)")
+        }
+
+        XCTAssertEqual(model.packages.first?.status, "running")
+        XCTAssertFalse(model.packageOperationIDs.contains("Example"))
+    }
+
+    func test套件控制在模型层阻止同一套件重复提交() async throws {
+        let repository = NasAdministrationRepositoryStub(
+            delayNanoseconds: 50_000_000,
+            packages: [
+                package(
+                    status: "running",
+                    canStart: false,
+                    canStop: true,
+                    canUninstall: true
+                )
+            ]
+        )
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.packages)
+
+        let firstTask = Task {
+            try await model.controlPackage(id: "Example", action: .stop)
+        }
+        while !model.packageOperationIDs.contains("Example") {
+            await Task.yield()
+        }
+
+        do {
+            _ = try await model.controlPackage(id: "Example", action: .stop)
+            XCTFail("同一套件不应重复提交")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .serverBusy)
+        }
+        let first = try await firstTask.value
+
+        XCTAssertEqual(first.status, .confirmedSuccess)
+        XCTAssertFalse(model.packageOperationIDs.contains("Example"))
+        let requestCount = await repository.packageControlRequestCount()
+        XCTAssertEqual(requestCount, 1)
+    }
+
+    func test套件升级提示不会开放未实现的写操作() async {
+        let repository = NasAdministrationRepositoryStub(packages: [
+            package(
+                status: "running",
+                canStart: false,
+                canStop: true,
+                canUninstall: true,
+                isUpgradeAvailable: true
+            )
+        ])
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.packages)
+
+        XCTAssertTrue(model.packages.first?.isUpgradeAvailable == true)
+        XCTAssertFalse(model.packages.first?.canUpgrade ?? true)
+        do {
+            _ = try await model.controlPackage(id: "Example", action: .upgrade)
+            XCTFail("只读升级提示不应发送升级请求")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .apiUnavailable)
+            XCTAssertFalse(error.isRetryable)
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("ui.40a27587a6302b95")
+            )
+        } catch {
+            XCTFail("返回了非统一错误：\(error)")
+        }
+        let requestCount = await repository.packageControlRequestCount()
+        XCTAssertEqual(requestCount, 0)
     }
 
     func test系统套件不会提交卸载请求() async {
@@ -86,7 +265,7 @@ final class NasAdministrationModelTests: XCTestCase {
         await model.activate(.packages)
 
         do {
-            try await model.controlPackage(id: "Example", action: .uninstall)
+            _ = try await model.controlPackage(id: "Example", action: .uninstall)
             XCTFail("系统套件应拒绝卸载")
         } catch let error as AppError {
             XCTAssertEqual(error.category, .permissionDenied)
@@ -105,7 +284,7 @@ final class NasAdministrationModelTests: XCTestCase {
         model.setModuleEnabled(true)
         await model.activate(.packages)
 
-        try await model.controlPackage(id: "Example", action: .uninstall)
+        _ = try await model.controlPackage(id: "Example", action: .uninstall)
 
         XCTAssertTrue(model.packages.isEmpty)
         XCTAssertFalse(model.packageOperationIDs.contains("Example"))
@@ -130,7 +309,7 @@ final class NasAdministrationModelTests: XCTestCase {
         await model.activate(.packages)
 
         do {
-            try await model.controlPackage(id: "Example", action: .uninstall)
+            _ = try await model.controlPackage(id: "Example", action: .uninstall)
             XCTFail("未确认的卸载不应显示为完成")
         } catch let error as AppError {
             XCTAssertEqual(error.category, .unknown)
@@ -640,6 +819,250 @@ final class NasAdministrationModelTests: XCTestCase {
         )
     }
 
+    func test区域与时间设置确认成功后刷新模型状态() async throws {
+        let repository = NasAdministrationRepositoryStub()
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.region)
+        let expected = regionUpdate
+
+        try await model.saveRegion(expected)
+
+        XCTAssertEqual(model.region, expected)
+        XCTAssertFalse(model.isSavingServiceSettings)
+    }
+
+    func test区域与时间部分成功时刷新并提示重新连接核对() async {
+        let repository = NasAdministrationRepositoryStub(
+            regionUpdateStatus: .partialSuccess
+        )
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.region)
+
+        do {
+            try await model.saveRegion(regionUpdate)
+            XCTFail("部分成功不应显示为全部保存")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .partialFailure)
+            XCTAssertFalse(error.isRetryable)
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("region.settings.partial")
+            )
+        } catch {
+            XCTFail("返回了非统一错误：\(error)")
+        }
+        XCTAssertEqual(model.region?.dateFormat, "Y/m/d")
+        XCTAssertEqual(model.region?.timeZone, "Asia/Shanghai")
+    }
+
+    func test区域与时间未确认时提示重连且禁止立即重试() async {
+        let repository = NasAdministrationRepositoryStub(
+            regionUpdateStatus: .submittedButUnverified
+        )
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.region)
+
+        do {
+            try await model.saveRegion(regionUpdate)
+            XCTFail("未确认结果不应显示为保存成功")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .unknown)
+            XCTAssertFalse(error.isRetryable)
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("region.settings.unverified")
+            )
+        } catch {
+            XCTFail("返回了非统一错误：\(error)")
+        }
+        XCTAssertEqual(model.region?.timeZone, "Asia/Shanghai")
+    }
+
+    func test区域与时间反馈覆盖权限和不支持状态() {
+        XCTAssertEqual(
+            NasSettingsModel.regionSettingsFeedback(for: .permissionDenied),
+            NasSettingsModel.RegionSettingsFeedback(
+                resourceKey: "region.settings.permission-denied",
+                category: .permissionDenied
+            )
+        )
+        XCTAssertEqual(
+            NasSettingsModel.regionSettingsFeedback(for: .unsupported),
+            NasSettingsModel.RegionSettingsFeedback(
+                resourceKey: "region.settings.unsupported",
+                category: .apiUnavailable
+            )
+        )
+    }
+
+    func testDDNS连接测试与保存分别确认结果() async throws {
+        let repository = NasAdministrationRepositoryStub()
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.ddns)
+
+        let testResult = try await model.testDDNS(ddnsDraft)
+        try await model.saveDDNS(ddnsDraft)
+
+        XCTAssertEqual(testResult.status, .confirmedSuccess)
+        XCTAssertEqual(model.ddns?.records.first?.hostname, "nas.example.invalid")
+        XCTAssertTrue(model.ddnsOperationIDs.isEmpty)
+    }
+
+    func testDDNS保存未确认时保留当前列表并禁止立即重试提示() async {
+        let repository = NasAdministrationRepositoryStub(
+            ddnsSaveStatus: .submittedButUnverified
+        )
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.ddns)
+
+        do {
+            try await model.saveDDNS(ddnsDraft)
+            XCTFail("未确认的 DDNS 保存不应显示为成功")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .unknown)
+            XCTAssertFalse(error.isRetryable)
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("ddns.save.unverified")
+            )
+        } catch {
+            XCTFail("返回了非统一错误：\(error)")
+        }
+        XCTAssertTrue(model.ddns?.records.isEmpty == true)
+    }
+
+    func testDDNS删除未确认时刷新后仍保留记录() async {
+        let record = ddnsRecord
+        let repository = NasAdministrationRepositoryStub(
+            ddnsRecords: [record],
+            ddnsDeleteStatus: .submittedButUnverified
+        )
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+        await model.activate(.ddns)
+
+        do {
+            try await model.deleteDDNS(record)
+            XCTFail("未确认的 DDNS 删除不应显示为成功")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .unknown)
+            XCTAssertFalse(error.isRetryable)
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("ddns.delete.unverified")
+            )
+        } catch {
+            XCTFail("返回了非统一错误：\(error)")
+        }
+        XCTAssertEqual(model.ddns?.records.map(\.providerID), ["Example"])
+    }
+
+    func testDDNS立即更新与连接测试覆盖权限和不支持反馈() async {
+        let permissionRepository = NasAdministrationRepositoryStub(
+            ddnsRecords: [ddnsRecord],
+            ddnsRefreshStatus: .permissionDenied
+        )
+        let permissionModel = NasSettingsModel(repository: permissionRepository)
+        permissionModel.setModuleEnabled(true)
+        await permissionModel.activate(.ddns)
+        do {
+            try await permissionModel.refreshDDNS()
+            XCTFail("权限不足不应显示为地址更新成功")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .permissionDenied)
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("ddns.operation.permission-denied")
+            )
+        } catch {
+            XCTFail("返回了非统一错误：\(error)")
+        }
+
+        let unsupportedRepository = NasAdministrationRepositoryStub(
+            ddnsTestStatus: .unsupported
+        )
+        let unsupportedModel = NasSettingsModel(repository: unsupportedRepository)
+        unsupportedModel.setModuleEnabled(true)
+        await unsupportedModel.activate(.ddns)
+        do {
+            _ = try await unsupportedModel.testDDNS(ddnsDraft)
+            XCTFail("不支持的连接测试不应显示为成功")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .apiUnavailable)
+            XCTAssertEqual(
+                error.safeUserMessage,
+                L10n.string("ddns.operation.unsupported")
+            )
+        } catch {
+            XCTFail("返回了非统一错误：\(error)")
+        }
+    }
+
+    func testNAS电源动作保留Repository结果且结束后释放忙碌状态() async throws {
+        let repository = NasAdministrationRepositoryStub(
+            powerActionStatus: .confirmedSuccess
+        )
+        let model = NasSettingsModel(repository: repository)
+
+        let shutdown = try await model.performPowerAction(.shutdown)
+        let reboot = try await model.performPowerAction(.reboot)
+
+        XCTAssertEqual(shutdown.status, .confirmedSuccess)
+        XCTAssertEqual(shutdown.operation, "nasShutdown")
+        XCTAssertEqual(shutdown.localizationKey, "power.shutdown.accepted")
+        XCTAssertEqual(reboot.operation, "nasReboot")
+        XCTAssertEqual(reboot.localizationKey, "power.reboot.accepted")
+        XCTAssertFalse(model.isPerformingPowerAction)
+        let requestCount = await repository.powerActionRequestCount()
+        XCTAssertEqual(requestCount, 2)
+    }
+
+    func testNAS电源动作未确认结果不会被模型改写为成功() async throws {
+        let repository = NasAdministrationRepositoryStub(
+            powerActionStatus: .submittedButUnverified
+        )
+        let model = NasSettingsModel(repository: repository)
+
+        let result = try await model.performPowerAction(.reboot)
+
+        XCTAssertEqual(result.status, .submittedButUnverified)
+        XCTAssertTrue(result.submitted)
+        XCTAssertTrue(result.requiresRefresh)
+        XCTAssertEqual(result.localizationKey, "power.action.unverified")
+        XCTAssertFalse(model.isPerformingPowerAction)
+    }
+
+    func testNAS电源动作模型阻止并发重复提交() async throws {
+        let repository = NasAdministrationRepositoryStub(
+            delayNanoseconds: 50_000_000
+        )
+        let model = NasSettingsModel(repository: repository)
+        let firstTask = Task {
+            try await model.performPowerAction(.shutdown)
+        }
+        while !model.isPerformingPowerAction {
+            await Task.yield()
+        }
+
+        do {
+            _ = try await model.performPowerAction(.reboot)
+            XCTFail("并发电源请求应在模型层被拒绝")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .serverBusy)
+            XCTAssertTrue(error.isRetryable)
+        }
+
+        _ = try await firstTask.value
+        XCTAssertFalse(model.isPerformingPowerAction)
+        let requestCount = await repository.powerActionRequestCount()
+        XCTAssertEqual(requestCount, 1)
+    }
+
     func test硬件设置确认成功后刷新模型状态() async throws {
         let repository = NasAdministrationRepositoryStub()
         let model = NasSettingsModel(repository: repository)
@@ -882,7 +1305,9 @@ final class NasAdministrationModelTests: XCTestCase {
         status: String,
         canStart: Bool,
         canStop: Bool,
-        canUninstall: Bool
+        canUninstall: Bool,
+        isUpgradeAvailable: Bool = false,
+        canUpgrade: Bool = false
     ) -> NasPackage {
         NasPackage(
             id: "Example",
@@ -895,7 +1320,9 @@ final class NasAdministrationModelTests: XCTestCase {
             installedAt: nil,
             canStart: canStart,
             canStop: canStop,
-            canUninstall: canUninstall
+            canUninstall: canUninstall,
+            isUpgradeAvailable: isUpgradeAvailable,
+            canUpgrade: canUpgrade
         )
     }
 
@@ -951,6 +1378,50 @@ final class NasAdministrationModelTests: XCTestCase {
         )
     }
 
+    private var regionUpdate: NasRegionSettings {
+        NasRegionSettings(
+            dateFormat: "Y/m/d",
+            timeFormat: "H:i",
+            timeZone: "UTC",
+            isNetworkTimeEnabled: true,
+            timeServers: ["time.example.invalid"],
+            manualDate: nil,
+            timeZones: [
+                NasTimeZoneOption(id: "Asia/Shanghai", displayName: "北京、上海"),
+                NasTimeZoneOption(id: "UTC", displayName: "协调世界时")
+            ]
+        )
+    }
+
+    private var ddnsDraft: NasDDNSDraft {
+        NasDDNSDraft(
+            providerID: "Example",
+            hostname: "nas.example.invalid",
+            username: "synthetic-owner",
+            password: "SYNTHETIC_EPHEMERAL_SECRET"
+        )
+    }
+
+    private var ddnsRecord: NasDDNSRecord {
+        NasDDNSRecord(
+            id: "Example",
+            providerID: "Example",
+            providerName: "Synthetic Provider",
+            hostname: "nas.example.invalid",
+            address: "192.0.2.10",
+            status: "service_ddns_normal",
+            lastUpdated: nil,
+            isEnabled: true,
+            username: "synthetic-owner",
+            networkType: "auto",
+            ipv4: "192.0.2.10",
+            ipv6: nil,
+            interfaceV4: nil,
+            interfaceV6: nil,
+            heartbeat: false
+        )
+    }
+
     private var hardwareUpdate: NasHardwareSettings {
         NasHardwareSettings(
             restartsAfterPowerFailure: true,
@@ -969,14 +1440,34 @@ final class NasAdministrationModelTests: XCTestCase {
     }
 }
 
+private actor ShareAccessRepositoryStub: NasShareAccessRepository {
+    private let directory: NasShareAccessDirectory
+    private var requests = 0
+
+    init(directory: NasShareAccessDirectory) {
+        self.directory = directory
+    }
+
+    func loadShareAccess() async throws -> NasShareAccessDirectory {
+        requests += 1
+        return directory
+    }
+
+    func requestCount() -> Int {
+        requests
+    }
+}
+
 private actor NasAdministrationRepositoryStub: NasSettingsRepository {
     private var systemRequests = 0
     private var packageControlRequests = 0
     private var diskTestRequests = 0
+    private var powerActionRequests = 0
     private var diskTestStatus = NasDiskTestStatus(diskID: "disk1", isRunning: false)
     private let diskTestStartStatus: MutationResultStatus
     private let diskTestStopStatus: MutationResultStatus
     private var packages: [NasPackage]
+    private let packageControlStatus: MutationResultStatus
     private let packageUninstallStatus: MutationResultStatus
     private var accountDirectory = NasAccountDirectory(
         users: [
@@ -1055,6 +1546,25 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
         port: 3_128
     )
     private let proxyUpdateStatus: MutationResultStatus
+    private var regionSettings = NasRegionSettings(
+        dateFormat: "Y-m-d",
+        timeFormat: "H:i",
+        timeZone: "Asia/Shanghai",
+        isNetworkTimeEnabled: false,
+        timeServers: [],
+        manualDate: Date(timeIntervalSince1970: 0),
+        timeZones: [
+            NasTimeZoneOption(id: "Asia/Shanghai", displayName: "北京、上海"),
+            NasTimeZoneOption(id: "UTC", displayName: "协调世界时")
+        ]
+    )
+    private let regionUpdateStatus: MutationResultStatus
+    private var ddnsDirectory: NasDDNSDirectory
+    private let ddnsTestStatus: MutationResultStatus
+    private let ddnsSaveStatus: MutationResultStatus
+    private let ddnsDeleteStatus: MutationResultStatus
+    private let ddnsRefreshStatus: MutationResultStatus
+    private let powerActionStatus: MutationResultStatus
     private let hardwareUpdateStatus: MutationResultStatus
     private let remoteAccessUpdateStatus: MutationResultStatus
     private let delayNanoseconds: UInt64
@@ -1062,6 +1572,7 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
     init(
         delayNanoseconds: UInt64 = 0,
         packages: [NasPackage] = [],
+        packageControlStatus: MutationResultStatus = .confirmedSuccess,
         packageUninstallStatus: MutationResultStatus = .confirmedSuccess,
         accountDeleteStatus: MutationResultStatus = .confirmedSuccess,
         ethernetUpdateStatus: MutationResultStatus = .confirmedSuccess,
@@ -1069,6 +1580,13 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
         fileServiceUpdateStatus: MutationResultStatus = .confirmedSuccess,
         terminalUpdateStatus: MutationResultStatus = .confirmedSuccess,
         proxyUpdateStatus: MutationResultStatus = .confirmedSuccess,
+        regionUpdateStatus: MutationResultStatus = .confirmedSuccess,
+        ddnsRecords: [NasDDNSRecord] = [],
+        ddnsTestStatus: MutationResultStatus = .confirmedSuccess,
+        ddnsSaveStatus: MutationResultStatus = .confirmedSuccess,
+        ddnsDeleteStatus: MutationResultStatus = .confirmedSuccess,
+        ddnsRefreshStatus: MutationResultStatus = .confirmedSuccess,
+        powerActionStatus: MutationResultStatus = .confirmedSuccess,
         hardwareUpdateStatus: MutationResultStatus = .confirmedSuccess,
         remoteAccessUpdateStatus: MutationResultStatus = .confirmedSuccess,
         diskTestStartStatus: MutationResultStatus = .confirmedSuccess,
@@ -1076,6 +1594,7 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
     ) {
         self.delayNanoseconds = delayNanoseconds
         self.packages = packages
+        self.packageControlStatus = packageControlStatus
         self.packageUninstallStatus = packageUninstallStatus
         self.accountDeleteStatus = accountDeleteStatus
         self.ethernetUpdateStatus = ethernetUpdateStatus
@@ -1083,6 +1602,18 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
         self.fileServiceUpdateStatus = fileServiceUpdateStatus
         self.terminalUpdateStatus = terminalUpdateStatus
         self.proxyUpdateStatus = proxyUpdateStatus
+        self.regionUpdateStatus = regionUpdateStatus
+        ddnsDirectory = NasDDNSDirectory(
+            providers: [
+                NasDDNSProvider(id: "Example", displayName: "Synthetic Provider")
+            ],
+            records: ddnsRecords
+        )
+        self.ddnsTestStatus = ddnsTestStatus
+        self.ddnsSaveStatus = ddnsSaveStatus
+        self.ddnsDeleteStatus = ddnsDeleteStatus
+        self.ddnsRefreshStatus = ddnsRefreshStatus
+        self.powerActionStatus = powerActionStatus
         self.hardwareUpdateStatus = hardwareUpdateStatus
         self.remoteAccessUpdateStatus = remoteAccessUpdateStatus
         self.diskTestStartStatus = diskTestStartStatus
@@ -1092,6 +1623,7 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
     func systemRequestCount() -> Int { systemRequests }
     func packageControlRequestCount() -> Int { packageControlRequests }
     func diskTestRequestCount() -> Int { diskTestRequests }
+    func powerActionRequestCount() -> Int { powerActionRequests }
 
     func loadSystemOverview() async throws -> NasSystemOverview {
         systemRequests += 1
@@ -1119,6 +1651,55 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
             diskUtilization: 10,
             nfsReadOperationsPerSecond: 0,
             nfsWriteOperationsPerSecond: 0
+        )
+    }
+
+    func performPowerActionResult(
+        _ action: NasPowerAction
+    ) async throws -> MutationResult {
+        powerActionRequests += 1
+        if delayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+        let unknown = powerActionStatus == .submittedButUnverified
+            || powerActionStatus == .cancellationRequestedAfterSubmission
+        let submitted = ![
+            .cancelledBeforeSubmission,
+            .permissionDenied,
+            .unsupported
+        ].contains(powerActionStatus)
+        let localizationKey: String = switch powerActionStatus {
+        case .confirmedSuccess:
+            action == .shutdown
+                ? "power.shutdown.accepted"
+                : "power.reboot.accepted"
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            "power.action.unverified"
+        case .cancelledBeforeSubmission:
+            "power.action.cancelled"
+        case .permissionDenied:
+            "power.action.permission-denied"
+        case .unsupported:
+            "power.action.unsupported"
+        case .confirmedFailure, .partialSuccess:
+            "power.action.rejected"
+        }
+        return try MutationResult(
+            status: powerActionStatus,
+            operation: action == .shutdown ? "nasShutdown" : "nasReboot",
+            submitted: submitted,
+            requiresRefresh: unknown || powerActionStatus == .partialSuccess,
+            counts: MutationResultCounts(
+                succeeded: powerActionStatus == .confirmedSuccess
+                    || powerActionStatus == .partialSuccess ? 1 : 0,
+                failed: powerActionStatus == .confirmedFailure
+                    || powerActionStatus == .permissionDenied
+                    || powerActionStatus == .unsupported
+                    || powerActionStatus == .partialSuccess ? 1 : 0,
+                unknown: unknown ? 1 : 0
+            ),
+            localizationKey: localizationKey,
+            diagnosticTag: "power.action.test"
         )
     }
 
@@ -1255,6 +1836,52 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
         NasLogPage(entries: [], total: 0, infoCount: 0, warningCount: 0, errorCount: 0)
     }
 
+    func loadSystemProcesses(
+        start: Int,
+        limit: Int
+    ) async throws -> NasProcessDirectory {
+        NasProcessDirectory(
+            processes: [
+                NasSystemProcess(
+                    id: "process:7",
+                    processID: "7",
+                    name: "service-worker",
+                    status: "running",
+                    groupID: "example-service"
+                )
+            ],
+            groups: [
+                NasProcessGroup(
+                    id: "example-service",
+                    name: "Example Service",
+                    status: "running",
+                    processCount: 1
+                )
+            ],
+            total: 1,
+            isTruncated: false,
+            groupsAreUnavailable: false
+        )
+    }
+
+    func loadPowerSchedule() async throws -> NasPowerScheduleSnapshot {
+        NasPowerScheduleSnapshot(
+            entries: [
+                NasPowerScheduleEntry(
+                    id: "synthetic-schedule",
+                    action: .startup,
+                    isEnabled: true,
+                    hour: 7,
+                    minute: 30,
+                    recurrence: .weekly([.monday, .wednesday, .friday])
+                )
+            ],
+            timeZoneIdentifier: "Asia/Shanghai",
+            total: 1,
+            isTruncated: false
+        )
+    }
+
     func loadConnections(offset: Int, limit: Int) async throws -> NasConnectionPage {
         NasConnectionPage(connections: [], total: 0)
     }
@@ -1386,6 +2013,162 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
                 ? "proxy.settings.partial"
                 : (isUnknown ? "proxy.settings.unverified" : nil),
             diagnosticTag: "proxy.settings.test"
+        )
+    }
+
+    func loadRegionSettings() async throws -> NasRegionSettings {
+        regionSettings
+    }
+
+    func saveRegionSettingsResult(
+        _ settings: NasRegionSettings
+    ) async throws -> MutationResult {
+        switch regionUpdateStatus {
+        case .confirmedSuccess:
+            regionSettings = settings
+        case .partialSuccess:
+            regionSettings.dateFormat = settings.dateFormat
+        default:
+            break
+        }
+        let isUnknown = regionUpdateStatus == .submittedButUnverified
+            || regionUpdateStatus == .cancellationRequestedAfterSubmission
+        let isPartial = regionUpdateStatus == .partialSuccess
+        let submitted = regionUpdateStatus != .cancelledBeforeSubmission
+            && regionUpdateStatus != .permissionDenied
+            && regionUpdateStatus != .unsupported
+        return try MutationResult(
+            status: regionUpdateStatus,
+            operation: "regionSettingsUpdate",
+            submitted: submitted,
+            requiresRefresh: isUnknown || isPartial,
+            counts: MutationResultCounts(
+                succeeded: regionUpdateStatus == .confirmedSuccess
+                    || isPartial ? 1 : 0,
+                failed: isPartial
+                    || regionUpdateStatus == .permissionDenied
+                    || regionUpdateStatus == .unsupported
+                    || regionUpdateStatus == .confirmedFailure ? 1 : 0,
+                unknown: isUnknown ? 1 : 0
+            ),
+            localizationKey: isPartial
+                ? "region.settings.partial"
+                : (isUnknown ? "region.settings.unverified" : nil),
+            diagnosticTag: "region.settings.test"
+        )
+    }
+
+    func loadDDNS() async throws -> NasDDNSDirectory {
+        ddnsDirectory
+    }
+
+    func testDDNSResult(_ draft: NasDDNSDraft) async throws -> MutationResult {
+        try ddnsMutationResult(
+            status: ddnsTestStatus,
+            operation: "ddnsProviderTest",
+            prefix: "ddns.test"
+        )
+    }
+
+    func saveDDNSResult(_ draft: NasDDNSDraft) async throws -> MutationResult {
+        if ddnsSaveStatus == .confirmedSuccess {
+            let record = NasDDNSRecord(
+                id: draft.normalizedProviderID,
+                providerID: draft.normalizedProviderID,
+                providerName: "Synthetic Provider",
+                hostname: draft.normalizedHostname,
+                address: nil,
+                status: nil,
+                lastUpdated: nil,
+                isEnabled: draft.isEnabled,
+                username: draft.normalizedUsername,
+                networkType: draft.networkType,
+                ipv4: draft.ipv4,
+                ipv6: draft.ipv6,
+                interfaceV4: draft.interfaceV4,
+                interfaceV6: draft.interfaceV6,
+                heartbeat: draft.heartbeat
+            )
+            ddnsDirectory = NasDDNSDirectory(
+                providers: ddnsDirectory.providers,
+                records: ddnsDirectory.records.filter {
+                    $0.providerID != record.providerID
+                } + [record]
+            )
+        }
+        return try ddnsMutationResult(
+            status: ddnsSaveStatus,
+            operation: "ddnsRecordSave",
+            prefix: "ddns.save"
+        )
+    }
+
+    func deleteDDNSResult(providerID: String) async throws -> MutationResult {
+        if ddnsDeleteStatus == .confirmedSuccess {
+            ddnsDirectory = NasDDNSDirectory(
+                providers: ddnsDirectory.providers,
+                records: ddnsDirectory.records.filter {
+                    $0.providerID != providerID
+                }
+            )
+        }
+        return try ddnsMutationResult(
+            status: ddnsDeleteStatus,
+            operation: "ddnsRecordDelete",
+            prefix: "ddns.delete"
+        )
+    }
+
+    func refreshDDNSResult() async throws -> MutationResult {
+        try ddnsMutationResult(
+            status: ddnsRefreshStatus,
+            operation: "ddnsAddressRefresh",
+            prefix: "ddns.refresh"
+        )
+    }
+
+    private func ddnsMutationResult(
+        status: MutationResultStatus,
+        operation: String,
+        prefix: String
+    ) throws -> MutationResult {
+        let unknown = status == .submittedButUnverified
+            || status == .cancellationRequestedAfterSubmission
+        let submitted = ![
+            .cancelledBeforeSubmission,
+            .permissionDenied,
+            .unsupported
+        ].contains(status)
+        let localizationKey: String? = switch status {
+        case .confirmedSuccess:
+            "\(prefix).completed"
+        case .confirmedFailure, .partialSuccess:
+            "\(prefix).failed"
+        case .submittedButUnverified, .cancellationRequestedAfterSubmission:
+            "\(prefix).unverified"
+        case .cancelledBeforeSubmission:
+            "\(prefix).cancelled"
+        case .permissionDenied:
+            "ddns.operation.permission-denied"
+        case .unsupported:
+            "ddns.operation.unsupported"
+        }
+        return try MutationResult(
+            status: status,
+            operation: operation,
+            submitted: submitted,
+            requiresRefresh: unknown || status == .partialSuccess,
+            counts: MutationResultCounts(
+                succeeded: status == .confirmedSuccess
+                    || status == .partialSuccess ? 1 : 0,
+                failed: status == .confirmedFailure
+                    || status == .permissionDenied
+                    || status == .unsupported
+                    || status == .partialSuccess ? 1 : 0,
+                unknown: unknown ? 1 : 0
+            ),
+            localizationKey: localizationKey,
+            diagnosticTag: "\(prefix).test"
         )
     }
 
@@ -1532,6 +2315,48 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
 
     func controlPackage(id: String, action: NasPackageAction) async throws {
         packageControlRequests += 1
+        applyPackageAction(id: id, action: action)
+    }
+
+    func controlPackageResult(
+        id: String,
+        action: NasPackageAction
+    ) async throws -> MutationResult {
+        packageControlRequests += 1
+        if delayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+        if packageControlStatus == .confirmedSuccess {
+            applyPackageAction(id: id, action: action)
+        }
+        let isUnknown = packageControlStatus == .submittedButUnverified
+            || packageControlStatus == .cancellationRequestedAfterSubmission
+        let submitted = ![
+            .cancelledBeforeSubmission,
+            .permissionDenied,
+            .unsupported
+        ].contains(packageControlStatus)
+        let prefix = action == .start ? "package.start" : "package.stop"
+        return try MutationResult(
+            status: packageControlStatus,
+            operation: action == .start ? "packageStart" : "packageStop",
+            submitted: submitted,
+            requiresRefresh: isUnknown,
+            counts: MutationResultCounts(
+                succeeded: packageControlStatus == .confirmedSuccess ? 1 : 0,
+                failed: [
+                    .confirmedFailure,
+                    .permissionDenied,
+                    .unsupported
+                ].contains(packageControlStatus) ? 1 : 0,
+                unknown: isUnknown ? 1 : 0
+            ),
+            localizationKey: isUnknown ? "\(prefix).unverified" : nil,
+            diagnosticTag: "\(prefix).test"
+        )
+    }
+
+    private func applyPackageAction(id: String, action: NasPackageAction) {
         switch action {
         case .uninstall:
             packages.removeAll { $0.id == id }
@@ -1551,7 +2376,9 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
                 iconData: package.iconData,
                 canStart: !isStarting,
                 canStop: isStarting,
-                canUninstall: package.canUninstall
+                canUninstall: package.canUninstall,
+                isUpgradeAvailable: package.isUpgradeAvailable,
+                canUpgrade: package.canUpgrade
             )
         case .upgrade:
             break

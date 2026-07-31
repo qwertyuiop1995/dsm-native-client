@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "region.synchronize-time.synthetic-servers",
+  "module": "region",
+  "operation": "synchronizeRegionTime",
+  "api": {
+    "name": "SYNO.Core.Region.NTP",
+    "method": "sync",
+    "preferredVersion": 3,
+    "resolvedVersion": 2,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "servers",
+      "valueType": "stringArray",
+      "encodedValue": "[\"time.example.invalid\"]"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "highRisk",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

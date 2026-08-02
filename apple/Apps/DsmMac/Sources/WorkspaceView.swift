@@ -241,7 +241,7 @@ struct WorkspaceView: View {
                         groupingMenu
                     }
 
-                } else if model.section == .photos {
+                } else if isPhotoSection {
                     Button {
                         presentPhotoUploadPanel()
                     } label: {
@@ -512,6 +512,9 @@ struct WorkspaceView: View {
                         kind: .directory
                     )
                     model.moveByDragging([item.fileItem], to: destination)
+                },
+                onBrowseModeChange: { browseMode in
+                    model.section = .photos(PhotoWorkspacePage(browseMode))
                 }
             )
         case .transfers:
@@ -522,10 +525,20 @@ struct WorkspaceView: View {
             NasSettingsView(model: model.nasSettings)
         case .downloadStation:
             ServiceManagementView(module: .downloads, model: model.serviceManagement)
-        case .containerManager:
-            ServiceManagementView(module: .containers, model: model.serviceManagement)
-        case .virtualMachineManager:
-            ServiceManagementView(module: .virtualMachines, model: model.serviceManagement)
+        case .containerManager(let pane):
+            ServiceManagementView(
+                module: .containers,
+                model: model.serviceManagement,
+                containerPane: pane,
+                onSelectContainerPane: { model.section = .containerManager($0) }
+            )
+        case .virtualMachineManager(let pane):
+            ServiceManagementView(
+                module: .virtualMachines,
+                model: model.serviceManagement,
+                virtualMachinePane: pane,
+                onSelectVirtualMachinePane: { model.section = .virtualMachineManager($0) }
+            )
         case .settings:
             SettingsView(model: model, onRenameNAS: onRenameNAS)
         default:
@@ -554,14 +567,14 @@ struct WorkspaceView: View {
 
     private var canNavigateBack: Bool {
         if isFileSection { return model.canGoBack }
-        if model.section == .photos { return model.photoLibrary.canGoBack }
+        if isPhotoSection { return model.photoLibrary.canGoBack }
         return model.section != nil
     }
 
     private func navigateBack() {
         if isFileSection {
             Task { await model.goBack() }
-        } else if model.section == .photos {
+        } else if isPhotoSection {
             Task { await model.photoLibrary.goBack() }
         } else {
             restoreFileBrowser()
@@ -569,11 +582,11 @@ struct WorkspaceView: View {
     }
 
     private var canNavigateUp: Bool {
-        model.section == .photos ? model.photoLibrary.canGoUp : model.canGoUp
+        isPhotoSection ? model.photoLibrary.canGoUp : model.canGoUp
     }
 
     private func navigateUp() {
-        if model.section == .photos {
+        if isPhotoSection {
             Task { await model.photoLibrary.goUp() }
         } else {
             Task { await model.goUp() }
@@ -591,8 +604,12 @@ struct WorkspaceView: View {
         }
     }
 
+    private var isPhotoSection: Bool {
+        model.section?.belongsToPhotosModule == true
+    }
+
     private var shouldShowFloatingPreview: Bool {
-        guard (isFileSection || model.section == .photos),
+        guard (isFileSection || isPhotoSection),
               model.isPreviewPresented,
               let item = model.selectedItem,
               !item.isDirectory else {
@@ -892,6 +909,59 @@ private struct SidebarModuleLabel: View {
     }
 }
 
+private extension PhotoWorkspacePage {
+    var title: String {
+        switch self {
+        case .timeline: L10n.string("ui.f1241a97b0821a99")
+        case .albums: L10n.string("ui.38793c1c1c23437e")
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .timeline: "clock"
+        case .albums: "rectangle.stack"
+        }
+    }
+}
+
+private struct SidebarExpandableSectionHeader: View {
+    @Environment(\.accessibilityReduceMotion) private var reducesMotion
+
+    let title: String
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(
+                reducesMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8)
+            ) {
+                isExpanded.toggle()
+            }
+        } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.trailing, 10)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            L10n.string(
+                isExpanded
+                    ? "sidebar.section.collapse-accessibility"
+                    : "sidebar.section.expand-accessibility",
+                title
+            )
+        )
+    }
+}
+
 private struct SidebarView: View {
     @Bindable var model: WorkspaceModel
     let profiles: [NasProfile]
@@ -903,7 +973,9 @@ private struct SidebarView: View {
     let onLogout: () async -> Void
 
     @AppStorage("sidebar_file_management_expanded") private var isFileManagementExpanded = false
-    @AppStorage("sidebar_package_management_expanded") private var isPackageManagementExpanded = false
+    @AppStorage("sidebar_photo_management_expanded") private var isPhotoManagementExpanded = false
+    @AppStorage("sidebar_container_management_expanded") private var isContainerManagementExpanded = false
+    @AppStorage("sidebar_virtual_machine_management_expanded") private var isVirtualMachineManagementExpanded = false
     @State private var isNasListExpanded = true
     @State private var connectingProfileID: UUID? = nil
     @State private var confirmsLogout = false
@@ -1020,34 +1092,60 @@ private struct SidebarView: View {
                         }
                     }
                 } header: {
-                    HStack {
-                        Text(L10n.string("ui.b3bd5ac7cc4d668b"))
-                        Spacer()
-                        Button {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                isFileManagementExpanded.toggle()
+                    SidebarExpandableSectionHeader(
+                        title: L10n.string("ui.b3bd5ac7cc4d668b"),
+                        isExpanded: Binding(
+                            get: { showFileDetails },
+                            set: { isExpanded in
+                                isFileManagementExpanded = isExpanded
+                                if !isExpanded, isFileChildSelected {
+                                    model.section = model.currentFileSection
+                                }
                             }
-                        } label: {
-                            Image(systemName: showFileDetails ? "chevron.down" : "chevron.right")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.tertiary)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
+                        )
+                    )
                 }
             }
 
             if model.isPhotosModuleEnabled {
-                Section(L10n.string("ui.67c683672f7ff48d")) {
-                    NavigationLink(value: WorkspaceSection.photos) {
+                let selectedPhotoPage = if case .photos(let page) = model.section {
+                    page
+                } else {
+                    Optional<PhotoWorkspacePage>.none
+                }
+                let showPhotoDetails = isPhotoManagementExpanded || selectedPhotoPage == .albums
+
+                Section {
+                    NavigationLink(value: WorkspaceSection.photos(.timeline)) {
                         SidebarModuleLabel(
-                            title: L10n.string("ui.7b50017ae47eca32"),
+                            title: PhotoWorkspacePage.timeline.title,
                             systemImage: "photo.on.rectangle.angled",
                             tint: .orange,
-                            isSelected: model.section == .photos
+                            isSelected: selectedPhotoPage == .timeline
                         )
                     }
+
+                    if showPhotoDetails {
+                        NavigationLink(value: WorkspaceSection.photos(.albums)) {
+                            TruncationAwareLabel(
+                                title: PhotoWorkspacePage.albums.title,
+                                systemImage: PhotoWorkspacePage.albums.icon
+                            )
+                        }
+                    }
+                } header: {
+                    SidebarExpandableSectionHeader(
+                        title: L10n.string("ui.67c683672f7ff48d"),
+                        isExpanded: Binding(
+                            get: { showPhotoDetails },
+                            set: { isExpanded in
+                                isPhotoManagementExpanded = isExpanded
+                                if !isExpanded, selectedPhotoPage == .albums {
+                                    model.section = .photos(.timeline)
+                                }
+                            }
+                        )
+                    )
                 }
             }
 
@@ -1079,28 +1177,88 @@ private struct SidebarView: View {
             }
 
             if model.isContainerManagerModuleEnabled {
-                Section(L10n.string("ui.6d23f04b26967d64")) {
-                    NavigationLink(value: WorkspaceSection.containerManager) {
+                let selectedContainerPane = if case .containerManager(let pane) = model.section {
+                    pane
+                } else {
+                    Optional<ContainerManagerPane>.none
+                }
+                let showContainerDetails = isContainerManagementExpanded
+                    || selectedContainerPane.map { $0 != .overview } == true
+
+                Section {
+                    NavigationLink(value: WorkspaceSection.containerManager(.overview)) {
                         SidebarModuleLabel(
-                            title: L10n.string("ui.aaf778d85ce5c2ed"),
+                            title: ContainerManagerPane.overview.title,
                             systemImage: "shippingbox",
                             tint: .blue,
-                            isSelected: model.section == .containerManager
+                            isSelected: selectedContainerPane == .overview
                         )
                     }
+
+                    if showContainerDetails {
+                        ForEach(ContainerManagerPane.allCases.dropFirst()) { pane in
+                            NavigationLink(value: WorkspaceSection.containerManager(pane)) {
+                                TruncationAwareLabel(title: pane.title, systemImage: pane.icon)
+                            }
+                        }
+                    }
+                } header: {
+                    SidebarExpandableSectionHeader(
+                        title: L10n.string("ui.6d23f04b26967d64"),
+                        isExpanded: Binding(
+                            get: { showContainerDetails },
+                            set: { isExpanded in
+                                isContainerManagementExpanded = isExpanded
+                                if !isExpanded,
+                                   selectedContainerPane.map({ $0 != .overview }) == true {
+                                    model.section = .containerManager(.overview)
+                                }
+                            }
+                        )
+                    )
                 }
             }
 
             if model.isVirtualMachineManagerModuleEnabled {
-                Section(L10n.string("ui.f3fb4b3a41570007")) {
-                    NavigationLink(value: WorkspaceSection.virtualMachineManager) {
+                let selectedVirtualMachinePane = if case .virtualMachineManager(let pane) = model.section {
+                    pane
+                } else {
+                    Optional<VirtualMachineManagerPane>.none
+                }
+                let showVirtualMachineDetails = isVirtualMachineManagementExpanded
+                    || selectedVirtualMachinePane.map { $0 != .machines } == true
+
+                Section {
+                    NavigationLink(value: WorkspaceSection.virtualMachineManager(.machines)) {
                         SidebarModuleLabel(
-                            title: L10n.string("ui.80c43bd2481c9580"),
+                            title: VirtualMachineManagerPane.machines.title,
                             systemImage: "desktopcomputer",
                             tint: .indigo,
-                            isSelected: model.section == .virtualMachineManager
+                            isSelected: selectedVirtualMachinePane == .machines
                         )
                     }
+
+                    if showVirtualMachineDetails {
+                        ForEach(VirtualMachineManagerPane.allCases.dropFirst()) { pane in
+                            NavigationLink(value: WorkspaceSection.virtualMachineManager(pane)) {
+                                TruncationAwareLabel(title: pane.title, systemImage: pane.icon)
+                            }
+                        }
+                    }
+                } header: {
+                    SidebarExpandableSectionHeader(
+                        title: L10n.string("ui.f3fb4b3a41570007"),
+                        isExpanded: Binding(
+                            get: { showVirtualMachineDetails },
+                            set: { isExpanded in
+                                isVirtualMachineManagementExpanded = isExpanded
+                                if !isExpanded,
+                                   selectedVirtualMachinePane.map({ $0 != .machines }) == true {
+                                    model.section = .virtualMachineManager(.machines)
+                                }
+                            }
+                        )
+                    )
                 }
             }
 
@@ -1136,6 +1294,7 @@ private struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollIndicators(.hidden)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 Divider()

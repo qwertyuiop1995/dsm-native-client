@@ -24,10 +24,54 @@ struct ToastMessage: Identifiable, Sendable {
     }
 }
 
+enum PhotoWorkspacePage: String, CaseIterable, Hashable, Identifiable {
+    case timeline
+    case albums
+
+    var id: Self { self }
+
+    var browseMode: PhotoBrowseMode {
+        switch self {
+        case .timeline: .timeline
+        case .albums: .albums
+        }
+    }
+
+    init(_ browseMode: PhotoBrowseMode) {
+        switch browseMode {
+        case .timeline: self = .timeline
+        case .albums: self = .albums
+        }
+    }
+}
+
+enum ContainerManagerPane: String, CaseIterable, Hashable, Identifiable {
+    case overview
+    case containers
+    case images
+    case networks
+    case projects
+    case events
+
+    var id: Self { self }
+}
+
+enum VirtualMachineManagerPane: String, CaseIterable, Hashable, Identifiable {
+    case machines
+    case hosts
+    case storages
+    case networks
+    case images
+    case protection
+    case events
+
+    var id: Self { self }
+}
+
 enum WorkspaceSection: Hashable, Identifiable {
     case files(String)
     case recycle(String)
-    case photos
+    case photos(PhotoWorkspacePage)
     case favorites
     case recent
     case remoteLocations
@@ -36,15 +80,15 @@ enum WorkspaceSection: Hashable, Identifiable {
     case chat
     case nasSettings
     case downloadStation
-    case containerManager
-    case virtualMachineManager
+    case containerManager(ContainerManagerPane)
+    case virtualMachineManager(VirtualMachineManagerPane)
     case settings
 
     var id: String {
         switch self {
         case .files(let path): "files:\(path)"
         case .recycle(let path): "recycle:\(path)"
-        case .photos: "photos"
+        case .photos(let page): "photos:\(page.rawValue)"
         case .favorites: "favorites"
         case .recent: "recent"
         case .remoteLocations: "remote-locations"
@@ -53,8 +97,8 @@ enum WorkspaceSection: Hashable, Identifiable {
         case .chat: "chat"
         case .nasSettings: "nas-settings"
         case .downloadStation: "download-station"
-        case .containerManager: "container-manager"
-        case .virtualMachineManager: "virtual-machine-manager"
+        case .containerManager(let pane): "container-manager:\(pane.rawValue)"
+        case .virtualMachineManager(let pane): "virtual-machine-manager:\(pane.rawValue)"
         case .settings: "settings"
         }
     }
@@ -67,6 +111,21 @@ enum WorkspaceSection: Hashable, Identifiable {
              .virtualMachineManager, .settings:
             false
         }
+    }
+
+    var belongsToPhotosModule: Bool {
+        if case .photos = self { return true }
+        return false
+    }
+
+    var belongsToContainerManagerModule: Bool {
+        if case .containerManager = self { return true }
+        return false
+    }
+
+    var belongsToVirtualMachineManagerModule: Bool {
+        if case .virtualMachineManager = self { return true }
+        return false
     }
 }
 
@@ -397,7 +456,7 @@ final class WorkspaceModel {
             Self.saveModuleEnabled(isPhotosModuleEnabled, for: profile.id, module: "Photos")
             guard oldValue != isPhotosModuleEnabled else { return }
             photoLibrary.setModuleEnabled(isPhotosModuleEnabled)
-            if !isPhotosModuleEnabled, section == .photos {
+            if !isPhotosModuleEnabled, section?.belongsToPhotosModule == true {
                 section = .settings
             }
         }
@@ -441,7 +500,8 @@ final class WorkspaceModel {
                 for: profile.id,
                 module: "ContainerManager"
             )
-            if !isContainerManagerModuleEnabled, section == .containerManager {
+            if !isContainerManagerModuleEnabled,
+               section?.belongsToContainerManagerModule == true {
                 section = .settings
             }
         }
@@ -453,7 +513,8 @@ final class WorkspaceModel {
                 for: profile.id,
                 module: "VirtualMachineManager"
             )
-            if !isVirtualMachineManagerModuleEnabled, section == .virtualMachineManager {
+            if !isVirtualMachineManagerModuleEnabled,
+               section?.belongsToVirtualMachineManagerModule == true {
                 section = .settings
             }
         }
@@ -663,7 +724,7 @@ final class WorkspaceModel {
     }
 
     private var defaultPreviewSourceItems: [FileItem] {
-        if section == .photos {
+        if section?.belongsToPhotosModule == true {
             return photoLibrary.displayedItems.map(\.fileItem)
         }
         return filteredItems
@@ -732,7 +793,7 @@ final class WorkspaceModel {
             return
         }
         if isPhotosModuleEnabled {
-            section = .photos
+            section = .photos(.timeline)
             await photoLibrary.loadIfNeeded()
             return
         }
@@ -752,12 +813,12 @@ final class WorkspaceModel {
             return
         }
         if isContainerManagerModuleEnabled {
-            section = .containerManager
+            section = .containerManager(.overview)
             await serviceManagement.activate(.containers)
             return
         }
         if isVirtualMachineManagerModuleEnabled {
-            section = .virtualMachineManager
+            section = .virtualMachineManager(.machines)
             await serviceManagement.activate(.virtualMachines)
             return
         }
@@ -811,8 +872,9 @@ final class WorkspaceModel {
                 history.removeAll()
                 await navigate(to: path, recordingHistory: false)
             }
-        case .photos:
+        case .photos(let page):
             guard isPhotosModuleEnabled else { return }
+            await photoLibrary.setBrowseMode(page.browseMode)
             await photoLibrary.loadIfNeeded()
         case .chat:
             guard isChatModuleEnabled else { return }
@@ -2530,7 +2592,7 @@ final class WorkspaceModel {
             totalUnits: Int64(targets.count)
         )
         let paths = targets.map(\.path)
-        let deletingFromPhotos = section == .photos
+        let deletingFromPhotos = section?.belongsToPhotosModule == true
         let operation = Task { [weak self] in
             guard let self else { return }
             do {

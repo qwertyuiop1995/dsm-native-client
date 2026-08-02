@@ -10,6 +10,7 @@ struct PhotoLibraryView: View {
     let onDelete: ([PhotoLibraryItem]) -> Void
     let onRestore: (PhotoLibraryItem) -> Void
     let onMove: (PhotoLibraryItem, String) -> Void
+    let onBrowseModeChange: @MainActor @Sendable (PhotoBrowseMode) -> Void
 
     @State private var timelineScrollTarget: Date?
     @State private var moveTarget: PhotoLibraryItem?
@@ -470,7 +471,9 @@ struct PhotoLibraryView: View {
     private var browseModeSelection: Binding<PhotoBrowseMode> {
         Binding(
             get: { model.browseMode },
-            set: { mode in Task { await model.setBrowseMode(mode) } }
+            set: { mode in
+                Task { @MainActor in onBrowseModeChange(mode) }
+            }
         )
     }
 

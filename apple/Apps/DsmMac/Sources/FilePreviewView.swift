@@ -520,7 +520,7 @@ struct FileDetailView: View {
     }
 
     private func livePhotoVideoPath(for item: FileItem) -> String? {
-        if model.section == .photos {
+        if model.section?.belongsToPhotosModule == true {
             if let photoItem = model.photoLibrary.displayedItems.first(where: { $0.id == item.id }),
                let videoPath = photoItem.livePhotoVideoPath {
                 return videoPath

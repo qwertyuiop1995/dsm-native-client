@@ -5,9 +5,79 @@ import UniformTypeIdentifiers
 import WebKit
 import DsmLocalization
 
+extension ContainerManagerPane {
+    var title: String {
+        switch self {
+        case .overview: L10n.string("ui.a33db573055626c5")
+        case .containers: L10n.string("ui.6d23f04b26967d64")
+        case .images: L10n.string("ui.ceb4432ba2356217")
+        case .networks: L10n.string("ui.97b31b5d63f57e51")
+        case .projects: L10n.string("ui.79f326be4409d51f")
+        case .events: L10n.string("ui.f98dfe0b4d543087")
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .overview: "square.grid.2x2"
+        case .containers: "shippingbox"
+        case .images: "square.stack.3d.up"
+        case .networks: "network"
+        case .projects: "folder"
+        case .events: "clock.arrow.circlepath"
+        }
+    }
+}
+
+extension VirtualMachineManagerPane {
+    var title: String {
+        switch self {
+        case .machines: L10n.string("ui.f3fb4b3a41570007")
+        case .hosts: L10n.string("ui.e87d9f23a3f5a830")
+        case .storages: L10n.string("ui.a3434acddb75d8fb")
+        case .networks: L10n.string("ui.97b31b5d63f57e51")
+        case .images: L10n.string("ui.ceb4432ba2356217")
+        case .protection: L10n.string("ui.0f810a7901cf0422")
+        case .events: L10n.string("ui.7dbac1c20f237bd4")
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .machines: "desktopcomputer"
+        case .hosts: "server.rack"
+        case .storages: "internaldrive"
+        case .networks: "network"
+        case .images: "square.stack.3d.up"
+        case .protection: "shield.checkered"
+        case .events: "doc.text.magnifyingglass"
+        }
+    }
+}
+
 struct ServiceManagementView: View {
     let module: ServiceManagementModel.Module
     @Bindable var model: ServiceManagementModel
+    let containerPane: ContainerManagerPane
+    let virtualMachinePane: VirtualMachineManagerPane
+    let onSelectContainerPane: @MainActor @Sendable (ContainerManagerPane) -> Void
+    let onSelectVirtualMachinePane: @MainActor @Sendable (VirtualMachineManagerPane) -> Void
+
+    init(
+        module: ServiceManagementModel.Module,
+        model: ServiceManagementModel,
+        containerPane: ContainerManagerPane = .overview,
+        virtualMachinePane: VirtualMachineManagerPane = .machines,
+        onSelectContainerPane: @escaping @MainActor @Sendable (ContainerManagerPane) -> Void = { _ in },
+        onSelectVirtualMachinePane: @escaping @MainActor @Sendable (VirtualMachineManagerPane) -> Void = { _ in }
+    ) {
+        self.module = module
+        self.model = model
+        self.containerPane = containerPane
+        self.virtualMachinePane = virtualMachinePane
+        self.onSelectContainerPane = onSelectContainerPane
+        self.onSelectVirtualMachinePane = onSelectVirtualMachinePane
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -17,9 +87,17 @@ struct ServiceManagementView: View {
                     case .downloads:
                         DownloadStationView(model: model)
                     case .containers:
-                        ContainerManagerView(model: model)
+                        ContainerManagerView(
+                            model: model,
+                            pane: containerPane,
+                            onSelectPane: onSelectContainerPane
+                        )
                     case .virtualMachines:
-                        VirtualMachineManagerView(model: model)
+                        VirtualMachineManagerView(
+                            model: model,
+                            pane: virtualMachinePane,
+                            onSelectPane: onSelectVirtualMachinePane
+                        )
                     }
                 }
 
@@ -921,29 +999,9 @@ private struct DownloadDestinationPicker: View {
 }
 
 private struct ContainerManagerView: View {
-    enum Pane: String, CaseIterable, Identifiable {
-        case overview
-        case containers
-        case images
-        case networks
-        case projects
-        case events
-
-        var id: Self { self }
-        var title: String {
-            switch self {
-            case .overview: L10n.string("ui.a33db573055626c5")
-            case .containers: L10n.string("ui.6d23f04b26967d64")
-            case .images: L10n.string("ui.ceb4432ba2356217")
-            case .networks: L10n.string("ui.97b31b5d63f57e51")
-            case .projects: L10n.string("ui.79f326be4409d51f")
-            case .events: L10n.string("ui.f98dfe0b4d543087")
-            }
-        }
-    }
-
     @Bindable var model: ServiceManagementModel
-    @State private var pane: Pane = .overview
+    let pane: ContainerManagerPane
+    let onSelectPane: @MainActor @Sendable (ContainerManagerPane) -> Void
     @State private var confirmsContainerDelete = false
     @State private var confirmsImageDelete = false
     @State private var confirmsNetworkDelete = false
@@ -959,8 +1017,8 @@ private struct ContainerManagerView: View {
                 tint: .blue,
                 isLoading: model.isLoading
             ) { Task { await model.activate(.containers, force: true) } }
-            Picker("", selection: $pane) {
-                ForEach(Pane.allCases) { Text($0.title).tag($0) }
+            Picker("", selection: paneSelection) {
+                ForEach(ContainerManagerPane.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -1022,6 +1080,15 @@ private struct ContainerManagerView: View {
                 return succeeded
             }
         }
+    }
+
+    private var paneSelection: Binding<ContainerManagerPane> {
+        Binding(
+            get: { pane },
+            set: { pane in
+                Task { @MainActor in onSelectPane(pane) }
+            }
+        )
     }
 
     private var containerSummary: String {
@@ -1176,29 +1243,6 @@ private struct ContainerManagerView: View {
 }
 
 private struct VirtualMachineManagerView: View {
-    enum Pane: String, CaseIterable, Identifiable {
-        case machines
-        case hosts
-        case storages
-        case networks
-        case images
-        case protection
-        case events
-
-        var id: Self { self }
-        var title: String {
-            switch self {
-            case .machines: L10n.string("ui.f3fb4b3a41570007")
-            case .hosts: L10n.string("ui.e87d9f23a3f5a830")
-            case .storages: L10n.string("ui.a3434acddb75d8fb")
-            case .networks: L10n.string("ui.97b31b5d63f57e51")
-            case .images: L10n.string("ui.ceb4432ba2356217")
-            case .protection: L10n.string("ui.0f810a7901cf0422")
-            case .events: L10n.string("ui.7dbac1c20f237bd4")
-            }
-        }
-    }
-
     enum ProtectionPane: String, CaseIterable, Identifiable {
         case plans
         case schedules
@@ -1215,7 +1259,8 @@ private struct VirtualMachineManagerView: View {
     }
 
     @Bindable var model: ServiceManagementModel
-    @State private var pane: Pane = .machines
+    let pane: VirtualMachineManagerPane
+    let onSelectPane: @MainActor @Sendable (VirtualMachineManagerPane) -> Void
     @State private var protectionPane: ProtectionPane = .plans
     @State private var pendingPowerAction: VirtualMachinePowerAction?
     @State private var confirmsDelete = false
@@ -1238,8 +1283,8 @@ private struct VirtualMachineManagerView: View {
                 tint: .indigo,
                 isLoading: model.isLoading
             ) { Task { await model.activate(.virtualMachines, force: true) } }
-            Picker("", selection: $pane) {
-                ForEach(Pane.allCases) { Text($0.title).tag($0) }
+            Picker("", selection: paneSelection) {
+                ForEach(VirtualMachineManagerPane.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -1348,6 +1393,15 @@ private struct VirtualMachineManagerView: View {
                 }
             )
         }
+    }
+
+    private var paneSelection: Binding<VirtualMachineManagerPane> {
+        Binding(
+            get: { pane },
+            set: { pane in
+                Task { @MainActor in onSelectPane(pane) }
+            }
+        )
     }
 
     private var machineList: some View {

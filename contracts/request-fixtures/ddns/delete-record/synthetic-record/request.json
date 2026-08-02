@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "ddns.delete-record.synthetic-record",
+  "module": "ddns",
+  "operation": "deleteRecord",
+  "api": {
+    "name": "SYNO.Core.DDNS.Record",
+    "method": "delete",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "id",
+      "valueType": "stringArray",
+      "encodedValue": "[\"Example\"]"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "destructive",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

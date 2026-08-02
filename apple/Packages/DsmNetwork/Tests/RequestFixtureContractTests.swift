@@ -166,20 +166,100 @@ final class RequestFixtureContractTests: XCTestCase {
             ),
             response(#"{"success":true}"#),
             response(#"{"success":true}"#),
+            response(#"{"success":true,"data":{"packages":[]}}"#),
         ])
         let repository = try makePackageAdministrationRepository(
             transport: transport
         )
         _ = try await repository.loadPackages()
 
-        try await repository.controlPackage(
-            id: "<synthetic-package>",
-            action: .uninstall
+        _ = try await repository.uninstallPackageResult(
+            id: "<synthetic-package>"
         )
 
         let requests = await transport.recordedRequests()
-        let request = try XCTUnwrap(requests.last)
+        let request = try XCTUnwrap(
+            requests.first {
+                (try? decodeForm($0.httpBody)["method"]) == "uninstall"
+            }
+        )
         try assertFormRequest(request, matches: fixture)
+    }
+
+    func test套件启动与停止请求和共享Fixture一致且写后回读() async throws {
+        let startFixture = try loadFixture(
+            "packages/start/synthetic-package/request.json"
+        )
+        let stopFixture = try loadFixture(
+            "packages/stop/synthetic-package/request.json"
+        )
+        let stopped = response(
+            #"{"success":true,"data":{"packages":[{"id":"<synthetic-package>","name":"Synthetic Package","version":"1.0","additional":{"status":"stopped","startable":true,"dsm_apps":"<synthetic-app-one> <synthetic-app-two>","available_operation":["start"]}}]}}"#
+        )
+        let running = response(
+            #"{"success":true,"data":{"packages":[{"id":"<synthetic-package>","name":"Synthetic Package","version":"1.0","additional":{"status":"running","startable":true,"dsm_apps":"<synthetic-app-one> <synthetic-app-two>","available_operation":["stop"]}}]}}"#
+        )
+        let accepted = response(#"{"success":true}"#)
+
+        let startTransport = MockHTTPTransport(
+            responses: [stopped, accepted, accepted, running]
+        )
+        let startRepository = try makePackageAdministrationRepository(
+            apiNames: [
+                DsmAPIName.corePackage,
+                DsmAPIName.corePackageControl,
+            ],
+            transport: startTransport
+        )
+        let startResult = try await startRepository.controlPackageResult(
+            id: "<synthetic-package>",
+            action: .start
+        )
+        let startRequests = await startTransport.recordedRequests()
+        let startRequest = try XCTUnwrap(
+            startRequests.first {
+                (try? decodeForm($0.httpBody)["method"]) == "start"
+            }
+        )
+
+        XCTAssertEqual(startResult.status, .confirmedSuccess)
+        XCTAssertEqual(
+            startRequests.compactMap {
+                try? decodeForm($0.httpBody)["method"]
+            },
+            ["list", "feasibility_check", "start", "list"]
+        )
+        try assertFormRequest(startRequest, matches: startFixture)
+
+        let stopTransport = MockHTTPTransport(
+            responses: [running, accepted, accepted, stopped]
+        )
+        let stopRepository = try makePackageAdministrationRepository(
+            apiNames: [
+                DsmAPIName.corePackage,
+                DsmAPIName.corePackageControl,
+            ],
+            transport: stopTransport
+        )
+        let stopResult = try await stopRepository.controlPackageResult(
+            id: "<synthetic-package>",
+            action: .stop
+        )
+        let stopRequests = await stopTransport.recordedRequests()
+        let stopRequest = try XCTUnwrap(
+            stopRequests.first {
+                (try? decodeForm($0.httpBody)["method"]) == "stop"
+            }
+        )
+
+        XCTAssertEqual(stopResult.status, .confirmedSuccess)
+        XCTAssertEqual(
+            stopRequests.compactMap {
+                try? decodeForm($0.httpBody)["method"]
+            },
+            ["list", "feasibility_check", "stop", "list"]
+        )
+        try assertFormRequest(stopRequest, matches: stopFixture)
     }
 
     func test容器删除请求与共享Fixture一致() async throws {
@@ -454,6 +534,235 @@ final class RequestFixtureContractTests: XCTestCase {
         let requests = await transport.recordedRequests()
         XCTAssertEqual(requests.count, 3)
         try assertFormRequest(requests[1], matches: fixture)
+    }
+
+    func test区域配置与立即校时请求与共享Fixture一致() async throws {
+        let setFixture = try loadFixture(
+            "region/set-settings/synthetic-settings/request.json"
+        )
+        let syncFixture = try loadFixture(
+            "region/synchronize-time/synthetic-servers/request.json"
+        )
+        let current = #"{"success":true,"data":{"date_format":"Y-m-d","time_format":"H:i","timezone":"Asia/Shanghai","enable_ntp":"manual","server":"","date":"2026/7/26","hour":18,"minute":30,"second":10}}"#
+        let updated = #"{"success":true,"data":{"date_format":"Y/m/d","time_format":"H:i","timezone":"UTC","enable_ntp":"ntp","server":"time.example.invalid","date":"2026/7/26","hour":18,"minute":30,"second":10}}"#
+        let zones = #"{"success":true,"data":{"zonedata":[{"value":"Asia/Shanghai","display":"Synthetic Local"},{"value":"UTC","display":"Synthetic UTC"}]}}"#
+        let transport = MockHTTPTransport(responses: [
+            response(current),
+            response(zones),
+            response(#"{"success":true}"#),
+            response(updated),
+            response(zones),
+            response(#"{"success":true}"#),
+            response(updated),
+            response(zones)
+        ])
+        let repository = try makeAdministrationRepository(
+            apiNames: [DsmAPIName.coreRegionNTP],
+            transport: transport
+        )
+
+        let result = try await repository.saveRegionSettingsResult(
+            NasRegionSettings(
+                dateFormat: "Y/m/d",
+                timeFormat: "H:i",
+                timeZone: "UTC",
+                isNetworkTimeEnabled: true,
+                timeServers: ["time.example.invalid"],
+                manualDate: nil,
+                timeZones: [
+                    NasTimeZoneOption(id: "Asia/Shanghai", displayName: "Synthetic Local"),
+                    NasTimeZoneOption(id: "UTC", displayName: "Synthetic UTC")
+                ]
+            )
+        )
+
+        XCTAssertEqual(result.status, .confirmedSuccess)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 8)
+        let setRequest = try XCTUnwrap(
+            requests.first {
+                (try? decodeForm($0.httpBody)["method"]) == "set"
+            }
+        )
+        let syncRequest = try XCTUnwrap(
+            requests.first {
+                (try? decodeForm($0.httpBody)["method"]) == "sync"
+            }
+        )
+        try assertFormRequest(setRequest, matches: setFixture)
+        try assertFormRequest(syncRequest, matches: syncFixture)
+    }
+
+    func testDDNS四类独立请求与共享Fixture一致且不保存凭据值() async throws {
+        let testFixture = try loadFixture(
+            "ddns/test-provider/synthetic-record/request.json"
+        )
+        let createFixture = try loadFixture(
+            "ddns/create-record/synthetic-record/request.json"
+        )
+        let updateFixture = try loadFixture(
+            "ddns/update-address/synthetic-record/request.json"
+        )
+        let deleteFixture = try loadFixture(
+            "ddns/delete-record/synthetic-record/request.json"
+        )
+        let providers = #"{"success":true,"data":{"providers":[{"id":"Example","display":"Synthetic Provider"}]}}"#
+        let emptyRecords = #"{"success":true,"data":{"records":[]}}"#
+        let records = #"{"success":true,"data":{"records":[{"provider":"Example","hostname":"nas.example.invalid","username":"synthetic-owner","enable":true,"heartbeat":false}]}}"#
+        let draft = NasDDNSDraft(
+            providerID: "Example",
+            hostname: "nas.example.invalid",
+            username: "synthetic-owner",
+            password: "SYNTHETIC_EPHEMERAL_SECRET",
+            ipv4: "<synthetic-ipv4>",
+            ipv6: "<synthetic-ipv6>",
+            interfaceV4: "<synthetic-interface-v4>",
+            interfaceV6: "<synthetic-interface-v6>"
+        )
+
+        let testTransport = MockHTTPTransport(responses: [
+            response(providers),
+            response(emptyRecords),
+            response(#"{"success":true}"#)
+        ])
+        let testRepository = try makeAdministrationRepository(
+            apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
+            transport: testTransport
+        )
+        _ = try await testRepository.testDDNSResult(draft)
+        let testRequests = await testTransport.recordedRequests()
+        let testRequest = try XCTUnwrap(
+            testRequests.first {
+                (try? decodeForm($0.httpBody)["method"]) == "test"
+            }
+        )
+        try assertFormRequest(testRequest, matches: testFixture)
+
+        let createTransport = MockHTTPTransport(responses: [
+            response(providers),
+            response(emptyRecords),
+            response(#"{"success":true}"#),
+            response(providers),
+            response(records)
+        ])
+        let createRepository = try makeAdministrationRepository(
+            apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
+            transport: createTransport
+        )
+        _ = try await createRepository.saveDDNSResult(draft)
+        let createRequests = await createTransport.recordedRequests()
+        let createRequest = try XCTUnwrap(
+            createRequests.first {
+                (try? decodeForm($0.httpBody)["method"]) == "create"
+            }
+        )
+        try assertFormRequest(createRequest, matches: createFixture)
+
+        let updateTransport = MockHTTPTransport(responses: [
+            response(providers),
+            response(records),
+            response(#"{"success":true}"#),
+            response(providers),
+            response(records)
+        ])
+        let updateRepository = try makeAdministrationRepository(
+            apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
+            transport: updateTransport
+        )
+        _ = try await updateRepository.refreshDDNSResult()
+        let updateRequests = await updateTransport.recordedRequests()
+        let updateRequest = try XCTUnwrap(
+            updateRequests.first {
+                (try? decodeForm($0.httpBody)["method"]) == "update_ip_address"
+            }
+        )
+        try assertFormRequest(updateRequest, matches: updateFixture)
+
+        let deleteTransport = MockHTTPTransport(responses: [
+            response(providers),
+            response(records),
+            response(#"{"success":true}"#),
+            response(providers),
+            response(emptyRecords)
+        ])
+        let deleteRepository = try makeAdministrationRepository(
+            apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
+            transport: deleteTransport
+        )
+        _ = try await deleteRepository.deleteDDNSResult(providerID: "Example")
+        let deleteRequests = await deleteTransport.recordedRequests()
+        let deleteRequest = try XCTUnwrap(
+            deleteRequests.first {
+                (try? decodeForm($0.httpBody)["method"]) == "delete"
+            }
+        )
+        try assertFormRequest(deleteRequest, matches: deleteFixture)
+
+        for request in [testRequest, createRequest] {
+            let fields = try decodeForm(request.httpBody)
+            XCTAssertEqual(fields["passwd"], "SYNTHETIC_EPHEMERAL_SECRET")
+            XCTAssertEqual(fields["username"], "synthetic-owner")
+        }
+        for fixture in [testFixture, createFixture] {
+            XCTAssertTrue(
+                fixture.parameters
+                    .filter { ["hostname", "passwd", "username"].contains($0.name) }
+                    .allSatisfy { $0.redacted == true && $0.encodedValue == nil }
+            )
+        }
+    }
+
+    func testNAS关机与重启请求和共享Fixture一致且没有业务参数() async throws {
+        let shutdownFixture = try loadFixture(
+            "system-power/shutdown/synthetic-nas/request.json"
+        )
+        let rebootFixture = try loadFixture(
+            "system-power/reboot/synthetic-nas/request.json"
+        )
+        let info = response(
+            #"{"success":true,"data":{"model":"Synthetic NAS","firmware_ver":"DSM 7"}}"#
+        )
+        let accepted = response(#"{"success":true}"#)
+
+        let shutdownTransport = MockHTTPTransport(
+            responses: [info, accepted]
+        )
+        let shutdownRepository = try makeAdministrationRepository(
+            apiNames: [DsmAPIName.coreSystem],
+            transport: shutdownTransport
+        )
+        let shutdownResult = try await shutdownRepository
+            .performPowerActionResult(.shutdown)
+        let shutdownRequests = await shutdownTransport.recordedRequests()
+
+        XCTAssertEqual(shutdownResult.status, .confirmedSuccess)
+        XCTAssertEqual(shutdownRequests.count, 2)
+        XCTAssertEqual(
+            try decodeForm(shutdownRequests[0].httpBody)["method"],
+            "info"
+        )
+        try assertFormRequest(shutdownRequests[1], matches: shutdownFixture)
+
+        let rebootTransport = MockHTTPTransport(
+            responses: [info, accepted]
+        )
+        let rebootRepository = try makeAdministrationRepository(
+            apiNames: [DsmAPIName.coreSystem],
+            transport: rebootTransport
+        )
+        let rebootResult = try await rebootRepository
+            .performPowerActionResult(.reboot)
+        let rebootRequests = await rebootTransport.recordedRequests()
+
+        XCTAssertEqual(rebootResult.status, .confirmedSuccess)
+        XCTAssertEqual(rebootRequests.count, 2)
+        XCTAssertEqual(
+            try decodeForm(rebootRequests[0].httpBody)["method"],
+            "info"
+        )
+        try assertFormRequest(rebootRequests[1], matches: rebootFixture)
+        XCTAssertTrue(shutdownFixture.parameters.isEmpty)
+        XCTAssertTrue(rebootFixture.parameters.isEmpty)
     }
 
     func test物理网卡设置请求与共享Fixture一致() async throws {
@@ -1078,7 +1387,11 @@ final class RequestFixtureContractTests: XCTestCase {
                             $0,
                             capability(
                                 $0,
-                                version: $0 == DsmAPIName.coreQuickConnect
+                                version: [
+                                    DsmAPIName.coreQuickConnect,
+                                    DsmAPIName.coreRegionNTP,
+                                    DsmAPIName.coreSystem,
+                                ].contains($0)
                                     ? 3
                                     : ($0 == DsmAPIName.coreWebDSM
                                         ? 2
@@ -1102,6 +1415,10 @@ final class RequestFixtureContractTests: XCTestCase {
     }
 
     private func makePackageAdministrationRepository(
+        apiNames: [String] = [
+            DsmAPIName.corePackage,
+            DsmAPIName.corePackageUninstallation,
+        ],
         transport: MockHTTPTransport
     ) throws -> DsmNasAdministrationRepository {
         let profile = try NasProfile(
@@ -1109,15 +1426,11 @@ final class RequestFixtureContractTests: XCTestCase {
             host: "nas.example.invalid",
             port: 5_001
         )
-        let capabilities = [
-            DsmAPIName.corePackage,
-            DsmAPIName.corePackageUninstallation,
-        ]
         return try DsmNasAdministrationRepository(
             profile: profile,
             capabilities: CapabilitySet(
                 Dictionary(
-                    uniqueKeysWithValues: capabilities.map {
+                    uniqueKeysWithValues: apiNames.map {
                         ($0, capability($0, version: $0 == DsmAPIName.corePackage ? 2 : 1))
                     }
                 )

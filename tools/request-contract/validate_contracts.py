@@ -201,8 +201,8 @@ def validate_request_fixture(value: Any, path: Path) -> dict[str, Any]:
     )
 
     parameters = request["parameters"]
-    if not isinstance(parameters, list) or not parameters:
-        raise ValidationError(f"{path}.parameters 必须是非空数组")
+    if not isinstance(parameters, list):
+        raise ValidationError(f"{path}.parameters 必须是数组")
     names: list[str] = []
     for index, raw_parameter in enumerate(parameters):
         location = f"{path}.parameters[{index}]"
@@ -284,15 +284,20 @@ def validate_request_fixture(value: Any, path: Path) -> dict[str, Any]:
         f"{path}.policy.risk",
         {"read", "standardWrite", "highRisk", "destructive"},
     )
-    require_enum(
+    readback_policy = require_enum(
         policy["readbackPolicy"],
         f"{path}.policy.readbackPolicy",
-        {"none", "required", "taskPoll"},
+        {"none", "required", "taskPoll", "unavailable"},
     )
     if risk != "read" and retry_policy == "readOnlyAutomatic":
         raise ValidationError(f"{path}: 写操作不得启用只读自动重试")
-    if risk in {"highRisk", "destructive"} and policy["readbackPolicy"] == "none":
+    if risk in {"highRisk", "destructive"} and readback_policy == "none":
         raise ValidationError(f"{path}: 高风险或破坏性操作必须复查最终状态")
+    if readback_policy == "unavailable":
+        if risk not in {"highRisk", "destructive"}:
+            raise ValidationError(f"{path}: 只有高风险或破坏性操作可标记为无法回读")
+        if retry_policy != "never":
+            raise ValidationError(f"{path}: 无法回读的危险写操作必须禁止重试")
 
     source = require_object_keys(
         request["source"],

@@ -1,7 +1,7 @@
 {
   "$schema": "../schemas/private-api-compatibility.schema.json",
   "schemaVersion": 1,
-  "updatedAt": "2026-07-30",
+  "updatedAt": "2026-07-31",
   "environments": [
     {
       "id": "lab-a-dsm-7-2-1-69057-u12-20260729",
@@ -174,9 +174,84 @@
           "verifiedAt": "2026-07-27",
           "evidenceRefs": [
             "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
-            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
+            "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md",
+            "docs/api/discovery/endpoints/dsm-system-update-check.md"
           ],
-          "notes": "连接断开属于写行为，本环境未执行，不能继承只读证据等级。"
+          "notes": "连接断开属于写行为，本环境未执行，不能继承只读证据等级；系统更新只读检查已记录，下载与安装保持关闭。"
+        }
+      ]
+    },
+    {
+      "id": "dsm-system-processes",
+      "componentId": "dsm-core",
+      "scope": "DSM 资源监控",
+      "capability": "系统进程与服务进程组只读摘要",
+      "classification": "internal",
+      "operation": "read",
+      "risk": "medium",
+      "apiNames": [
+        "SYNO.Core.System.Process",
+        "SYNO.Core.System.ProcessGroup"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "进程能力缺失时页面独立不可用；服务组缺失或失败时保留进程列表。命令、路径、账号和网络地址不进入模型。",
+      "documentRef": "docs/api/discovery/endpoints/dsm-system-processes.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "static",
+          "status": "candidate",
+          "versionMatrix": {
+            "SYNO.Core.System.Process": "静态目录仅确认 list；客户端保守接受运行时发现的 v1，真实参数与响应未验证",
+            "SYNO.Core.System.ProcessGroup": "静态目录确认 list / service_info；客户端仅候选接入 v1 list，service_info 保持关闭"
+          },
+          "verifiedAt": "2026-07-31",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/api/discovery/endpoints/dsm-system-processes.md"
+          ],
+          "notes": "合成响应只验证字段白名单、500 项上限、能力缺失零请求和服务组失败降级，不提升真实环境证据等级。"
+        }
+      ]
+    },
+    {
+      "id": "dsm-power-schedule",
+      "componentId": "dsm-core",
+      "scope": "DSM 控制面板",
+      "capability": "电源计划只读摘要与保存禁用边界",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "high",
+      "apiNames": [
+        "SYNO.Core.Hardware.PowerSchedule"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "能力缺失或 v1 不在发现范围时页面独立不可用且零请求；save 始终保持关闭。",
+      "documentRef": "docs/api/discovery/endpoints/dsm-power-schedule.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "static",
+          "status": "candidate",
+          "versionMatrix": {
+            "SYNO.Core.Hardware.PowerSchedule": "静态目录仅确认 load / save；客户端保守接受运行时发现的 v1 load，save 禁用"
+          },
+          "verifiedAt": "2026-07-31",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/api/discovery/endpoints/dsm-power-schedule.md"
+          ],
+          "notes": "合成响应只验证字段白名单、128 条上限、歧义星期降级、能力缺失零请求和零 save，不提升真实环境证据等级。"
         }
       ]
     },
@@ -272,6 +347,116 @@
       ]
     },
     {
+      "id": "file-station-share-access",
+      "componentId": "file-station",
+      "scope": "File Station",
+      "capability": "当前登录账号可见共享文件夹及有效读写权限",
+      "classification": "official",
+      "operation": "read",
+      "risk": "low",
+      "apiNames": [
+        "SYNO.FileStation.List"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "能力缺失或读取失败时仅关闭共享访问页面；空结果和缺少权限位均不推断为拒绝访问。",
+      "documentRef": "docs/api/discovery/endpoints/dsm-share-access.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "observed",
+          "status": "enabled",
+          "versionMatrix": {
+            "SYNO.FileStation.List": "list_share；当前客户端使用能力发现范围内版本，合成响应测试覆盖 v2"
+          },
+          "verifiedAt": "2026-07-31",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/api/discovery/endpoints/dsm-share-access.md"
+          ],
+          "notes": "只展示当前账号可见集合；本批没有读取或记录真实共享名、路径或权限响应。"
+        }
+      ]
+    },
+    {
+      "id": "dsm-share-permission-matrix",
+      "componentId": "dsm-core",
+      "scope": "DSM",
+      "capability": "按用户读取管理员共享文件夹权限矩阵",
+      "classification": "internal",
+      "operation": "read",
+      "risk": "medium",
+      "apiNames": [
+        "SYNO.Core.Share.Permission"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "保持管理员权限矩阵关闭，继续使用公开 File Station 当前账号有效访问视图。",
+      "documentRef": "docs/api/discovery/endpoints/dsm-share-access.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "static",
+          "status": "disabled",
+          "versionMatrix": {
+            "SYNO.Core.Share.Permission": "仅发现 list_by_user 方法名；版本、参数和响应未验证"
+          },
+          "verifiedAt": "2026-07-31",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/api/discovery/endpoints/dsm-share-access.md"
+          ],
+          "notes": "客户端不探测、不调用该内部候选，也不根据方法名猜测参数。"
+        }
+      ]
+    },
+    {
+      "id": "dsm-package-installation",
+      "componentId": "dsm-core",
+      "scope": "DSM 套件中心",
+      "capability": "套件来源、安装队列、安装、升级与取消",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "high",
+      "apiNames": [
+        "SYNO.Core.Package.Server",
+        "SYNO.Core.Package.Installation"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "安装与升级入口保持关闭；仅使用 Package.list 明确返回的 upgrade 操作显示非交互提示。",
+      "documentRef": "docs/api/discovery/endpoints/dsm-package-installation.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "static",
+          "status": "disabled",
+          "versionMatrix": {
+            "SYNO.Core.Package.Server": "仅发现 list 方法名；版本、参数和响应未验证",
+            "SYNO.Core.Package.Installation": "仅发现 install/status/get_queue/cancel 方法名；版本、参数、队列和取消语义未验证"
+          },
+          "verifiedAt": "2026-07-31",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/api/discovery/endpoints/dsm-package-installation.md"
+          ],
+          "notes": "客户端不探测或调用安装接口；合成 Package.list 响应只验证只读升级提示，不能提升写行为证据。"
+        }
+      ]
+    },
+    {
       "id": "dsm-administration",
       "componentId": "dsm-core",
       "scope": "DSM",
@@ -320,14 +505,17 @@
           "evidenceLevel": "observed",
           "status": "degraded",
           "versionMatrix": {
-            "SYNO.Core.Package": "v1-v2；当前列表使用 v2",
-            "SYNO.Core.Package.Control / Uninstallation / Thumb": "v1",
+            "SYNO.Core.Package": "v1-v2；当前列表使用 v2，明确 upgrade 操作只显示只读提示",
+            "SYNO.Core.System": "info/shutdown/reboot 客户端使用能力发现版本；关机与重启真实行为未验证",
+            "SYNO.Core.Package.Control / Uninstallation / Thumb": "v1；启动/停止已实现列表状态预检、可行性检查、同 ID 防重复和写后回读，真实写行为未验证",
             "SYNO.Core.TaskScheduler": "列表/运行 v3；详情/创建/修改 v4",
             "SYNO.Core.EventScheduler": "v1",
             "SYNO.Core.Terminal / FileServ.SMB / FileServ.NFS": "客户端范围 v1-v3",
             "SYNO.Core.Network.Proxy": "客户端范围 v1；写行为未验证",
             "SYNO.Core.Web.DSM / Network.Ethernet / Security.DoS": "客户端范围 v1-v2",
-            "SYNO.Core.QuickConnect / Region.NTP": "客户端范围 v1-v3",
+            "SYNO.Core.QuickConnect": "客户端范围 v1-v3",
+            "SYNO.Core.Region.NTP": "get/set v3、listzone v1、sync v2；真实写行为未验证",
+            "SYNO.Core.DDNS.Provider / DDNS.Record": "v1；list/test/create/set/update_ip_address/delete 真实写行为未验证",
             "其余已列 DSM 控制面板 API": "客户端范围 v1"
           },
           "verifiedAt": "2026-07-27",
@@ -339,9 +527,14 @@
             "docs/api/discovery/endpoints/dsm-remote-access-settings.md",
             "docs/api/discovery/endpoints/dsm-file-service-settings.md",
             "docs/api/discovery/endpoints/dsm-terminal-settings.md",
-            "docs/api/discovery/endpoints/dsm-proxy-settings.md"
+            "docs/api/discovery/endpoints/dsm-proxy-settings.md",
+            "docs/api/discovery/endpoints/dsm-region-time-settings.md",
+            "docs/api/discovery/endpoints/dsm-ddns-settings.md",
+            "docs/api/discovery/endpoints/dsm-system-power-actions.md",
+            "docs/api/discovery/endpoints/dsm-package-control.md",
+            "docs/api/discovery/endpoints/dsm-package-installation.md"
           ],
-          "notes": "只读结构和网页请求已有记录；危险写操作未形成当前环境的统一行为验证结论。"
+          "notes": "只读结构和网页请求已有记录；套件启动/停止的合成请求、故障注入和回读测试不提升当前环境的写行为证据等级，危险写操作仍未形成统一行为验证结论。"
         }
       ]
     },

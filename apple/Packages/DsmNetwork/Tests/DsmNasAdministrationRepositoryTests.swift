@@ -298,6 +298,97 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertTrue(cancelled.requiresRefresh)
     }
 
+    func test系统进程只保留白名单字段并限制单次读取数量() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(
+                #"{"success":true,"data":{"processes":[{"pid":42,"name":"/volume1/private/bin/worker","status":"running","service":"backup","cmdline":"worker --token synthetic-secret","user":"administrator","path":"/volume1/private","remote":"192.0.2.8"},{"pid":42,"name":"duplicate"},{"pid":"invalid/path","name":"ignored"}],"total":800}}"#
+            ),
+            response(
+                #"{"success":true,"data":{"groups":[{"id":"backup","display_name":"Backup Service","status":"running","process_count":2,"account":"administrator","path":"/volume1/private"}]}}"#
+            )
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.coreSystemProcess,
+                DsmAPIName.coreSystemProcessGroup
+            ],
+            transport: transport
+        )
+
+        let directory = try await repository.loadSystemProcesses(
+            start: -20,
+            limit: 5_000
+        )
+
+        XCTAssertEqual(directory.processes.count, 1)
+        XCTAssertEqual(directory.processes.first?.processID, "42")
+        XCTAssertEqual(directory.processes.first?.name, "worker")
+        XCTAssertEqual(directory.processes.first?.groupID, "backup")
+        XCTAssertEqual(directory.groups.map(\.name), ["Backup Service"])
+        XCTAssertEqual(directory.groups.first?.processCount, 2)
+        XCTAssertEqual(directory.total, 800)
+        XCTAssertTrue(directory.isTruncated)
+        XCTAssertFalse(directory.groupsAreUnavailable)
+        let description = String(describing: directory)
+        XCTAssertFalse(description.contains("/volume1"))
+        XCTAssertFalse(description.contains("administrator"))
+        XCTAssertFalse(description.contains("synthetic-secret"))
+        XCTAssertFalse(description.contains("192.0.2.8"))
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requestValue("api", in: requests[0]), DsmAPIName.coreSystemProcess)
+        XCTAssertEqual(requestValue("method", in: requests[0]), "list")
+        XCTAssertEqual(requestValue("start", in: requests[0]), "0")
+        XCTAssertEqual(requestValue("limit", in: requests[0]), "500")
+        XCTAssertEqual(requestValue("api", in: requests[1]), DsmAPIName.coreSystemProcessGroup)
+        XCTAssertEqual(requestValue("method", in: requests[1]), "list")
+    }
+
+    func test服务进程组读取失败时保留进程列表() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(
+                #"{"success":true,"data":{"items":[{"process_id":"7","process_name":"service-worker","status":"sleeping"}],"total_count":1}}"#
+            ),
+            response(#"{"success":false,"error":{"code":105}}"#)
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.coreSystemProcess,
+                DsmAPIName.coreSystemProcessGroup
+            ],
+            transport: transport
+        )
+
+        let directory = try await repository.loadSystemProcesses(
+            start: 0,
+            limit: 100
+        )
+
+        XCTAssertEqual(directory.processes.map(\.name), ["service-worker"])
+        XCTAssertTrue(directory.groups.isEmpty)
+        XCTAssertTrue(directory.groupsAreUnavailable)
+        XCTAssertFalse(directory.isTruncated)
+    }
+
+    func test缺少系统进程能力时不发送猜测请求() async throws {
+        let transport = MockHTTPTransport(responses: [])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreSystemProcessGroup],
+            transport: transport
+        )
+
+        do {
+            _ = try await repository.loadSystemProcesses(start: 0, limit: 100)
+            XCTFail("缺少运行时能力时不应尝试进程接口")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .apiUnavailable)
+        }
+
+        let requests = await transport.recordedRequests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     func test套件列表读取附加状态和说明() async throws {
         let transport = MockHTTPTransport(responses: [
             response(#"{"success":true,"data":{"packages":[{"id":"HyperBackup","name":"Hyper Backup","version":"4.1","timestamp":100,"additional":{"status":"running","status_description":"运行中","description":"备份服务","install_type":"system"}}]}}"#)
@@ -309,12 +400,33 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertEqual(packages.map(\.name), ["Hyper Backup"])
         XCTAssertEqual(packages.first?.status, "running")
         XCTAssertEqual(packages.first?.packageDescription, "备份服务")
+        XCTAssertFalse(packages.first?.isUpgradeAvailable ?? true)
+        XCTAssertFalse(packages.first?.canUpgrade ?? true)
+    }
+
+    func test套件列表将明确升级操作解释为只读提示() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"running","install_type":"user","available_operation":["stop","upgrade"]}}]}}"#)
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.corePackage],
+            transport: transport
+        )
+
+        let packages = try await repository.loadPackages()
+
+        let package = try XCTUnwrap(packages.first)
+        XCTAssertTrue(package.isUpgradeAvailable)
+        XCTAssertFalse(package.canUpgrade)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requestValue("method", in: requests[0]), "list")
     }
 
     func test套件图标通过认证请求头读取且凭据不进入地址() async throws {
         let icon = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
         let transport = MockHTTPTransport(responses: [
-            response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"stopped","startable":true,"install_type":"user","ctl_uninstall":true,"available_operation":["start","uninstall"]}}]}}"#),
+            response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"stopped","startable":true,"install_type":"user","ctl_uninstall":true,"available_operation":["start","uninstall","upgrade"]}}]}}"#),
             DsmHTTPResponse(
                 data: icon,
                 statusCode: 200,
@@ -332,6 +444,8 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertEqual(packages.first?.canStart, true)
         XCTAssertEqual(packages.first?.canStop, false)
         XCTAssertEqual(packages.first?.canUninstall, true)
+        XCTAssertEqual(packages.first?.isUpgradeAvailable, true)
+        XCTAssertEqual(packages.first?.canUpgrade, false)
         let requests = await transport.recordedRequests()
         XCTAssertEqual(requests.count, 2)
         XCTAssertEqual(requestValue("api", in: requests[1]), DsmAPIName.corePackageThumb)
@@ -346,7 +460,8 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         let transport = MockHTTPTransport(responses: [
             response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"running","startable":true,"dsm_apps":"App.One App.Two","install_type":"user","available_operation":["stop","uninstall"]}}]}}"#),
             response(#"{"success":true}"#),
-            response(#"{"success":true}"#)
+            response(#"{"success":true}"#),
+            response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"stopped","startable":true,"dsm_apps":"App.One App.Two","install_type":"user","available_operation":["start","uninstall"]}}]}}"#)
         ])
         let repository = try makeRepository(
             apiNames: [
@@ -355,12 +470,10 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
             ],
             transport: transport
         )
-        _ = try await repository.loadPackages()
-
         try await repository.controlPackage(id: "Example", action: .stop)
 
         let requests = await transport.recordedRequests()
-        XCTAssertEqual(requests.count, 3)
+        XCTAssertEqual(requests.count, 4)
         XCTAssertEqual(requestValue("api", in: requests[1]), DsmAPIName.corePackage)
         XCTAssertEqual(requestValue("method", in: requests[1]), "feasibility_check")
         XCTAssertEqual(requestValue("type", in: requests[1]), "stop_check")
@@ -369,11 +482,217 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertEqual(requestValue("id", in: requests[2]), "Example")
     }
 
+    func test启动套件写后回读确认并传递桌面应用标识() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"stopped","startable":true,"dsm_apps":"App.One App.Two","install_type":"user","available_operation":["start"]}}]}}"#),
+            response(#"{"success":true}"#),
+            response(#"{"success":true}"#),
+            response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"running","startable":true,"dsm_apps":"App.One App.Two","install_type":"user","available_operation":["stop"]}}]}}"#),
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.corePackage,
+                DsmAPIName.corePackageControl,
+                DsmAPIName.corePackageThumb,
+            ],
+            transport: transport
+        )
+
+        let result = try await repository.controlPackageResult(
+            id: "Example",
+            action: .start
+        )
+
+        XCTAssertEqual(result.status, .confirmedSuccess)
+        XCTAssertEqual(result.operation, "packageStart")
+        XCTAssertFalse(result.requiresRefresh)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(
+            requests.compactMap { requestValue("method", in: $0) },
+            ["list", "feasibility_check", "start", "list"]
+        )
+        XCTAssertEqual(
+            requestValue("dsm_apps", in: requests[2]),
+            #"["App.One","App.Two"]"#
+        )
+    }
+
+    func test套件启动停止预检拒绝过期状态和缺失能力且不写入() async throws {
+        let staleTransport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"running","startable":true,"available_operation":["stop"]}}]}}"#),
+        ])
+        let staleRepository = try makeRepository(
+            apiNames: [
+                DsmAPIName.corePackage,
+                DsmAPIName.corePackageControl,
+            ],
+            transport: staleTransport
+        )
+
+        let stale = try await staleRepository.controlPackageResult(
+            id: "Example",
+            action: .start
+        )
+
+        XCTAssertEqual(stale.status, .confirmedFailure)
+        XCTAssertFalse(stale.submitted)
+        XCTAssertEqual(stale.localizationKey, "package.start.unavailable")
+        let staleRequests = await staleTransport.recordedRequests()
+        XCTAssertEqual(
+            staleRequests.compactMap { requestValue("method", in: $0) },
+            ["list"]
+        )
+
+        let unsupportedTransport = MockHTTPTransport(responses: [])
+        let unsupportedRepository = try makeRepository(
+            apiNames: [DsmAPIName.corePackage],
+            transport: unsupportedTransport
+        )
+        let unsupported = try await unsupportedRepository.controlPackageResult(
+            id: "Example",
+            action: .stop
+        )
+
+        XCTAssertEqual(unsupported.status, .unsupported)
+        XCTAssertFalse(unsupported.submitted)
+        let unsupportedRequests = await unsupportedTransport.recordedRequests()
+        XCTAssertTrue(unsupportedRequests.isEmpty)
+
+        let cancelledTransport = MockHTTPTransport(responses: [])
+        let cancelledRepository = try makeRepository(
+            apiNames: [
+                DsmAPIName.corePackage,
+                DsmAPIName.corePackageControl,
+            ],
+            transport: cancelledTransport
+        )
+        let cancelled = try await Task {
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+            return try await cancelledRepository.controlPackageResult(
+                id: "Example",
+                action: .start
+            )
+        }.value
+
+        XCTAssertEqual(cancelled.status, .cancelledBeforeSubmission)
+        XCTAssertFalse(cancelled.submitted)
+        let cancelledRequests = await cancelledTransport.recordedRequests()
+        XCTAssertTrue(cancelledRequests.isEmpty)
+    }
+
+    func test套件控制提交超时后只回读且不会重放写请求() async throws {
+        let transport = MockHTTPTransport(steps: [
+            .response(response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"stopped","startable":true,"available_operation":["start"]}}]}}"#)),
+            .response(response(#"{"success":true}"#)),
+            .urlError(.timedOut),
+            .response(response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"running","startable":true,"available_operation":["stop"]}}]}}"#)),
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.corePackage,
+                DsmAPIName.corePackageControl,
+            ],
+            transport: transport
+        )
+
+        let result = try await repository.controlPackageResult(
+            id: "Example",
+            action: .start
+        )
+
+        XCTAssertEqual(result.status, .confirmedSuccess)
+        XCTAssertEqual(
+            result.diagnosticTag,
+            "package.start.confirmed"
+        )
+        let methods = await transport.recordedRequests().compactMap {
+            requestValue("method", in: $0)
+        }
+        XCTAssertEqual(methods, ["list", "feasibility_check", "start", "list"])
+        XCTAssertEqual(methods.filter { $0 == "start" }.count, 1)
+    }
+
+    func test套件控制明确权限拒绝不进入未知结果() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"running","startable":true,"available_operation":["stop"]}}]}}"#),
+            response(#"{"success":true}"#),
+            response(#"{"success":false,"error":{"code":105}}"#),
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.corePackage,
+                DsmAPIName.corePackageControl,
+            ],
+            transport: transport
+        )
+
+        let result = try await repository.controlPackageResult(
+            id: "Example",
+            action: .stop
+        )
+
+        XCTAssertEqual(result.status, .permissionDenied)
+        XCTAssertTrue(result.submitted)
+        XCTAssertFalse(result.requiresRefresh)
+        XCTAssertEqual(result.counts.failed, 1)
+        let methods = await transport.recordedRequests().compactMap {
+            requestValue("method", in: $0)
+        }
+        XCTAssertEqual(methods, ["list", "feasibility_check", "stop"])
+    }
+
+    func test套件控制按稳定ID去重并区分提交后取消() async throws {
+        let running = #"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"running","startable":true,"available_operation":["stop"]}}]}}"#
+        let transport = MockHTTPTransport(steps: [
+            .response(response(running)),
+            .response(response(#"{"success":true}"#)),
+            .waitUntilCancelled,
+            .response(response(running)),
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.corePackage,
+                DsmAPIName.corePackageControl,
+            ],
+            transport: transport
+        )
+        let firstTask = Task {
+            try await repository.controlPackageResult(
+                id: "Example",
+                action: .stop
+            )
+        }
+        while await transport.recordedRequests().count < 3 {
+            await Task.yield()
+        }
+
+        let duplicate = try await repository.controlPackageResult(
+            id: "Example",
+            action: .start
+        )
+        firstTask.cancel()
+        let cancelled = try await firstTask.value
+
+        XCTAssertEqual(duplicate.status, .confirmedFailure)
+        XCTAssertFalse(duplicate.submitted)
+        XCTAssertEqual(duplicate.errorCategory, .conflict)
+        XCTAssertEqual(cancelled.status, .cancellationRequestedAfterSubmission)
+        XCTAssertTrue(cancelled.requiresRefresh)
+        let methods = await transport.recordedRequests().compactMap {
+            requestValue("method", in: $0)
+        }
+        XCTAssertEqual(methods.filter { $0 == "stop" }.count, 1)
+        XCTAssertEqual(methods.filter { $0 == "start" }.count, 0)
+    }
+
     func test卸载套件使用专用接口并传递桌面应用标识() async throws {
         let transport = MockHTTPTransport(responses: [
             response(#"{"success":true,"data":{"packages":[{"id":"Example","name":"示例套件","version":"1.0","additional":{"status":"stopped","startable":true,"dsm_apps":"App.One App.Two","install_type":"user","ctl_uninstall":true,"available_operation":["uninstall"]}}]}}"#),
             response(#"{"success":true}"#),
-            response(#"{"success":true}"#)
+            response(#"{"success":true}"#),
+            response(#"{"success":true,"data":{"packages":[]}}"#)
         ])
         let repository = try makeRepository(
             apiNames: [
@@ -615,10 +934,10 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertEqual(requestValue("result_id", in: requests[1]), "result-2")
     }
 
-    func test系统更新检查使用实际更新服务且没有更新时不伪造版本() async throws {
+    func test系统更新检查使用实际更新服务并规范化可用版本() async throws {
         let transport = MockHTTPTransport(responses: [
             response(#"{"success":true,"data":{"firmware_ver":"DSM 7.2.1"}}"#),
-            response(#"{"success":true,"data":{"update":{"version":"DSM 7.2.2","release_note":"可靠性改进"},"promotion":null}}"#)
+            response(#"{"success":true,"data":{"update":{"version":"  DSM 7.2.2  ","release_note":"  可靠性改进\n"},"promotion":null}}"#)
         ])
         let repository = try makeRepository(
             apiNames: [DsmAPIName.coreSystem, DsmAPIName.coreUpgradeServer],
@@ -636,6 +955,195 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertEqual(requestValue("method", in: requests[1]), "check")
         XCTAssertEqual(requestValue("version", in: requests[1]), "3")
         XCTAssertEqual(requestValue("need_promotion", in: requests[1]), "false")
+    }
+
+    func test系统更新没有候选或版本相同时不伪造可用更新() async throws {
+        for updateBody in [
+            "null",
+            #"{"version":"DSM 7.2.1","release_note":"相同版本"}"#
+        ] {
+            let transport = MockHTTPTransport(responses: [
+                response(#"{"success":true,"data":{"firmware_ver":"DSM 7.2.1"}}"#),
+                response(
+                    #"{"success":true,"data":{"update":\#(updateBody),"promotion":null}}"#
+                )
+            ])
+            let repository = try makeRepository(
+                apiNames: [DsmAPIName.coreSystem, DsmAPIName.coreUpgradeServer],
+                transport: transport
+            )
+
+            let info = try await repository.checkSystemUpdate()
+
+            XCTAssertFalse(info.isUpdateAvailable)
+            XCTAssertEqual(info.currentVersion, "DSM 7.2.1")
+        }
+    }
+
+    func testNAS关机与重启先预检并只确认DSM接受请求() async throws {
+        for (action, method, operation, localizationKey) in [
+            (NasPowerAction.shutdown, "shutdown", "nasShutdown", "power.shutdown.accepted"),
+            (NasPowerAction.reboot, "reboot", "nasReboot", "power.reboot.accepted")
+        ] {
+            let transport = MockHTTPTransport(responses: [
+                response(#"{"success":true,"data":{"model":"Synthetic NAS"}}"#),
+                response(#"{"success":true}"#)
+            ])
+            let repository = try makeRepository(
+                apiNames: [DsmAPIName.coreSystem],
+                transport: transport
+            )
+
+            let result = try await repository.performPowerActionResult(action)
+
+            XCTAssertEqual(result.status, .confirmedSuccess)
+            XCTAssertEqual(result.operation, operation)
+            XCTAssertTrue(result.submitted)
+            XCTAssertFalse(result.requiresRefresh)
+            XCTAssertEqual(result.localizationKey, localizationKey)
+            let requests = await transport.recordedRequests()
+            XCTAssertEqual(requests.count, 2)
+            XCTAssertEqual(requestValue("method", in: requests[0]), "info")
+            XCTAssertEqual(requestValue("method", in: requests[1]), method)
+        }
+    }
+
+    func testNAS电源请求能力缺失和预检权限不足时不写入() async throws {
+        let unsupportedTransport = MockHTTPTransport(responses: [])
+        let unsupportedRepository = try makeRepository(
+            apiNames: [],
+            transport: unsupportedTransport
+        )
+
+        let unsupported = try await unsupportedRepository
+            .performPowerActionResult(.shutdown)
+
+        XCTAssertEqual(unsupported.status, .unsupported)
+        XCTAssertFalse(unsupported.submitted)
+        let unsupportedRequests = await unsupportedTransport.recordedRequests()
+        XCTAssertTrue(unsupportedRequests.isEmpty)
+
+        let permissionTransport = MockHTTPTransport(responses: [
+            response(#"{"success":false,"error":{"code":105}}"#)
+        ])
+        let permissionRepository = try makeRepository(
+            apiNames: [DsmAPIName.coreSystem],
+            transport: permissionTransport
+        )
+
+        let denied = try await permissionRepository
+            .performPowerActionResult(.reboot)
+
+        XCTAssertEqual(denied.status, .permissionDenied)
+        XCTAssertFalse(denied.submitted)
+        let permissionRequests = await permissionTransport.recordedRequests()
+        XCTAssertEqual(permissionRequests.count, 1)
+        XCTAssertEqual(
+            requestValue("method", in: permissionRequests[0]),
+            "info"
+        )
+    }
+
+    func testNAS电源请求提交前取消时不发送任何请求() async throws {
+        let transport = MockHTTPTransport(responses: [])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreSystem],
+            transport: transport
+        )
+
+        let result = try await Task {
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+            return try await repository.performPowerActionResult(.shutdown)
+        }.value
+
+        XCTAssertEqual(result.status, .cancelledBeforeSubmission)
+        XCTAssertFalse(result.submitted)
+        XCTAssertFalse(result.requiresRefresh)
+        let requests = await transport.recordedRequests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
+    func testNAS电源请求提交超时报告未确认且不自动重放() async throws {
+        let transport = MockHTTPTransport(steps: [
+            .response(
+                response(#"{"success":true,"data":{"model":"Synthetic NAS"}}"#)
+            ),
+            .urlError(.timedOut)
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreSystem],
+            transport: transport
+        )
+
+        let result = try await repository.performPowerActionResult(.shutdown)
+
+        XCTAssertEqual(result.status, .submittedButUnverified)
+        XCTAssertTrue(result.submitted)
+        XCTAssertTrue(result.requiresRefresh)
+        XCTAssertEqual(result.counts.unknown, 1)
+        XCTAssertEqual(result.localizationKey, "power.action.unverified")
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requestValue("method", in: requests[1]), "shutdown")
+    }
+
+    func testNAS电源请求提交后权限拒绝与登录失效不会误报未知() async throws {
+        for (code, expectedStatus, expectedKey) in [
+            (105, MutationResultStatus.permissionDenied, "power.action.permission-denied"),
+            (106, MutationResultStatus.confirmedFailure, "power.action.session-expired")
+        ] {
+            let transport = MockHTTPTransport(responses: [
+                response(#"{"success":true,"data":{"model":"Synthetic NAS"}}"#),
+                response(#"{"success":false,"error":{"code":\#(code)}}"#)
+            ])
+            let repository = try makeRepository(
+                apiNames: [DsmAPIName.coreSystem],
+                transport: transport
+            )
+
+            let result = try await repository.performPowerActionResult(.reboot)
+
+            XCTAssertEqual(result.status, expectedStatus)
+            XCTAssertTrue(result.submitted)
+            XCTAssertFalse(result.requiresRefresh)
+            XCTAssertEqual(result.localizationKey, expectedKey)
+        }
+    }
+
+    func testNAS电源请求全局防重复并区分提交后取消() async throws {
+        let transport = MockHTTPTransport(steps: [
+            .response(
+                response(#"{"success":true,"data":{"model":"Synthetic NAS"}}"#)
+            ),
+            .waitUntilCancelled
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreSystem],
+            transport: transport
+        )
+        let firstTask = Task {
+            try await repository.performPowerActionResult(.shutdown)
+        }
+        while await transport.recordedRequests().count < 2 {
+            await Task.yield()
+        }
+
+        let duplicate = try await repository.performPowerActionResult(.reboot)
+        firstTask.cancel()
+        let cancelled = try await firstTask.value
+
+        XCTAssertEqual(duplicate.status, .confirmedFailure)
+        XCTAssertFalse(duplicate.submitted)
+        XCTAssertEqual(duplicate.localizationKey, "power.action.busy")
+        XCTAssertEqual(
+            cancelled.status,
+            .cancellationRequestedAfterSubmission
+        )
+        XCTAssertTrue(cancelled.requiresRefresh)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
     }
 
     func test断开网页连接使用设备标识且写请求允许没有数据正文() async throws {
@@ -2032,17 +2540,20 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertNotNil(settings.manualDate)
     }
 
-    func test网络校时先验证服务器再保存并回读确认() async throws {
+    func test网络校时先保存回读配置再立即校时并复查() async throws {
         let current = #"{"success":true,"data":{"date_format":"Y-m-d","time_format":"H:i","timezone":"Asia/Shanghai","enable_ntp":"manual","server":"","date":"2026/7/26","hour":18,"minute":30,"second":10}}"#
         let zones = #"{"success":true,"data":{"zonedata":[{"value":"Asia/Shanghai","display":"北京、上海"},{"value":"UTC","display":"协调世界时"}]}}"#
+        let updated = #"{"success":true,"data":{"date_format":"Y/m/d","time_format":"H:i","timezone":"UTC","enable_ntp":"ntp","server":"time.example.invalid","date":"2026/7/26","hour":18,"minute":30,"second":10}}"#
         let transport = MockHTTPTransport(responses: [
             response(current),
             response(zones),
             response(current),
             response(zones),
             response(#"{"success":true}"#),
+            response(updated),
+            response(zones),
             response(#"{"success":true}"#),
-            response(#"{"success":true,"data":{"date_format":"Y/m/d","time_format":"H:i","timezone":"UTC","enable_ntp":"ntp","server":"time.example.invalid"}}"#),
+            response(updated),
             response(zones)
         ])
         let repository = try makeRepository(
@@ -2051,7 +2562,7 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         )
         let original = try await repository.loadRegionSettings()
 
-        try await repository.saveRegionSettings(
+        let result = try await repository.saveRegionSettingsResult(
             NasRegionSettings(
                 dateFormat: "Y/m/d",
                 timeFormat: "H:i",
@@ -2063,45 +2574,471 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
             )
         )
 
+        XCTAssertEqual(result.status, .confirmedSuccess)
+        XCTAssertEqual(
+            result.counts,
+            try MutationResultCounts(succeeded: 5, failed: 0, unknown: 0)
+        )
         let requests = await transport.recordedRequests()
-        XCTAssertEqual(requestValue("method", in: requests[4]), "sync")
-        XCTAssertEqual(requestValue("servers", in: requests[4]), #"["time.example.invalid"]"#)
-        XCTAssertEqual(requestValue("method", in: requests[5]), "set")
-        XCTAssertEqual(requestValue("enable_ntp", in: requests[5]), "ntp")
-        XCTAssertEqual(requestValue("timezone", in: requests[5]), "UTC")
+        XCTAssertEqual(requestValue("method", in: requests[4]), "set")
+        XCTAssertEqual(requestValue("enable_ntp", in: requests[4]), "ntp")
+        XCTAssertEqual(requestValue("timezone", in: requests[4]), "UTC")
+        XCTAssertEqual(requestValue("method", in: requests[7]), "sync")
+        XCTAssertEqual(requestValue("servers", in: requests[7]), #"["time.example.invalid"]"#)
     }
 
-    func test新建DDNS先验证连接再保存更新并回读确认() async throws {
-        let providers = #"{"success":true,"data":{"providers":[{"id":"Example","display":"示例服务"}]}}"#
+    func test区域配置确认后校时超时报告部分成功且不重放() async throws {
+        let current = #"{"success":true,"data":{"date_format":"Y-m-d","time_format":"H:i","timezone":"Asia/Shanghai","enable_ntp":"manual","server":"","date":"2026/7/26","hour":18,"minute":30,"second":10}}"#
+        let updated = #"{"success":true,"data":{"date_format":"Y/m/d","time_format":"H:i","timezone":"UTC","enable_ntp":"ntp","server":"time.example.invalid","date":"2026/7/26","hour":18,"minute":30,"second":10}}"#
+        let zones = #"{"success":true,"data":{"zonedata":[{"value":"Asia/Shanghai","display":"北京、上海"},{"value":"UTC","display":"协调世界时"}]}}"#
+        let transport = MockHTTPTransport(steps: [
+            .response(response(current)),
+            .response(response(zones)),
+            .response(response(#"{"success":true}"#)),
+            .response(response(updated)),
+            .response(response(zones)),
+            .urlError(.timedOut)
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreRegionNTP],
+            transport: transport
+        )
+
+        let result = try await repository.saveRegionSettingsResult(
+            NasRegionSettings(
+                dateFormat: "Y/m/d",
+                timeFormat: "H:i",
+                timeZone: "UTC",
+                isNetworkTimeEnabled: true,
+                timeServers: ["time.example.invalid"],
+                manualDate: nil,
+                timeZones: [
+                    NasTimeZoneOption(id: "Asia/Shanghai", displayName: "北京、上海"),
+                    NasTimeZoneOption(id: "UTC", displayName: "协调世界时")
+                ]
+            )
+        )
+
+        XCTAssertEqual(result.status, .partialSuccess)
+        XCTAssertEqual(
+            result.counts,
+            try MutationResultCounts(succeeded: 4, failed: 0, unknown: 1)
+        )
+        XCTAssertEqual(result.localizationKey, "region.settings.partial")
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(
+            requests.filter { requestValue("method", in: $0) == "sync" }.count,
+            1
+        )
+    }
+
+    func test区域配置提交超时后逐字段回读且不继续校时() async throws {
+        let current = #"{"success":true,"data":{"date_format":"Y-m-d","time_format":"H:i","timezone":"Asia/Shanghai","enable_ntp":"manual","server":"","date":"2026/7/26","hour":18,"minute":30,"second":10}}"#
+        let partial = #"{"success":true,"data":{"date_format":"Y/m/d","time_format":"H:i","timezone":"Asia/Shanghai","enable_ntp":"manual","server":"","date":"2026/7/26","hour":18,"minute":30,"second":10}}"#
+        let zones = #"{"success":true,"data":{"zonedata":[{"value":"Asia/Shanghai","display":"北京、上海"},{"value":"UTC","display":"协调世界时"}]}}"#
+        let transport = MockHTTPTransport(steps: [
+            .response(response(current)),
+            .response(response(zones)),
+            .urlError(.timedOut),
+            .response(response(partial)),
+            .response(response(zones))
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreRegionNTP],
+            transport: transport
+        )
+
+        let result = try await repository.saveRegionSettingsResult(
+            NasRegionSettings(
+                dateFormat: "Y/m/d",
+                timeFormat: "H:i",
+                timeZone: "UTC",
+                isNetworkTimeEnabled: true,
+                timeServers: ["time.example.invalid"],
+                manualDate: nil,
+                timeZones: [
+                    NasTimeZoneOption(id: "Asia/Shanghai", displayName: "北京、上海"),
+                    NasTimeZoneOption(id: "UTC", displayName: "协调世界时")
+                ]
+            )
+        )
+
+        XCTAssertEqual(result.status, .partialSuccess)
+        XCTAssertEqual(
+            result.counts,
+            try MutationResultCounts(succeeded: 1, failed: 0, unknown: 4)
+        )
+        let requests = await transport.recordedRequests()
+        XCTAssertFalse(requests.contains {
+            requestValue("method", in: $0) == "sync"
+        })
+        XCTAssertEqual(
+            requests.filter { requestValue("method", in: $0) == "set" }.count,
+            1
+        )
+    }
+
+    func test区域设置未编辑手动时间时使用刚回读的NAS时间() async throws {
+        let current = #"{"success":true,"data":{"date_format":"Y-m-d","time_format":"H:i","timezone":"Asia/Shanghai","enable_ntp":"manual","server":"","date":"2026/7/26","hour":18,"minute":30,"second":10}}"#
+        let updated = #"{"success":true,"data":{"date_format":"Y/m/d","time_format":"H:i","timezone":"Asia/Shanghai","enable_ntp":"manual","server":"","date":"2026/7/26","hour":18,"minute":30,"second":11}}"#
+        let zones = #"{"success":true,"data":{"zonedata":[{"value":"Asia/Shanghai","display":"北京、上海"}]}}"#
         let transport = MockHTTPTransport(responses: [
+            response(current),
+            response(zones),
+            response(#"{"success":true}"#),
+            response(updated),
+            response(zones)
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreRegionNTP],
+            transport: transport
+        )
+
+        let result = try await repository.saveRegionSettingsResult(
+            NasRegionSettings(
+                dateFormat: "Y/m/d",
+                timeFormat: "H:i",
+                timeZone: "Asia/Shanghai",
+                isNetworkTimeEnabled: false,
+                timeServers: [],
+                manualDate: nil,
+                timeZones: [
+                    NasTimeZoneOption(id: "Asia/Shanghai", displayName: "北京、上海")
+                ]
+            )
+        )
+
+        XCTAssertEqual(result.status, .confirmedSuccess)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requestValue("date", in: requests[2]), "2026/7/26")
+        XCTAssertEqual(requestValue("hour", in: requests[2]), "18")
+        XCTAssertEqual(requestValue("minute", in: requests[2]), "30")
+        XCTAssertEqual(requestValue("second", in: requests[2]), "10")
+    }
+
+    func test区域设置拒绝重复提交并区分提交后取消() async throws {
+        let current = #"{"success":true,"data":{"date_format":"Y-m-d","time_format":"H:i","timezone":"Asia/Shanghai","enable_ntp":"manual","server":"","date":"2026/7/26","hour":18,"minute":30,"second":10}}"#
+        let zones = #"{"success":true,"data":{"zonedata":[{"value":"Asia/Shanghai","display":"北京、上海"},{"value":"UTC","display":"协调世界时"}]}}"#
+        let transport = MockHTTPTransport(steps: [
+            .response(response(current)),
+            .response(response(zones)),
+            .waitUntilCancelled
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreRegionNTP],
+            transport: transport
+        )
+        let settings = NasRegionSettings(
+            dateFormat: "Y/m/d",
+            timeFormat: "H:i",
+            timeZone: "UTC",
+            isNetworkTimeEnabled: true,
+            timeServers: ["time.example.invalid"],
+            manualDate: nil,
+            timeZones: [
+                NasTimeZoneOption(id: "Asia/Shanghai", displayName: "北京、上海"),
+                NasTimeZoneOption(id: "UTC", displayName: "协调世界时")
+            ]
+        )
+        let firstTask = Task {
+            try await repository.saveRegionSettingsResult(settings)
+        }
+        while await transport.recordedRequests().count < 3 {
+            await Task.yield()
+        }
+
+        let duplicate = try await repository.saveRegionSettingsResult(settings)
+        firstTask.cancel()
+        let cancelled = try await firstTask.value
+
+        XCTAssertEqual(duplicate.status, .confirmedFailure)
+        XCTAssertFalse(duplicate.submitted)
+        XCTAssertEqual(duplicate.errorCategory, .conflict)
+        XCTAssertEqual(cancelled.status, .cancellationRequestedAfterSubmission)
+        XCTAssertTrue(cancelled.requiresRefresh)
+    }
+
+    func test区域设置预检拒绝无效输入和能力缺失且不发送请求() async throws {
+        let zones = [
+            NasTimeZoneOption(id: "Asia/Shanghai", displayName: "北京、上海")
+        ]
+        for settings in [
+            NasRegionSettings(
+                dateFormat: " ",
+                timeFormat: "H:i",
+                timeZone: "Asia/Shanghai",
+                isNetworkTimeEnabled: true,
+                timeServers: ["time.example.invalid"],
+                manualDate: nil,
+                timeZones: zones
+            ),
+            NasRegionSettings(
+                dateFormat: "Y-m-d",
+                timeFormat: "H:i",
+                timeZone: "Asia/Shanghai",
+                isNetworkTimeEnabled: true,
+                timeServers: ["https://time.example.invalid/path"],
+                manualDate: nil,
+                timeZones: zones
+            )
+        ] {
+            let transport = MockHTTPTransport(responses: [])
+            let repository = try makeRepository(
+                apiNames: [DsmAPIName.coreRegionNTP],
+                transport: transport
+            )
+
+            let result = try await repository.saveRegionSettingsResult(settings)
+
+            XCTAssertEqual(result.status, .confirmedFailure)
+            XCTAssertFalse(result.submitted)
+            XCTAssertEqual(result.errorCategory, .validation)
+            let requests = await transport.recordedRequests()
+            XCTAssertTrue(requests.isEmpty)
+        }
+
+        let transport = MockHTTPTransport(responses: [])
+        let repository = try makeRepository(apiNames: [], transport: transport)
+        let result = try await repository.saveRegionSettingsResult(
+            NasRegionSettings(
+                dateFormat: "Y-m-d",
+                timeFormat: "H:i",
+                timeZone: "Asia/Shanghai",
+                isNetworkTimeEnabled: true,
+                timeServers: ["time.example.invalid"],
+                manualDate: nil,
+                timeZones: zones
+            )
+        )
+        XCTAssertEqual(result.status, .unsupported)
+        XCTAssertFalse(result.submitted)
+        let requests = await transport.recordedRequests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
+    func testDDNS连接测试与保存记录是两个独立操作() async throws {
+        let providers = #"{"success":true,"data":{"providers":[{"id":"Example","display":"示例服务"}]}}"#
+        let testTransport = MockHTTPTransport(responses: [
+            response(providers),
+            response(#"{"success":true,"data":{"records":[]}}"#),
+            response(#"{"success":true}"#)
+        ])
+        let testRepository = try makeRepository(
+            apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
+            transport: testTransport
+        )
+        let draft = NasDDNSDraft(
+            providerID: "Example",
+            hostname: "nas.example.invalid",
+            username: "synthetic-owner",
+            password: "SYNTHETIC_EPHEMERAL_SECRET"
+        )
+
+        let testResult = try await testRepository.testDDNSResult(draft)
+
+        XCTAssertEqual(testResult.status, .confirmedSuccess)
+        let testRequests = await testTransport.recordedRequests()
+        XCTAssertEqual(testRequests.count, 3)
+        XCTAssertEqual(requestValue("method", in: testRequests[2]), "test")
+        XCTAssertFalse(testRequests.contains {
+            ["create", "set", "update_ip_address"].contains(
+                requestValue("method", in: $0)
+            )
+        })
+
+        let saveTransport = MockHTTPTransport(responses: [
             response(providers),
             response(#"{"success":true,"data":{"records":[]}}"#),
             response(#"{"success":true}"#),
-            response(#"{"success":true}"#),
-            response(#"{"success":true}"#),
             response(providers),
-            response(#"{"success":true,"data":{"records":[{"provider":"Example","hostname":"nas.example.invalid","username":"owner","enable":true,"ip":"192.0.2.10","status":"service_ddns_normal"}]}}"#)
+            response(#"{"success":true,"data":{"records":[{"provider":"Example","hostname":"nas.example.invalid","username":"synthetic-owner","enable":true,"heartbeat":false,"ip":"192.0.2.10","status":"service_ddns_normal"}]}}"#)
+        ])
+        let saveRepository = try makeRepository(
+            apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
+            transport: saveTransport
+        )
+
+        let saveResult = try await saveRepository.saveDDNSResult(draft)
+
+        XCTAssertEqual(saveResult.status, .confirmedSuccess)
+        let saveRequests = await saveTransport.recordedRequests()
+        XCTAssertEqual(saveRequests.count, 5)
+        XCTAssertEqual(requestValue("method", in: saveRequests[2]), "create")
+        XCTAssertFalse(saveRequests.contains {
+            ["test", "update_ip_address"].contains(requestValue("method", in: $0))
+        })
+        XCTAssertFalse(saveRequests[2].url?.absoluteString.contains(
+            "SYNTHETIC_EPHEMERAL_SECRET"
+        ) == true)
+    }
+
+    func testDDNS保存超时后回读确认且不重放() async throws {
+        let providers = #"{"success":true,"data":{"providers":[{"id":"Example","display":"Synthetic Provider"}]}}"#
+        let saved = #"{"success":true,"data":{"records":[{"provider":"Example","hostname":"nas.example.invalid","username":"synthetic-owner","enable":true,"heartbeat":false}]}}"#
+        let transport = MockHTTPTransport(steps: [
+            .response(response(providers)),
+            .response(response(#"{"success":true,"data":{"records":[]}}"#)),
+            .urlError(.timedOut),
+            .response(response(providers)),
+            .response(response(saved))
         ])
         let repository = try makeRepository(
             apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
             transport: transport
         )
 
-        try await repository.saveDDNS(
-            NasDDNSDraft(
-                providerID: "Example",
-                hostname: "nas.example.invalid",
-                username: "owner",
-                password: "REDACTED_PASSWORD"
-            )
+        let result = try await repository.saveDDNSResult(
+            syntheticDDNSDraft
         )
 
+        XCTAssertEqual(result.status, .confirmedSuccess)
         let requests = await transport.recordedRequests()
-        XCTAssertEqual(requestValue("method", in: requests[2]), "test")
-        XCTAssertEqual(requestValue("method", in: requests[3]), "create")
-        XCTAssertEqual(requestValue("method", in: requests[4]), "update_ip_address")
-        XCTAssertEqual(requestValue("id", in: requests[4]), "Example")
-        XCTAssertFalse(requests[3].url?.absoluteString.contains("REDACTED_PASSWORD") == true)
+        XCTAssertEqual(
+            requests.filter { requestValue("method", in: $0) == "create" }.count,
+            1
+        )
+    }
+
+    func testDDNS保存超时且回读未生效时报告未确认() async throws {
+        let providers = #"{"success":true,"data":{"providers":[{"id":"Example","display":"Synthetic Provider"}]}}"#
+        let transport = MockHTTPTransport(steps: [
+            .response(response(providers)),
+            .response(response(#"{"success":true,"data":{"records":[]}}"#)),
+            .urlError(.networkConnectionLost),
+            .response(response(providers)),
+            .response(response(#"{"success":true,"data":{"records":[]}}"#))
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
+            transport: transport
+        )
+
+        let result = try await repository.saveDDNSResult(
+            syntheticDDNSDraft
+        )
+
+        XCTAssertEqual(result.status, .submittedButUnverified)
+        XCTAssertTrue(result.requiresRefresh)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(
+            requests.filter { requestValue("method", in: $0) == "create" }.count,
+            1
+        )
+    }
+
+    func testDDNS删除超时但回读消失时确认成功() async throws {
+        let providers = #"{"success":true,"data":{"providers":[{"id":"Example","display":"Synthetic Provider"}]}}"#
+        let existing = #"{"success":true,"data":{"records":[{"provider":"Example","hostname":"nas.example.invalid","username":"synthetic-owner","enable":true}]}}"#
+        let transport = MockHTTPTransport(steps: [
+            .response(response(providers)),
+            .response(response(existing)),
+            .urlError(.timedOut),
+            .response(response(providers)),
+            .response(response(#"{"success":true,"data":{"records":[]}}"#))
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
+            transport: transport
+        )
+
+        let result = try await repository.deleteDDNSResult(
+            providerID: "Example"
+        )
+
+        XCTAssertEqual(result.status, .confirmedSuccess)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(
+            requests.filter { requestValue("method", in: $0) == "delete" }.count,
+            1
+        )
+    }
+
+    func testDDNS立即更新只确认请求接受和列表复载() async throws {
+        let providers = #"{"success":true,"data":{"providers":[{"id":"Example","display":"Synthetic Provider"}]}}"#
+        let records = #"{"success":true,"data":{"records":[{"provider":"Example","hostname":"nas.example.invalid","username":"synthetic-owner","enable":true,"status":"service_ddns_normal"}]}}"#
+        let transport = MockHTTPTransport(responses: [
+            response(providers),
+            response(records),
+            response(#"{"success":true}"#),
+            response(providers),
+            response(records)
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
+            transport: transport
+        )
+
+        let result = try await repository.refreshDDNSResult()
+
+        XCTAssertEqual(result.status, .confirmedSuccess)
+        XCTAssertEqual(result.diagnosticTag, "ddns.refresh.accepted-and-reloaded")
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(
+            requests.filter {
+                requestValue("method", in: $0) == "update_ip_address"
+            }.count,
+            1
+        )
+    }
+
+    func testDDNS拒绝无效输入能力缺失与重复提交() async throws {
+        let invalidTransport = MockHTTPTransport(responses: [])
+        let invalidRepository = try makeRepository(
+            apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
+            transport: invalidTransport
+        )
+        let invalid = try await invalidRepository.saveDDNSResult(
+            NasDDNSDraft(
+                providerID: "Example",
+                hostname: "https://nas.example.invalid/path",
+                username: "synthetic-owner",
+                password: "SYNTHETIC_EPHEMERAL_SECRET"
+            )
+        )
+        XCTAssertEqual(invalid.status, .confirmedFailure)
+        XCTAssertEqual(invalid.errorCategory, .validation)
+        let invalidRequests = await invalidTransport.recordedRequests()
+        XCTAssertTrue(invalidRequests.isEmpty)
+
+        let unsupportedTransport = MockHTTPTransport(responses: [])
+        let unsupportedRepository = try makeRepository(
+            apiNames: [],
+            transport: unsupportedTransport
+        )
+        let unsupported = try await unsupportedRepository.saveDDNSResult(
+            syntheticDDNSDraft
+        )
+        XCTAssertEqual(unsupported.status, .unsupported)
+        let unsupportedRequests = await unsupportedTransport.recordedRequests()
+        XCTAssertTrue(unsupportedRequests.isEmpty)
+
+        let providers = #"{"success":true,"data":{"providers":[{"id":"Example","display":"Synthetic Provider"}]}}"#
+        let duplicateTransport = MockHTTPTransport(steps: [
+            .response(response(providers)),
+            .response(response(#"{"success":true,"data":{"records":[]}}"#)),
+            .waitUntilCancelled
+        ])
+        let duplicateRepository = try makeRepository(
+            apiNames: [DsmAPIName.coreDDNSProvider, DsmAPIName.coreDDNSRecord],
+            transport: duplicateTransport
+        )
+        let duplicateDraft = syntheticDDNSDraft
+        let firstTask = Task {
+            try await duplicateRepository.saveDDNSResult(duplicateDraft)
+        }
+        while await duplicateTransport.recordedRequests().count < 3 {
+            await Task.yield()
+        }
+
+        let duplicate = try await duplicateRepository.testDDNSResult(
+            duplicateDraft
+        )
+        firstTask.cancel()
+        let cancelled = try await firstTask.value
+
+        XCTAssertEqual(duplicate.status, .confirmedFailure)
+        XCTAssertEqual(duplicate.errorCategory, .conflict)
+        XCTAssertEqual(cancelled.status, .cancellationRequestedAfterSubmission)
     }
 
     func test读取DDNS时合并重复服务商并忽略无效项() async throws {
@@ -2540,6 +3477,78 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertEqual(requestValue("method", in: requests[4]), "stop")
     }
 
+    func test读取电源计划时仅保留白名单字段且不提交写操作() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(
+                #"{"success":true,"data":{"timezone":"Asia/Shanghai","total":200,"schedules":[{"id":"schedule-1","action":"power_on","enabled":true,"hour":7,"minute":30,"weekdays":["mon","wed","fri"],"command":"PRIVATE_COMMAND","path":"/private/path","account":"private-user","address":"192.0.2.1"},{"id":"schedule-2","action":"shutdown","enabled":false,"hour":23,"minute":5,"date":"2026-12-31"},{"id":"schedule-3","action":"custom","hour":12,"minute":0,"weekdays":["mon","tue","wed","thu","fri","sat","sun"]}]}}"#
+            )
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreHardwarePowerSchedule],
+            transport: transport
+        )
+
+        let snapshot = try await repository.loadPowerSchedule()
+
+        XCTAssertEqual(snapshot.timeZoneIdentifier, "Asia/Shanghai")
+        XCTAssertEqual(snapshot.total, 200)
+        XCTAssertTrue(snapshot.isTruncated)
+        XCTAssertEqual(snapshot.entries.count, 3)
+        XCTAssertEqual(snapshot.entries[0].action, .startup)
+        XCTAssertEqual(
+            snapshot.entries[0].recurrence,
+            .weekly([.monday, .wednesday, .friday])
+        )
+        XCTAssertEqual(
+            snapshot.entries[1].recurrence,
+            .once(NasPowerScheduleDate(year: 2026, month: 12, day: 31))
+        )
+        XCTAssertEqual(snapshot.entries[2].action, .unknown)
+        XCTAssertEqual(snapshot.entries[2].recurrence, .daily)
+        XCTAssertNil(snapshot.entries[2].isEnabled)
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requestValue("api", in: requests[0]), DsmAPIName.coreHardwarePowerSchedule)
+        XCTAssertEqual(requestValue("version", in: requests[0]), "1")
+        XCTAssertEqual(requestValue("method", in: requests[0]), "load")
+        XCTAssertFalse(requests.contains { requestValue("method", in: $0) == "save" })
+    }
+
+    func test电源计划拒绝歧义星期和无效时间() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(
+                #"{"success":true,"data":{"time_zone":"Unsafe Time Zone","items":[{"id":"numeric-days","action":"restart","enabled":true,"hour":8,"minute":15,"days":[1,2,3]},{"id":"invalid-time","action":"shutdown","hour":24,"minute":0,"weekdays":["sun"]}]}}"#
+            )
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreHardwarePowerSchedule],
+            transport: transport
+        )
+
+        let snapshot = try await repository.loadPowerSchedule()
+
+        XCTAssertNil(snapshot.timeZoneIdentifier)
+        XCTAssertEqual(snapshot.entries.count, 1)
+        XCTAssertEqual(snapshot.entries[0].action, .restart)
+        XCTAssertEqual(snapshot.entries[0].recurrence, .unknown)
+    }
+
+    func test缺少电源计划能力时零请求降级() async throws {
+        let transport = MockHTTPTransport(responses: [])
+        let repository = try makeRepository(apiNames: [], transport: transport)
+
+        do {
+            _ = try await repository.loadPowerSchedule()
+            XCTFail("缺少能力时不应发送电源计划请求")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .apiUnavailable)
+        }
+
+        let requests = await transport.recordedRequests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     private func makeRepository(
         apiNames: [String],
         transport: MockHTTPTransport,
@@ -2556,7 +3565,10 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
                     requestFormat: .form,
                     selectedVersion: name == DsmAPIName.coreTaskScheduler
                         ? 4
-                        : (name == DsmAPIName.coreRegionNTP ? 3 : 1)
+                        : ([
+                            DsmAPIName.coreRegionNTP,
+                            DsmAPIName.coreSystem
+                        ].contains(name) ? 3 : 1)
                 )
             )
         })
@@ -2665,6 +3677,15 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
             isFirewallEnabled: false,
             firewallProfileName: "synthetic-profile",
             isPortScanProtectionEnabled: true
+        )
+    }
+
+    private var syntheticDDNSDraft: NasDDNSDraft {
+        NasDDNSDraft(
+            providerID: "Example",
+            hostname: "nas.example.invalid",
+            username: "synthetic-owner",
+            password: "SYNTHETIC_EPHEMERAL_SECRET"
         )
     }
 

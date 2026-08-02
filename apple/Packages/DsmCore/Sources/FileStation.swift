@@ -523,6 +523,60 @@ public extension FileRepository {
     }
 }
 
+public actor FileStationShareAccessRepository: NasShareAccessRepository {
+    private let repository: any FileRepository
+
+    public init(repository: any FileRepository) {
+        self.repository = repository
+    }
+
+    public func loadShareAccess() async throws -> NasShareAccessDirectory {
+        var entriesByID: [String: NasShareAccessEntry] = [:]
+        var offset = 0
+
+        repeat {
+            let page = try await repository.listShares(offset: offset, limit: 200)
+            for item in page.items where isLocalShare(item) {
+                let accessLevel: NasShareAccessLevel
+                if let permissions = item.permissions {
+                    if permissions.canWrite {
+                        accessLevel = .readWrite
+                    } else if permissions.canRead {
+                        accessLevel = .readOnly
+                    } else {
+                        // `list_share` 只证明条目对当前账号可见，不能把缺少权限位解释为拒绝访问。
+                        accessLevel = .unknown
+                    }
+                } else {
+                    accessLevel = .unknown
+                }
+                entriesByID[item.id] = NasShareAccessEntry(
+                    id: item.id,
+                    name: item.name,
+                    accessLevel: accessLevel,
+                    canDelete: item.permissions?.canDelete == true
+                )
+            }
+
+            guard page.hasMore, !page.items.isEmpty else { break }
+            offset = max(offset + page.items.count, page.offset + page.items.count)
+        } while true
+
+        let shares = entriesByID.values.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        return NasShareAccessDirectory(shares: shares)
+    }
+
+    private func isLocalShare(_ item: FileItem) -> Bool {
+        guard !item.isRecyclePath else { return false }
+        guard let mountType = item.mountPointType?.lowercased(), !mountType.isEmpty else {
+            return true
+        }
+        return mountType == "normal"
+    }
+}
+
 public struct ArchiveItem: Sendable, Equatable {
     public let id: Int
     public let name: String

@@ -1626,7 +1626,7 @@ private struct VirtualMachineManagerView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: 420)
+            .frame(maxWidth: 420, alignment: .leading)
 
             if isUnavailable(.protection) {
                 unavailableState(icon: "shield.checkered")

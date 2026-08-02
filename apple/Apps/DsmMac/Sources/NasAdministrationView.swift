@@ -2002,7 +2002,7 @@ private struct UnifiedStorageView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(maxWidth: 520)
+                .frame(maxWidth: 520, alignment: .leading)
 
                 Spacer()
 

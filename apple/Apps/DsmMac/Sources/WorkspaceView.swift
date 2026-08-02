@@ -1065,63 +1065,47 @@ private struct SidebarView: View {
                 }
             }
 
-            let enabledPackages: [(section: WorkspaceSection, title: String, icon: String, tint: Color)] = [
-                model.isDownloadStationModuleEnabled ? (WorkspaceSection.downloadStation, L10n.string("ui.5248507df52ff455"), "arrow.down.circle", Color.green) : nil,
-                model.isContainerManagerModuleEnabled ? (WorkspaceSection.containerManager, L10n.string("ui.aaf778d85ce5c2ed"), "shippingbox", Color.blue) : nil,
-                model.isVirtualMachineManagerModuleEnabled ? (WorkspaceSection.virtualMachineManager, L10n.string("ui.80c43bd2481c9580"), "desktopcomputer", Color.indigo) : nil
-            ].compactMap { $0 }
-
-            if !enabledPackages.isEmpty {
-                let firstPackage = enabledPackages[0]
-                let remainingPackages = enabledPackages.dropFirst()
-                let isPackageChildSelected = remainingPackages.contains { $0.section == model.section }
-                let showPackageDetails = isPackageManagementExpanded || isPackageChildSelected
-
-                Section {
-                    NavigationLink(value: firstPackage.section) {
+            if model.isDownloadStationModuleEnabled {
+                Section(L10n.string("ui.4673a23061656125")) {
+                    NavigationLink(value: WorkspaceSection.downloadStation) {
                         SidebarModuleLabel(
-                            title: firstPackage.title,
-                            systemImage: firstPackage.icon,
-                            tint: firstPackage.tint,
-                            isSelected: model.section == firstPackage.section
+                            title: L10n.string("ui.5248507df52ff455"),
+                            systemImage: "arrow.down.circle",
+                            tint: .green,
+                            isSelected: model.section == .downloadStation
                         )
-                    }
-
-                    if enabledPackages.count > 1 && showPackageDetails {
-                        ForEach(Array(remainingPackages), id: \.section) { pkg in
-                            NavigationLink(value: pkg.section) {
-                                SidebarModuleLabel(
-                                    title: pkg.title,
-                                    systemImage: pkg.icon,
-                                    tint: pkg.tint,
-                                    isSelected: model.section == pkg.section
-                                )
-                            }
-                        }
-                    }
-                } header: {
-                    HStack {
-                        Text(L10n.string("ui.d7617d7b3b1fa180"))
-                        if enabledPackages.count > 1 {
-                            Spacer()
-                            Button {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                    isPackageManagementExpanded.toggle()
-                                }
-                            } label: {
-                                Image(systemName: showPackageDetails ? "chevron.down" : "chevron.right")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(.tertiary)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
                     }
                 }
             }
 
-            Section {
-                if model.isNasSettingsModuleEnabled {
+            if model.isContainerManagerModuleEnabled {
+                Section(L10n.string("ui.6d23f04b26967d64")) {
+                    NavigationLink(value: WorkspaceSection.containerManager) {
+                        SidebarModuleLabel(
+                            title: L10n.string("ui.aaf778d85ce5c2ed"),
+                            systemImage: "shippingbox",
+                            tint: .blue,
+                            isSelected: model.section == .containerManager
+                        )
+                    }
+                }
+            }
+
+            if model.isVirtualMachineManagerModuleEnabled {
+                Section(L10n.string("ui.f3fb4b3a41570007")) {
+                    NavigationLink(value: WorkspaceSection.virtualMachineManager) {
+                        SidebarModuleLabel(
+                            title: L10n.string("ui.80c43bd2481c9580"),
+                            systemImage: "desktopcomputer",
+                            tint: .indigo,
+                            isSelected: model.section == .virtualMachineManager
+                        )
+                    }
+                }
+            }
+
+            if model.isNasSettingsModuleEnabled {
+                Section(L10n.string("ui.5b50d7c4b5950dc5")) {
                     NavigationLink(value: WorkspaceSection.nasSettings) {
                         SidebarModuleLabel(
                             title: L10n.string("ui.b1729f4b03c4b97d"),
@@ -1131,6 +1115,9 @@ private struct SidebarView: View {
                         )
                     }
                 }
+            }
+
+            Section(L10n.string("ui.df3d58c7d84b85f2")) {
                 if model.isFileModuleEnabled {
                     NavigationLink(value: WorkspaceSection.transfers) {
                         TruncationAwareLabel(
@@ -3996,10 +3983,46 @@ private enum AppStorageInspector {
     }
 }
 
+private enum SettingsCategory: String, CaseIterable, Identifiable {
+    case general
+    case features
+    case storage
+    case desktopDrive
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general:
+            return L10n.string("ui.82479cb6ca73042d")
+        case .features:
+            return L10n.string("ui.25f5ce57a1909740")
+        case .storage:
+            return L10n.string("ui.0e41f8e3d59ec47b")
+        case .desktopDrive:
+            return L10n.string("desktopDrive.title")
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .general:
+            return "gearshape"
+        case .features:
+            return "square.grid.3x3.fill"
+        case .storage:
+            return "internaldrive.fill"
+        case .desktopDrive:
+            return "externaldrive.connected.to.line.below"
+        }
+    }
+}
+
 private struct SettingsView: View {
     @Bindable var model: WorkspaceModel
     let onRenameNAS: (String) -> String?
     @State private var desktopDriveManager: DesktopCloudDriveManager
+    @State private var selectedCategory: SettingsCategory = .general
     @State private var showsRenamePrompt = false
     @State private var renamedNAS = ""
     @State private var renameError: String?
@@ -4029,405 +4052,33 @@ private struct SettingsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+        HStack(spacing: 0) {
+            // 左侧分类子导航
+            settingsSidebar
 
-                SettingsSectionCard(
-                    title: L10n.string("settings.language.title"),
-                    icon: "globe",
-                    iconColor: .blue
-                ) {
-                    HStack {
-                        Text(L10n.string("settings.language.title"))
-                        Spacer()
-                        AppLanguagePicker()
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .frame(width: 180)
-                    }
-                    Text(L10n.string("settings.language.footer"))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+            Divider()
 
-                // 1. 连接信息
-                SettingsSectionCard(
-                    title: L10n.string("ui.82479cb6ca73042d"),
-                    icon: "server.rack",
-                    iconColor: .blue
-                ) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(L10n.string("ui.65d8f92232ae77b0"))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(model.profile.displayName)
-                            .textSelection(.enabled)
-                        Button(L10n.string("ui.1eff9b7d894c0ff9")) {
-                            renamedNAS = model.profile.displayName
-                            renameError = nil
-                            showsRenamePrompt = true
-                        }
-                    }
-                    if let renameError {
-                        Label(renameError, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                    Divider().opacity(0.3)
-                    SettingsRow(label: L10n.string("ui.317c133e7a877caf"), value: "https://\(model.profile.host):\(model.profile.port)")
-                    Divider().opacity(0.3)
-                    SettingsRow(label: L10n.string("ui.1a3f0617d6de8e52"), value: model.profile.usernameHint ?? L10n.string("ui.6a1be012c99c34e8"))
-                    Divider().opacity(0.3)
-                    SettingsRow(label: L10n.string("ui.b8f945ea49ff3774"), value: L10n.string("ui.39c35b1b42f8d938"))
-                }
-
-                // 4. 功能模块管理
-                SettingsSectionCard(
-                    title: L10n.string("ui.25f5ce57a1909740"),
-                    icon: "square.grid.3x3.fill",
-                    iconColor: .blue
-                ) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Toggle(isOn: $model.isFileModuleEnabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(L10n.string("ui.b3bd5ac7cc4d668b"))
-                                    .font(.body.weight(.medium))
-                                Text(L10n.string("ui.b3ba4f016f790299"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .toggleStyle(.switch)
-                        
-                        Divider().opacity(0.3)
-                        
-                        Toggle(isOn: $model.isPhotosModuleEnabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(L10n.string("ui.67c683672f7ff48d"))
-                                        .font(.body.weight(.medium))
-                                }
-                                Text(L10n.string("ui.a7b4352894d3f848"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .toggleStyle(.switch)
-
-                        Divider().opacity(0.3)
-
-                        Toggle(isOn: $model.isChatModuleEnabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(L10n.string("ui.4da199fae933d4fa"))
-                                    .font(.body.weight(.medium))
-                                Text(L10n.string("ui.77d90374f41aaf36"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .toggleStyle(.switch)
-
-                        Divider().opacity(0.3)
-
-                        Toggle(isOn: $model.isNasSettingsModuleEnabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(L10n.string("ui.b1729f4b03c4b97d"))
-                                    .font(.body.weight(.medium))
-                                Text(L10n.string("ui.ab0dbdbdfe0bfe42"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .toggleStyle(.switch)
-
-                        Divider().opacity(0.3)
-
-                        Toggle(isOn: $model.isDownloadStationModuleEnabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(L10n.string("ui.5248507df52ff455"))
-                                    .font(.body.weight(.medium))
-                                Text(L10n.string("ui.476f084918556c4f"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .toggleStyle(.switch)
-
-                        Divider().opacity(0.3)
-
-                        Toggle(isOn: $model.isContainerManagerModuleEnabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(L10n.string("ui.aaf778d85ce5c2ed"))
-                                    .font(.body.weight(.medium))
-                                Text(L10n.string("ui.fe5d8ebe107b885f"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .toggleStyle(.switch)
-
-                        Divider().opacity(0.3)
-
-                        Toggle(isOn: $model.isVirtualMachineManagerModuleEnabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(L10n.string("ui.80c43bd2481c9580"))
-                                    .font(.body.weight(.medium))
-                                Text(L10n.string("ui.81d1084630dcb682"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .toggleStyle(.switch)
+            // 右侧设置面板
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    switch selectedCategory {
+                    case .general:
+                        generalSettingsSection
+                    case .features:
+                        featuresSettingsSection
+                    case .storage:
+                        storageSettingsSection
+                    case .desktopDrive:
+                        desktopDriveSettingsSection
                     }
                 }
-
-                // 5. 传输设置
-                SettingsSectionCard(
-                    title: L10n.string("ui.04451130e17bac43"),
-                    icon: "arrow.up.and.down.and.sparkles",
-                    iconColor: .orange
-                ) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text(L10n.string("ui.9159bd6506fdcf1e"))
-                                .font(.body)
-                            Spacer()
-                            Picker("", selection: $chunkSizeSetting) {
-                                Text(L10n.string("ui.19e6e917e4b79680")).tag(4)
-                                Text(L10n.string("ui.d0621e01d3a44aed")).tag(8)
-                                Text(L10n.string("ui.28e307d638dc8de8")).tag(16)
-                                Text(L10n.string("ui.9aaec86f3a5dfb9a")).tag(32)
-                                Text(L10n.string("ui.d621b33c69f45f77")).tag(64)
-                            }
-                            .pickerStyle(.menu)
-                            .frame(width: 155)
-                        }
-                        
-                        Text(L10n.string("ui.a684d5ddd3cc0bea"))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                SettingsSectionCard(
-                    title: L10n.string("ui.0e41f8e3d59ec47b"),
-                    icon: "internaldrive.fill",
-                    iconColor: .teal
-                ) {
-                    SettingsRow(label: L10n.string("ui.f47f13394910cbaa"), value: ByteCountFormatter.string(fromByteCount: storage.total, countStyle: .file))
-                    Divider().opacity(0.3)
-                    SettingsRow(label: L10n.string("ui.f19c6c4c2cf77247"), value: ByteCountFormatter.string(fromByteCount: storage.safeTrash, countStyle: .file))
-                    Divider().opacity(0.3)
-                    SettingsRow(label: L10n.string("ui.05ca0d4a5aed9488"), value: ByteCountFormatter.string(fromByteCount: storage.photoCache, countStyle: .file))
-                    Divider().opacity(0.3)
-                    SettingsRow(label: L10n.string("ui.5513fba74a6c8c0b"), value: ByteCountFormatter.string(fromByteCount: storage.protectedData, countStyle: .file))
-                    Text(L10n.string("ui.fa01182022325b0b"))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        if let storageMessage {
-                            Text(storageMessage).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(L10n.string("ui.99a713a1340efda3")) { storage = AppStorageInspector.snapshot() }
-                        Button(L10n.string("ui.4499f757f9894ee7")) { showsSelectiveCleanupSheet = true }
-                            .disabled(storage.reclaimable == 0)
-                        Button(L10n.string("ui.1079be00e4efe07d")) { confirmsCacheCleanup = true }
-                            .disabled(storage.safeTrash == 0)
-                    }
-                }
-
-                SettingsSectionCard(
-                    title: L10n.string("desktopDrive.title"),
-                    icon: "externaldrive.connected.to.line.below",
-                    iconColor: .blue
-                ) {
-                    Text(L10n.string("desktopDrive.description"))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    HStack {
-                        Button(L10n.string("desktopDrive.add")) {
-                            showsMappingCreator = true
-                        }
-                        .disabled(
-                            desktopDriveManager.isBusy
-                                || !desktopDriveManager.isAvailable
-                        )
-                        Button(
-                            L10n.string("desktopDrive.diagnostics.preview")
-                        ) {
-                            do {
-                                diagnosticPreview =
-                                    try desktopDriveManager.diagnosticPreview()
-                                showsDiagnosticPreview = true
-                            } catch {
-                                desktopDriveManager.reportDiagnosticFailure()
-                            }
-                        }
-                        Spacer()
-                        if desktopDriveManager.isBusy {
-                            ProgressView()
-                                .controlSize(.small)
-                                .accessibilityLabel(
-                                    L10n.string("desktopDrive.status.working")
-                                )
-                        }
-                    }
-
-                    if !desktopDriveManager.isAvailable {
-                        Label(
-                            L10n.string("desktopDrive.unavailable"),
-                            systemImage: "info.circle"
-                        )
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    } else if desktopDriveManager.mappings.isEmpty {
-                        Text(L10n.string("desktopDrive.empty"))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(desktopDriveManager.mappings) { mapping in
-                            Divider().opacity(0.3)
-                            HStack {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(mapping.displayName)
-                                        .font(.body.weight(.medium))
-                                    Text(mappingScopeText(mapping.scope))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                    Label(
-                                        mappingStatusText(mapping),
-                                        systemImage: mappingStatusIcon(mapping)
-                                    )
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    Text(mappingCacheText(mapping))
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                    Text(
-                                        desktopDriveManager.cacheLocationText(mapping)
-                                    )
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                                    if let progress = desktopDriveManager
-                                        .offlineProgress[mapping.id] {
-                                        mappingOfflineProgress(
-                                            mapping: mapping,
-                                            progress: progress
-                                        )
-                                    }
-                                }
-                                Spacer()
-                                Button(L10n.string("desktopDrive.open")) {
-                                    Task { await desktopDriveManager.reveal(mapping) }
-                                }
-                                Menu(L10n.string("desktopDrive.more")) {
-                                    if isOfflineTaskRunning(mapping) {
-                                        Button(L10n.string("desktopDrive.cancel")) {
-                                            desktopDriveManager.cancelOffline(mapping)
-                                        }
-                                    } else if desktopDriveManager.runtimes[mapping.id]?
-                                        .pinnedPaths.isEmpty == false {
-                                        Button(L10n.string("desktopDrive.releaseOffline")) {
-                                            Task {
-                                                await desktopDriveManager.releaseOffline(mapping)
-                                            }
-                                        }
-                                    } else {
-                                        Button(L10n.string("desktopDrive.keepOffline")) {
-                                            desktopDriveManager.keepMappingOffline(mapping)
-                                        }
-                                    }
-                                    Divider()
-                                    if desktopDriveManager.runtimes[mapping.id]?
-                                        .isManuallyPaused == true {
-                                        Button(L10n.string("desktopDrive.resume")) {
-                                            Task {
-                                                await desktopDriveManager.resume(mapping)
-                                            }
-                                        }
-                                    } else {
-                                        Button(L10n.string("desktopDrive.pause")) {
-                                            Task {
-                                                await desktopDriveManager.pause(mapping)
-                                            }
-                                        }
-                                    }
-                                    Button(L10n.string("desktopDrive.clearCache")) {
-                                        Task {
-                                            await desktopDriveManager.clearCache(mapping)
-                                        }
-                                    }
-                                    Menu(L10n.string("desktopDrive.cache.limit")) {
-                                        ForEach(
-                                            [Int64(5), 10, 20, 50],
-                                            id: \.self
-                                        ) { gibibytes in
-                                            let bytes = gibibytes
-                                                * 1_024 * 1_024 * 1_024
-                                            Button {
-                                                Task {
-                                                    await desktopDriveManager
-                                                        .setTemporaryCacheLimit(
-                                                            bytes,
-                                                            mapping: mapping
-                                                        )
-                                                }
-                                            } label: {
-                                                if mapping.cachePolicy
-                                                    .temporaryLimitBytes == bytes {
-                                                    Label(
-                                                        L10n.string(
-                                                            "desktopDrive.cache.limitGiB",
-                                                            gibibytes
-                                                        ),
-                                                        systemImage: "checkmark"
-                                                    )
-                                                } else {
-                                                    Text(
-                                                        L10n.string(
-                                                            "desktopDrive.cache.limitGiB",
-                                                            gibibytes
-                                                        )
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Divider()
-                                    Button(
-                                        L10n.string("desktopDrive.remove"),
-                                        role: .destructive
-                                    ) {
-                                        mappingToRemove = mapping
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if let message = desktopDriveManager.statusMessage {
-                        Label(
-                            message,
-                            systemImage: desktopDriveManager.statusIsError
-                                ? "exclamationmark.triangle.fill"
-                                : "checkmark.circle.fill"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(
-                            desktopDriveManager.statusIsError ? .red : .secondary
-                        )
-                    }
-                }
+                .padding(28)
+                .frame(maxWidth: 680, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(32)
-            .frame(maxWidth: 680, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .fillsAvailableContentArea(alignment: .topLeading)
         }
+        .fillsAvailableContentArea(alignment: .topLeading)
         .task {
             storage = AppStorageInspector.snapshot()
             await desktopDriveManager.load()
@@ -4496,6 +4147,451 @@ private struct SettingsView: View {
             .disabled(renamedNAS.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } message: {
             Text(L10n.string("ui.c0fb0cc138b48413"))
+        }
+    }
+
+    // MARK: - Sub-Sidebar
+
+    @ViewBuilder
+    private var settingsSidebar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(L10n.string("ui.df3d58c7d84b85f2"))
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
+
+            ForEach(SettingsCategory.allCases) { category in
+                Button {
+                    selectedCategory = category
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: category.icon)
+                            .font(.system(size: 14))
+                            .foregroundStyle(selectedCategory == category ? Color.blue : Color.primary)
+                            .frame(width: 20)
+                        Text(category.title)
+                            .font(.body)
+                            .foregroundStyle(Color.primary.opacity(selectedCategory == category ? 1.0 : 0.7))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(selectedCategory == category ? Color.primary.opacity(0.08) : Color.clear)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .frame(width: 200)
+        .background(Color(NSColor.windowBackgroundColor).opacity(0.5))
+    }
+
+    // MARK: - Sub-Sections
+
+    @ViewBuilder
+    private var generalSettingsSection: some View {
+        SettingsSectionCard(
+            title: L10n.string("settings.language.title"),
+            icon: "globe",
+            iconColor: .blue
+        ) {
+            HStack {
+                Text(L10n.string("settings.language.title"))
+                Spacer()
+                AppLanguagePicker()
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 180)
+            }
+            Text(L10n.string("settings.language.footer"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+
+        SettingsSectionCard(
+            title: L10n.string("ui.82479cb6ca73042d"),
+            icon: "server.rack",
+            iconColor: .blue
+        ) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(L10n.string("ui.65d8f92232ae77b0"))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(model.profile.displayName)
+                    .textSelection(.enabled)
+                Button(L10n.string("ui.1eff9b7d894c0ff9")) {
+                    renamedNAS = model.profile.displayName
+                    renameError = nil
+                    showsRenamePrompt = true
+                }
+            }
+            if let renameError {
+                Label(renameError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            Divider().opacity(0.3)
+            SettingsRow(label: L10n.string("ui.317c133e7a877caf"), value: "https://\(model.profile.host):\(model.profile.port)")
+            Divider().opacity(0.3)
+            SettingsRow(label: L10n.string("ui.1a3f0617d6de8e52"), value: model.profile.usernameHint ?? L10n.string("ui.6a1be012c99c34e8"))
+            Divider().opacity(0.3)
+            SettingsRow(label: L10n.string("ui.b8f945ea49ff3774"), value: L10n.string("ui.39c35b1b42f8d938"))
+        }
+    }
+
+    @ViewBuilder
+    private var featuresSettingsSection: some View {
+        SettingsSectionCard(
+            title: L10n.string("ui.25f5ce57a1909740"),
+            icon: "square.grid.3x3.fill",
+            iconColor: .blue
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                Toggle(isOn: $model.isFileModuleEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L10n.string("ui.b3bd5ac7cc4d668b"))
+                            .font(.body.weight(.medium))
+                        Text(L10n.string("ui.b3ba4f016f790299"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                Divider().opacity(0.3)
+
+                Toggle(isOn: $model.isPhotosModuleEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(L10n.string("ui.67c683672f7ff48d"))
+                                .font(.body.weight(.medium))
+                        }
+                        Text(L10n.string("ui.a7b4352894d3f848"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                Divider().opacity(0.3)
+
+                Toggle(isOn: $model.isChatModuleEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L10n.string("ui.4da199fae933d4fa"))
+                            .font(.body.weight(.medium))
+                        Text(L10n.string("ui.77d90374f41aaf36"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                Divider().opacity(0.3)
+
+                Toggle(isOn: $model.isNasSettingsModuleEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L10n.string("ui.b1729f4b03c4b97d"))
+                            .font(.body.weight(.medium))
+                        Text(L10n.string("ui.ab0dbdbdfe0bfe42"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                Divider().opacity(0.3)
+
+                Toggle(isOn: $model.isDownloadStationModuleEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L10n.string("ui.5248507df52ff455"))
+                            .font(.body.weight(.medium))
+                        Text(L10n.string("ui.476f084918556c4f"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                Divider().opacity(0.3)
+
+                Toggle(isOn: $model.isContainerManagerModuleEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L10n.string("ui.aaf778d85ce5c2ed"))
+                            .font(.body.weight(.medium))
+                        Text(L10n.string("ui.fe5d8ebe107b885f"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                Divider().opacity(0.3)
+
+                Toggle(isOn: $model.isVirtualMachineManagerModuleEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L10n.string("ui.80c43bd2481c9580"))
+                            .font(.body.weight(.medium))
+                        Text(L10n.string("ui.81d1084630dcb682"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var storageSettingsSection: some View {
+        SettingsSectionCard(
+            title: L10n.string("ui.04451130e17bac43"),
+            icon: "arrow.up.and.down.and.sparkles",
+            iconColor: .orange
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(L10n.string("ui.9159bd6506fdcf1e"))
+                        .font(.body)
+                    Spacer()
+                    Picker("", selection: $chunkSizeSetting) {
+                        Text(L10n.string("ui.19e6e917e4b79680")).tag(4)
+                        Text(L10n.string("ui.d0621e01d3a44aed")).tag(8)
+                        Text(L10n.string("ui.28e307d638dc8de8")).tag(16)
+                        Text(L10n.string("ui.9aaec86f3a5dfb9a")).tag(32)
+                        Text(L10n.string("ui.d621b33c69f45f77")).tag(64)
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 155)
+                }
+
+                Text(L10n.string("ui.a684d5ddd3cc0bea"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
+        SettingsSectionCard(
+            title: L10n.string("ui.0e41f8e3d59ec47b"),
+            icon: "internaldrive.fill",
+            iconColor: .teal
+        ) {
+            SettingsRow(label: L10n.string("ui.f47f13394910cbaa"), value: ByteCountFormatter.string(fromByteCount: storage.total, countStyle: .file))
+            Divider().opacity(0.3)
+            SettingsRow(label: L10n.string("ui.f19c6c4c2cf77247"), value: ByteCountFormatter.string(fromByteCount: storage.safeTrash, countStyle: .file))
+            Divider().opacity(0.3)
+            SettingsRow(label: L10n.string("ui.05ca0d4a5aed9488"), value: ByteCountFormatter.string(fromByteCount: storage.photoCache, countStyle: .file))
+            Divider().opacity(0.3)
+            SettingsRow(label: L10n.string("ui.5513fba74a6c8c0b"), value: ByteCountFormatter.string(fromByteCount: storage.protectedData, countStyle: .file))
+            Text(L10n.string("ui.fa01182022325b0b"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            HStack {
+                if let storageMessage {
+                    Text(storageMessage).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(L10n.string("ui.99a713a1340efda3")) { storage = AppStorageInspector.snapshot() }
+                Button(L10n.string("ui.4499f757f9894ee7")) { showsSelectiveCleanupSheet = true }
+                    .disabled(storage.reclaimable == 0)
+                Button(L10n.string("ui.1079be00e4efe07d")) { confirmsCacheCleanup = true }
+                    .disabled(storage.safeTrash == 0)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var desktopDriveSettingsSection: some View {
+        SettingsSectionCard(
+            title: L10n.string("desktopDrive.title"),
+            icon: "externaldrive.connected.to.line.below",
+            iconColor: .blue
+        ) {
+            Text(L10n.string("desktopDrive.description"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button(L10n.string("desktopDrive.add")) {
+                    showsMappingCreator = true
+                }
+                .disabled(
+                    desktopDriveManager.isBusy
+                        || !desktopDriveManager.isAvailable
+                )
+                Button(
+                    L10n.string("desktopDrive.diagnostics.preview")
+                ) {
+                    do {
+                        diagnosticPreview =
+                            try desktopDriveManager.diagnosticPreview()
+                        showsDiagnosticPreview = true
+                    } catch {
+                        desktopDriveManager.reportDiagnosticFailure()
+                    }
+                }
+                Spacer()
+                if desktopDriveManager.isBusy {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel(
+                            L10n.string("desktopDrive.status.working")
+                        )
+                }
+            }
+
+            if !desktopDriveManager.isAvailable {
+                Label(
+                    L10n.string("desktopDrive.unavailable"),
+                    systemImage: "info.circle"
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            } else if desktopDriveManager.mappings.isEmpty {
+                Text(L10n.string("desktopDrive.empty"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(desktopDriveManager.mappings) { mapping in
+                    Divider().opacity(0.3)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(mapping.displayName)
+                                .font(.body.weight(.medium))
+                            Text(mappingScopeText(mapping.scope))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                            Label(
+                                mappingStatusText(mapping),
+                                systemImage: mappingStatusIcon(mapping)
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            Text(mappingCacheText(mapping))
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Text(
+                                desktopDriveManager.cacheLocationText(mapping)
+                            )
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            if let progress = desktopDriveManager
+                                .offlineProgress[mapping.id] {
+                                mappingOfflineProgress(
+                                    mapping: mapping,
+                                    progress: progress
+                                )
+                            }
+                        }
+                        Spacer()
+                        Button(L10n.string("desktopDrive.open")) {
+                            Task { await desktopDriveManager.reveal(mapping) }
+                        }
+                        Menu(L10n.string("desktopDrive.more")) {
+                            if isOfflineTaskRunning(mapping) {
+                                Button(L10n.string("desktopDrive.cancel")) {
+                                    desktopDriveManager.cancelOffline(mapping)
+                                }
+                            } else if desktopDriveManager.runtimes[mapping.id]?
+                                .pinnedPaths.isEmpty == false {
+                                Button(L10n.string("desktopDrive.releaseOffline")) {
+                                    Task {
+                                        await desktopDriveManager.releaseOffline(mapping)
+                                    }
+                                }
+                            } else {
+                                Button(L10n.string("desktopDrive.keepOffline")) {
+                                    desktopDriveManager.keepMappingOffline(mapping)
+                                }
+                            }
+                            Divider()
+                            if desktopDriveManager.runtimes[mapping.id]?
+                                .isManuallyPaused == true {
+                                Button(L10n.string("desktopDrive.resume")) {
+                                    Task {
+                                        await desktopDriveManager.resume(mapping)
+                                    }
+                                }
+                            } else {
+                                Button(L10n.string("desktopDrive.pause")) {
+                                    Task {
+                                        await desktopDriveManager.pause(mapping)
+                                    }
+                                }
+                            }
+                            Button(L10n.string("desktopDrive.clearCache")) {
+                                Task {
+                                    await desktopDriveManager.clearCache(mapping)
+                                }
+                            }
+                            Menu(L10n.string("desktopDrive.cache.limit")) {
+                                ForEach(
+                                    [Int64(5), 10, 20, 50],
+                                    id: \.self
+                                ) { gibibytes in
+                                    let bytes = gibibytes
+                                        * 1_024 * 1_024 * 1_024
+                                    Button {
+                                        Task {
+                                            await desktopDriveManager
+                                                .setTemporaryCacheLimit(
+                                                    bytes,
+                                                    mapping: mapping
+                                                )
+                                        }
+                                    } label: {
+                                        if mapping.cachePolicy
+                                            .temporaryLimitBytes == bytes {
+                                            Label(
+                                                L10n.string(
+                                                    "desktopDrive.cache.limitGiB",
+                                                    gibibytes
+                                                ),
+                                                systemImage: "checkmark"
+                                            )
+                                        } else {
+                                            Text(
+                                                L10n.string(
+                                                    "desktopDrive.cache.limitGiB",
+                                                    gibibytes
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            Divider()
+                            Button(
+                                L10n.string("desktopDrive.remove"),
+                                role: .destructive
+                            ) {
+                                mappingToRemove = mapping
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let message = desktopDriveManager.statusMessage {
+                Label(
+                    message,
+                    systemImage: desktopDriveManager.statusIsError
+                        ? "exclamationmark.triangle.fill"
+                        : "checkmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(
+                    desktopDriveManager.statusIsError ? .red : .secondary
+                )
+            }
         }
     }
 

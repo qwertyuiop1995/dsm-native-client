@@ -3549,6 +3549,161 @@ final class DsmNasAdministrationRepositoryTests: XCTestCase {
         XCTAssertTrue(requests.isEmpty)
     }
 
+    func test读取外接存储只保留明确字节字段且绝不弹出设备() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(
+                #"{"success":true,"data":{"total":1,"devices":[{"id":"usb-1","display_name":"Synthetic USB","status":"ready","capacity_bytes":1000000000,"used_bytes":250000000,"size":999,"serial":"PRIVATE_SERIAL","device":"/private/device","mount_path":"/private/mount","share_name":"private-share","address":"192.0.2.1"}]}}"#
+            ),
+            response(
+                #"{"success":true,"data":{"items":[{"storage_id":"esata-1","model":"Synthetic eSATA","state":"busy","total_bytes":2000000000,"usage_bytes":3000000000}]}}"#
+            )
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.coreExternalStorageUSB,
+                DsmAPIName.coreExternalStorageESATA
+            ],
+            transport: transport
+        )
+
+        let directory = try await repository.loadExternalStorage()
+
+        XCTAssertEqual(directory.devices.count, 2)
+        XCTAssertEqual(directory.total, 2)
+        XCTAssertFalse(directory.isTruncated)
+        XCTAssertTrue(directory.unavailableConnections.isEmpty)
+        XCTAssertEqual(directory.devices[0].connection, .eSATA)
+        XCTAssertEqual(directory.devices[0].capacityBytes, 2_000_000_000)
+        XCTAssertNil(directory.devices[0].usedBytes)
+        XCTAssertEqual(directory.devices[0].status, .busy)
+        XCTAssertEqual(directory.devices[1].connection, .usb)
+        XCTAssertEqual(directory.devices[1].displayName, "Synthetic USB")
+        XCTAssertEqual(directory.devices[1].capacityBytes, 1_000_000_000)
+        XCTAssertEqual(directory.devices[1].usedBytes, 250_000_000)
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.allSatisfy { requestValue("version", in: $0) == "1" })
+        XCTAssertTrue(requests.allSatisfy { requestValue("method", in: $0) == "list" })
+        XCTAssertFalse(requests.contains { requestValue("method", in: $0) == "eject" })
+    }
+
+    func test外接存储单项失败时保留另一连接类型() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(
+                #"{"success":true,"data":{"devices":[{"id":"usb-1","name":"/private/device","status":"normal","size":1024}]}}"#
+            ),
+            response(#"{"success":false,"error":{"code":105}}"#)
+        ])
+        let repository = try makeRepository(
+            apiNames: [
+                DsmAPIName.coreExternalStorageUSB,
+                DsmAPIName.coreExternalStorageESATA
+            ],
+            transport: transport
+        )
+
+        let directory = try await repository.loadExternalStorage()
+
+        XCTAssertEqual(directory.devices.count, 1)
+        XCTAssertEqual(directory.devices[0].connection, .usb)
+        XCTAssertNil(directory.devices[0].displayName)
+        XCTAssertNil(directory.devices[0].capacityBytes)
+        XCTAssertEqual(directory.unavailableConnections, [.eSATA])
+    }
+
+    func test外接存储每种连接最多保留六十四项() async throws {
+        let rows = (0..<65).map { index in
+            #"{"id":"usb-\#(index)","name":"Synthetic \#(index)","status":"ready"}"#
+        }.joined(separator: ",")
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"total":65,"devices":[\#(rows)]}}"#)
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreExternalStorageUSB],
+            transport: transport
+        )
+
+        let directory = try await repository.loadExternalStorage()
+
+        XCTAssertEqual(directory.devices.count, 64)
+        XCTAssertEqual(directory.total, 65)
+        XCTAssertTrue(directory.isTruncated)
+        XCTAssertEqual(directory.unavailableConnections, [.eSATA])
+    }
+
+    func test缺少外接存储能力时零请求降级() async throws {
+        let transport = MockHTTPTransport(responses: [])
+        let repository = try makeRepository(apiNames: [], transport: transport)
+
+        do {
+            _ = try await repository.loadExternalStorage()
+            XCTFail("缺少能力时不应发送外接存储请求")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .apiUnavailable)
+        }
+
+        let requests = await transport.recordedRequests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
+    func test读取ZRAM只保留白名单字段且绝不提交设置() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(
+                #"{"success":true,"data":{"enable":true,"configured_bytes":1073741824,"algorithm":"lz4hc","device":"/private/zram0","kernel_parameter":"private","account":"private-user"}}"#
+            )
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreHardwareZRAM],
+            transport: transport
+        )
+
+        let snapshot = try await repository.loadZRAM()
+
+        XCTAssertEqual(snapshot.isEnabled, true)
+        XCTAssertEqual(snapshot.configuredBytes, 1_073_741_824)
+        XCTAssertEqual(snapshot.algorithm, .lz4)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requestValue("api", in: requests[0]), DsmAPIName.coreHardwareZRAM)
+        XCTAssertEqual(requestValue("version", in: requests[0]), "1")
+        XCTAssertEqual(requestValue("method", in: requests[0]), "get")
+        XCTAssertFalse(requests.contains { requestValue("method", in: $0) == "set" })
+    }
+
+    func testZRAM拒绝单位不明确容量和未知算法() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(
+                #"{"success":true,"data":{"enabled":false,"size":1024,"algorithm":"private-algorithm"}}"#
+            )
+        ])
+        let repository = try makeRepository(
+            apiNames: [DsmAPIName.coreHardwareZRAM],
+            transport: transport
+        )
+
+        let snapshot = try await repository.loadZRAM()
+
+        XCTAssertEqual(snapshot.isEnabled, false)
+        XCTAssertNil(snapshot.configuredBytes)
+        XCTAssertEqual(snapshot.algorithm, .unknown)
+    }
+
+    func test缺少ZRAM能力时零请求降级() async throws {
+        let transport = MockHTTPTransport(responses: [])
+        let repository = try makeRepository(apiNames: [], transport: transport)
+
+        do {
+            _ = try await repository.loadZRAM()
+            XCTFail("缺少能力时不应发送 ZRAM 请求")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .apiUnavailable)
+        }
+
+        let requests = await transport.recordedRequests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     private func makeRepository(
         apiNames: [String],
         transport: MockHTTPTransport,

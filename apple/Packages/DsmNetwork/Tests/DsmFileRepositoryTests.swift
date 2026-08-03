@@ -6,6 +6,336 @@ import XCTest
 @testable import DsmNetwork
 
 final class DsmFileRepositoryTests: XCTestCase {
+    func test目录大小使用官方V2任务且只保留安全汇总字段() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"taskid":"dirsize-task"}}"#),
+            response(#"{"success":true,"data":{"finished":false,"path":"/home/private","password":"PRIVATE_PASSWORD"}}"#),
+            response(#"{"success":true,"data":{"finished":true,"total_size":"4096","num_file":"3","num_dir":"2","processing_path":"/home/private/current"}}"#),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDirSize: capability(DsmAPIName.fileStationDirSize, version: 2)
+            ]),
+            transport: transport,
+            directorySizePollingPolicy: .init(
+                maxAttempts: 3,
+                initialDelayNanoseconds: 0,
+                maximumDelayNanoseconds: 0
+            )
+        )
+
+        let summary = try await repository.calculateDirectorySize(path: "/home//private/")
+
+        XCTAssertEqual(summary.totalBytes, 4_096)
+        XCTAssertEqual(summary.fileCount, 3)
+        XCTAssertEqual(summary.directoryCount, 2)
+        XCTAssertFalse(String(describing: summary).contains("/home/private"))
+        XCTAssertFalse(String(describing: summary).contains("PRIVATE_PASSWORD"))
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.compactMap { requestParameter("method", in: $0) }, ["start", "status", "status"])
+        XCTAssertTrue(requests.allSatisfy { requestParameter("version", in: $0) == "2" })
+        let encodedPaths = try XCTUnwrap(requestParameter("path", in: requests[0]))
+        XCTAssertEqual(
+            try JSONDecoder().decode([String].self, from: Data(encodedPaths.utf8)),
+            ["/home/private"]
+        )
+        XCTAssertEqual(requestParameter("taskid", in: requests[1]), "dirsize-task")
+        XCTAssertFalse(requests.contains { $0.url?.absoluteString.contains("private") == true })
+    }
+
+    func test目录大小缺少能力或路径无效时不发请求() async throws {
+        let missingTransport = MockHTTPTransport(responses: [])
+        let missingRepository = try makeRepository(
+            capabilities: CapabilitySet([:]),
+            transport: missingTransport
+        )
+        do {
+            _ = try await missingRepository.calculateDirectorySize(path: "/home/docs")
+            XCTFail("缺少能力时不应继续")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .apiUnavailable)
+        }
+        let missingRequests = await missingTransport.recordedRequests()
+        XCTAssertTrue(missingRequests.isEmpty)
+
+        for invalidPath in ["", "home/docs", "/home/../private"] {
+            let transport = MockHTTPTransport(responses: [])
+            let repository = try makeRepository(
+                capabilities: CapabilitySet([
+                    DsmAPIName.fileStationDirSize: capability(DsmAPIName.fileStationDirSize, version: 2)
+                ]),
+                transport: transport
+            )
+            do {
+                _ = try await repository.calculateDirectorySize(path: invalidPath)
+                XCTFail("无效路径不应继续")
+            } catch let error as AppError {
+                XCTAssertFalse(error.isRetryable)
+            }
+            let requests = await transport.recordedRequests()
+            XCTAssertTrue(requests.isEmpty)
+        }
+    }
+
+    func test目录大小轮询超时会停止任务且不会重放启动() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"taskid":"dirsize-timeout"}}"#),
+            response(#"{"success":true,"data":{"finished":false}}"#),
+            response(#"{"success":true,"data":{"finished":false}}"#),
+            response(#"{"success":true}"#),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDirSize: capability(DsmAPIName.fileStationDirSize, version: 2)
+            ]),
+            transport: transport,
+            directorySizePollingPolicy: .init(
+                maxAttempts: 2,
+                initialDelayNanoseconds: 0,
+                maximumDelayNanoseconds: 0
+            )
+        )
+
+        do {
+            _ = try await repository.calculateDirectorySize(path: "/home/docs")
+            XCTFail("达到轮询上限后应报告超时")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .timeout)
+        }
+
+        let methods = await transport.recordedRequests().compactMap {
+            requestParameter("method", in: $0)
+        }
+        XCTAssertEqual(methods, ["start", "status", "status", "stop"])
+        XCTAssertEqual(methods.filter { $0 == "start" }.count, 1)
+    }
+
+    func test目录大小提交后取消会停止远端任务() async throws {
+        let transport = MockHTTPTransport(steps: [
+            .response(response(#"{"success":true,"data":{"taskid":"dirsize-cancel"}}"#)),
+            .waitUntilCancelled,
+            .response(response(#"{"success":true}"#)),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDirSize: capability(DsmAPIName.fileStationDirSize, version: 2)
+            ]),
+            transport: transport,
+            directorySizePollingPolicy: .init(
+                maxAttempts: 2,
+                initialDelayNanoseconds: 0,
+                maximumDelayNanoseconds: 0
+            )
+        )
+        let task = Task {
+            try await repository.calculateDirectorySize(path: "/home/docs")
+        }
+        while await transport.recordedRequests().count < 2 {
+            await Task.yield()
+        }
+
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("取消后不应返回结果")
+        } catch is CancellationError {
+            // 预期取消。
+        }
+
+        let methods = await transport.recordedRequests().compactMap {
+            requestParameter("method", in: $0)
+        }
+        XCTAssertEqual(methods, ["start", "status", "stop"])
+    }
+
+    func test目录大小拒绝重复规范化路径并在结束后释放占用() async throws {
+        let transport = MockHTTPTransport(steps: [
+            .response(response(#"{"success":true,"data":{"taskid":"dirsize-active"}}"#)),
+            .waitUntilCancelled,
+            .response(response(#"{"success":true}"#)),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDirSize: capability(DsmAPIName.fileStationDirSize, version: 2)
+            ]),
+            transport: transport,
+            directorySizePollingPolicy: .init(
+                maxAttempts: 2,
+                initialDelayNanoseconds: 0,
+                maximumDelayNanoseconds: 0
+            )
+        )
+        let firstTask = Task {
+            try await repository.calculateDirectorySize(path: "/home/docs/")
+        }
+        while await transport.recordedRequests().count < 2 {
+            await Task.yield()
+        }
+
+        do {
+            _ = try await repository.calculateDirectorySize(path: "/home//docs")
+            XCTFail("相同规范化路径不应重复提交")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .conflict)
+        }
+        firstTask.cancel()
+        _ = try? await firstTask.value
+
+        let methods = await transport.recordedRequests().compactMap {
+            requestParameter("method", in: $0)
+        }
+        XCTAssertEqual(methods, ["start", "status", "stop"])
+    }
+
+    func test目录大小完成响应缺字段时不再停止已完成任务() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"taskid":"dirsize-finished"}}"#),
+            response(#"{"success":true,"data":{"finished":true,"total_size":4096,"num_file":-1}}"#),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDirSize: capability(DsmAPIName.fileStationDirSize, version: 2)
+            ]),
+            transport: transport
+        )
+
+        do {
+            _ = try await repository.calculateDirectorySize(path: "/home/docs")
+            XCTFail("完成响应缺少有效汇总时应失败")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .invalidResponse)
+        }
+
+        let methods = await transport.recordedRequests().compactMap {
+            requestParameter("method", in: $0)
+        }
+        XCTAssertEqual(methods, ["start", "status"])
+    }
+
+    func test后台任务列表使用有界官方V3请求() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"offset":0,"total":0,"tasks":[]}}"#)
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationBackgroundTask: capability(
+                    DsmAPIName.fileStationBackgroundTask,
+                    version: 3
+                )
+            ]),
+            transport: transport
+        )
+
+        let page = try await repository.listBackgroundTasks(offset: -20, limit: 5_000)
+
+        XCTAssertTrue(page.tasks.isEmpty)
+        let requests = await transport.recordedRequests()
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(requestParameter("api", in: request), DsmAPIName.fileStationBackgroundTask)
+        XCTAssertEqual(requestParameter("version", in: request), "3")
+        XCTAssertEqual(requestParameter("method", in: request), "list")
+        XCTAssertEqual(requestParameter("offset", in: request), "0")
+        XCTAssertEqual(requestParameter("limit", in: request), "100")
+        XCTAssertEqual(requestParameter("sort_by", in: request), "crtime")
+        XCTAssertEqual(requestParameter("sort_direction", in: request), "desc")
+        XCTAssertEqual(
+            requestParameter("api_filter", in: request),
+            #"["SYNO.FileStation.CopyMove","SYNO.FileStation.Delete","SYNO.FileStation.Extract","SYNO.FileStation.Compress"]"#
+        )
+        XCTAssertNil(requestParameter("path", in: request))
+    }
+
+    func test缺少后台任务能力时零请求降级() async throws {
+        let transport = MockHTTPTransport(responses: [])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([:]),
+            transport: transport
+        )
+
+        do {
+            _ = try await repository.listBackgroundTasks(offset: 0, limit: 100)
+            XCTFail("缺少能力时不应发起请求")
+        } catch let error as AppError {
+            XCTAssertEqual(error.category, .apiUnavailable)
+        }
+
+        let requests = await transport.recordedRequests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
+    func test后台任务只保留白名单字段且已结束不等于成功() async throws {
+        let body = #"{"success":true,"data":{"offset":0,"total":2,"tasks":[{"api":"SYNO.FileStation.CopyMove","taskid":"copy-1","finished":false,"progress":0.25,"crtime":1700000000,"processed_num":2,"processed_size":1024,"total":4096,"params":{"password":"PRIVATE_PASSWORD"},"path":"/volume1/private/source.txt","processing_path":"/volume1/private/current.txt","message":"PRIVATE_MESSAGE"},{"api":"SYNO.FileStation.Compress","taskid":"compress-1","finished":true,"progress":1,"processed_num":3,"processed_size":2048,"total":99,"params":{"password":"PRIVATE_ARCHIVE_PASSWORD"}}]}}"#
+        let transport = MockHTTPTransport(responses: [response(body)])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationBackgroundTask: capability(
+                    DsmAPIName.fileStationBackgroundTask,
+                    version: 3
+                )
+            ]),
+            transport: transport
+        )
+
+        let page = try await repository.listBackgroundTasks(offset: 0, limit: 100)
+
+        XCTAssertEqual(page.tasks.map(\.id), ["copy-1", "compress-1"])
+        XCTAssertEqual(page.tasks[0].kind, .copyOrMove)
+        XCTAssertEqual(page.tasks[0].state, .active)
+        XCTAssertEqual(page.tasks[0].progress, 0.25)
+        XCTAssertEqual(page.tasks[0].totalBytes, 4_096)
+        XCTAssertEqual(page.tasks[1].kind, .compress)
+        XCTAssertEqual(page.tasks[1].state, .finished)
+        XCTAssertNil(page.tasks[1].totalBytes)
+        XCTAssertNil(page.tasks[1].totalItemCount)
+        let description = String(describing: page)
+        XCTAssertFalse(description.contains("/volume1"))
+        XCTAssertFalse(description.contains("PRIVATE_PASSWORD"))
+        XCTAssertFalse(description.contains("PRIVATE_ARCHIVE_PASSWORD"))
+        XCTAssertFalse(description.contains("PRIVATE_MESSAGE"))
+    }
+
+    func test后台任务按原始行推进并丢弃未知类型坏ID和重复ID() async throws {
+        let body = #"{"success":true,"data":{"offset":10,"total":15,"tasks":[{"api":"SYNO.FileStation.CopyMove","taskid":"safe-1","finished":false},{"api":"SYNO.FileStation.Future","taskid":"future-1","finished":false},{"api":"SYNO.FileStation.Delete","taskid":"/volume1/private/task","finished":false},{"api":"SYNO.FileStation.CopyMove","taskid":"safe-1","finished":true},{"api":"SYNO.FileStation.Delete","taskid":"safe-2","finished":false,"processed_num":4,"total":9}]}}"#
+        let transport = MockHTTPTransport(responses: [response(body)])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationBackgroundTask: capability(
+                    DsmAPIName.fileStationBackgroundTask,
+                    version: 3
+                )
+            ]),
+            transport: transport
+        )
+
+        let page = try await repository.listBackgroundTasks(offset: 10, limit: 100)
+
+        XCTAssertEqual(page.tasks.map(\.id), ["safe-1", "safe-2"])
+        XCTAssertEqual(page.tasks.last?.totalItemCount, 9)
+        XCTAssertEqual(page.nextOffset, 15)
+        XCTAssertFalse(page.hasMore)
+        XCTAssertFalse(String(describing: page).contains("/volume1/private/task"))
+    }
+
+    func test后台任务空页停止继续分页() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"offset":20,"total":100,"tasks":[]}}"#)
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationBackgroundTask: capability(
+                    DsmAPIName.fileStationBackgroundTask,
+                    version: 3
+                )
+            ]),
+            transport: transport
+        )
+
+        let page = try await repository.listBackgroundTasks(offset: 20, limit: 100)
+
+        XCTAssertEqual(page.nextOffset, 20)
+        XCTAssertFalse(page.hasMore)
+    }
+
     func test三端共享Fixture兼容字符串数字和异常附加信息() async throws {
         let stringNumbers = try await pageFromFixture("synthetic-string-numbers")
         XCTAssertEqual(stringNumbers.total, 2)
@@ -159,30 +489,194 @@ final class DsmFileRepositoryTests: XCTestCase {
         XCTAssertEqual(page.total, 2)
     }
 
-    func test使用公开虚拟文件夹接口列出远程位置() async throws {
-        let response = DsmHTTPResponse(
-            data: Data(
-                #"{"success":true,"data":{"offset":0,"total":1,"folders":[{"name":"远程资料","path":"/home/远程资料","isdir":true,"additional":{"mount_point_type":"nfs","perm":{"adv_right":{"read":true,"write":true}}}}]}}"#.utf8
-            ),
-            statusCode: 200
-        )
-        let transport = MockHTTPTransport(responses: [response])
+    func test虚拟文件夹先读取协议并按CIFSNFSISO分别请求() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"support_virtual_protocol":" cifs, NFS,iso,unknown "}}"#),
+            response(#"{"success":true,"data":{"offset":0,"total":1,"folders":[{"name":"CIFS 资料","path":"/remote/shared","isdir":true,"additional":{"mount_point_type":"cifs"}}]}}"#),
+            response(#"{"success":true,"data":{"offset":0,"total":1,"folders":[{"name":"NFS 资料","path":"/remote/shared","isdir":true,"additional":{"mount_point_type":"nfs"}}]}}"#),
+            response(#"{"success":true,"data":{"offset":0,"total":1,"folders":[{"name":"ISO 映像","path":"/remote/shared","isdir":true,"additional":{"mount_point_type":"iso"}}]}}"#),
+        ])
         let repository = try makeRepository(
             capabilities: CapabilitySet([
+                DsmAPIName.fileStationInfo: capability(DsmAPIName.fileStationInfo, version: 2),
                 DsmAPIName.fileStationVirtualFolder: capability(DsmAPIName.fileStationVirtualFolder, version: 2)
             ]),
             transport: transport
         )
 
-        let page = try await repository.listRemoteMounts(offset: 0, limit: 100)
+        let page = try await repository.listVirtualFolders(offset: 0, limit: 100)
 
-        XCTAssertEqual(page.total, 1)
-        XCTAssertEqual(page.items.first?.path, "/home/远程资料")
-        XCTAssertEqual(page.items.first?.mountPointType, "nfs")
+        XCTAssertEqual(page.total, 3)
+        XCTAssertEqual(page.folders.count, 3)
+        XCTAssertEqual(Set(page.folders.map(\.id)).count, 3)
+        XCTAssertEqual(Set(page.folders.map(\.protocolType)), Set(FileVirtualProtocol.allCases))
+        XCTAssertTrue(page.unavailableProtocols.isEmpty)
         let requests = await transport.recordedRequests()
-        let request = try XCTUnwrap(requests.first)
-        XCTAssertEqual(requestParameter("api", in: request), DsmAPIName.fileStationVirtualFolder)
-        XCTAssertEqual(requestParameter("type", in: request), "all")
+        XCTAssertEqual(requests.count, 4)
+        XCTAssertEqual(requestParameter("api", in: requests[0]), DsmAPIName.fileStationInfo)
+        XCTAssertEqual(requestParameter("method", in: requests[0]), "get")
+        XCTAssertEqual(requestParameter("version", in: requests[0]), "2")
+        XCTAssertNil(requestParameter("additional", in: requests[0]))
+        XCTAssertEqual(requests.dropFirst().compactMap { requestParameter("type", in: $0) }, ["cifs", "nfs", "iso"])
+        XCTAssertFalse(requests.contains { requestParameter("type", in: $0) == "all" })
+        for request in requests.dropFirst() {
+            XCTAssertEqual(requestParameter("api", in: request), DsmAPIName.fileStationVirtualFolder)
+            XCTAssertEqual(requestParameter("method", in: request), "list")
+            XCTAssertEqual(requestParameter("version", in: request), "2")
+            let encodedAdditional = try XCTUnwrap(requestParameter("additional", in: request))
+            XCTAssertEqual(
+                try JSONDecoder().decode([String].self, from: Data(encodedAdditional.utf8)),
+                ["mount_point_type", "perm"]
+            )
+        }
+    }
+
+    func test虚拟文件夹非正分页大小会收敛为一条() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"support_virtual_protocol":"cifs"}}"#),
+            response(#"{"success":true,"data":{"offset":0,"total":2,"folders":[{"name":"位置一","path":"/remote/one","isdir":true}]}}"#),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationInfo: capability(DsmAPIName.fileStationInfo, version: 2),
+                DsmAPIName.fileStationVirtualFolder: capability(DsmAPIName.fileStationVirtualFolder, version: 2)
+            ]),
+            transport: transport
+        )
+
+        let page = try await repository.listVirtualFolders(offset: 0, limit: 0)
+
+        XCTAssertEqual(page.folders.map(\.item.path), ["/remote/one"])
+        XCTAssertTrue(page.hasMore)
+        let requests = await transport.recordedRequests()
+        let request = try XCTUnwrap(requests.last)
+        XCTAssertEqual(requestParameter("limit", in: request), "1")
+    }
+
+    func test虚拟文件夹合并分页超过单次上限后仍能继续() async throws {
+        let folderJSON: (Int) -> String = { index in
+            let number = String(format: "%03d", index)
+            return #"{"name":"位置 \#(number)","path":"/remote/item-\#(number)","isdir":true}"#
+        }
+        let firstPage = (0..<500).map(folderJSON).joined(separator: ",")
+        let secondPage = (500..<502).map(folderJSON).joined(separator: ",")
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"support_virtual_protocol":"cifs"}}"#),
+            response(#"{"success":true,"data":{"offset":0,"total":502,"folders":[\#(firstPage)]}}"#),
+            response(#"{"success":true,"data":{"offset":500,"total":502,"folders":[\#(secondPage)]}}"#),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationInfo: capability(DsmAPIName.fileStationInfo, version: 2),
+                DsmAPIName.fileStationVirtualFolder: capability(DsmAPIName.fileStationVirtualFolder, version: 2)
+            ]),
+            transport: transport
+        )
+
+        let page = try await repository.listVirtualFolders(offset: 501, limit: 1)
+
+        XCTAssertEqual(page.folders.map(\.item.path), ["/remote/item-501"])
+        XCTAssertEqual(page.total, 502)
+        XCTAssertFalse(page.hasMore)
+        XCTAssertFalse(page.isTruncated)
+        let requests = await transport.recordedRequests().dropFirst()
+        XCTAssertEqual(requests.compactMap { requestParameter("offset", in: $0) }, ["0", "500"])
+        XCTAssertEqual(requests.compactMap { requestParameter("limit", in: $0) }, ["500", "2"])
+    }
+
+    func test虚拟文件夹部分协议失败仍返回成功结果() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"support_virtual_protocol":["cifs","nfs"]}}"#),
+            response(#"{"success":false,"error":{"code":408}}"#),
+            response(#"{"success":true,"data":{"offset":0,"total":1,"folders":[{"name":"NFS 资料","path":"/remote/nfs","isdir":true}]}}"#),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationInfo: capability(DsmAPIName.fileStationInfo, version: 2),
+                DsmAPIName.fileStationVirtualFolder: capability(DsmAPIName.fileStationVirtualFolder, version: 2)
+            ]),
+            transport: transport
+        )
+
+        let page = try await repository.listVirtualFolders(offset: 0, limit: 100)
+
+        XCTAssertEqual(page.folders.map(\.item.path), ["/remote/nfs"])
+        XCTAssertEqual(page.folders.map(\.protocolType), [.nfs])
+        XCTAssertEqual(page.unavailableProtocols, [.cifs])
+    }
+
+    func test虚拟文件夹全部协议失败时抛错() async throws {
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"support_virtual_protocol":"cifs,nfs"}}"#),
+            response(#"{"success":false,"error":{"code":408}}"#),
+            response(#"{"success":false,"error":{"code":408}}"#),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationInfo: capability(DsmAPIName.fileStationInfo, version: 2),
+                DsmAPIName.fileStationVirtualFolder: capability(DsmAPIName.fileStationVirtualFolder, version: 2)
+            ]),
+            transport: transport
+        )
+
+        do {
+            _ = try await repository.listVirtualFolders(offset: 0, limit: 100)
+            XCTFail("所有已宣告协议失败时不应返回空页")
+        } catch {
+            XCTAssertFalse(error is CancellationError)
+        }
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.dropFirst().compactMap { requestParameter("type", in: $0) }, ["cifs", "nfs"])
+    }
+
+    func test批量详情使用V2百条分块去重并按首次输入顺序返回() async throws {
+        let paths = (0...101).map { "/home/item-\($0)" }
+        let input = [paths[2], paths[0], paths[2], paths[1]] + Array(paths[3...])
+        let orderedUnique = [paths[2], paths[0], paths[1]] + Array(paths[3...])
+        let firstChunk = Array(orderedUnique.prefix(100))
+        let secondChunk = Array(orderedUnique.dropFirst(100))
+        let fileJSON: (String) -> String = { path in
+            let name = String(path.split(separator: "/").last ?? "")
+            return #"{"name":"\#(name)","path":"\#(path)","isdir":false}"#
+        }
+        let firstResponseItems = firstChunk.reversed()
+            .filter { $0 != paths[1] }
+            .map(fileJSON)
+            + [fileJSON("/home/foreign")]
+        let secondResponseItems = secondChunk.reversed().map(fileJSON)
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"files":[\#(firstResponseItems.joined(separator: ","))]}}"#),
+            response(#"{"success":true,"data":{"files":[\#(secondResponseItems.joined(separator: ","))]}}"#),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationList: capability(DsmAPIName.fileStationList, version: 2)
+            ]),
+            transport: transport
+        )
+
+        let items = try await repository.getInfo(paths: input)
+
+        XCTAssertEqual(items.map(\.path), orderedUnique.filter { $0 != paths[1] })
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.allSatisfy { requestParameter("method", in: $0) == "getinfo" })
+        XCTAssertTrue(requests.allSatisfy { requestParameter("version", in: $0) == "2" })
+        let requestedChunks = try requests.map { request -> [String] in
+            let encodedPaths = try XCTUnwrap(requestParameter("path", in: request))
+            return try JSONDecoder().decode([String].self, from: Data(encodedPaths.utf8))
+        }
+        XCTAssertEqual(requestedChunks.map(\.count), [100, 2])
+        XCTAssertEqual(requestedChunks.flatMap { $0 }, orderedUnique)
+        XCTAssertFalse(requestedChunks.flatMap { $0 }.contains("/home/foreign"))
+        for request in requests {
+            let encodedAdditional = try XCTUnwrap(requestParameter("additional", in: request))
+            XCTAssertEqual(
+                try JSONDecoder().decode([String].self, from: Data(encodedAdditional.utf8)),
+                ["size", "owner", "time", "perm", "type", "mount_point_type"]
+            )
+        }
     }
 
     func test二进制下载写入目标且凭据在URL中() async throws {
@@ -1374,7 +1868,8 @@ final class DsmFileRepositoryTests: XCTestCase {
 
     private func makeRepository(
         capabilities: CapabilitySet,
-        transport: MockHTTPTransport
+        transport: MockHTTPTransport,
+        directorySizePollingPolicy: DirectorySizePollingPolicy = .production
     ) throws -> DsmFileRepository {
         let profile = try NasProfile(
             displayName: "测试设备",
@@ -1390,7 +1885,8 @@ final class DsmFileRepositoryTests: XCTestCase {
                 did: nil,
                 isPortalPort: false
             ),
-            transport: transport
+            transport: transport,
+            directorySizePollingPolicy: directorySizePollingPolicy
         )
     }
 

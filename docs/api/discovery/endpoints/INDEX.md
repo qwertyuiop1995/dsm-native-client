@@ -57,11 +57,20 @@
   - `SYNO.Core.Hardware.PowerRecovery`、`Led.Brightness`、`FanSpeed`、`BeepControl`、`Hibernation` v1。
   - `SYNO.Core.Hardware.PowerSchedule`：客户端保守范围 v1；仅启用 `load`，
     `save` 保持关闭。
+  - `SYNO.Core.Hardware.ZRAM`：客户端保守范围 v1；仅启用 `get`，`set` 保持关闭。
   - `SYNO.Core.ExternalDevice.UPS` v1。
+  - `SYNO.Core.ExternalDevice.Storage.USB`、`Storage.eSATA`：客户端保守范围 v1；
+    仅启用 `list`，USB `eject` 保持关闭。
 - S.M.A.R.T. 稳定记录：[DSM S.M.A.R.T. 检测内部 API](dsm-smart-test.md)。
 - 硬件设置稳定记录：[DSM 硬件与 UPS 设置内部 API](dsm-hardware-settings.md)。
 - 电源计划稳定记录：[DSM 电源计划内部 API](dsm-power-schedule.md)。当前只读取动作、
   启用状态、时间、命名星期、一次日期和可选时区，最多 128 条，不发送 `save`。
+- 内存压缩稳定记录：[DSM 内存压缩（ZRAM）内部 API](dsm-zram.md)。当前只读取启用
+  状态、明确字节容量和算法白名单，不发送 `set`；官方页面已观察但 API 响应未验证。
+- 打印机 Bonjour 共享稳定记录：[DSM 打印机 Bonjour 共享内部 API](dsm-printer-bonjour-sharing.md)。
+  当前只有静态 API 名称与 `get`，版本、参数和响应均未知，客户端保持关闭且零请求。
+- 外接存储稳定记录：[DSM USB 与 eSATA 外接存储内部 API](dsm-external-storage.md)。
+  当前每种连接最多读取 64 项白名单摘要，不读取路径、序列号或共享名，不发送 `eject`。
 - 当前确认：`Storage.load_info` v1 与硬盘检测读取结构已核对；`Storage.Volume.list` 在当前环境返回错误 `101`；S.M.A.R.T. 启停和硬件设置没有为发现而执行。
 - 降级：以 `load_info` 为主，不使用失败的 `Volume.list` 覆盖有效结果；写入口按能力与权限逐项关闭。
 

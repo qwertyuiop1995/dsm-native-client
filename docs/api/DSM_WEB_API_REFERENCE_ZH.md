@@ -353,7 +353,7 @@ _sid=<SID>
 | `SYNO.FileStation.VirtualFolder` | 2 | `list` | CIFS/NFS/ISO 等虚拟挂载点 |
 | `SYNO.FileStation.Favorite` | 2 | `list`, `add`, `delete`, `clear_broken`, `edit`, `replace_all` | 收藏目录 |
 | `SYNO.FileStation.Thumb` | 2 | `get` | 获取缩略图二进制 |
-| `SYNO.FileStation.DirSize` | 2 | `start`, `status`, `stop` | 异步计算目录大小 |
+| `SYNO.FileStation.DirSize` | 2 | `start`, `status`, `stop` | 显式启动、查询或取消目录大小任务；Apple 已接入，真实 NAS 响应待验证 |
 | `SYNO.FileStation.MD5` | 2 | `start`, `status`, `stop` | 异步计算文件 MD5 |
 | `SYNO.FileStation.CheckPermission` | 3 | `write` | 上传或创建前检查写权限 |
 | `SYNO.FileStation.Upload` | 2 | `upload` | multipart 文件上传 |
@@ -365,7 +365,7 @@ _sid=<SID>
 | `SYNO.FileStation.Delete` | 2 | `start`, `status`, `stop`, `delete` | 异步或同步删除 |
 | `SYNO.FileStation.Extract` | 2 | `start`, `status`, `stop`, `list` | 解压和查看压缩包；`list` 用于开始前检测密码并比较文件名编码，`start` 必须沿用选定的 `codepage` |
 | `SYNO.FileStation.Compress` | 3 | `start`, `status`, `stop` | 异步压缩 |
-| `SYNO.FileStation.BackgroundTask` | 3 | `list` | 汇总后台文件任务 |
+| `SYNO.FileStation.BackgroundTask` | 3 | `list`, `clear_finished` | 客户端只允许只读 `list`；清除已完成记录的 `clear_finished` 保持关闭 |
 
 ### 5.2 列出共享文件夹
 
@@ -398,7 +398,21 @@ macOS 客户端使用公开的 `list_share` 响应中 `additional.volume_status`
 | `filetype` | `file`、`dir` 或全部 |
 | `additional` | `real_path`、`size`、`owner`、`time`、`perm`、`mount_point_type`、`type` 等 |
 
-`method=getinfo` 使用 `path=[...]` 批量读取详情，返回 `files[]`。
+`method=getinfo` 使用 `path=[...]` 批量读取详情，返回 `files[]`。该方法固定要求
+`SYNO.FileStation.List` v2；客户端先按输入路径字符串去重并保留首次输入顺序，再以每批最多
+100 条的保守上限分块请求。官方指南没有声明服务端批量上限，因此 100 条只是客户端的
+防御性限制，不代表 DSM 契约。`additional` 只请求当前功能需要的最小字段，不使用
+`volume_status` 等未列入 `getinfo` 官方参数表的字段。上述分块、字段兼容性和不同权限下的
+部分缺失响应尚未在真实 NAS 上验证。
+
+远程位置浏览使用 `SYNO.FileStation.Info.get` 返回的 `support_virtual_protocol` 决定读取
+范围，再对其中受支持的 `cifs`、`nfs`、`iso` 分别调用
+`SYNO.FileStation.VirtualFolder.list` v2，合并结果后去重；不发送公开指南未列出的
+`type=all`。该流程只读，单次向 DSM 请求最多 500 条，每个协议的读取窗口最多 5,000 条，
+最终排序返回最多 5,000 个结果（三种协议最坏会在排序前处理 15,000 条）；
+超过上限时界面明确提示结果已截断。请求只使用最小 `additional` 字段。ISO 挂载可以显示，
+但界面不提供编辑或删除入口。协议大小写、空能力、失效挂载、跨协议重复项和分页合并
+仍需在真实 DSM / File Station 上验证。
 
 ### 5.4 搜索
 
@@ -418,11 +432,27 @@ macOS 客户端使用公开的 `list_share` 响应中 `additional.volume_status`
 | `Favorite.edit` | `path`、新 `name` |
 | `Favorite.delete` | `path` |
 | `Thumb.get` | `path` 和缩略图尺寸，响应是二进制而非 JSON |
-| `DirSize.start` | `path=[...]`，返回 `taskid` |
-| `DirSize.status` | `taskid`，直到 `finished=true` |
+| `DirSize.start` | v2；`path` 使用 JSON 数组，成功返回 `taskid` |
+| `DirSize.status` | v2；提交 `taskid`，返回 `finished`、`num_dir`、`num_file` 和字节数 `total_size` |
+| `DirSize.stop` | v2；提交 `taskid`，成功时为空响应 |
 | `MD5.start` | `file_path`，返回 `taskid` |
 | `MD5.status` | 返回 `finished` 和 `md5` |
 | `CheckPermission.write` | `path`、`filename`，公开契约用于检查目录中新建项目的写入权限；`create_only` 默认为 `true` |
+
+`SYNO.FileStation.DirSize` 是 File Station 官方 v2 非阻塞任务。官方 `stop` 参数表疑似把
+`taskid` 误写成 `tasked`，但同章节的 `start` / `status` 契约和 `stop` 请求示例均使用
+`taskid`，客户端按示例与一致契约提交 `taskid`，不发送猜测字段。`start` 会在 NAS 上
+创建目录遍历任务，`stop` 会取消任务，因此不能当作无副作用的普通读取；客户端只允许
+用户在 macOS 属性窗口明确选择“计算大小”或“重新计算”后启动，同一路径防重复，并以
+有界退避轮询 `status`。提交结果不确定时不得自动重放 `start`。
+
+属性窗口关闭后计算可以继续，用户重新打开时可以查看或取消；关闭 File Station 模块或
+断开当前 NAS 时会取消本地任务并尝试一次 `stop`。只有运行时能力缺失时才回退现有的
+客户端递归统计，权限、网络、超时或响应异常不得伪装成回退成功。请求路径和服务端
+`taskid` 只在 Repository 内存中短暂使用，不进入领域结果、用户错误、日志、持久化或
+遥测；领域层只保留非负的总字节数、文件数和目录数。当前 Apple 共享仓库与 macOS
+属性窗口已经实现该流程，但尚未在真实 DSM / File Station 上验证版本、权限、计数语义、
+取消和长任务行为。
 
 ### 5.6 上传
 
@@ -495,6 +525,22 @@ _sid=<SID>
 - 采用退避轮询，前台建议 500 ms、1 s、2 s，后台进一步降低频率。
 - 页面销毁不等于取消服务端任务；用户明确取消时调用 `stop`。
 - `finished=true` 后再刷新目录列表。
+
+`BackgroundTask.list` 是 File Station 官方 v3 只读接口。本批客户端请求固定使用
+`offset >= 0`、`limit=1...100`、`sort_by=crtime`、`sort_direction=desc`，并将
+`api_filter` 限制为 `SYNO.FileStation.CopyMove`、`SYNO.FileStation.Delete`、
+`SYNO.FileStation.Extract` 和 `SYNO.FileStation.Compress`。官方默认 `limit=0` 表示
+读取全部任务，客户端不得使用该无界默认值。
+
+响应中的 `params`、`path` 和 `processing_path` 可能包含源/目标路径、文件名，甚至压缩
+任务提交过的密码，必须在解码边界直接丢弃，不得进入领域模型、界面、日志、遥测、
+持久化数据或测试 Fixture。`finished=true` 只表示任务停止运行，不等于操作成功；在没有
+独立成功/失败证据时只能显示“已结束”，不能显示“已完成”。同一 API 的
+`clear_finished` 会删除已完成任务记录，且省略任务标识时可能清除全部记录，因此不进入
+Repository 或界面。macOS 传输中心已将 App 传输与 NAS 文件任务作为独立数据源展示，
+NAS 任务支持全部/进行中/已结束筛选、手动刷新、有限分页，以及加载、空内容、筛选后
+为空、错误和正常内容五种状态。当前实现与聚焦自动化测试已经完成，但尚未在真实
+DSM / File Station 只读响应上验收。
 
 ## 6. Download Station API
 
@@ -634,12 +680,17 @@ force_complete=false
 
 | API | 方法 | 用途 | 风险 |
 | --- | --- | --- | --- |
-| `SYNO.FileStation.VFS.Connection` | `delete` | 删除 VFS 连接 | 中 |
+| `SYNO.FileStation.VFS.Connection` | `delete`（未验证） | 候选删除 VFS 连接；客户端保持关闭 | 中 |
 | `SYNO.FileStation.Mount` | `mount_remote`, `unmount` | 远程挂载 | 高 |
 | `SYNO.FileStation.Property.CompressSize` | `get` | 压缩大小属性 | 低 |
-| `SYNO.Entry.Request` | `request` | 将多个子请求合并为批处理 | 中 |
+| `SYNO.Entry.Request` | `request`（未验证） | 候选复合批处理；客户端保持关闭 | 中 |
 
 `SYNO.Entry.Request` 的子请求可能分别成功或失败，必须逐项检查结果。不要因为外层 `success=true` 就假定所有修改都完成。
+
+`SYNO.FileStation.VFS.Connection` 和 `SYNO.Entry.Request` 在当前审阅的群晖公开 File
+Station 指南中没有稳定契约，版本、参数、响应、权限和副作用均未验证。客户端继续保持
+两者关闭，不用它们替代公开的 `VirtualFolder.list` 分协议枚举或 `List.getinfo` 客户端
+分块；后续只有完成私有 API 发现记录和专用测试环境验收后才可重新评估。
 
 #### `SYNO.FileStation.Mount` 使用边界
 
@@ -674,9 +725,11 @@ force_complete=false
 | `SYNO.Core.SyslogClient.Log` | `list` | 系统日志 | 中 |
 | `SYNO.Core.SyslogClient.FileTransfer` | `get`, `get_level`, `set_level` | 文件传输日志开关与级别 | 中 |
 | `SYNO.LogCenter.History` | `list` | Log Center 历史 | 中 |
-| `SYNO.Core.SecurityScan.Status` | `rule_get`, `system_get` | 安全扫描状态 | 低 |
+| `SYNO.Core.SecurityScan.Status` | `rule_get`, `system_get` | 仅静态确认名称与方法；组件归属、版本、参数和响应未知，客户端保持关闭 | 中 |
 
 连接、进程、文件句柄和日志可能泄漏用户名、IP、共享路径、文件名与服务信息。客户端只应按需展示，默认禁止遥测上报。
+
+`SYNO.Core.SecurityScan.Status` 当前只完成静态审计。`SYNO.Core.*` 命名不能证明它由 DSM 核心直接提供，也不能排除对“安全顾问”套件的依赖；仓库没有该套件版本、运行时路径、参数或响应证据。`rule_get` 可能包含规则正文或发现详情，`system_get` 也可能包含系统配置、账号、主机、网络、路径或套件信息，因此客户端不注册能力、不调用两个方法，也不把它并入现有自动封锁、DoS 和防火墙设置。
 
 当前 macOS 的“NAS 设置”统一接入以下已核对的只读路径；原“服务与监控”入口已经合并，不再单独运行第二套性能采样：
 
@@ -702,7 +755,7 @@ force_complete=false
 | `SYNO.Storage.CGI.Smart` | `get_health_info` | SMART 健康摘要 | 低 |
 | `SYNO.Core.Storage.Volume` | `list` | 存储空间列表 | 低 |
 | `SYNO.Core.Storage.Disk` | `disk_test_log_get`, `get_smart_test_log`, `do_smart_test` | SMART 测试与日志 | 中 |
-| `SYNO.Core.Hardware.ZRAM` | `get`, `set` | ZRAM 配置 | 高 |
+| `SYNO.Core.Hardware.ZRAM` | `get`, `set` | 客户端仅候选接入运行时发现的 v1 `get`，只保留启用状态、明确字节容量与算法白名单；`set` 保持关闭 | 高 |
 | `SYNO.Core.Hardware.PowerRecovery` | `get`, `set` | 来电自启 | 高 |
 | `SYNO.Core.Hardware.BeepControl` | `get`, `set` | 蜂鸣器 | 中 |
 | `SYNO.Core.Hardware.FanSpeed` | `get`, `set` | 风扇模式 | 高 |
@@ -710,13 +763,17 @@ force_complete=false
 | `SYNO.Core.Hardware.Hibernation` | `get`, `set` | 休眠设置 | 中 |
 | `SYNO.Core.Hardware.PowerSchedule` | `load`, `save` | 客户端仅候选接入运行时发现的 v1 `load`，最多读取 128 条白名单摘要；`save` 保持关闭 | 高 |
 | `SYNO.Core.ExternalDevice.UPS` | `get`, `set` | UPS 设置 | 高 |
-| `SYNO.Core.ExternalDevice.Storage.USB` | `list`, `eject` | USB 设备与安全弹出 | 高 |
-| `SYNO.Core.ExternalDevice.Storage.eSATA` | `list` | eSATA 设备 | 低 |
-| `SYNO.Core.ExternalDevice.Printer.BonjourSharing` | `get` | 打印机 Bonjour 共享 | 低 |
+| `SYNO.Core.ExternalDevice.Storage.USB` | `list`, `eject` | 客户端仅候选接入运行时发现的 v1 `list`，每类最多读取 64 项白名单摘要；`eject` 保持关闭 | 高 |
+| `SYNO.Core.ExternalDevice.Storage.eSATA` | `list` | 客户端仅候选接入运行时发现的 v1 `list`，与 USB 独立降级 | 低 |
+| `SYNO.Core.ExternalDevice.Printer.BonjourSharing` | `get` | 仅静态确认名称与方法；版本、参数和响应未知，客户端保持关闭 | 中 |
 
 硬件操作必须使用精确的设备标识并在提交前显示摘要。不要根据数组索引选择硬盘或外接设备。
 
 当前 macOS 已按设备能力接入断电恢复、LED 亮度、风扇模式、设备提示音、外接存储深度休眠、唤醒日志、SATA 深度休眠、休眠时忽略发现流量、闲置自动关机和 UPS 基础安全关机设置。UPS 支持 DSM 返回的 USB、网络从属与 SNMP 三种模式，以及等待时间、低电量策略和关机联动；不猜测未返回的 SNMP v3 密钥或 ACL 字段。只显示 DSM 实际返回的字段，保存后重新读取所有已修改字段。
+
+内存压缩当前使用 `SYNO.Core.Hardware.ZRAM` 候选 v1 `get` 显示只读摘要。2026-08-03 已在官方 DSM 页面只读观察到该设置，但没有捕获对应 API 请求或响应，因此真实版本与字段仍未验证。客户端只接受布尔启用状态、字段名明确为字节的配置容量，以及 `lz4`、`lzo`、`zstd` 算法白名单；单位不明确的容量和其他算法均降级为不可用/未知，`set` 不进入 Repository 或界面。稳定记录见 [`dsm-zram.md`](discovery/endpoints/dsm-zram.md)。
+
+打印机 Bonjour 共享目前只完成静态审计。既有目录仅列出 `SYNO.Core.ExternalDevice.Printer.BonjourSharing.get`，没有版本、路径、参数或响应证据；它不能与文件服务的通用 Bonjour/Avahi 设置混用。客户端不注册该能力、不发送请求，也不推断打印机清单、共享状态或设备字段。稳定记录见 [`dsm-printer-bonjour-sharing.md`](discovery/endpoints/dsm-printer-bonjour-sharing.md)。
 
 当前 macOS 直接从 `Storage.load_info` v1 的 `disks`、`storagePools` 和 `volumes` 读取硬盘、S.M.A.R.T. 摘要、温度、型号、序列号、固件、位置、4Kn、寿命/坏扇区摘要、存储池成员、RAID、文件系统与容量，并在原生详情页按空间、存储池和硬盘分别展示。`Smart.get_health_info` 必须携带精确的 `device`，缺少硬盘参数时返回 `114`；`Storage.Volume.list` 在当前目标返回 `101`，因此客户端不会用失败接口覆盖 `load_info` 已返回的数据。
 

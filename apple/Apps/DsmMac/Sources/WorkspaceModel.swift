@@ -408,7 +408,12 @@ final class WorkspaceModel {
     var isSearching = false
     var favorites: [FavoriteLocation] = []
     var recentLocations: [FavoriteLocation] = []
-    var remoteLocations: [FileItem] = []
+    var remoteLocations: [FileVirtualFolder] = []
+    var unavailableRemoteLocationProtocols: [FileVirtualProtocol] = []
+    var remoteLocationsAreTruncated = false
+    var remoteLocationsError: String?
+    var isLoadingRemoteLocations = false
+    var remoteLocationsHasLoaded = false
     var shareLinks: [FileShareLink] = []
     var isLoadingShareLinks = false
     var storageSpaceSummary: StorageSpaceSummary?
@@ -433,6 +438,16 @@ final class WorkspaceModel {
     var textEditingMessage: String?
     var textEditingMessageIsError = false
     var transfers: [ActivityTask] = []
+    var serverBackgroundTasks: [FileBackgroundTaskSummary] = []
+    var serverBackgroundTaskTotal = 0
+    var serverBackgroundTaskHasMore = false
+    var serverBackgroundTaskHasLoaded = false
+    var isLoadingServerBackgroundTasks = false
+    var serverBackgroundTaskError: String?
+    var folderStatisticsResults: [FileItem.ID: FolderStatistics] = [:]
+    var calculatingFolderStatisticsIDs: Set<FileItem.ID> = []
+    var cancellingFolderStatisticsIDs: Set<FileItem.ID> = []
+    var folderStatisticsErrors: [FileItem.ID: String] = [:]
     var isMovingItemsByDrag = false
     var archivePasswordRequest: ArchivePasswordRequest?
     var isCheckingArchivePassword = false
@@ -542,6 +557,9 @@ final class WorkspaceModel {
     @ObservationIgnored private let transferNotifier: any TransferNotifying
     @ObservationIgnored private var history: [String] = []
     @ObservationIgnored private var navigationGeneration = 0
+    @ObservationIgnored private var backgroundTaskGeneration = 0
+    @ObservationIgnored private var remoteLocationGeneration = 0
+    @ObservationIgnored private var nextBackgroundTaskOffset = 0
     @ObservationIgnored private var nextOffset = 0
     @ObservationIgnored private var previewTask: Task<Void, Never>?
     @ObservationIgnored private var previewProgressEstimator = TransferProgressEstimator()
@@ -557,6 +575,7 @@ final class WorkspaceModel {
     @ObservationIgnored private var progressEstimators: [UUID: TransferProgressEstimator] = [:]
     @ObservationIgnored private var dragMoveUndoExpirationTask: Task<Void, Never>?
     @ObservationIgnored private var previewContextItems: [FileItem]?
+    @ObservationIgnored private var folderStatisticsTasks: [FileItem.ID: Task<Void, Never>] = [:]
 
     var fileRepository: any FileRepository {
         repository
@@ -891,8 +910,18 @@ final class WorkspaceModel {
         case .virtualMachineManager:
             guard isVirtualMachineManagerModuleEnabled else { return }
             await serviceManagement.activate(.virtualMachines)
-        case .favorites, .recent, .remoteLocations, .sharedLinks, .transfers:
+        case .favorites, .recent, .sharedLinks:
             guard isFileModuleEnabled else { return }
+        case .remoteLocations:
+            guard isFileModuleEnabled else { return }
+            if !remoteLocationsHasLoaded {
+                await refreshRemoteLocations()
+            }
+        case .transfers:
+            guard isFileModuleEnabled else { return }
+            if !serverBackgroundTaskHasLoaded {
+                await refreshServerBackgroundTasks()
+            }
         case .settings:
             break
         }
@@ -1043,17 +1072,48 @@ final class WorkspaceModel {
         }
     }
 
-    private func loadRemoteLocations() async {
+    func refreshRemoteLocations() async {
         guard isFileModuleEnabled else { return }
-        do {
-            remoteLocations = try await repository.listRemoteMounts(offset: 0, limit: 500).items
-        } catch {
-            // 旧版 DSM 未提供虚拟文件夹接口时，仍可识别共享列表中带挂载类型的项目。
-            remoteLocations = shares.filter {
-                guard let type = $0.mountPointType?.lowercased(), !type.isEmpty else { return false }
-                return type != "normal" && type != "shared_folder"
+        remoteLocationGeneration += 1
+        let generation = remoteLocationGeneration
+        isLoadingRemoteLocations = true
+        remoteLocationsError = nil
+        unavailableRemoteLocationProtocols = []
+        remoteLocationsAreTruncated = false
+        defer {
+            if generation == remoteLocationGeneration {
+                isLoadingRemoteLocations = false
             }
         }
+        do {
+            let page = try await repository.listVirtualFolders(offset: 0, limit: 5_000)
+            guard isFileModuleEnabled, generation == remoteLocationGeneration else { return }
+            remoteLocations = page.folders
+            unavailableRemoteLocationProtocols = page.unavailableProtocols
+            remoteLocationsAreTruncated = page.isTruncated
+            remoteLocationsHasLoaded = true
+        } catch let error as AppError where error.category == .apiUnavailable || error.category == .versionUnsupported {
+            // 旧版 DSM 缺少官方虚拟文件夹能力时，仅显示共享列表中能明确识别协议的条目。
+            guard isFileModuleEnabled, generation == remoteLocationGeneration else { return }
+            remoteLocations = shares.compactMap { item in
+                guard let rawType = item.mountPointType?.lowercased(),
+                      let protocolType = FileVirtualProtocol(rawValue: rawType) else {
+                    return nil
+                }
+                return FileVirtualFolder(item: item, protocolType: protocolType)
+            }
+            unavailableRemoteLocationProtocols = []
+            remoteLocationsAreTruncated = false
+            remoteLocationsHasLoaded = true
+        } catch {
+            guard isFileModuleEnabled, generation == remoteLocationGeneration else { return }
+            remoteLocationsError = Self.userMessage(for: error)
+            remoteLocationsHasLoaded = true
+        }
+    }
+
+    private func loadRemoteLocations() async {
+        await refreshRemoteLocations()
     }
 
     func createRemoteMount(_ configuration: RemoteMountConfiguration) async -> Bool {
@@ -1376,7 +1436,7 @@ final class WorkspaceModel {
         }.value
     }
 
-    func folderStatistics(for item: FileItem) async throws -> FolderStatistics {
+    private func localFolderStatistics(for item: FileItem) async throws -> FolderStatistics {
         guard item.isDirectory else {
             return FolderStatistics(
                 sizeBytes: item.sizeBytes ?? 0,
@@ -1386,6 +1446,50 @@ final class WorkspaceModel {
             )
         }
         return try await folderManifest(for: item).statistics
+    }
+
+    func startFolderStatistics(for item: FileItem) {
+        guard item.isDirectory,
+              isFileModuleEnabled,
+              folderStatisticsTasks[item.id] == nil else { return }
+        folderStatisticsErrors[item.id] = nil
+        calculatingFolderStatisticsIDs.insert(item.id)
+        cancellingFolderStatisticsIDs.remove(item.id)
+
+        folderStatisticsTasks[item.id] = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let statistics: FolderStatistics
+                do {
+                    let summary = try await repository.calculateDirectorySize(path: item.path)
+                    statistics = FolderStatistics(
+                        sizeBytes: summary.totalBytes,
+                        fileCount: summary.fileCount,
+                        folderCount: summary.directoryCount,
+                        isComplete: true
+                    )
+                } catch let error as AppError where error.category == .apiUnavailable {
+                    // 旧版 DSM 没有官方目录大小任务时，才降级为现有的客户端递归枚举。
+                    statistics = try await localFolderStatistics(for: item)
+                }
+                try Task.checkCancellation()
+                folderStatisticsResults[item.id] = statistics
+                folderStatisticsErrors[item.id] = nil
+            } catch {
+                if !Self.isCancellation(error) {
+                    folderStatisticsErrors[item.id] = Self.userMessage(for: error)
+                }
+            }
+            calculatingFolderStatisticsIDs.remove(item.id)
+            cancellingFolderStatisticsIDs.remove(item.id)
+            folderStatisticsTasks[item.id] = nil
+        }
+    }
+
+    func cancelFolderStatistics(for itemID: FileItem.ID) {
+        guard let task = folderStatisticsTasks[itemID] else { return }
+        cancellingFolderStatisticsIDs.insert(itemID)
+        task.cancel()
     }
 
     /// 返回是否应关闭当前预览。图片预览内部切换时复用同一个窗口，避免窗口闪烁。
@@ -2894,6 +2998,58 @@ final class WorkspaceModel {
         taskIDs.forEach(deleteTransfer)
     }
 
+    func refreshServerBackgroundTasks() async {
+        guard isFileModuleEnabled, !isLoadingServerBackgroundTasks else { return }
+        backgroundTaskGeneration += 1
+        let generation = backgroundTaskGeneration
+        isLoadingServerBackgroundTasks = true
+        serverBackgroundTaskError = nil
+        do {
+            let page = try await repository.listBackgroundTasks(offset: 0, limit: 100)
+            guard generation == backgroundTaskGeneration, isFileModuleEnabled else { return }
+            serverBackgroundTasks = page.tasks
+            serverBackgroundTaskTotal = page.total
+            serverBackgroundTaskHasMore = page.hasMore
+            nextBackgroundTaskOffset = page.nextOffset
+            serverBackgroundTaskHasLoaded = true
+            isLoadingServerBackgroundTasks = false
+        } catch {
+            guard generation == backgroundTaskGeneration, isFileModuleEnabled else { return }
+            // 刷新失败时保留上一次成功结果，仅展示可安全呈现的错误信息。
+            serverBackgroundTaskError = Self.userMessage(for: error)
+            serverBackgroundTaskHasLoaded = true
+            isLoadingServerBackgroundTasks = false
+        }
+    }
+
+    func loadMoreServerBackgroundTasks() async {
+        guard isFileModuleEnabled,
+              serverBackgroundTaskHasMore,
+              !isLoadingServerBackgroundTasks else { return }
+        let generation = backgroundTaskGeneration
+        isLoadingServerBackgroundTasks = true
+        serverBackgroundTaskError = nil
+        do {
+            let page = try await repository.listBackgroundTasks(
+                offset: nextBackgroundTaskOffset,
+                limit: 100
+            )
+            guard generation == backgroundTaskGeneration, isFileModuleEnabled else { return }
+            var existingIDs = Set(serverBackgroundTasks.map(\.id))
+            serverBackgroundTasks.append(contentsOf: page.tasks.filter {
+                existingIDs.insert($0.id).inserted
+            })
+            serverBackgroundTaskTotal = page.total
+            serverBackgroundTaskHasMore = page.hasMore
+            nextBackgroundTaskOffset = page.nextOffset
+            isLoadingServerBackgroundTasks = false
+        } catch {
+            guard generation == backgroundTaskGeneration, isFileModuleEnabled else { return }
+            serverBackgroundTaskError = Self.userMessage(for: error)
+            isLoadingServerBackgroundTasks = false
+        }
+    }
+
     func deleteTransfer(_ taskID: UUID) {
         let runningTask = runningTasks[taskID]
         let restartableTransfer = restartableTransfers[taskID]
@@ -2920,6 +3076,8 @@ final class WorkspaceModel {
 
     private func suspendFileModule() {
         navigationGeneration += 1
+        backgroundTaskGeneration += 1
+        remoteLocationGeneration += 1
         previewTask?.cancel()
         previewTask = nil
         searchTask?.cancel()
@@ -2931,6 +3089,10 @@ final class WorkspaceModel {
         toastDismissTask = nil
         activeToast = nil
         runningTasks.values.forEach { $0.cancel() }
+        for (itemID, task) in folderStatisticsTasks {
+            cancellingFolderStatisticsIDs.insert(itemID)
+            task.cancel()
+        }
 
         for index in transfers.indices {
             switch transfers[index].state {
@@ -2948,6 +3110,12 @@ final class WorkspaceModel {
         isLoading = false
         isRefreshing = false
         isLoadingMore = false
+        isLoadingServerBackgroundTasks = false
+        isLoadingRemoteLocations = false
+        remoteLocationsHasLoaded = false
+        remoteLocationsError = nil
+        unavailableRemoteLocationProtocols = []
+        remoteLocationsAreTruncated = false
         isSearching = false
         isMovingItemsByDrag = false
         clearPreview()

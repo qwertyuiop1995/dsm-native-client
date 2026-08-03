@@ -309,11 +309,48 @@ contracts/request-fixtures/
   保留 128 条；只解释白名单动作、启用状态、合法时间、命名星期、一次日期与受限时区。
   数值星期因周日起始歧义保持未知，命令、路径、账号和地址不会进入模型。`save` 没有
   进入 Repository 或界面，当前真实 DSM 响应仍标为未验证。
-- 下一批审计 `SYNO.Core.ExternalDevice.Storage.USB.list/eject` 与
-  `SYNO.Core.ExternalDevice.Storage.eSATA.list`。先固化外接存储的只读设备标识、
-  名称、连接类型、容量与状态白名单；`eject` 在取得版本化参数、占用检查、防重复和
-  拔出前最终状态复查契约前保持关闭。
-- 每项必须具备确认、权限检查、重复提交保护、最终状态复查和故障注入测试。
+- 外接存储批次已完成保守的只读适配：客户端分别发现并调用 USB 与 eSATA v1
+  `list`，每种连接最多保留 64 项；只读取受限标识、名称、归一状态以及字段名明确为
+  字节的容量。设备节点、挂载路径、共享名、序列号和地址不会进入模型；单项失败保留
+  另一项结果。USB `eject` 没有进入 Repository、Fixture 或界面。
+- 内存压缩批次已完成保守的只读适配：客户端只接受运行时发现的 v1 `get`，仅保留
+  启用状态、字段名明确为字节的配置容量和 `lz4` / `lzo` / `zstd` 算法白名单。
+  官方 DSM 页面已只读观察到该设置，但没有捕获 API 请求或响应，真实契约仍标为
+  未验证；`set` 没有进入 Repository、Fixture 或界面。
+- 打印机 Bonjour 共享批次已完成静态审计：当前只确认
+  `SYNO.Core.ExternalDevice.Printer.BonjourSharing.get` 名称与方法，版本、路径、参数、
+  响应和权限均未知。通用 Bonjour/Avahi 字段属于其他 API，不能复用；客户端不注册
+  能力、领域模型或 Adapter，保持零猜测请求。取得版本化静态契约或脱敏只读响应后，
+  再决定是否只保留可空布尔状态。
+- 安全扫描状态批次已完成静态审计：当前只确认
+  `SYNO.Core.SecurityScan.Status.rule_get/system_get` 名称与方法，组件归属、版本、路径、
+  参数、响应和权限均未知。客户端不注册能力，不与现有自动封锁、DoS 或防火墙设置
+  合并，保持零请求；规则正文、发现详情、路径、账号、主机、网络与修复命令均禁止
+  进入领域模型或默认界面。组件与环境版本未确认前暂不建立机器端点记录。
+- File Station 后台任务批次已在 Apple 共享领域、Adapter 与 macOS 传输中心完成官方
+  `SYNO.FileStation.BackgroundTask.list` v3 的只读实现：请求使用 `offset >= 0`、
+  `limit=1...100`、`sort_by=crtime`、
+  `sort_direction=desc`，`api_filter` 只允许 CopyMove、Delete、Extract 和 Compress
+  四类 API。`params`、`path` 与 `processing_path` 在解码边界直接丢弃，避免路径、
+  文件名或压缩密码进入领域模型、日志、遥测和 Fixture；`finished=true` 只归一为
+  “已结束”，没有独立结果证据时不得宣称成功。`clear_finished` 不进入 Repository 或
+  界面，能力缺失或 v3 不在运行时发现范围时保持零请求。传输中心把 App 传输和 NAS
+  文件任务作为独立数据源，NAS 任务支持全部/进行中/已结束筛选、刷新、有限分页，以及
+  加载、空内容、筛选后为空、错误和正常内容五种状态。聚焦自动化 13 项已通过，当前
+  尚未取得真实 DSM / File Station 只读响应。
+- File Station 目录大小批次已在 Apple 共享仓库与 macOS 属性窗口完成官方
+  `SYNO.FileStation.DirSize` v2 的 `start(path JSON array) -> taskid`、
+  `status(taskid) -> finished/num_dir/num_file/total_size` 和 `stop(taskid)` 工作流。官方
+  `stop` 参数表疑似写作 `tasked`，但请求示例和其余方法都使用 `taskid`，客户端按一致
+  契约提交 `taskid`。用户必须显式选择计算或重新计算；取消只提交一次 `stop`，同路径
+  防重复，轮询有界，结果未知时不自动重放 `start`。属性窗口关闭后任务继续，关闭
+  File Station 模块或断连时取消；只有能力缺失才回退客户端递归，其他错误保持可见。
+  路径和服务端任务 ID 只在 Repository 内存中短暂存在，不进入领域结果、错误、日志、
+  遥测或持久化。8 项 DirSize 聚焦测试、529 项 Apple XCTest、4 项 Swift Testing、
+  本地化与契约校验以及 `DsmMac` Debug 无签名构建均已通过；真实 DSM / File Station
+  验收仍待完成。
+- 后续任何写项必须具备确认、权限检查、重复提交保护、最终状态复查和故障注入测试；
+  只读项必须具备能力与权限边界、字段白名单、失败降级、零猜测请求和隐私测试。
 
 ## 7. 完成条件
 

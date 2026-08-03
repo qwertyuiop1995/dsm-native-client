@@ -34,8 +34,137 @@ private struct FileListPayload: Decodable, Sendable {
 
 }
 
+/// 只声明界面实际需要的白名单字段。官方响应中的 `params`、`path` 和
+/// `processing_path` 可能包含路径或密码，必须在解码边界直接丢弃。
+private struct BackgroundTaskListPayload: Decodable, Sendable {
+    let offset: Int?
+    let total: Int?
+    let tasks: [BackgroundTaskPayload]?
+
+    private enum CodingKeys: String, CodingKey {
+        case offset, total, tasks
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        offset = Self.decodeInteger(from: container, key: .offset)
+        total = Self.decodeInteger(from: container, key: .total)
+        tasks = try? container.decodeIfPresent([BackgroundTaskPayload].self, forKey: .tasks)
+    }
+
+    private static func decodeInteger(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys
+    ) -> Int? {
+        if let value = try? container.decode(Int.self, forKey: key) { return value }
+        if let value = try? container.decode(String.self, forKey: key) { return Int(value) }
+        return nil
+    }
+}
+
+private struct BackgroundTaskPayload: Decodable, Sendable {
+    let api: String?
+    let taskID: String?
+    let finished: Bool?
+    let progress: Double?
+    let creationTime: Double?
+    let processedItemCount: Int64?
+    let processedBytes: Int64?
+    let total: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case api
+        case taskID = "taskid"
+        case finished
+        case progress
+        case creationTime = "crtime"
+        case processedItemCount = "processed_num"
+        case processedBytes = "processed_size"
+        case total
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        api = try? container.decodeIfPresent(String.self, forKey: .api)
+        taskID = try? container.decodeIfPresent(String.self, forKey: .taskID)
+        finished = Self.decodeBool(from: container, key: .finished)
+        progress = Self.decodeDouble(from: container, key: .progress)
+        creationTime = Self.decodeDouble(from: container, key: .creationTime)
+        processedItemCount = Self.decodeInteger(from: container, key: .processedItemCount)
+        processedBytes = Self.decodeInteger(from: container, key: .processedBytes)
+        total = Self.decodeInteger(from: container, key: .total)
+    }
+
+    private static func decodeBool(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys
+    ) -> Bool? {
+        if let value = try? container.decode(Bool.self, forKey: key) { return value }
+        if let value = try? container.decode(Int.self, forKey: key) { return value != 0 }
+        if let value = try? container.decode(String.self, forKey: key) {
+            switch value.lowercased() {
+            case "true", "1": return true
+            case "false", "0": return false
+            default: return nil
+            }
+        }
+        return nil
+    }
+
+    private static func decodeDouble(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys
+    ) -> Double? {
+        if let value = try? container.decode(Double.self, forKey: key) { return value }
+        if let value = try? container.decode(String.self, forKey: key) { return Double(value) }
+        return nil
+    }
+
+    private static func decodeInteger(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys
+    ) -> Int64? {
+        if let value = try? container.decode(Int64.self, forKey: key) { return value }
+        if let value = try? container.decode(String.self, forKey: key) { return Int64(value) }
+        return nil
+    }
+}
+
 private struct FileInfoPayload: Decodable, Sendable {
     let files: [FilePayload]
+}
+
+private struct FileStationInfoPayload: Decodable, Sendable {
+    let supportedVirtualProtocols: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case supportVirtualProtocol = "support_virtual_protocol"
+        case supportVirtual = "support_virtual"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let value = Self.decodeValue(from: container, key: .supportVirtualProtocol)
+            ?? Self.decodeValue(from: container, key: .supportVirtual)
+            ?? ""
+        supportedVirtualProtocols = value
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func decodeValue(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys
+    ) -> String? {
+        if let value = try? container.decode(String.self, forKey: key) {
+            return value
+        }
+        if let values = try? container.decode([String].self, forKey: key) {
+            return values.joined(separator: ",")
+        }
+        return nil
+    }
 }
 
 private struct FilePayload: Decodable, Sendable {
@@ -288,6 +417,37 @@ private struct FileMD5StatusPayload: Decodable, Sendable {
     let md5: String?
 }
 
+private struct DirectorySizeStatusPayload: Decodable, Sendable {
+    let finished: Bool
+    let totalBytes: Int64?
+    let fileCount: Int64?
+    let directoryCount: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case finished
+        case totalBytes = "total_size"
+        case fileCount = "num_file"
+        case directoryCount = "num_dir"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        finished = try container.decode(Bool.self, forKey: .finished)
+        totalBytes = Self.decodeInteger(from: container, key: .totalBytes)
+        fileCount = Self.decodeInteger(from: container, key: .fileCount)
+        directoryCount = Self.decodeInteger(from: container, key: .directoryCount)
+    }
+
+    private static func decodeInteger(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys
+    ) -> Int64? {
+        if let value = try? container.decode(Int64.self, forKey: key) { return value }
+        if let value = try? container.decode(String.self, forKey: key) { return Int64(value) }
+        return nil
+    }
+}
+
 private struct ArchiveListPayload: Decodable, Sendable {
     let items: [ArchiveItemPayload]?
 }
@@ -347,6 +507,18 @@ private struct StreamingUploadPlan: @unchecked Sendable {
     let suffix: Data
 }
 
+struct DirectorySizePollingPolicy: Sendable {
+    let maxAttempts: Int
+    let initialDelayNanoseconds: UInt64
+    let maximumDelayNanoseconds: UInt64
+
+    static let production = DirectorySizePollingPolicy(
+        maxAttempts: 30,
+        initialDelayNanoseconds: 250_000_000,
+        maximumDelayNanoseconds: 2_000_000_000
+    )
+}
+
 public actor DsmFileRepository: FileRepository {
     public nonisolated let profileID: UUID
     public nonisolated let allowsVerifiedRestore: Bool
@@ -359,13 +531,31 @@ public actor DsmFileRepository: FileRepository {
     private let credential: DsmSessionCredential
     private let transport: any DsmBinaryHTTPTransport
     private let client: DsmAPIClient
+    private let directorySizePollingPolicy: DirectorySizePollingPolicy
     private var activeDeletionPaths: Set<String> = []
+    private var activeDirectorySizePaths: Set<String> = []
 
     public init(
         profile: NasProfile,
         capabilities: CapabilitySet,
         session: AuthSession,
         transport: (any DsmBinaryHTTPTransport)? = nil
+    ) throws {
+        try self.init(
+            profile: profile,
+            capabilities: capabilities,
+            session: session,
+            transport: transport,
+            directorySizePollingPolicy: .production
+        )
+    }
+
+    init(
+        profile: NasProfile,
+        capabilities: CapabilitySet,
+        session: AuthSession,
+        transport: (any DsmBinaryHTTPTransport)?,
+        directorySizePollingPolicy: DirectorySizePollingPolicy
     ) throws {
         let resolvedTransport = transport ?? URLSessionTransport(
             expectedHost: profile.host,
@@ -388,6 +578,7 @@ public actor DsmFileRepository: FileRepository {
         )
         self.transport = resolvedTransport
         self.client = DsmAPIClient(baseURL: baseURL, transport: resolvedTransport)
+        self.directorySizePollingPolicy = directorySizePollingPolicy
     }
 
     public func listShares(offset: Int = 0, limit: Int = 200) async throws -> FilePage {
@@ -412,6 +603,63 @@ public actor DsmFileRepository: FileRepository {
                 offset: resolvedOffset,
                 total: total,
                 hasMore: resolvedOffset + items.count < total
+            )
+        } catch let error as DsmNetworkError {
+            throw DsmErrorMapper.map(error)
+        }
+    }
+
+    public func listBackgroundTasks(
+        offset: Int = 0,
+        limit: Int = 100
+    ) async throws -> FileBackgroundTaskPage {
+        let capability = try requireCapability(DsmAPIName.fileStationBackgroundTask)
+        let requestedOffset = max(0, offset)
+        // 官方允许 limit=0 返回全部任务；客户端始终限制为有界分页。
+        let requestedLimit = min(max(1, limit), 100)
+
+        do {
+            let payload = try await client.call(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: "list",
+                requestFormat: capability.requestFormat,
+                parameters: [
+                    "offset": .integer(requestedOffset),
+                    "limit": .integer(requestedLimit),
+                    "sort_by": .string("crtime"),
+                    "sort_direction": .string("desc"),
+                    "api_filter": .stringArray([
+                        "SYNO.FileStation.CopyMove",
+                        "SYNO.FileStation.Delete",
+                        "SYNO.FileStation.Extract",
+                        "SYNO.FileStation.Compress"
+                    ])
+                ],
+                credential: credential,
+                as: BackgroundTaskListPayload.self
+            )
+
+            let rawTasks = Array((payload.tasks ?? []).prefix(requestedLimit))
+            var seenTaskIDs: Set<String> = []
+            let tasks = rawTasks.compactMap { task -> FileBackgroundTaskSummary? in
+                guard let summary = Self.makeBackgroundTaskSummary(task),
+                      seenTaskIDs.insert(summary.id).inserted else {
+                    return nil
+                }
+                return summary
+            }
+            let resolvedOffset = min(max(0, payload.offset ?? requestedOffset), 1_000_000)
+            let nextOffset = min(resolvedOffset + rawTasks.count, 1_000_000)
+            let reportedTotal = min(max(0, payload.total ?? nextOffset), 1_000_000)
+            let total = max(nextOffset, reportedTotal)
+            return FileBackgroundTaskPage(
+                tasks: tasks,
+                offset: resolvedOffset,
+                nextOffset: nextOffset,
+                total: total,
+                hasMore: !rawTasks.isEmpty && nextOffset < total
             )
         } catch let error as DsmNetworkError {
             throw DsmErrorMapper.map(error)
@@ -453,59 +701,186 @@ public actor DsmFileRepository: FileRepository {
             return []
         }
         let capability = try requireCapability(DsmAPIName.fileStationList)
+        let version = try selectedVersion(capability, minimum: 2)
+        var orderedPaths: [String] = []
+        var seenPaths = Set<String>()
+        for path in paths where seenPaths.insert(path).inserted {
+            orderedPaths.append(path)
+        }
         do {
-            let payload = try await client.call(
-                path: capability.path,
-                api: capability.name,
-                version: try selectedVersion(capability),
-                method: "getinfo",
-                requestFormat: capability.requestFormat,
-                parameters: [
-                    "path": .stringArray(paths),
-                    "additional": .stringArray(Self.additionalFields)
-                ],
-                credential: credential,
-                as: FileInfoPayload.self
-            )
-            return payload.files.map(makeFileItem)
+            var itemsByPath: [String: FileItem] = [:]
+            for chunkStart in stride(from: 0, to: orderedPaths.count, by: Self.getInfoChunkSize) {
+                let chunkEnd = min(chunkStart + Self.getInfoChunkSize, orderedPaths.count)
+                let chunk = Array(orderedPaths[chunkStart..<chunkEnd])
+                let payload = try await client.call(
+                    path: capability.path,
+                    api: capability.name,
+                    version: version,
+                    method: "getinfo",
+                    requestFormat: capability.requestFormat,
+                    parameters: [
+                        "path": .stringArray(chunk),
+                        "additional": .stringArray(Self.getInfoAdditionalFields)
+                    ],
+                    credential: credential,
+                    as: FileInfoPayload.self
+                )
+                let requestedPaths = Set(chunk)
+                for payloadItem in payload.files where requestedPaths.contains(payloadItem.path) {
+                    if itemsByPath[payloadItem.path] == nil {
+                        itemsByPath[payloadItem.path] = makeFileItem(payloadItem)
+                    }
+                }
+            }
+            return orderedPaths.compactMap { itemsByPath[$0] }
         } catch let error as DsmNetworkError {
             throw DsmErrorMapper.map(error)
         }
     }
 
-    public func listRemoteMounts(offset: Int, limit: Int) async throws -> FilePage {
-        let capability = try requireCapability(DsmAPIName.fileStationVirtualFolder)
+    public func listVirtualFolders(offset: Int, limit: Int) async throws -> FileVirtualFolderPage {
+        let infoCapability = try requireCapability(DsmAPIName.fileStationInfo)
+        let virtualFolderCapability = try requireCapability(DsmAPIName.fileStationVirtualFolder)
+        let infoVersion = try selectedVersion(infoCapability, minimum: 2)
+        let virtualFolderVersion = try selectedVersion(virtualFolderCapability, minimum: 2)
+        let requestedOffset = min(max(0, offset), Self.virtualFolderSnapshotLimit)
+        let remainingCapacity = Self.virtualFolderSnapshotLimit - requestedOffset
+        let requestedLimit = remainingCapacity == 0
+            ? 0
+            : min(max(1, limit), remainingCapacity)
+        let requestedWindow = requestedOffset + requestedLimit
+
+        let info: FileStationInfoPayload
         do {
-            let payload = try await client.call(
-                path: capability.path,
-                api: capability.name,
-                version: try selectedVersion(capability),
-                method: "list",
-                requestFormat: capability.requestFormat,
-                parameters: [
-                    "type": .string("all"),
-                    "offset": .integer(offset),
-                    "limit": .integer(limit),
-                    "sort_by": .string("name"),
-                    "sort_direction": .string("asc"),
-                    "additional": .stringArray(Self.additionalFields)
-                ],
+            info = try await client.call(
+                path: infoCapability.path,
+                api: infoCapability.name,
+                version: infoVersion,
+                method: "get",
+                requestFormat: infoCapability.requestFormat,
+                parameters: [:],
                 credential: credential,
-                as: FileListPayload.self
-            )
-            let items = (payload.folders ?? payload.files ?? []).map(makeFileItem)
-            let resolvedOffset = payload.offset ?? offset
-            let total = payload.total ?? items.count
-            return FilePage(
-                folderPath: "/",
-                items: items,
-                offset: resolvedOffset,
-                total: total,
-                hasMore: resolvedOffset + items.count < total
+                as: FileStationInfoPayload.self
             )
         } catch let error as DsmNetworkError {
             throw DsmErrorMapper.map(error)
         }
+
+        let advertised = Set(info.supportedVirtualProtocols)
+        let protocols = FileVirtualProtocol.allCases.filter { advertised.contains($0.rawValue) }
+        guard !protocols.isEmpty else {
+            return FileVirtualFolderPage(
+                folders: [],
+                offset: requestedOffset,
+                total: 0,
+                hasMore: false
+            )
+        }
+
+        var folders: [FileVirtualFolder] = []
+        var unavailableProtocols: [FileVirtualProtocol] = []
+        var firstError: AppError?
+        var successfulTotal = 0
+
+        for protocolType in protocols {
+            var protocolFolders: [FileVirtualFolder] = []
+            var protocolOffset = 0
+            var protocolTotal = 0
+            do {
+                while protocolOffset < requestedWindow {
+                    let requestLimit = min(
+                        Self.virtualFolderRequestLimit,
+                        requestedWindow - protocolOffset
+                    )
+                    let payload = try await client.call(
+                        path: virtualFolderCapability.path,
+                        api: virtualFolderCapability.name,
+                        version: virtualFolderVersion,
+                        method: "list",
+                        requestFormat: virtualFolderCapability.requestFormat,
+                        parameters: [
+                            "type": .string(protocolType.rawValue),
+                            "offset": .integer(protocolOffset),
+                            "limit": .integer(requestLimit),
+                            "sort_by": .string("name"),
+                            "sort_direction": .string("asc"),
+                            "additional": .stringArray(Self.virtualFolderAdditionalFields)
+                        ],
+                        credential: credential,
+                        as: FileListPayload.self
+                    )
+                    let payloadFolders = payload.folders ?? payload.files ?? []
+                    let resolvedOffset = max(0, payload.offset ?? protocolOffset)
+                    let nextOffset = resolvedOffset + payloadFolders.count
+                    protocolTotal = max(
+                        protocolTotal,
+                        max(payload.total ?? nextOffset, nextOffset)
+                    )
+                    protocolFolders.append(contentsOf: payloadFolders.map {
+                        FileVirtualFolder(item: makeFileItem($0), protocolType: protocolType)
+                    })
+                    guard !payloadFolders.isEmpty,
+                          nextOffset > protocolOffset,
+                          nextOffset < protocolTotal else {
+                        break
+                    }
+                    protocolOffset = nextOffset
+                }
+                successfulTotal += max(protocolTotal, protocolFolders.count)
+                folders.append(contentsOf: protocolFolders)
+            } catch let error as DsmNetworkError {
+                unavailableProtocols.append(protocolType)
+                if firstError == nil {
+                    firstError = DsmErrorMapper.map(error)
+                }
+            }
+        }
+
+        if unavailableProtocols.count == protocols.count, let firstError {
+            throw firstError
+        }
+
+        var uniqueFoldersByID: [String: FileVirtualFolder] = [:]
+        for folder in folders where uniqueFoldersByID[folder.id] == nil {
+            uniqueFoldersByID[folder.id] = folder
+        }
+        let sortedFolders = uniqueFoldersByID.values.sorted { left, right in
+            let nameComparison = left.item.name.localizedCaseInsensitiveCompare(right.item.name)
+            if nameComparison == .orderedSame {
+                if left.item.path == right.item.path {
+                    return left.protocolType.rawValue < right.protocolType.rawValue
+                }
+                return left.item.path < right.item.path
+            }
+            return nameComparison == .orderedAscending
+        }
+        let start = min(requestedOffset, sortedFolders.count)
+        let end = min(start + requestedLimit, sortedFolders.count)
+        let pageFolders = Array(sortedFolders[start..<end])
+        let total = min(
+            max(successfulTotal, sortedFolders.count),
+            Self.virtualFolderSnapshotLimit
+        )
+        let isTruncated = successfulTotal > Self.virtualFolderSnapshotLimit
+        return FileVirtualFolderPage(
+            folders: pageFolders,
+            offset: requestedOffset,
+            total: total,
+            hasMore: requestedOffset + pageFolders.count < total,
+            isTruncated: isTruncated,
+            unavailableProtocols: unavailableProtocols
+        )
+    }
+
+    public func listRemoteMounts(offset: Int, limit: Int) async throws -> FilePage {
+        let page = try await listVirtualFolders(offset: offset, limit: limit)
+        return FilePage(
+            folderPath: "/",
+            items: page.folders.map(\.item),
+            offset: page.offset,
+            total: page.total,
+            hasMore: page.hasMore
+        )
     }
 
     public func getThumbnail(path: String, size: ThumbnailSize) async throws -> Data {
@@ -1753,6 +2128,122 @@ public actor DsmFileRepository: FileRepository {
         }
     }
 
+    public func calculateDirectorySize(path: String) async throws -> FileDirectorySizeSummary {
+        try Task.checkCancellation()
+        let capability = try requireCapability(DsmAPIName.fileStationDirSize)
+        let normalizedPath = try Self.normalizedDirectorySizePath(path)
+        guard activeDirectorySizePaths.insert(normalizedPath).inserted else {
+            throw AppError(
+                category: .conflict,
+                isRetryable: true,
+                safeUserMessage: L10n.string("dirsize.already-running")
+            )
+        }
+        defer { activeDirectorySizePaths.remove(normalizedPath) }
+
+        let start: TaskStartPayload
+        do {
+            start = try await client.call(
+                path: capability.path,
+                api: capability.name,
+                version: try selectedVersion(capability),
+                method: "start",
+                requestFormat: capability.requestFormat,
+                parameters: ["path": .stringArray([normalizedPath])],
+                credential: credential,
+                as: TaskStartPayload.self
+            )
+        } catch {
+            if Task.isCancelled || error is CancellationError {
+                throw CancellationError()
+            }
+            if let error = error as? DsmNetworkError {
+                throw DsmErrorMapper.map(error)
+            }
+            throw translate(error)
+        }
+
+        guard Self.normalizedBackgroundTaskID(start.taskid) == start.taskid else {
+            throw AppError(
+                category: .invalidResponse,
+                isRetryable: true,
+                safeUserMessage: L10n.string("dirsize.invalid-response")
+            )
+        }
+
+        var taskFinished = false
+        do {
+            var delay = directorySizePollingPolicy.initialDelayNanoseconds
+            for attempt in 0..<max(1, directorySizePollingPolicy.maxAttempts) {
+                try Task.checkCancellation()
+                let status = try await client.call(
+                    path: capability.path,
+                    api: capability.name,
+                    version: try selectedVersion(capability),
+                    method: "status",
+                    requestFormat: capability.requestFormat,
+                    parameters: ["taskid": .string(start.taskid)],
+                    credential: credential,
+                    as: DirectorySizeStatusPayload.self
+                )
+                if status.finished {
+                    taskFinished = true
+                    guard let totalBytes = status.totalBytes,
+                          let fileCount = status.fileCount,
+                          let directoryCount = status.directoryCount,
+                          totalBytes >= 0,
+                          fileCount >= 0,
+                          directoryCount >= 0,
+                          fileCount <= Int64(Int.max),
+                          directoryCount <= Int64(Int.max) else {
+                        throw AppError(
+                            category: .invalidResponse,
+                            isRetryable: true,
+                            safeUserMessage: L10n.string("dirsize.invalid-response")
+                        )
+                    }
+                    return FileDirectorySizeSummary(
+                        totalBytes: totalBytes,
+                        fileCount: Int(fileCount),
+                        directoryCount: Int(directoryCount)
+                    )
+                }
+
+                guard attempt + 1 < max(1, directorySizePollingPolicy.maxAttempts) else {
+                    throw AppError(
+                        category: .timeout,
+                        isRetryable: true,
+                        safeUserMessage: L10n.string("dirsize.timeout")
+                    )
+                }
+                if delay > 0 {
+                    try await Task.sleep(nanoseconds: delay)
+                }
+                let doubledDelay = max(delay, 1).multipliedReportingOverflow(by: 2)
+                delay = min(
+                    doubledDelay.overflow ? UInt64.max : doubledDelay.partialValue,
+                    max(directorySizePollingPolicy.maximumDelayNanoseconds, 1)
+                )
+            }
+            throw AppError(
+                category: .timeout,
+                isRetryable: true,
+                safeUserMessage: L10n.string("dirsize.timeout")
+            )
+        } catch {
+            if !taskFinished {
+                await stopDirectorySizeTask(capability: capability, taskID: start.taskid)
+            }
+            if Task.isCancelled || error is CancellationError {
+                throw CancellationError()
+            }
+            if let error = error as? DsmNetworkError {
+                throw DsmErrorMapper.map(error)
+            }
+            throw translate(error)
+        }
+    }
+
     public func fileMD5(remotePath: String) async throws -> String {
         let capability = try requireCapability(DsmAPIName.fileStationMD5)
         let start = try await client.call(
@@ -1806,6 +2297,24 @@ public actor DsmFileRepository: FileRepository {
             )
             throw translate(error)
         }
+    }
+
+    private func stopDirectorySizeTask(capability: ApiCapability, taskID: String) async {
+        guard let version = try? selectedVersion(capability) else { return }
+        let pollingClient = client
+        let pollingCredential = credential
+        let stopTask = Task.detached {
+            try? await pollingClient.callVoid(
+                path: capability.path,
+                api: capability.name,
+                version: version,
+                method: "stop",
+                requestFormat: capability.requestFormat,
+                parameters: ["taskid": .string(taskID)],
+                credential: pollingCredential
+            )
+        }
+        await stopTask.value
     }
 
     private func cleanSearch(capability: ApiCapability, taskID: String) async throws {
@@ -2709,6 +3218,116 @@ public actor DsmFileRepository: FileRepository {
         return "/" + components.joined(separator: "/")
     }
 
+    private static func normalizedDirectorySizePath(_ value: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = trimmed.split(separator: "/", omittingEmptySubsequences: true)
+        let containsControlCharacters = trimmed.unicodeScalars.contains {
+            CharacterSet.controlCharacters.contains($0)
+        }
+        guard trimmed.hasPrefix("/"),
+              !components.isEmpty,
+              trimmed.utf8.count <= 4_096,
+              !containsControlCharacters,
+              components.allSatisfy({ $0 != "." && $0 != ".." }) else {
+            throw AppError(
+                category: .unknown,
+                isRetryable: false,
+                safeUserMessage: L10n.string("dirsize.invalid-path")
+            )
+        }
+        return "/" + components.joined(separator: "/")
+    }
+
+    private static func makeBackgroundTaskSummary(
+        _ payload: BackgroundTaskPayload
+    ) -> FileBackgroundTaskSummary? {
+        guard let taskID = normalizedBackgroundTaskID(payload.taskID),
+              let kind = backgroundTaskKind(api: payload.api),
+              let finished = payload.finished else {
+            return nil
+        }
+
+        let processedItems = nonnegativeInt(payload.processedItemCount)
+        let processedBytes = nonnegativeInt64(payload.processedBytes)
+        let resolvedTotal = nonnegativeInt64(payload.total)
+        let totalItems: Int?
+        let totalBytes: Int64?
+        switch kind {
+        case .copyOrMove:
+            totalItems = nil
+            totalBytes = resolvedTotal
+        case .delete:
+            totalItems = nonnegativeInt(resolvedTotal)
+            totalBytes = nil
+        case .compress, .extract:
+            // 官方说明没有为这两类任务稳定定义 total 的单位，避免误导。
+            totalItems = nil
+            totalBytes = nil
+        }
+
+        let progress: Double?
+        if let value = payload.progress,
+           value.isFinite,
+           value > 0,
+           value <= 1 {
+            progress = value
+        } else {
+            // 进行中的 0 可能表示服务端不支持进度，界面应显示不确定状态。
+            progress = nil
+        }
+
+        let createdAt: Date?
+        if let value = payload.creationTime,
+           value.isFinite,
+           value >= 946_684_800,
+           value <= Date().timeIntervalSince1970 + 86_400 {
+            createdAt = Date(timeIntervalSince1970: value)
+        } else {
+            createdAt = nil
+        }
+
+        return FileBackgroundTaskSummary(
+            id: taskID,
+            kind: kind,
+            state: finished ? .finished : .active,
+            progress: progress,
+            createdAt: createdAt,
+            processedItemCount: processedItems,
+            totalItemCount: totalItems,
+            processedBytes: processedBytes,
+            totalBytes: totalBytes
+        )
+    }
+
+    private static func normalizedBackgroundTaskID(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.utf8.count <= 256 else { return nil }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-:"))
+        guard trimmed.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
+        return trimmed
+    }
+
+    private static func backgroundTaskKind(api: String?) -> FileBackgroundTaskKind? {
+        switch api {
+        case "SYNO.FileStation.CopyMove": return .copyOrMove
+        case "SYNO.FileStation.Delete": return .delete
+        case "SYNO.FileStation.Compress": return .compress
+        case "SYNO.FileStation.Extract": return .extract
+        default: return nil
+        }
+    }
+
+    private static func nonnegativeInt(_ value: Int64?) -> Int? {
+        guard let value, value >= 0, value <= Int64(Int.max) else { return nil }
+        return Int(value)
+    }
+
+    private static func nonnegativeInt64(_ value: Int64?) -> Int64? {
+        guard let value, value >= 0 else { return nil }
+        return value
+    }
+
     private func requireCapability(_ name: String) throws -> ApiCapability {
         guard let capability = capabilities[name], capability.selectedVersion != nil else {
             throw AppError(
@@ -2722,6 +3341,18 @@ public actor DsmFileRepository: FileRepository {
 
     private func selectedVersion(_ capability: ApiCapability) throws -> Int {
         guard let version = capability.selectedVersion else {
+            throw AppError(
+                category: .versionUnsupported,
+                isRetryable: false,
+                safeUserMessage: L10n.string("shared.03e86493986f245a")
+            )
+        }
+        return version
+    }
+
+    private func selectedVersion(_ capability: ApiCapability, minimum: Int) throws -> Int {
+        let version = try selectedVersion(capability)
+        guard version >= minimum else {
             throw AppError(
                 category: .versionUnsupported,
                 isRetryable: false,
@@ -2981,4 +3612,11 @@ public actor DsmFileRepository: FileRepository {
     private static let additionalFields = [
         "real_path", "size", "owner", "time", "perm", "mount_point_type", "volume_status", "type"
     ]
+    private static let getInfoChunkSize = 100
+    private static let getInfoAdditionalFields = [
+        "size", "owner", "time", "perm", "type", "mount_point_type"
+    ]
+    private static let virtualFolderRequestLimit = 500
+    private static let virtualFolderSnapshotLimit = 5_000
+    private static let virtualFolderAdditionalFields = ["mount_point_type", "perm"]
 }

@@ -6,6 +6,8 @@ import DsmLocalization
 enum NasSettingsPage: String, CaseIterable, Identifiable {
     case overview
     case storage
+    case externalStorage
+    case zram
     case fileServices
     case terminal
     case network
@@ -326,6 +328,8 @@ final class NasSettingsModel {
     private(set) var overview: NasSystemOverview?
     private(set) var performanceHistory: [NasPerformanceSnapshot] = []
     private(set) var storage: NasStorageSnapshot?
+    private(set) var externalStorage: NasExternalStorageDirectory?
+    private(set) var zram: NasZRAMSnapshot?
     private(set) var storageUsageHistory: [StorageUsagePoint] = []
     private(set) var storageAnalysis: StorageAnalysisSnapshot?
     private(set) var storageAnalysisProgress: StorageAnalysisProgress?
@@ -451,6 +455,14 @@ final class NasSettingsModel {
             await loadPage(.storage, operation: { [repository] in
                 try await repository.loadStorage()
             }, apply: { applyStorage($0) })
+        case .externalStorage:
+            await loadPage(.externalStorage, operation: { [repository] in
+                try await repository.loadExternalStorage()
+            }, apply: { externalStorage = $0 })
+        case .zram:
+            await loadPage(.zram, operation: { [repository] in
+                try await repository.loadZRAM()
+            }, apply: { zram = $0 })
         case .fileServices:
             await loadPage(.fileServices, operation: { [repository] in
                 try await repository.loadFileServiceSettings()

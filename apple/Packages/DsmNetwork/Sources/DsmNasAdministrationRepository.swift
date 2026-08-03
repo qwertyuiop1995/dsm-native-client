@@ -2633,6 +2633,118 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
         )
     }
 
+    public func loadExternalStorage() async throws -> NasExternalStorageDirectory {
+        let maximumEntriesPerConnection = 64
+        let supportedConnections: [(NasExternalStorageConnection, String)] = [
+            (.usb, DsmAPIName.coreExternalStorageUSB),
+            (.eSATA, DsmAPIName.coreExternalStorageESATA)
+        ]
+        guard supportedConnections.contains(where: {
+            capabilitySupports($0.1, version: 1)
+        }) else {
+            throw AppError(
+                category: .apiUnavailable,
+                isRetryable: false,
+                safeUserMessage: L10n.string("external-storage.unavailable")
+            )
+        }
+
+        var devices: [NasExternalStorageDevice] = []
+        var unavailableConnections: [NasExternalStorageConnection] = []
+        var total = 0
+        var isTruncated = false
+
+        for (connection, apiName) in supportedConnections {
+            guard capabilitySupports(apiName, version: 1) else {
+                unavailableConnections.append(connection)
+                continue
+            }
+            do {
+                let value = try await call(apiName, method: "list", version: 1)
+                let rows = Self.externalStorageRows(from: value, connection: connection)
+                let reportedTotal = value.integer(["total", "total_count"]).flatMap {
+                    $0 >= 0 && $0 <= 1_000_000 ? Int($0) : nil
+                }
+                total += max(rows.count, reportedTotal ?? rows.count)
+                isTruncated = isTruncated
+                    || rows.count > maximumEntriesPerConnection
+                    || (reportedTotal.map { $0 > rows.count } ?? false)
+
+                var seenIDs = Set<String>()
+                let parsed = rows.prefix(maximumEntriesPerConnection).enumerated().compactMap {
+                    index, raw -> NasExternalStorageDevice? in
+                    let item = DsmDynamicJSON.object(raw)
+                    let rawID = Self.safeExternalStorageIdentifier(
+                        item.string(["id", "device_id", "storage_id"])
+                    )
+                    let localID = rawID ?? "snapshot-\(index)"
+                    let id = "\(connection.rawValue):\(localID)"
+                    guard seenIDs.insert(id).inserted else { return nil }
+                    let capacityBytes = Self.safeExternalStorageByteCount(
+                        item.integer(["capacity_bytes", "total_bytes", "size_bytes"])
+                    )
+                    let usedBytes = Self.safeExternalStorageByteCount(
+                        item.integer(["used_bytes", "usage_bytes"])
+                    ).flatMap { value in
+                        guard let capacityBytes else { return value }
+                        return value <= capacityBytes ? value : nil
+                    }
+                    return NasExternalStorageDevice(
+                        id: id,
+                        displayName: Self.safeExternalStorageName(
+                            item.string(["display_name", "name", "model"])
+                        ),
+                        connection: connection,
+                        status: Self.externalStorageStatus(
+                            item.string(["status", "state"])
+                        ),
+                        capacityBytes: capacityBytes,
+                        usedBytes: usedBytes
+                    )
+                }
+                devices.append(contentsOf: parsed)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as AppError where error.category == .cancelled {
+                throw CancellationError()
+            } catch {
+                // USB 与 eSATA 是独立的只读补充，单项失败不能覆盖另一项结果。
+                unavailableConnections.append(connection)
+            }
+        }
+
+        return NasExternalStorageDirectory(
+            devices: devices.sorted {
+                if $0.connection != $1.connection {
+                    return $0.connection.rawValue < $1.connection.rawValue
+                }
+                return ($0.displayName ?? $0.id).localizedStandardCompare(
+                    $1.displayName ?? $1.id
+                ) == .orderedAscending
+            },
+            total: max(total, devices.count),
+            isTruncated: isTruncated,
+            unavailableConnections: unavailableConnections
+        )
+    }
+
+    public func loadZRAM() async throws -> NasZRAMSnapshot {
+        let value = try await call(
+            DsmAPIName.coreHardwareZRAM,
+            method: "get",
+            version: 1
+        )
+        return NasZRAMSnapshot(
+            isEnabled: value.boolean(["enable", "enabled", "zram_enable"]),
+            configuredBytes: Self.safeExternalStorageByteCount(
+                value.integer(["configured_bytes", "capacity_bytes", "size_bytes"])
+            ),
+            algorithm: Self.zramAlgorithm(
+                value.string(["algorithm", "compression_algorithm", "compressor"])
+            )
+        )
+    }
+
     public func saveHardwareSettings(_ settings: NasHardwareSettings) async throws {
         let result = try await saveHardwareSettingsResult(settings)
         guard result.status == .confirmedSuccess
@@ -10839,6 +10951,72 @@ public actor DsmNasAdministrationRepository: NasSettingsRepository {
             return nil
         }
         return value
+    }
+
+    private static func externalStorageRows(
+        from value: DsmDynamicJSON,
+        connection: NasExternalStorageConnection
+    ) -> [[String: DsmDynamicJSON]] {
+        let keys: [String]
+        switch connection {
+        case .usb:
+            keys = ["devices", "items", "storages", "usb_devices"]
+        case .eSATA:
+            keys = ["devices", "items", "storages", "esata_devices"]
+        }
+        for key in keys {
+            let rows = value.objects(key)
+            if !rows.isEmpty { return rows }
+        }
+        return []
+    }
+
+    private static func safeExternalStorageIdentifier(_ raw: String?) -> String? {
+        guard let value = safeProcessText(raw, maximumLength: 128),
+              value.unicodeScalars.allSatisfy({
+                  CharacterSet.alphanumerics.union(
+                      CharacterSet(charactersIn: "._-:")
+                  ).contains($0)
+              }) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func safeExternalStorageName(_ raw: String?) -> String? {
+        guard let value = safeProcessText(raw, maximumLength: 160),
+              !value.contains("/"),
+              !value.contains("\\") else {
+            return nil
+        }
+        return value
+    }
+
+    private static func safeExternalStorageByteCount(_ value: Int64?) -> Int64? {
+        guard let value, value >= 0 else { return nil }
+        return value
+    }
+
+    private static func externalStorageStatus(_ raw: String?) -> NasExternalStorageStatus {
+        switch raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "ready", "normal", "healthy", "connected", "mounted", "active":
+            return .ready
+        case "busy", "in_use", "in-use", "syncing", "checking":
+            return .busy
+        case "unavailable", "offline", "disconnected", "error", "failed":
+            return .unavailable
+        default:
+            return .unknown
+        }
+    }
+
+    private static func zramAlgorithm(_ raw: String?) -> NasZRAMAlgorithm {
+        switch raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "lz4", "lz4hc": .lz4
+        case "lzo", "lzo-rle", "lzorle": .lzo
+        case "zstd": .zstd
+        default: .unknown
+        }
     }
 
     private static func safePowerScheduleTimeZone(_ raw: String?) -> String? {

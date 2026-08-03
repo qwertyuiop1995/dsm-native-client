@@ -132,6 +132,34 @@ final class NasAdministrationModelTests: XCTestCase {
         XCTAssertNil(model.errorMessage(for: .powerSchedule))
     }
 
+    func test外接存储页面读取只读目录() async {
+        let repository = NasAdministrationRepositoryStub()
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+
+        await model.activate(.externalStorage)
+
+        XCTAssertTrue(model.hasLoaded(.externalStorage))
+        XCTAssertEqual(model.externalStorage?.devices.count, 1)
+        XCTAssertEqual(model.externalStorage?.devices.first?.connection, .usb)
+        XCTAssertEqual(model.externalStorage?.devices.first?.status, .ready)
+        XCTAssertNil(model.errorMessage(for: .externalStorage))
+    }
+
+    func test内存压缩页面读取只读摘要() async {
+        let repository = NasAdministrationRepositoryStub()
+        let model = NasSettingsModel(repository: repository)
+        model.setModuleEnabled(true)
+
+        await model.activate(.zram)
+
+        XCTAssertTrue(model.hasLoaded(.zram))
+        XCTAssertEqual(model.zram?.isEnabled, true)
+        XCTAssertEqual(model.zram?.configuredBytes, 1_073_741_824)
+        XCTAssertEqual(model.zram?.algorithm, .lz4)
+        XCTAssertNil(model.errorMessage(for: .zram))
+    }
+
     func test暂停套件后刷新并确认最终状态() async throws {
         let repository = NasAdministrationRepositoryStub(packages: [
             package(status: "running", canStart: false, canStop: true, canUninstall: true)
@@ -1879,6 +1907,32 @@ private actor NasAdministrationRepositoryStub: NasSettingsRepository {
             timeZoneIdentifier: "Asia/Shanghai",
             total: 1,
             isTruncated: false
+        )
+    }
+
+    func loadExternalStorage() async throws -> NasExternalStorageDirectory {
+        NasExternalStorageDirectory(
+            devices: [
+                NasExternalStorageDevice(
+                    id: "usb:synthetic",
+                    displayName: "Synthetic USB",
+                    connection: .usb,
+                    status: .ready,
+                    capacityBytes: 1_000_000_000,
+                    usedBytes: 250_000_000
+                )
+            ],
+            total: 1,
+            isTruncated: false,
+            unavailableConnections: [.eSATA]
+        )
+    }
+
+    func loadZRAM() async throws -> NasZRAMSnapshot {
+        NasZRAMSnapshot(
+            isEnabled: true,
+            configuredBytes: 1_073_741_824,
+            algorithm: .lz4
         )
     }
 

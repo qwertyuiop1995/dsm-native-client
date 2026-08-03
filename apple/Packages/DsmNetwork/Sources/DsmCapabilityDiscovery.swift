@@ -18,9 +18,13 @@ public enum DsmAPIName {
     public static let fileStationExtract = "SYNO.FileStation.Extract"
     public static let fileStationSearch = "SYNO.FileStation.Search"
     public static let fileStationMD5 = "SYNO.FileStation.MD5"
+    /// File Station 官方目录大小任务；固定使用 v2 的 start/status/stop 工作流。
+    public static let fileStationDirSize = "SYNO.FileStation.DirSize"
     public static let fileStationFavorite = "SYNO.FileStation.Favorite"
     public static let fileStationSharing = "SYNO.FileStation.Sharing"
     public static let fileStationVirtualFolder = "SYNO.FileStation.VirtualFolder"
+    /// File Station 官方只读后台任务列表；客户端不接入清理等写方法。
+    public static let fileStationBackgroundTask = "SYNO.FileStation.BackgroundTask"
     /// DSM File Station 的未公开挂载接口；只在能力发现明确返回时启用。
     public static let fileStationMount = "SYNO.FileStation.Mount"
     /// Synology Chat 套件内部接口；仅在 DSM 能力发现明确返回时启用。
@@ -125,8 +129,14 @@ public enum DsmAPIName {
     public static let coreNetworkProxy = "SYNO.Core.Network.Proxy"
     /// DSM 控制面板内部接口：断电恢复。
     public static let coreHardwarePowerRecovery = "SYNO.Core.Hardware.PowerRecovery"
+    /// DSM 控制面板内部内存压缩；当前客户端仅启用只读 `get`。
+    public static let coreHardwareZRAM = "SYNO.Core.Hardware.ZRAM"
     /// DSM 控制面板内部电源计划；当前客户端仅启用只读 `load`。
     public static let coreHardwarePowerSchedule = "SYNO.Core.Hardware.PowerSchedule"
+    /// DSM 控制面板内部 USB 存储列表；`eject` 尚未接入。
+    public static let coreExternalStorageUSB = "SYNO.Core.ExternalDevice.Storage.USB"
+    /// DSM 控制面板内部 eSATA 存储列表。
+    public static let coreExternalStorageESATA = "SYNO.Core.ExternalDevice.Storage.eSATA"
     /// DSM 控制面板内部接口：设备灯光亮度。
     public static let coreHardwareLEDBrightness = "SYNO.Core.Hardware.Led.Brightness"
     /// DSM 控制面板内部接口：风扇模式。
@@ -204,10 +214,12 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationExtract,
         DsmAPIName.fileStationSearch,
         DsmAPIName.fileStationMD5,
+        DsmAPIName.fileStationDirSize,
         DsmAPIName.fileStationFavorite,
         DsmAPIName.fileStationSharing,
         DsmAPIName.fileStationVirtualFolder,
         DsmAPIName.fileStationMount,
+        DsmAPIName.fileStationBackgroundTask,
         DsmAPIName.chatChannel,
         DsmAPIName.chatChannelNamed,
         DsmAPIName.chatChannelAnonymous,
@@ -278,7 +290,10 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.coreFileServiceSFTP,
         DsmAPIName.coreNetworkProxy,
         DsmAPIName.coreHardwarePowerRecovery,
+        DsmAPIName.coreHardwareZRAM,
         DsmAPIName.coreHardwarePowerSchedule,
+        DsmAPIName.coreExternalStorageUSB,
+        DsmAPIName.coreExternalStorageESATA,
         DsmAPIName.coreHardwareLEDBrightness,
         DsmAPIName.coreHardwareFanSpeed,
         DsmAPIName.coreHardwareBeepControl,
@@ -396,10 +411,12 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.fileStationExtract: 2...2,
         DsmAPIName.fileStationSearch: 1...2,
         DsmAPIName.fileStationMD5: 1...2,
+        DsmAPIName.fileStationDirSize: 2...2,
         DsmAPIName.fileStationFavorite: 1...2,
         DsmAPIName.fileStationSharing: 1...3,
-        DsmAPIName.fileStationVirtualFolder: 1...2,
+        DsmAPIName.fileStationVirtualFolder: 2...2,
         DsmAPIName.fileStationMount: 1...1,
+        DsmAPIName.fileStationBackgroundTask: 3...3,
         // Chat Server 没有公开普通用户聊天契约，范围按运行时返回值与已验证实现取交集。
         DsmAPIName.chatChannel: 1...5,
         DsmAPIName.chatChannelNamed: 1...1,
@@ -473,8 +490,11 @@ public struct DsmCapabilityDiscovery: Sendable {
         DsmAPIName.coreFileServiceSFTP: 1...1,
         DsmAPIName.coreNetworkProxy: 1...1,
         DsmAPIName.coreHardwarePowerRecovery: 1...1,
+        DsmAPIName.coreHardwareZRAM: 1...1,
         // 静态目录尚未给出版本矩阵；客户端仅接受最小 v1 范围并要求运行时发现。
         DsmAPIName.coreHardwarePowerSchedule: 1...1,
+        DsmAPIName.coreExternalStorageUSB: 1...1,
+        DsmAPIName.coreExternalStorageESATA: 1...1,
         DsmAPIName.coreHardwareLEDBrightness: 1...1,
         DsmAPIName.coreHardwareFanSpeed: 1...1,
         DsmAPIName.coreHardwareBeepControl: 1...1,

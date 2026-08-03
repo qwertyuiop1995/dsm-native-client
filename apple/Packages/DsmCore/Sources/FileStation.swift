@@ -92,6 +92,56 @@ public struct FileItem: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+/// File Station 官方虚拟文件夹接口支持的远程协议。
+public enum FileVirtualProtocol: String, Codable, CaseIterable, Sendable {
+    case cifs
+    case nfs
+    case iso
+
+    /// ISO 映像由系统以只读方式挂载，不能使用远程连接管理接口修改或移除。
+    public var supportsManagement: Bool {
+        self != .iso
+    }
+}
+
+/// 已识别协议的远程虚拟文件夹。
+public struct FileVirtualFolder: Identifiable, Hashable, Sendable {
+    public var id: String { "\(protocolType.rawValue):\(item.id)" }
+    public let item: FileItem
+    public let protocolType: FileVirtualProtocol
+
+    public init(item: FileItem, protocolType: FileVirtualProtocol) {
+        self.item = item
+        self.protocolType = protocolType
+    }
+}
+
+/// 远程虚拟文件夹分页结果；部分协议读取失败时仍返回其他可用协议。
+public struct FileVirtualFolderPage: Equatable, Sendable {
+    public let folders: [FileVirtualFolder]
+    public let offset: Int
+    public let total: Int
+    public let hasMore: Bool
+    public let isTruncated: Bool
+    public let unavailableProtocols: [FileVirtualProtocol]
+
+    public init(
+        folders: [FileVirtualFolder],
+        offset: Int,
+        total: Int,
+        hasMore: Bool,
+        isTruncated: Bool = false,
+        unavailableProtocols: [FileVirtualProtocol] = []
+    ) {
+        self.folders = folders
+        self.offset = offset
+        self.total = total
+        self.hasMore = hasMore
+        self.isTruncated = isTruncated
+        self.unavailableProtocols = unavailableProtocols
+    }
+}
+
 public struct FavoriteLocation: Identifiable, Codable, Hashable, Sendable {
     public var id: String { path }
     public let name: String
@@ -307,6 +357,94 @@ public struct RecycleLocation: Equatable, Sendable {
 
 public typealias FileTransferProgress = @Sendable (_ completedBytes: Int64, _ totalBytes: Int64?) -> Void
 
+/// NAS 上由 File Station 执行的只读后台任务摘要。
+///
+/// 该模型刻意不包含任务参数、文件路径或当前处理路径，避免把服务端可能回显的敏感信息
+/// 带入持久化、日志或用户界面。
+public struct FileBackgroundTaskSummary: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let kind: FileBackgroundTaskKind
+    public let state: FileBackgroundTaskState
+    public let progress: Double?
+    public let createdAt: Date?
+    public let processedItemCount: Int?
+    public let totalItemCount: Int?
+    public let processedBytes: Int64?
+    public let totalBytes: Int64?
+
+    public init(
+        id: String,
+        kind: FileBackgroundTaskKind,
+        state: FileBackgroundTaskState,
+        progress: Double?,
+        createdAt: Date?,
+        processedItemCount: Int?,
+        totalItemCount: Int?,
+        processedBytes: Int64?,
+        totalBytes: Int64?
+    ) {
+        self.id = id
+        self.kind = kind
+        self.state = state
+        self.progress = progress
+        self.createdAt = createdAt
+        self.processedItemCount = processedItemCount
+        self.totalItemCount = totalItemCount
+        self.processedBytes = processedBytes
+        self.totalBytes = totalBytes
+    }
+}
+
+public enum FileBackgroundTaskKind: Equatable, Sendable {
+    case copyOrMove
+    case delete
+    case compress
+    case extract
+}
+
+public enum FileBackgroundTaskState: Equatable, Sendable {
+    case active
+    /// 官方字段只表示任务已经结束，不代表任务成功。
+    case finished
+}
+
+public struct FileBackgroundTaskPage: Equatable, Sendable {
+    public let tasks: [FileBackgroundTaskSummary]
+    public let offset: Int
+    public let nextOffset: Int
+    public let total: Int
+    public let hasMore: Bool
+
+    public init(
+        tasks: [FileBackgroundTaskSummary],
+        offset: Int,
+        nextOffset: Int,
+        total: Int,
+        hasMore: Bool
+    ) {
+        self.tasks = tasks
+        self.offset = offset
+        self.nextOffset = nextOffset
+        self.total = total
+        self.hasMore = hasMore
+    }
+}
+
+/// NAS 完成目录大小计算后返回的聚合结果。
+///
+/// 输入路径和服务端任务标识只在 Repository 内部短暂使用，不进入领域结果。
+public struct FileDirectorySizeSummary: Equatable, Sendable {
+    public let totalBytes: Int64
+    public let fileCount: Int
+    public let directoryCount: Int
+
+    public init(totalBytes: Int64, fileCount: Int, directoryCount: Int) {
+        self.totalBytes = totalBytes
+        self.fileCount = fileCount
+        self.directoryCount = directoryCount
+    }
+}
+
 /// 只在内存中交给媒体播放器使用。请求头可能包含短期会话信息，不得记录或持久化。
 public struct MediaStreamSource: @unchecked Sendable {
     public let request: URLRequest
@@ -336,6 +474,9 @@ public protocol FileRepository: PhotoFileServing, Sendable {
     var allowsRemoteMountManagement: Bool { get }
 
     func listShares(offset: Int, limit: Int) async throws -> FilePage
+    func listBackgroundTasks(offset: Int, limit: Int) async throws -> FileBackgroundTaskPage
+    func calculateDirectorySize(path: String) async throws -> FileDirectorySizeSummary
+    func listVirtualFolders(offset: Int, limit: Int) async throws -> FileVirtualFolderPage
     func listRemoteMounts(offset: Int, limit: Int) async throws -> FilePage
     func listFolder(path: String, offset: Int, limit: Int) async throws -> FilePage
     func getInfo(paths: [String]) async throws -> [FileItem]
@@ -425,8 +566,41 @@ public protocol FileRepository: PhotoFileServing, Sendable {
 public extension FileRepository {
     var allowsRemoteMountManagement: Bool { false }
 
+    func listVirtualFolders(offset: Int, limit: Int) async throws -> FileVirtualFolderPage {
+        let page = try await listRemoteMounts(offset: offset, limit: limit)
+        let folders = page.items.compactMap { item -> FileVirtualFolder? in
+            guard let rawValue = item.mountPointType?.lowercased(),
+                  let protocolType = FileVirtualProtocol(rawValue: rawValue) else {
+                return nil
+            }
+            return FileVirtualFolder(item: item, protocolType: protocolType)
+        }
+        return FileVirtualFolderPage(
+            folders: folders,
+            offset: page.offset,
+            total: folders.count,
+            hasMore: page.hasMore
+        )
+    }
+
     func listRemoteMounts(offset: Int, limit: Int) async throws -> FilePage {
         FilePage(folderPath: "/", items: [], offset: offset, total: 0, hasMore: false)
+    }
+
+    func listBackgroundTasks(offset: Int, limit: Int) async throws -> FileBackgroundTaskPage {
+        throw AppError(
+            category: .apiUnavailable,
+            isRetryable: false,
+            safeUserMessage: L10n.string("shared.7dc6f291445bfb76")
+        )
+    }
+
+    func calculateDirectorySize(path: String) async throws -> FileDirectorySizeSummary {
+        throw AppError(
+            category: .apiUnavailable,
+            isRetryable: false,
+            safeUserMessage: L10n.string("shared.7dc6f291445bfb76")
+        )
     }
 
     func readPrefix(remotePath: String, maximumLength: Int) async throws -> Data {

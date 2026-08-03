@@ -1,6 +1,6 @@
 # 岚仓（LanStash）当前开发与验收入口
 
-> 最后更新：2026-07-30
+> 最后更新：2026-08-03
 > 当前状态：[当前开发进度](../progress/STATUS.md)
 > 后续优先级：[产品路线图](../progress/ROADMAP.md)
 > 历史规格：[第一阶段开发文档归档](../archive/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_V1_ARCHIVE_ZH.md)
@@ -29,6 +29,13 @@
 4. 写操作必须验证确认、权限检查、防重复提交、取消或超时处理以及最终状态复查。
 5. 内部 API 按发现规范记录证据等级；未验证的新 build 默认关闭内部写能力。
 6. 结果写入[DSM 兼容矩阵](../compatibility/DSM_COMPATIBILITY_MATRIX.md)，自动化测试不能替代实机证据。
+7. File Station 远程位置浏览按 `Info.get` 的 `support_virtual_protocol` 对 `cifs`、`nfs`、
+   `iso` 分别调用官方 `VirtualFolder.list` v2；验证合并、去重、有限分页和 ISO 只读展示，
+   不发送 `type=all`。文件详情使用官方 `List.getinfo` v2，按首次输入顺序去重并以每批
+   最多 100 条分块，只请求最小字段；100 条不作为 DSM 服务端上限。上述行为在形成脱敏
+   实机记录前均标记为未验证。
+8. `SYNO.FileStation.VFS.Connection` 与 `SYNO.Entry.Request` 继续关闭；没有完成版本化
+   私有契约、权限、副作用和专用测试环境验收前，不得用于远程位置或批量读取流程。
 
 ## 发布共同出口
 

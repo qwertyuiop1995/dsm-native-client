@@ -1509,6 +1509,33 @@ private struct RemoteLocationsView: View {
     @State private var showsCreate = false
     @State private var editingItem: FileItem?
     @State private var removingItem: FileItem?
+    @State private var filter: RemoteLocationFilter = .all
+
+    private enum RemoteLocationFilter: String, CaseIterable, Identifiable {
+        case all
+        case cifs
+        case nfs
+        case iso
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .all: L10n.string("remote-locations.filter.all")
+            case .cifs: L10n.string("remote-locations.protocol.smb")
+            case .nfs: L10n.string("remote-locations.protocol.nfs")
+            case .iso: L10n.string("remote-locations.protocol.iso")
+            }
+        }
+
+        func includes(_ protocolType: FileVirtualProtocol) -> Bool {
+            self == .all || rawValue == protocolType.rawValue
+        }
+    }
+
+    private var filteredLocations: [FileVirtualFolder] {
+        model.remoteLocations.filter { filter.includes($0.protocolType) }
+    }
 
     private var defaultMountPoint: String {
         let parent = model.shares.first(where: { $0.permissions?.canWrite == true })?.path
@@ -1518,9 +1545,78 @@ private struct RemoteLocationsView: View {
     }
 
     var body: some View {
-        Group {
-            if model.remoteLocations.isEmpty {
-                VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 0) {
+            Picker(L10n.string("remote-locations.filter.label"), selection: $filter) {
+                ForEach(RemoteLocationFilter.allCases) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding()
+
+            if !model.unavailableRemoteLocationProtocols.isEmpty {
+                Label(
+                    L10n.string(
+                        "remote-locations.partial-unavailable",
+                        model.unavailableRemoteLocationProtocols.map(protocolTitle).joined(
+                            separator: L10n.string("remote-locations.protocol-list-separator")
+                        )
+                    ),
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+                .padding(.bottom, 12)
+                .accessibilityAddTraits(.isStaticText)
+            }
+
+            if model.remoteLocationsAreTruncated {
+                Label(
+                    L10n.string("remote-locations.truncated"),
+                    systemImage: "list.bullet.rectangle"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+                .padding(.bottom, 12)
+                .accessibilityAddTraits(.isStaticText)
+            }
+
+            if let error = model.remoteLocationsError, !model.remoteLocations.isEmpty {
+                Label(error, systemImage: "wifi.exclamationmark")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+                    .accessibilityAddTraits(.isStaticText)
+            }
+
+            Group {
+                if (!model.remoteLocationsHasLoaded || model.isLoadingRemoteLocations)
+                    && model.remoteLocations.isEmpty {
+                    ProgressView(L10n.string("remote-locations.loading"))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = model.remoteLocationsError, model.remoteLocations.isEmpty {
+                    ContentUnavailableView {
+                        Label(L10n.string("remote-locations.error.title"), systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button(L10n.string("remote-locations.retry")) {
+                            Task { await model.refreshRemoteLocations() }
+                        }
+                    }
+                } else if filteredLocations.isEmpty, !model.remoteLocations.isEmpty {
+                    ContentUnavailableView {
+                        Label(L10n.string("remote-locations.filtered-empty.title"), systemImage: "line.3.horizontal.decrease.circle")
+                    } description: {
+                        Text(L10n.string("remote-locations.filtered-empty.description"))
+                    } actions: {
+                        Button(L10n.string("remote-locations.filter.show-all")) { filter = .all }
+                    }
+                } else if model.remoteLocations.isEmpty {
+                    VStack(spacing: 16) {
                     ContentUnavailableView(
                         L10n.string("ui.9155045b349728e4"),
                         systemImage: "network",
@@ -1533,36 +1629,48 @@ private struct RemoteLocationsView: View {
                     if model.allowsRemoteMountManagement {
                         Button(L10n.string("ui.21539a2c4f05e43d")) { showsCreate = true }
                     }
-                }
-            } else {
-                List(model.remoteLocations) { location in
-                    Button { onOpen(location) } label: {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(location.name)
-                                Text(remoteLocationDescription(location))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "network").foregroundStyle(.blue)
-                        }
                     }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button(L10n.string("ui.c771248e511fbf93")) { onOpen(location) }
-                        if model.allowsRemoteMountManagement {
-                            Divider()
-                            Button(L10n.string("ui.27765faa9412fc59")) { editingItem = location }
-                            Button(L10n.string("ui.94a750d92afbec3e"), role: .destructive) { removingItem = location }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(filteredLocations) { folder in
+                        let location = folder.item
+                        Button { onOpen(location) } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(location.name)
+                                    Text(remoteLocationDescription(folder))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: folder.protocolType == .iso ? "opticaldisc" : "network")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(remoteLocationAccessibilityLabel(folder))
+                        .contextMenu {
+                            Button(L10n.string("ui.c771248e511fbf93")) { onOpen(location) }
+                            if model.allowsRemoteMountManagement && folder.protocolType.supportsManagement {
+                                Divider()
+                                Button(L10n.string("ui.27765faa9412fc59")) { editingItem = location }
+                                Button(L10n.string("ui.94a750d92afbec3e"), role: .destructive) { removingItem = location }
+                            }
                         }
                     }
                 }
             }
         }
-        .fillsAvailableContentArea()
+        .fillsAvailableContentArea(alignment: .topLeading)
         .navigationTitle(L10n.string("ui.6727073e65194528"))
         .toolbar {
+            Button {
+                Task { await model.refreshRemoteLocations() }
+            } label: {
+                Label(L10n.string("remote-locations.refresh"), systemImage: "arrow.clockwise")
+            }
+            .disabled(model.isLoadingRemoteLocations)
+
             Button {
                 showsCreate = true
             } label: {
@@ -1608,10 +1716,37 @@ private struct RemoteLocationsView: View {
         }
     }
 
-    private func remoteLocationDescription(_ item: FileItem) -> String {
-        let type = item.mountPointType?.lowercased() ?? ""
-        let protocolName = type.contains("nfs") ? "NFS" : type.contains("cifs") || type.contains("smb") ? "SMB" : L10n.string("ui.c201790492030d84")
-        return "\(protocolName) · \(item.path)"
+    private func protocolTitle(_ protocolType: FileVirtualProtocol) -> String {
+        switch protocolType {
+        case .cifs: L10n.string("remote-locations.protocol.smb")
+        case .nfs: L10n.string("remote-locations.protocol.nfs")
+        case .iso: L10n.string("remote-locations.protocol.iso")
+        }
+    }
+
+    private func remoteLocationDescription(_ folder: FileVirtualFolder) -> String {
+        let protocolName = protocolTitle(folder.protocolType)
+        if folder.protocolType == .iso {
+            return L10n.string("remote-locations.description.read-only", protocolName, folder.item.path)
+        }
+        return L10n.string("remote-locations.description", protocolName, folder.item.path)
+    }
+
+    private func remoteLocationAccessibilityLabel(_ folder: FileVirtualFolder) -> String {
+        if folder.protocolType == .iso {
+            return L10n.string(
+                "remote-locations.accessibility.read-only",
+                folder.item.name,
+                protocolTitle(folder.protocolType),
+                folder.item.path
+            )
+        }
+        return L10n.string(
+            "remote-locations.accessibility",
+            folder.item.name,
+            protocolTitle(folder.protocolType),
+            folder.item.path
+        )
     }
 }
 
@@ -3350,6 +3485,19 @@ private struct TransferCenterView: View {
 
     @State private var selectedNasID: UUID?
     @State private var activeFilter: TaskFilterType? = nil
+    @State private var source: TransferSource = .app
+
+    private enum TransferSource: Hashable {
+        case app
+        case nas
+
+        var title: String {
+            switch self {
+            case .app: return L10n.string("background-tasks.source-app")
+            case .nas: return L10n.string("background-tasks.source-nas")
+            }
+        }
+    }
 
     private enum TaskFilterType: Hashable {
         case upload
@@ -3475,113 +3623,120 @@ private struct TransferCenterView: View {
         }
     }
 
+    private var selectedWorkspaces: [WorkspaceModel] {
+        guard let selectedNasID else { return connectedWorkspaces }
+        return connectedWorkspaces.filter { $0.profile.id == selectedNasID }
+    }
+
     var body: some View {
-        Group {
-            if allConnectedTasks.isEmpty {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L10n.string("ui.cebeae3f4b78f233", String(describing: model.profile.displayName)))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 6)
+
+            HStack(spacing: 12) {
+                Picker(L10n.string("background-tasks.source-label"), selection: $source) {
+                    Text(TransferSource.app.title).tag(TransferSource.app)
+                    Text(TransferSource.nas.title).tag(TransferSource.nas)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 320)
+
+                if connectedWorkspaces.count > 1 {
+                    Divider()
+                        .frame(height: 14)
+
+                    Text(L10n.string("label.nas"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    FilterChip(title: L10n.string("ui.5c55a67935af8f45"), isSelected: selectedNasID == nil) {
+                        selectedNasID = nil
+                    }
+
+                    ForEach(connectedWorkspaces, id: \.profile.id) { ws in
+                        FilterChip(title: ws.profile.displayName, isSelected: selectedNasID == ws.profile.id) {
+                            selectedNasID = ws.profile.id
+                        }
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+
+            if source == .app {
+                let activeFilters = availableFilters
+                if !activeFilters.isEmpty {
+                    HStack(spacing: 6) {
+                        Text(L10n.string("ui.f9082aad585f4fb9"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        FilterChip(title: L10n.string("ui.5c55a67935af8f45"), isSelected: currentActiveFilter == nil) {
+                            activeFilter = nil
+                        }
+
+                        ForEach(activeFilters, id: \.self) { filter in
+                            let count = countForFilter(filter)
+                            FilterChip(title: "\(filter.displayName) (\(count))", isSelected: currentActiveFilter == filter) {
+                                activeFilter = activeFilter == filter ? nil : filter
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                }
+            }
+
+            Divider()
+
+            if source == .nas {
+                NASBackgroundTaskCenter(workspaces: selectedWorkspaces)
+            } else if baseTasks.isEmpty {
                 ContentUnavailableView(
                     L10n.string("ui.d01c644a2d1f3570"),
                     systemImage: "arrow.up.arrow.down.circle",
                     description: Text(L10n.string("ui.f7503c0037f86224"))
                 )
                 .fillsAvailableContentArea()
+            } else if filteredTasks.isEmpty {
+                ContentUnavailableView(
+                    L10n.string("ui.e8c286bbf6e5bd12"),
+                    systemImage: "arrow.up.arrow.down.circle",
+                    description: Text(L10n.string("ui.6fed029eeaa6ec22"))
+                )
+                .fillsAvailableContentArea()
             } else {
-                VStack(spacing: 0) {
-                    HStack {
-                        Text(L10n.string("ui.cebeae3f4b78f233", String(describing: model.profile.displayName)))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(filteredTasks) { task in
+                            let taskWorkspace = connectedWorkspaces.first(where: { ws in
+                                ws.transfers.contains(where: { $0.id == task.id })
+                            }) ?? model
+
+                            TransferRow(
+                                task: task,
+                                canRetry: taskWorkspace.canRetryTransfer(task.id),
+                                onPause: { taskWorkspace.pauseTransfer(task.id) },
+                                onResume: { taskWorkspace.resumeTransfer(task.id) },
+                                onRetry: { taskWorkspace.retryTransfer(task.id) },
+                                onCancel: { taskWorkspace.cancelTransfer(task.id) },
+                                onDelete: { taskWorkspace.deleteTransfer(task.id) }
+                            )
+                        }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 6)
-
-                    HStack(spacing: 12) {
-                        if connectedWorkspaces.count > 1 {
-                            HStack(spacing: 6) {
-                                Text(L10n.string("label.nas"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                
-                                FilterChip(title: L10n.string("ui.5c55a67935af8f45"), isSelected: selectedNasID == nil) {
-                                    selectedNasID = nil
-                                }
-                                
-                                ForEach(connectedWorkspaces, id: \.profile.id) { ws in
-                                    FilterChip(title: ws.profile.displayName, isSelected: selectedNasID == ws.profile.id) {
-                                        selectedNasID = ws.profile.id
-                                    }
-                                }
-                            }
-                            
-                            Divider()
-                                .frame(height: 14)
-                                .foregroundStyle(.secondary.opacity(0.3))
-                        }
-
-                        let activeFilters = availableFilters
-                        if !activeFilters.isEmpty {
-                            HStack(spacing: 6) {
-                                Text(L10n.string("ui.f9082aad585f4fb9"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                
-                                FilterChip(title: L10n.string("ui.5c55a67935af8f45"), isSelected: currentActiveFilter == nil) {
-                                    activeFilter = nil
-                                }
-                                
-                                ForEach(activeFilters, id: \.self) { filter in
-                                    let count = countForFilter(filter)
-                                    FilterChip(title: "\(filter.displayName) (\(count))", isSelected: currentActiveFilter == filter) {
-                                        if activeFilter == filter {
-                                            activeFilter = nil
-                                        } else {
-                                            activeFilter = filter
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-
-                    Divider()
-
-                    if filteredTasks.isEmpty {
-                        ContentUnavailableView(
-                            L10n.string("ui.e8c286bbf6e5bd12"),
-                            systemImage: "arrow.up.arrow.down.circle",
-                            description: Text(L10n.string("ui.6fed029eeaa6ec22"))
-                        )
-                        .fillsAvailableContentArea()
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 12) {
-                                ForEach(filteredTasks) { task in
-                                    let taskWorkspace = connectedWorkspaces.first(where: { ws in
-                                        ws.transfers.contains(where: { $0.id == task.id })
-                                    }) ?? model
-
-                                    TransferRow(
-                                        task: task,
-                                        canRetry: taskWorkspace.canRetryTransfer(task.id),
-                                        onPause: { taskWorkspace.pauseTransfer(task.id) },
-                                        onResume: { taskWorkspace.resumeTransfer(task.id) },
-                                        onRetry: { taskWorkspace.retryTransfer(task.id) },
-                                        onCancel: { taskWorkspace.cancelTransfer(task.id) },
-                                        onDelete: { taskWorkspace.deleteTransfer(task.id) }
-                                    )
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                        }
-                    }
+                    .padding(.vertical, 12)
                 }
-                .fillsAvailableContentArea(alignment: .topLeading)
             }
         }
         .fillsAvailableContentArea(alignment: .topLeading)
@@ -3590,6 +3745,282 @@ private struct TransferCenterView: View {
                 selectedNasID = model.profile.id
             }
         }
+    }
+}
+
+private struct NASBackgroundTaskCenter: View {
+    let workspaces: [WorkspaceModel]
+
+    @State private var filter: Filter = .all
+
+    private enum Filter: Hashable {
+        case all
+        case active
+        case finished
+
+        var title: String {
+            switch self {
+            case .all: return L10n.string("background-tasks.filter-all")
+            case .active: return L10n.string("background-tasks.filter-active")
+            case .finished: return L10n.string("background-tasks.filter-finished")
+            }
+        }
+    }
+
+    private var isLoading: Bool {
+        workspaces.contains(where: \.isLoadingServerBackgroundTasks)
+    }
+
+    private var allTasks: [FileBackgroundTaskSummary] {
+        workspaces.flatMap(\.serverBackgroundTasks)
+    }
+
+    private var hasErrorWithoutContent: Bool {
+        allTasks.isEmpty && workspaces.contains { $0.serverBackgroundTaskError != nil }
+    }
+
+    private func tasks(for workspace: WorkspaceModel) -> [FileBackgroundTaskSummary] {
+        switch filter {
+        case .all:
+            return workspace.serverBackgroundTasks
+        case .active:
+            return workspace.serverBackgroundTasks.filter { $0.state == .active }
+        case .finished:
+            return workspace.serverBackgroundTasks.filter { $0.state == .finished }
+        }
+    }
+
+    private var filteredTaskCount: Int {
+        workspaces.reduce(into: 0) { $0 += tasks(for: $1).count }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.string("background-tasks.title"))
+                        .font(.headline)
+                    Text(L10n.string("background-tasks.description"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Label(L10n.string("background-tasks.read-only"), systemImage: "eye")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    Task { await refreshAll() }
+                } label: {
+                    if isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label(L10n.string("background-tasks.refresh"), systemImage: "arrow.clockwise")
+                    }
+                }
+                .disabled(isLoading)
+                .accessibilityLabel(L10n.string("background-tasks.refresh"))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            HStack(spacing: 6) {
+                Text(L10n.string("background-tasks.filter-label"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ForEach([Filter.all, .active, .finished], id: \.self) { option in
+                    FilterChip(title: option.title, isSelected: filter == option) {
+                        filter = option
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+
+            Divider()
+
+            if isLoading && allTasks.isEmpty {
+                ProgressView(L10n.string("background-tasks.loading"))
+                    .fillsAvailableContentArea()
+            } else if hasErrorWithoutContent {
+                ContentUnavailableView {
+                    Label(L10n.string("background-tasks.error-title"), systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(workspaces.compactMap(\.serverBackgroundTaskError).first ?? L10n.string("background-tasks.error-description"))
+                } actions: {
+                    Button(L10n.string("background-tasks.retry")) {
+                        Task { await refreshAll() }
+                    }
+                }
+                .fillsAvailableContentArea()
+            } else if allTasks.isEmpty {
+                ContentUnavailableView(
+                    L10n.string("background-tasks.empty-title"),
+                    systemImage: "clock.badge.checkmark",
+                    description: Text(L10n.string("background-tasks.empty-description"))
+                )
+                .fillsAvailableContentArea()
+            } else if filteredTaskCount == 0 {
+                ContentUnavailableView {
+                    Label(L10n.string("background-tasks.filtered-empty-title"), systemImage: "line.3.horizontal.decrease.circle")
+                } description: {
+                    Text(L10n.string("background-tasks.filtered-empty-description"))
+                } actions: {
+                    Button(L10n.string("background-tasks.show-all")) { filter = .all }
+                }
+                .fillsAvailableContentArea()
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(workspaces, id: \.profile.id) { workspace in
+                            let visibleTasks = tasks(for: workspace)
+                            if !visibleTasks.isEmpty || workspace.serverBackgroundTaskError != nil {
+                                Text(workspace.profile.displayName)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 4)
+
+                                ForEach(visibleTasks) { task in
+                                    NASBackgroundTaskRow(task: task)
+                                }
+
+                                if let error = workspace.serverBackgroundTaskError {
+                                    Label(error, systemImage: "exclamationmark.triangle")
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                }
+
+                                if workspace.serverBackgroundTaskHasMore {
+                                    Button {
+                                        Task { await workspace.loadMoreServerBackgroundTasks() }
+                                    } label: {
+                                        if workspace.isLoadingServerBackgroundTasks {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        } else {
+                                            Text(L10n.string("background-tasks.load-more"))
+                                        }
+                                    }
+                                    .disabled(workspace.isLoadingServerBackgroundTasks)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+            }
+        }
+        .fillsAvailableContentArea(alignment: .topLeading)
+        .task(id: workspaces.map(\.profile.id)) {
+            for workspace in workspaces where !workspace.serverBackgroundTaskHasLoaded {
+                await workspace.refreshServerBackgroundTasks()
+            }
+        }
+    }
+
+    private func refreshAll() async {
+        for workspace in workspaces {
+            await workspace.refreshServerBackgroundTasks()
+        }
+    }
+}
+
+private struct NASBackgroundTaskRow: View {
+    let task: FileBackgroundTaskSummary
+
+    private var kindTitle: String {
+        switch task.kind {
+        case .copyOrMove: return L10n.string("background-tasks.kind-copy-move")
+        case .delete: return L10n.string("background-tasks.kind-delete")
+        case .compress: return L10n.string("background-tasks.kind-compress")
+        case .extract: return L10n.string("background-tasks.kind-extract")
+        }
+    }
+
+    private var stateTitle: String {
+        switch task.state {
+        case .active: return L10n.string("background-tasks.state-active")
+        case .finished: return L10n.string("background-tasks.state-finished")
+        }
+    }
+
+    private var icon: String {
+        switch task.kind {
+        case .copyOrMove: return "doc.on.doc"
+        case .delete: return "trash"
+        case .compress: return "archivebox"
+        case .extract: return "arrow.up.doc"
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(.tint)
+                .frame(width: 32, height: 32)
+                .background(Color.accentColor.opacity(0.1), in: Circle())
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(kindTitle)
+                        .font(.subheadline.weight(.semibold))
+                    Text(stateTitle)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                    Spacer()
+                    if let createdAt = task.createdAt {
+                        Text(createdAt, format: .dateTime.year().month().day().hour().minute())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if task.state == .active {
+                    if let progress = task.progress {
+                        ProgressView(value: progress)
+                            .accessibilityValue(progress.formatted(.percent.precision(.fractionLength(0))))
+                    } else {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(L10n.string("background-tasks.progress-unknown"))
+                    }
+                }
+
+                if let detail = detailText {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(L10n.string("background-tasks.row-accessibility", kindTitle, stateTitle))
+    }
+
+    private var detailText: String? {
+        if let processed = task.processedBytes {
+            let completed = ByteCountFormatter.string(fromByteCount: processed, countStyle: .file)
+            if let total = task.totalBytes {
+                let totalText = ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+                return L10n.string("background-tasks.bytes-progress", completed, totalText)
+            }
+            return L10n.string("background-tasks.bytes-processed", completed)
+        }
+        if let processed = task.processedItemCount {
+            if let total = task.totalItemCount {
+                return L10n.string("background-tasks.items-progress", processed, total)
+            }
+            return L10n.string("background-tasks.items-processed", processed)
+        }
+        return nil
     }
 }
 
@@ -5091,9 +5522,22 @@ struct FilePropertiesView: View {
     let item: FileItem
     let model: WorkspaceModel
     @Environment(\.dismiss) private var dismiss
-    @State private var folderStatistics: FolderStatistics?
-    @State private var isCalculatingFolderSize = false
-    @State private var folderSizeError: String?
+
+    private var folderStatistics: FolderStatistics? {
+        model.folderStatisticsResults[item.id]
+    }
+
+    private var isCalculatingFolderSize: Bool {
+        model.calculatingFolderStatisticsIDs.contains(item.id)
+    }
+
+    private var isCancellingFolderSize: Bool {
+        model.cancellingFolderStatisticsIDs.contains(item.id)
+    }
+
+    private var folderSizeError: String? {
+        model.folderStatisticsErrors[item.id]
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -5144,15 +5588,26 @@ struct FilePropertiesView: View {
                             Text(L10n.string("ui.50db7447b966f5ef"))
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            if isCalculatingFolderSize {
+                            if isCalculatingFolderSize, folderStatistics == nil {
                                 ProgressView()
                                     .controlSize(.small)
-                                Text(L10n.string("ui.e1fa1bf0cd786284"))
+                                Text(
+                                    L10n.string(
+                                        isCancellingFolderSize
+                                            ? "dirsize.cancelling"
+                                            : "dirsize.calculating"
+                                    )
+                                )
                                     .foregroundStyle(.secondary)
                             } else {
                                 Text(sizeDisplayValue)
                                     .monospacedDigit()
                                     .multilineTextAlignment(.trailing)
+                                if isCalculatingFolderSize {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .accessibilityLabel(L10n.string("dirsize.calculating"))
+                                }
                             }
                         }
                         if let folderStatistics {
@@ -5161,10 +5616,49 @@ struct FilePropertiesView: View {
                                 label: L10n.string("ui.7a688306423bec17"),
                                 value: L10n.string("ui.1455e4d7dd9068d4", String(describing: folderStatistics.fileCount), String(describing: folderStatistics.folderCount))
                             )
-                        } else if let folderSizeError {
+                        }
+                        if let folderSizeError {
                             Text(folderSizeError)
                                 .font(.caption)
                                 .foregroundStyle(.red)
+                        }
+                        if item.isDirectory {
+                            Divider().opacity(0.3)
+                            HStack(spacing: 10) {
+                                if isCalculatingFolderSize {
+                                    Button {
+                                        model.cancelFolderStatistics(for: item.id)
+                                    } label: {
+                                        Text(
+                                            L10n.string(
+                                                isCancellingFolderSize
+                                                    ? "dirsize.cancelling"
+                                                    : "dirsize.cancel"
+                                            )
+                                        )
+                                    }
+                                    .disabled(isCancellingFolderSize)
+                                } else {
+                                    Button {
+                                        model.startFolderStatistics(for: item)
+                                    } label: {
+                                        Text(
+                                            L10n.string(
+                                                folderStatistics == nil
+                                                    ? "dirsize.calculate"
+                                                    : "dirsize.recalculate"
+                                            )
+                                        )
+                                    }
+                                }
+                                Spacer()
+                            }
+                            if isCalculatingFolderSize {
+                                Text(L10n.string("dirsize.background-note"))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                         Divider().opacity(0.3)
                         SettingsRow(label: L10n.string("ui.1fb4d574da92f1c1"), value: item.path, isMonospaced: true)
@@ -5205,19 +5699,6 @@ struct FilePropertiesView: View {
             }
         }
         .frame(width: 520, height: 540)
-        .task(id: item.id) {
-            guard item.isDirectory else { return }
-            isCalculatingFolderSize = true
-            folderSizeError = nil
-            do {
-                folderStatistics = try await model.folderStatistics(for: item)
-            } catch is CancellationError {
-                return
-            } catch {
-                folderSizeError = L10n.string("ui.7d8eb62241dc5e7b")
-            }
-            isCalculatingFolderSize = false
-        }
     }
 
     private var sizeDisplayValue: String {

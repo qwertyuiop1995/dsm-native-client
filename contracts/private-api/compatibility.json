@@ -1,7 +1,7 @@
 {
   "$schema": "../schemas/private-api-compatibility.schema.json",
   "schemaVersion": 1,
-  "updatedAt": "2026-07-31",
+  "updatedAt": "2026-08-03",
   "environments": [
     {
       "id": "lab-a-dsm-7-2-1-69057-u12-20260729",
@@ -252,6 +252,117 @@
             "docs/api/discovery/endpoints/dsm-power-schedule.md"
           ],
           "notes": "合成响应只验证字段白名单、128 条上限、歧义星期降级、能力缺失零请求和零 save，不提升真实环境证据等级。"
+        }
+      ]
+    },
+    {
+      "id": "dsm-external-storage",
+      "componentId": "dsm-core",
+      "scope": "DSM 控制面板",
+      "capability": "USB 与 eSATA 外接存储只读摘要和安全弹出禁用边界",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "high",
+      "apiNames": [
+        "SYNO.Core.ExternalDevice.Storage.USB",
+        "SYNO.Core.ExternalDevice.Storage.eSATA"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "两个 list 独立发现和降级；均缺失时零请求，单项失败时保留另一项；USB eject 始终关闭。",
+      "documentRef": "docs/api/discovery/endpoints/dsm-external-storage.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "static",
+          "status": "candidate",
+          "versionMatrix": {
+            "SYNO.Core.ExternalDevice.Storage.USB": "静态目录仅确认 list / eject；客户端保守接受运行时发现的 v1 list，eject 禁用",
+            "SYNO.Core.ExternalDevice.Storage.eSATA": "静态目录仅确认 list；客户端保守接受运行时发现的 v1"
+          },
+          "verifiedAt": "2026-08-03",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/api/discovery/endpoints/dsm-external-storage.md"
+          ],
+          "notes": "合成响应只验证字段白名单、明确字节单位、每类 64 项上限、局部降级、能力缺失零请求和零 eject，不提升真实环境证据等级。"
+        }
+      ]
+    },
+    {
+      "id": "dsm-zram",
+      "componentId": "dsm-core",
+      "scope": "DSM 控制面板",
+      "capability": "内存压缩启用状态、明确字节容量与算法白名单只读摘要",
+      "classification": "internal",
+      "operation": "mixed",
+      "risk": "high",
+      "apiNames": [
+        "SYNO.Core.Hardware.ZRAM"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "能力缺失或 v1 不在发现范围时页面独立不可用且零请求；单位不明确的容量和未知算法降级；set 始终关闭。",
+      "documentRef": "docs/api/discovery/endpoints/dsm-zram.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "static",
+          "status": "candidate",
+          "versionMatrix": {
+            "SYNO.Core.Hardware.ZRAM": "静态目录确认 get / set；官方 DSM 页面已观察到内存压缩设置；客户端保守接受运行时发现的 v1 get，set 禁用"
+          },
+          "verifiedAt": "2026-08-03",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/api/discovery/endpoints/dsm-zram.md",
+            "docs/api/discovery/environments/2026-07-29-lab-a-dsm-69057-u12.md"
+          ],
+          "notes": "2026-08-03 只在同一匿名设备观察到官方设置控件，当日未重新核实 DSM 版本；未捕获或保存 API 请求/响应。合成响应只验证字段白名单、明确字节单位、算法归一、能力缺失零请求和零 set，不提升真实环境证据等级。"
+        }
+      ]
+    },
+    {
+      "id": "dsm-printer-bonjour-sharing",
+      "componentId": "dsm-core",
+      "scope": "DSM 控制面板 / 外接设备",
+      "capability": "打印机 Bonjour 共享只读状态候选",
+      "classification": "internal",
+      "operation": "read",
+      "risk": "medium",
+      "apiNames": [
+        "SYNO.Core.ExternalDevice.Printer.BonjourSharing"
+      ],
+      "paths": [
+        "runtime-discovered-via-SYNO.API.Info"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "fallback": "版本、参数和响应未确认前客户端整体关闭且零猜测请求；接口缺失、无权限或结构未知不解释为共享关闭或没有打印机。",
+      "documentRef": "docs/api/discovery/endpoints/dsm-printer-bonjour-sharing.md",
+      "verifications": [
+        {
+          "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
+          "evidenceLevel": "static",
+          "status": "candidate",
+          "versionMatrix": {
+            "SYNO.Core.ExternalDevice.Printer.BonjourSharing": "静态目录仅确认 get；版本、路径、参数、响应和权限未知，当前环境未观察或调用"
+          },
+          "verifiedAt": "2026-08-03",
+          "evidenceRefs": [
+            "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
+            "docs/api/discovery/endpoints/dsm-printer-bonjour-sharing.md"
+          ],
+          "notes": "没有注册客户端能力、领域模型、Adapter、响应 Schema 或 fixture；不复用通用 Bonjour/Avahi 字段，不推断打印机清单或共享状态。"
         }
       ]
     },

@@ -96,6 +96,44 @@ struct NasSettingsView: View {
                     }
                 )
             }
+        case .externalStorage:
+            AdministrationPageContainer(
+                isLoading: model.isLoading(.externalStorage),
+                hasLoaded: model.hasLoaded(.externalStorage),
+                hasContent: model.externalStorage != nil,
+                errorMessage: model.errorMessage(for: .externalStorage),
+                emptyTitle: L10n.string("external-storage.empty-title"),
+                emptyDescription: L10n.string("external-storage.empty-description"),
+                retry: { await model.activate(.externalStorage, force: true) }
+            ) {
+                if let directory = model.externalStorage {
+                    ExternalStorageView(
+                        directory: directory,
+                        isRefreshing: model.isLoading(.externalStorage),
+                        refresh: {
+                            await model.activate(.externalStorage, force: true)
+                        }
+                    )
+                }
+            }
+        case .zram:
+            AdministrationPageContainer(
+                isLoading: model.isLoading(.zram),
+                hasLoaded: model.hasLoaded(.zram),
+                hasContent: model.zram.map(hasZRAMContent) ?? false,
+                errorMessage: model.errorMessage(for: .zram),
+                emptyTitle: L10n.string("zram.empty-title"),
+                emptyDescription: L10n.string("zram.empty-description"),
+                retry: { await model.activate(.zram, force: true) }
+            ) {
+                if let snapshot = model.zram {
+                    ZRAMView(
+                        snapshot: snapshot,
+                        isRefreshing: model.isLoading(.zram),
+                        refresh: { await model.activate(.zram, force: true) }
+                    )
+                }
+            }
         case .fileServices:
             AdministrationPageContainer(
                 isLoading: model.isLoading(.fileServices),
@@ -427,6 +465,11 @@ struct NasSettingsView: View {
         switch page {
         case .overview: (L10n.string("ui.582da2581a0cd0ee"), "gauge.with.dots.needle.67percent")
         case .storage: (L10n.string("ui.0e41f8e3d59ec47b"), "internaldrive")
+        case .externalStorage: (
+            L10n.string("external-storage.navigation-title"),
+            "externaldrive"
+        )
+        case .zram: (L10n.string("zram.navigation-title"), "memorychip")
         case .fileServices: (L10n.string("ui.f771e808e831f599"), "folder.badge.gearshape")
         case .terminal: (L10n.string("ui.678b783fb578172b"), "terminal")
         case .network: (L10n.string("ui.841fb4ce271a4e64"), "network")
@@ -448,6 +491,382 @@ struct NasSettingsView: View {
         case .logs: (L10n.string("ui.366ada1d2fcfc4b3"), "doc.text.magnifyingglass")
         case .connections: (L10n.string("ui.e403ba5798ba13a4"), "network")
         }
+    }
+}
+
+private func hasZRAMContent(_ snapshot: NasZRAMSnapshot) -> Bool {
+    snapshot.isEnabled != nil
+        || snapshot.configuredBytes != nil
+        || snapshot.algorithm != .unknown
+}
+
+private struct ZRAMView: View {
+    let snapshot: NasZRAMSnapshot
+    let isRefreshing: Bool
+    let refresh: () async -> Void
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L10n.string("zram.title"))
+                                .font(.title2.weight(.semibold))
+                            Text(L10n.string("zram.description"))
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 12)
+                        Button {
+                            Task { await refresh() }
+                        } label: {
+                            HStack(spacing: 6) {
+                                if isRefreshing {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                                Text(L10n.string("zram.refresh"))
+                            }
+                        }
+                        .disabled(isRefreshing)
+                        .help(L10n.string("zram.refresh-help"))
+                    }
+                    Label(L10n.string("zram.read-only"), systemImage: "eye")
+                        .font(.caption.weight(.medium))
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section(L10n.string("zram.details-title")) {
+                detailRow(
+                    title: L10n.string("zram.status-title"),
+                    value: statusText,
+                    icon: statusIcon
+                )
+                detailRow(
+                    title: L10n.string("zram.capacity-title"),
+                    value: capacityText,
+                    icon: "memorychip"
+                )
+                detailRow(
+                    title: L10n.string("zram.algorithm-title"),
+                    value: algorithmText,
+                    icon: "archivebox"
+                )
+            }
+
+            Section {
+                Label(
+                    L10n.string("zram.manage-in-dsm"),
+                    systemImage: "info.circle"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.inset)
+        .fillsAvailableContentArea(alignment: .topLeading)
+    }
+
+    private func detailRow(title: String, value: String, icon: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+            Text(title)
+            Spacer(minLength: 12)
+            Text(value)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L10n.string("zram.row-accessibility", title, value))
+    }
+
+    private var statusText: String {
+        switch snapshot.isEnabled {
+        case true: L10n.string("zram.status-enabled")
+        case false: L10n.string("zram.status-disabled")
+        case nil: L10n.string("zram.value-unavailable")
+        }
+    }
+
+    private var statusIcon: String {
+        switch snapshot.isEnabled {
+        case true: "checkmark.circle"
+        case false: "pause.circle"
+        case nil: "questionmark.circle"
+        }
+    }
+
+    private var capacityText: String {
+        snapshot.configuredBytes.map {
+            ByteCountFormatter.string(fromByteCount: $0, countStyle: .memory)
+        } ?? L10n.string("zram.value-unavailable")
+    }
+
+    private var algorithmText: String {
+        switch snapshot.algorithm {
+        case .lz4: L10n.string("zram.algorithm-lz4")
+        case .lzo: L10n.string("zram.algorithm-lzo")
+        case .zstd: L10n.string("zram.algorithm-zstd")
+        case .unknown: L10n.string("zram.value-unavailable")
+        }
+    }
+}
+
+private struct ExternalStorageView: View {
+    private enum Filter: String, CaseIterable, Identifiable {
+        case all
+        case usb
+        case eSATA
+
+        var id: Self { self }
+    }
+
+    let directory: NasExternalStorageDirectory
+    let isRefreshing: Bool
+    let refresh: () async -> Void
+
+    @State private var filter: Filter = .all
+
+    private var filteredDevices: [NasExternalStorageDevice] {
+        switch filter {
+        case .all:
+            directory.devices
+        case .usb:
+            directory.devices.filter { $0.connection == .usb }
+        case .eSATA:
+            directory.devices.filter { $0.connection == .eSATA }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+
+            if directory.devices.isEmpty {
+                ContentUnavailableView(
+                    L10n.string("external-storage.empty-title"),
+                    systemImage: "externaldrive.badge.questionmark",
+                    description: Text(
+                        L10n.string("external-storage.empty-description")
+                    )
+                )
+                .fillsAvailableContentArea()
+            } else if filteredDevices.isEmpty {
+                ContentUnavailableView(
+                    L10n.string("external-storage.filtered-empty-title"),
+                    systemImage: "line.3.horizontal.decrease.circle",
+                    description: Text(
+                        L10n.string("external-storage.filtered-empty-description")
+                    )
+                )
+                .fillsAvailableContentArea()
+            } else {
+                List {
+                    Section(L10n.string("external-storage.list-title")) {
+                        ForEach(filteredDevices) { device in
+                            deviceRow(device)
+                        }
+                    }
+                }
+                .listStyle(.inset)
+            }
+        }
+        .fillsAvailableContentArea(alignment: .topLeading)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.string("external-storage.title"))
+                        .font(.title2.weight(.semibold))
+                    Text(L10n.string("external-storage.description"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isRefreshing {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Text(L10n.string("external-storage.refresh"))
+                    }
+                }
+                .disabled(isRefreshing)
+                .help(L10n.string("external-storage.refresh-help"))
+            }
+
+            HStack(spacing: 8) {
+                Label(
+                    L10n.string("external-storage.read-only"),
+                    systemImage: "eye"
+                )
+                .font(.caption.weight(.medium))
+
+                Text(
+                    L10n.string(
+                        "external-storage.count",
+                        String(describing: directory.total)
+                    )
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Picker(
+                L10n.string("external-storage.filter-title"),
+                selection: $filter
+            ) {
+                ForEach(Filter.allCases) { item in
+                    Text(filterLabel(item)).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 420)
+
+            if directory.isTruncated {
+                warningLabel(
+                    L10n.string("external-storage.truncated"),
+                    systemImage: "list.bullet.rectangle"
+                )
+            }
+
+            if !directory.unavailableConnections.isEmpty {
+                warningLabel(
+                    L10n.string(
+                        "external-storage.partial-unavailable",
+                        directory.unavailableConnections
+                            .map(connectionLabel)
+                            .joined(separator: L10n.string("external-storage.separator"))
+                    ),
+                    systemImage: "exclamationmark.triangle"
+                )
+            }
+        }
+        .padding(16)
+    }
+
+    private func warningLabel(_ text: String, systemImage: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func filterLabel(_ value: Filter) -> String {
+        switch value {
+        case .all: L10n.string("external-storage.filter-all")
+        case .usb: L10n.string("external-storage.connection-usb")
+        case .eSATA: L10n.string("external-storage.connection-esata")
+        }
+    }
+
+    private func deviceRow(_ device: NasExternalStorageDevice) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: device.connection == .usb ? "externaldrive" : "externaldrive.connected.to.line.below")
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(device.displayName ?? L10n.string("external-storage.unnamed-device"))
+                    .font(.body.weight(.medium))
+                    .textSelection(.enabled)
+                Text(capacityDescription(device))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            Label(statusText(device.status), systemImage: statusIcon(device.status))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            Text(connectionLabel(device.connection))
+                .font(.caption2.weight(.medium))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(.quaternary, in: Capsule())
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            L10n.string(
+                "external-storage.row-accessibility",
+                device.displayName ?? L10n.string("external-storage.unnamed-device"),
+                connectionLabel(device.connection),
+                statusText(device.status),
+                capacityDescription(device)
+            )
+        )
+    }
+
+    private func connectionLabel(_ connection: NasExternalStorageConnection) -> String {
+        switch connection {
+        case .usb: L10n.string("external-storage.connection-usb")
+        case .eSATA: L10n.string("external-storage.connection-esata")
+        }
+    }
+
+    private func statusText(_ status: NasExternalStorageStatus) -> String {
+        switch status {
+        case .ready: L10n.string("external-storage.status-ready")
+        case .busy: L10n.string("external-storage.status-busy")
+        case .unavailable: L10n.string("external-storage.status-unavailable")
+        case .unknown: L10n.string("external-storage.status-unknown")
+        }
+    }
+
+    private func statusIcon(_ status: NasExternalStorageStatus) -> String {
+        switch status {
+        case .ready: "checkmark.circle"
+        case .busy: "clock"
+        case .unavailable: "exclamationmark.triangle"
+        case .unknown: "questionmark.circle"
+        }
+    }
+
+    private func capacityDescription(_ device: NasExternalStorageDevice) -> String {
+        guard let capacity = device.capacityBytes else {
+            return L10n.string("external-storage.capacity-unavailable")
+        }
+        if let used = device.usedBytes {
+            return L10n.string(
+                "external-storage.capacity-used",
+                byteCount(used),
+                byteCount(capacity)
+            )
+        }
+        return L10n.string("external-storage.capacity-total", byteCount(capacity))
+    }
+
+    private func byteCount(_ value: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
+        formatter.countStyle = .file
+        formatter.includesUnit = true
+        formatter.isAdaptive = true
+        formatter.zeroPadsFractionDigits = false
+        return formatter.string(fromByteCount: value)
     }
 }
 

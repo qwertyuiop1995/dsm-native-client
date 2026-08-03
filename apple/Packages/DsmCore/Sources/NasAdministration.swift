@@ -852,6 +852,87 @@ public struct NasPowerScheduleDate: Equatable, Sendable {
     }
 }
 
+/// 外接存储只读目录。设备路径、挂载路径、共享名和序列号不得进入领域模型。
+public struct NasExternalStorageDirectory: Equatable, Sendable {
+    public let devices: [NasExternalStorageDevice]
+    public let total: Int
+    public let isTruncated: Bool
+    public let unavailableConnections: [NasExternalStorageConnection]
+
+    public init(
+        devices: [NasExternalStorageDevice],
+        total: Int,
+        isTruncated: Bool,
+        unavailableConnections: [NasExternalStorageConnection]
+    ) {
+        self.devices = devices
+        self.total = total
+        self.isTruncated = isTruncated
+        self.unavailableConnections = unavailableConnections
+    }
+}
+
+public struct NasExternalStorageDevice: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let displayName: String?
+    public let connection: NasExternalStorageConnection
+    public let status: NasExternalStorageStatus
+    public let capacityBytes: Int64?
+    public let usedBytes: Int64?
+
+    public init(
+        id: String,
+        displayName: String?,
+        connection: NasExternalStorageConnection,
+        status: NasExternalStorageStatus,
+        capacityBytes: Int64?,
+        usedBytes: Int64?
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.connection = connection
+        self.status = status
+        self.capacityBytes = capacityBytes
+        self.usedBytes = usedBytes
+    }
+}
+
+public enum NasExternalStorageConnection: String, CaseIterable, Equatable, Sendable {
+    case usb
+    case eSATA
+}
+
+public enum NasExternalStorageStatus: Equatable, Sendable {
+    case ready
+    case busy
+    case unavailable
+    case unknown
+}
+
+/// ZRAM 只读摘要。原始内核参数和设备节点不得进入领域模型。
+public struct NasZRAMSnapshot: Equatable, Sendable {
+    public let isEnabled: Bool?
+    public let configuredBytes: Int64?
+    public let algorithm: NasZRAMAlgorithm
+
+    public init(
+        isEnabled: Bool?,
+        configuredBytes: Int64?,
+        algorithm: NasZRAMAlgorithm
+    ) {
+        self.isEnabled = isEnabled
+        self.configuredBytes = configuredBytes
+        self.algorithm = algorithm
+    }
+}
+
+public enum NasZRAMAlgorithm: Equatable, Sendable {
+    case lz4
+    case lzo
+    case zstd
+    case unknown
+}
+
 public struct NasConnectionPage: Equatable, Sendable {
     public let connections: [NasConnection]
     public let total: Int
@@ -1470,6 +1551,8 @@ public protocol NasSettingsRepository: Sendable {
     ) async throws -> MutationResult
     func loadHardwareSettings() async throws -> NasHardwareSettings
     func loadPowerSchedule() async throws -> NasPowerScheduleSnapshot
+    func loadExternalStorage() async throws -> NasExternalStorageDirectory
+    func loadZRAM() async throws -> NasZRAMSnapshot
     func saveHardwareSettings(_ settings: NasHardwareSettings) async throws
     func saveHardwareSettingsResult(
         _ settings: NasHardwareSettings
@@ -1766,6 +1849,12 @@ public extension NasSettingsRepository {
         throw unsupportedManagementOperation()
     }
     func loadPowerSchedule() async throws -> NasPowerScheduleSnapshot {
+        throw unsupportedManagementOperation()
+    }
+    func loadExternalStorage() async throws -> NasExternalStorageDirectory {
+        throw unsupportedManagementOperation()
+    }
+    func loadZRAM() async throws -> NasZRAMSnapshot {
         throw unsupportedManagementOperation()
     }
     func saveHardwareSettings(_ settings: NasHardwareSettings) async throws {

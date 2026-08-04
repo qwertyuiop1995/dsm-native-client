@@ -14,12 +14,42 @@ body:
 
         **This form is public. Do not submit logs, screenshots, HAR files, raw errors, serial numbers, device names, addresses, QuickConnect IDs, accounts, real file names, or paths.**
 
+  - type: dropdown
+    id: schema_version
+    attributes:
+      label: 报告结构版本 / Report schema version
+      description: 当前公开表单只生成 schemaVersion 2 报告。 / This public form currently produces only schemaVersion 2 reports.
+      options:
+        - "2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: test_suite_version
+    attributes:
+      label: 测试套件版本 / Test suite version
+      description: 版本 1 包含 14 项基础能力；版本 2 包含这 14 项及 5 项 macOS 桌面云盘能力。 / Version 1 contains 14 base capabilities; version 2 adds five macOS desktop cloud-drive capabilities.
+      options:
+        - "2 — 19 capabilities / 19 项能力"
+        - "1 — 14 capabilities / 14 项能力"
+    validations:
+      required: true
+
   - type: input
     id: app_version
     attributes:
       label: 岚仓版本 / LanStash version
       description: 在 App 的“关于”页面查看；请勿填写自定义调试标识。 / Find this on the About screen; do not include custom debug identifiers.
       placeholder: 0.3.0
+    validations:
+      required: true
+
+  - type: input
+    id: app_commit
+    attributes:
+      label: 岚仓源码提交 / LanStash source commit
+      description: 填写 unknown，或 7 至 40 位十六进制 Git commit（大小写均可）；不要填写分支名或调试标识。 / Enter unknown or a 7-40 character hexadecimal Git commit (either letter case); do not enter a branch name or debug identifier.
+      placeholder: unknown
     validations:
       required: true
 
@@ -68,11 +98,29 @@ body:
       required: true
 
   - type: input
-    id: dsm
+    id: dsm_version
     attributes:
-      label: DSM 完整版本 / Complete DSM version
-      description: 从 DSM 更新页面抄写版本、Build 和 Update，不要附带主机信息。 / Copy the version, build, and update from DSM without host information.
-      placeholder: 7.2.2-72806 Update 3
+      label: DSM 版本 / DSM version
+      description: 仅填写由 2 至 4 段数字组成的公开版本号。 / Enter only the public version number containing 2-4 numeric components.
+      placeholder: 7.2.2
+    validations:
+      required: true
+
+  - type: input
+    id: dsm_build
+    attributes:
+      label: DSM Build
+      description: 仅填写 4 至 8 位数字，不要附带设备或主机信息。 / Enter only 4-8 digits without device or host information.
+      placeholder: "72806"
+    validations:
+      required: true
+
+  - type: input
+    id: dsm_update
+    attributes:
+      label: DSM Update
+      description: 填写 0 至 999 的 Update 编号；没有 Update 时填写 none，不确定时填写 unknown。 / Enter the Update number from 0 to 999, none when absent, or unknown when unsure.
+      placeholder: "3"
     validations:
       required: true
 
@@ -131,15 +179,15 @@ body:
       value: |
         ## 只读与登录结果 / Read-only and sign-in results
 
-        保留每个能力 ID，只把值改成 `passed`、`failed`、`partial`、`skipped` 或 `not-supported`。失败或部分通过时，在下一行填写一个固定失败类别，不要粘贴原始错误。
+        保留每个能力 ID，只把值改成 `passed`、`failed`、`partial`、`skipped` 或 `not-supported`。失败或部分通过时，还必须在下方“结构化失败记录”中填写对应白名单字段。
 
-        Keep every capability ID and change only its value to `passed`, `failed`, `partial`, `skipped`, or `not-supported`. For a failed or partial result, add `<capabilityId>.failureCategory: <category>` on the next line. Categories: `permission-denied`, `operation-failed`, `connection-failed`, `unexpected-result`, `app-crashed`, `unknown`. Never paste a raw error.
+        Keep every capability ID and change only its value to `passed`, `failed`, `partial`, `skipped`, or `not-supported`. Every failed or partial result also requires the corresponding allowlisted fields under “Structured failure records” below.
 
   - type: textarea
     id: readonly_results
     attributes:
       label: 只读与登录测试 / Read-only and sign-in tests
-      description: 测试指南对应 testSuiteVersion 2；旧版报告仍可保留。 / The test guide corresponds to testSuiteVersion 2; older reports remain valid.
+      description: testSuiteVersion 1 和 2 都必须保留以下 8 项。 / Keep all eight entries for both testSuiteVersion 1 and 2.
       value: |
         connection.resolve: skipped
         authentication.password: skipped
@@ -149,8 +197,6 @@ body:
         files.browse: skipped
         files.search: skipped
         files.download: skipped
-        # 失败或部分通过示例 / Failed or partial example:
-        # files.download.failureCategory: operation-failed
       render: yaml
     validations:
       required: true
@@ -175,8 +221,67 @@ body:
         files.copy-move: skipped
         files.recycle: skipped
         files.restore: skipped
-        # 失败或部分通过示例 / Failed or partial example:
-        # files.upload.failureCategory: operation-failed
+      render: yaml
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## macOS 桌面云盘 / macOS desktop cloud drive
+
+        这些能力从 testSuiteVersion 2 开始纳入报告。选择版本 1 时保留默认值，由审核者从结构化报告中排除；选择版本 2 时，macOS 未使用正式签名包或未执行对应测试应填写 `skipped`，iPhone、iPad、Android 和 Windows 必须全部填写 `not-supported`。不能用普通文件浏览结果代替 Finder 云盘结论。
+
+        These capabilities start with testSuiteVersion 2. For version 1, leave the defaults and reviewers will exclude them from the structured report. For version 2, use `skipped` on macOS when a properly signed build was unavailable or the check was not performed; on iPhone, iPad, Android, and Windows, every result below must be `not-supported`. Regular file browsing cannot substitute for a Finder cloud-drive result.
+
+  - type: textarea
+    id: desktop_drive_results
+    attributes:
+      label: 桌面云盘测试 / Desktop cloud-drive tests
+      value: |
+        desktop-drive.mount: skipped
+        desktop-drive.browse: skipped
+        desktop-drive.download-resume: skipped
+        desktop-drive.keep-offline: skipped
+        desktop-drive.upgrade-restore: skipped
+        # 非 macOS 平台请把以上五项全部改为 not-supported。
+        # On non-macOS platforms, change all five results above to not-supported.
+      render: yaml
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 结构化失败记录 / Structured failure records
+
+        仅为 `failed` 或 `partial` 能力填写 `failure`，其他状态禁止填写。`stage` 只能是 `setup`、`discovery`、`authentication`、`request`、`submission`、`readback`、`final-state`、`cleanup`、`unknown`；`errorCategory` 只能是 `permission-denied`、`operation-failed`、`connection-failed`、`unexpected-result`、`app-crashed`、`unknown`。`apiName` 填写 `SYNO.*` 名称或 `unknown`，`apiVersion` 填写 1–99 或 `unknown`，`httpStatus` 填写 100–599 或 `null`。
+
+        Add `failure` only for `failed` or `partial`; it is prohibited for other statuses. Use only these `stage` values: `setup`, `discovery`, `authentication`, `request`, `submission`, `readback`, `final-state`, `cleanup`, `unknown`. Use only these `errorCategory` values: `permission-denied`, `operation-failed`, `connection-failed`, `unexpected-result`, `app-crashed`, `unknown`. Set `apiName` to a `SYNO.*` name or `unknown`, `apiVersion` to 1–99 or `unknown`, and `httpStatus` to 100–599 or `null`.
+
+        `retryPerformed` 必须为布尔值，`rawResponseIncluded` 必须为 `false`。禁止增加 `message`、`body`、`path`、`host`、原始错误或原始响应。 / `retryPerformed` must be Boolean and `rawResponseIncluded` must be `false`. Never add `message`, `body`, `path`, `host`, raw-error text, or a raw response.
+
+  - type: textarea
+    id: failure_details
+    attributes:
+      label: 结构化失败记录 / Structured failure records
+      description: >-
+        每个 failed 或 partial 能力填写一项；没有失败时保留 failures: []。只允许模板中的字段，禁止 message、body、path、host 或原始错误。 /
+        Add one item for every failed or partial capability; keep failures: [] when none failed. Use only the template fields; message, body, path, host, and raw errors are prohibited.
+      value: |
+        failures: []
+        # 失败或部分通过时，将上一行替换为以下结构并删除注释符号：
+        # For failed or partial results, replace the line above with this structure and remove the comment markers:
+        # failures:
+        #   - capabilityId: files.download
+        #     failure:
+        #       stage: request
+        #       errorCategory: connection-failed
+        #       apiName: unknown
+        #       apiVersion: unknown
+        #       httpStatus: null
+        #       retryPerformed: false
+        #       rawResponseIncluded: false
       render: yaml
     validations:
       required: true

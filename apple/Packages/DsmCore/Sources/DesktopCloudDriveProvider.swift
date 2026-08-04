@@ -36,6 +36,7 @@ public struct DesktopDriveProviderConfiguration: Codable, Equatable, Sendable {
 public enum DesktopDriveConfigurationStoreError: Error, Equatable, Sendable {
     case sharedContainerUnavailable
     case connectionUnavailable
+    case invalidStateTransition
 }
 
 public actor DesktopDriveConfigurationStore {
@@ -45,12 +46,175 @@ public actor DesktopDriveConfigurationStore {
         var mappings: [UUID: DesktopDriveMapping] = [:]
         var itemPaths: [UUID: [String: String]]?
         var runtimes: [UUID: DesktopDriveMappingRuntime]?
+        var runtimeRecoveryMappingIDs: Set<UUID>?
+        var pendingSessionRemovalProfileIDs: Set<UUID>?
         var providerAvailable: Bool?
+
+        private enum CodingKeys: String, CodingKey {
+            case version
+            case connections
+            case mappings
+            case itemPaths
+            case runtimes
+            case runtimeRecoveryMappingIDs
+            case pendingSessionRemovalProfileIDs
+            case providerAvailable
+        }
+
+        init() {}
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 2
+            connections = try container.decode(
+                [UUID: DesktopDriveProviderConnection].self,
+                forKey: .connections
+            )
+            mappings = try container.decode(
+                [UUID: DesktopDriveMapping].self,
+                forKey: .mappings
+            )
+            itemPaths = try container.decodeIfPresent(
+                [UUID: [String: String]].self,
+                forKey: .itemPaths
+            )
+            providerAvailable = try container.decodeIfPresent(
+                Bool.self,
+                forKey: .providerAvailable
+            )
+            let persistedRecoveryIDs: Set<UUID>
+            do {
+                persistedRecoveryIDs = Set(
+                    try container.decodeIfPresent(
+                        [UUID].self,
+                        forKey: .runtimeRecoveryMappingIDs
+                    ) ?? []
+                )
+            } catch {
+                persistedRecoveryIDs = Set(mappings.keys)
+            }
+            runtimeRecoveryMappingIDs = persistedRecoveryIDs
+            pendingSessionRemovalProfileIDs = Set(
+                try container.decodeIfPresent(
+                    [UUID].self,
+                    forKey: .pendingSessionRemovalProfileIDs
+                ) ?? []
+            )
+
+            guard container.contains(.runtimes) else {
+                runtimes = nil
+                runtimeRecoveryMappingIDs = persistedRecoveryIDs.intersection(
+                    mappings.keys
+                )
+                return
+            }
+            do {
+                let recovered = try container.decodeIfPresent(
+                    RecoverableRuntimeDictionary.self,
+                    forKey: .runtimes
+                )
+                runtimes = recovered?.values
+                runtimeRecoveryMappingIDs = persistedRecoveryIDs.union(
+                    recovered?.corruptIdentifiers ?? []
+                )
+            } catch {
+                runtimes = Dictionary(uniqueKeysWithValues: mappings.keys.map {
+                    ($0, DesktopDriveMappingRuntime(state: .failed))
+                })
+                runtimeRecoveryMappingIDs = persistedRecoveryIDs.union(
+                    mappings.keys
+                )
+            }
+            runtimeRecoveryMappingIDs = runtimeRecoveryMappingIDs?
+                .intersection(mappings.keys)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(version, forKey: .version)
+            try container.encode(connections, forKey: .connections)
+            try container.encode(mappings, forKey: .mappings)
+            try container.encodeIfPresent(itemPaths, forKey: .itemPaths)
+            try container.encodeIfPresent(
+                runtimes.map(RecoverableRuntimeDictionary.init(values:)),
+                forKey: .runtimes
+            )
+            try container.encodeIfPresent(
+                runtimeRecoveryMappingIDs?.sorted {
+                    $0.uuidString < $1.uuidString
+                },
+                forKey: .runtimeRecoveryMappingIDs
+            )
+            try container.encodeIfPresent(
+                pendingSessionRemovalProfileIDs?.sorted {
+                    $0.uuidString < $1.uuidString
+                },
+                forKey: .pendingSessionRemovalProfileIDs
+            )
+            try container.encodeIfPresent(
+                providerAvailable,
+                forKey: .providerAvailable
+            )
+        }
+    }
+
+    /// 单条运行时记录损坏时保留其映射，并将该记录降级为需要本机恢复。
+    private struct RecoverableRuntimeDictionary: Codable {
+        var values: [UUID: DesktopDriveMappingRuntime]
+        var corruptIdentifiers: Set<UUID> = []
+
+        init(values: [UUID: DesktopDriveMappingRuntime]) {
+            self.values = values
+        }
+
+        init(from decoder: Decoder) throws {
+            var container = try decoder.unkeyedContainer()
+            var decoded: [UUID: DesktopDriveMappingRuntime] = [:]
+            while !container.isAtEnd {
+                let rawIdentifier = try container.decode(String.self)
+                guard !container.isAtEnd else {
+                    if let identifier = UUID(uuidString: rawIdentifier) {
+                        decoded[identifier] = .init(state: .failed)
+                        corruptIdentifiers.insert(identifier)
+                    }
+                    break
+                }
+                let valueDecoder = try container.superDecoder()
+                guard let identifier = UUID(uuidString: rawIdentifier) else {
+                    continue
+                }
+                do {
+                    decoded[identifier] = try DesktopDriveMappingRuntime(
+                        from: valueDecoder
+                    )
+                } catch {
+                    decoded[identifier] = .init(state: .failed)
+                    corruptIdentifiers.insert(identifier)
+                }
+            }
+            values = decoded
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.unkeyedContainer()
+            for identifier in values.keys.sorted(by: {
+                $0.uuidString < $1.uuidString
+            }) {
+                guard var runtime = values[identifier] else { continue }
+                try container.encode(identifier.uuidString)
+                if runtime.state == .recoveryRequired {
+                    runtime.state = .failed
+                }
+                try container.encode(runtime)
+            }
+        }
     }
 
     private let directoryURL: URL?
     private let fileManager: FileManager
     private let writeOptions: Data.WritingOptions
+    /// 只用于读取降级；任何写入仍必须先成功解码当前磁盘快照。
+    private var lastSuccessfullyDecodedSnapshot: Snapshot?
 
     public init(
         appGroupIdentifier: String = DesktopDriveSharedContainer.appGroupIdentifier,
@@ -118,6 +282,7 @@ public actor DesktopDriveConfigurationStore {
             snapshot.mappings.removeValue(forKey: id)
             snapshot.itemPaths?[id] = nil
             snapshot.runtimes?[id] = nil
+            snapshot.runtimeRecoveryMappingIDs?.remove(id)
         }
     }
 
@@ -133,6 +298,31 @@ public actor DesktopDriveConfigurationStore {
             for mappingID in removedIDs {
                 snapshot.itemPaths?[mappingID] = nil
                 snapshot.runtimes?[mappingID] = nil
+                snapshot.runtimeRecoveryMappingIDs?.remove(mappingID)
+            }
+        }
+    }
+
+    /// 返回会话删除尚未得到确认的 profile，供启动恢复继续处理。
+    public func pendingSessionRemovalProfileIDs() throws -> Set<UUID> {
+        try readSnapshot { snapshot in
+            snapshot.pendingSessionRemovalProfileIDs ?? []
+        }
+    }
+
+    /// 标记或清除 profile 级会话删除任务；只有外部确认删除成功后才应清除。
+    public func setSessionRemovalPending(
+        _ isPending: Bool,
+        profileID: UUID
+    ) throws {
+        try updateSnapshot { snapshot in
+            if snapshot.pendingSessionRemovalProfileIDs == nil {
+                snapshot.pendingSessionRemovalProfileIDs = []
+            }
+            if isPending {
+                snapshot.pendingSessionRemovalProfileIDs?.insert(profileID)
+            } else {
+                snapshot.pendingSessionRemovalProfileIDs?.remove(profileID)
             }
         }
     }
@@ -175,8 +365,12 @@ public actor DesktopDriveConfigurationStore {
     public func runtime(
         mappingID: UUID
     ) throws -> DesktopDriveMappingRuntime {
-        try readSnapshot {
-            $0.runtimes?[mappingID] ?? .init()
+        try readSnapshot { snapshot in
+            var runtime = snapshot.runtimes?[mappingID] ?? .init()
+            if snapshot.runtimeRecoveryMappingIDs?.contains(mappingID) == true {
+                runtime.state = .recoveryRequired
+            }
+            return runtime
         }
     }
 
@@ -191,7 +385,26 @@ public actor DesktopDriveConfigurationStore {
             if snapshot.runtimes == nil {
                 snapshot.runtimes = [:]
             }
-            snapshot.runtimes?[mappingID] = runtime
+            let currentState = effectiveState(
+                in: snapshot,
+                mappingID: mappingID
+            )
+            guard currentState != .recoveryRequired,
+                  isAllowedStoreTransition(
+                    from: currentState,
+                    to: runtime.state
+                  ) else {
+                throw DesktopDriveConfigurationStoreError.invalidStateTransition
+            }
+            var storedRuntime = runtime
+            if runtime.state == .recoveryRequired {
+                storedRuntime.state = .failed
+                if snapshot.runtimeRecoveryMappingIDs == nil {
+                    snapshot.runtimeRecoveryMappingIDs = []
+                }
+                snapshot.runtimeRecoveryMappingIDs?.insert(mappingID)
+            }
+            snapshot.runtimes?[mappingID] = storedRuntime
         }
     }
 
@@ -204,15 +417,53 @@ public actor DesktopDriveConfigurationStore {
             guard snapshot.mappings[mappingID] != nil else {
                 return
             }
+            let currentState = effectiveState(
+                in: snapshot,
+                mappingID: mappingID
+            )
+            guard isAllowedStoreTransition(from: currentState, to: state) else {
+                throw DesktopDriveConfigurationStoreError.invalidStateTransition
+            }
             var runtime = snapshot.runtimes?[mappingID] ?? .init()
-            runtime.state = state
+            runtime.state = state == .recoveryRequired ? .failed : state
             if let successfulCheckAt {
                 runtime.lastSuccessfulCheckAt = successfulCheckAt
             }
             if snapshot.runtimes == nil {
                 snapshot.runtimes = [:]
             }
+            if state == .recoveryRequired {
+                if snapshot.runtimeRecoveryMappingIDs == nil {
+                    snapshot.runtimeRecoveryMappingIDs = []
+                }
+                snapshot.runtimeRecoveryMappingIDs?.insert(mappingID)
+            } else if state == .removing {
+                snapshot.runtimeRecoveryMappingIDs?.remove(mappingID)
+            }
             snapshot.runtimes?[mappingID] = runtime
+        }
+    }
+
+    /// 只有显式恢复完成后才同时清除恢复标记并提交可用状态。
+    public func completeRuntimeRecovery(
+        mappingID: UUID,
+        successfulCheckAt: Date
+    ) throws {
+        try updateSnapshot { snapshot in
+            guard snapshot.mappings[mappingID] != nil else { return }
+            guard effectiveState(in: snapshot, mappingID: mappingID)
+                    == .recoveryRequired else {
+                throw DesktopDriveConfigurationStoreError.invalidStateTransition
+            }
+            var runtime = snapshot.runtimes?[mappingID] ?? .init()
+            runtime.state = .available
+            runtime.isManuallyPaused = false
+            runtime.lastSuccessfulCheckAt = successfulCheckAt
+            if snapshot.runtimes == nil {
+                snapshot.runtimes = [:]
+            }
+            snapshot.runtimes?[mappingID] = runtime
+            snapshot.runtimeRecoveryMappingIDs?.remove(mappingID)
         }
     }
 
@@ -224,9 +475,20 @@ public actor DesktopDriveConfigurationStore {
             guard snapshot.mappings[mappingID] != nil else {
                 return
             }
+            let targetState: DesktopDriveMappingState = isPaused ? .paused : .checking
+            let currentState = effectiveState(
+                in: snapshot,
+                mappingID: mappingID
+            )
+            guard isAllowedStoreTransition(
+                from: currentState,
+                to: targetState
+            ) else {
+                throw DesktopDriveConfigurationStoreError.invalidStateTransition
+            }
             var runtime = snapshot.runtimes?[mappingID] ?? .init()
             runtime.isManuallyPaused = isPaused
-            runtime.state = isPaused ? .paused : .checking
+            runtime.state = targetState
             if snapshot.runtimes == nil {
                 snapshot.runtimes = [:]
             }
@@ -305,7 +567,7 @@ public actor DesktopDriveConfigurationStore {
         _ body: (Snapshot) throws -> T
     ) throws -> T {
         try withFileLock(exclusive: false) {
-            try body(loadSnapshotUnlocked())
+            try body(loadSnapshotUnlocked(allowCachedFallback: true))
         }
     }
 
@@ -313,20 +575,40 @@ public actor DesktopDriveConfigurationStore {
         _ body: (inout Snapshot) throws -> Void
     ) throws {
         try withFileLock(exclusive: true) {
-            var snapshot = try loadSnapshotUnlocked()
+            var snapshot = try loadSnapshotUnlocked(allowCachedFallback: false)
             try body(&snapshot)
             try saveSnapshotUnlocked(snapshot)
         }
     }
 
-    private func loadSnapshotUnlocked() throws -> Snapshot {
+    private func loadSnapshotUnlocked(
+        allowCachedFallback: Bool
+    ) throws -> Snapshot {
         guard let fileURL else {
             throw DesktopDriveConfigurationStoreError.sharedContainerUnavailable
         }
         guard fileManager.fileExists(atPath: fileURL.path) else {
+            if let lastSuccessfullyDecodedSnapshot {
+                if allowCachedFallback {
+                    return lastSuccessfullyDecodedSnapshot
+                }
+                throw CocoaError(.fileNoSuchFile)
+            }
             return Snapshot()
         }
-        return try JSONDecoder().decode(Snapshot.self, from: Data(contentsOf: fileURL))
+        do {
+            let snapshot = try JSONDecoder().decode(
+                Snapshot.self,
+                from: Data(contentsOf: fileURL)
+            )
+            lastSuccessfullyDecodedSnapshot = snapshot
+            return snapshot
+        } catch {
+            if allowCachedFallback, let lastSuccessfullyDecodedSnapshot {
+                return lastSuccessfullyDecodedSnapshot
+            }
+            throw error
+        }
     }
 
     private func saveSnapshotUnlocked(_ snapshot: Snapshot) throws {
@@ -339,6 +621,32 @@ public actor DesktopDriveConfigurationStore {
         )
         let data = try JSONEncoder().encode(snapshot)
         try data.write(to: fileURL, options: writeOptions)
+        lastSuccessfullyDecodedSnapshot = snapshot
+    }
+
+    private func effectiveState(
+        in snapshot: Snapshot,
+        mappingID: UUID
+    ) -> DesktopDriveMappingState {
+        if snapshot.runtimeRecoveryMappingIDs?.contains(mappingID) == true {
+            return .recoveryRequired
+        }
+        return snapshot.runtimes?[mappingID]?.state ?? .preparing
+    }
+
+    /// 启动恢复会在完成可读验证后直接恢复为可用，其余路径遵循领域状态机。
+    private func isAllowedStoreTransition(
+        from current: DesktopDriveMappingState,
+        to target: DesktopDriveMappingState
+    ) -> Bool {
+        if current == .recoveryRequired {
+            return target == .recoveryRequired || target == .removing
+        }
+        if [DesktopDriveMappingState.failed, .cacheVolumeUnavailable]
+            .contains(current), target == .available {
+            return true
+        }
+        return current.canTransition(to: target)
     }
 
     private func withFileLock<T>(

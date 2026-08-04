@@ -4,50 +4,66 @@ import XCTest
 @testable import DsmNetwork
 
 final class RequestFixtureContractTests: XCTestCase {
-    func test删除请求与共享Fixture一致() throws {
+    func test删除请求经Repository调用链后与共享Fixture一致() async throws {
         let fixture = try loadFixture(
             "file-station/delete/synthetic-task/request.json"
         )
-        let request = try DsmRequestBuilder.build(
-            baseURL: try XCTUnwrap(URL(string: "https://nas.example.invalid:5001")),
-            path: fixture.api.resolvedPath,
-            api: fixture.api.name,
-            version: fixture.api.resolvedVersion,
-            method: fixture.api.method,
-            requestFormat: .form,
-            parameters: [
-                "path": .stringArray(["<synthetic-path>"]),
-                "recursive": .boolean(true),
-                "accurate_progress": .boolean(true),
-            ],
-            credential: testCredential
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"taskid":"synthetic-delete-task"}}"#),
+            response(#"{"success":true,"data":{"finished":true}}"#),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationDelete: capability(
+                    DsmAPIName.fileStationDelete,
+                    version: fixture.api.resolvedVersion
+                ),
+            ]),
+            transport: transport
         )
 
-        try assertFormRequest(request, matches: fixture)
+        try await repository.delete(paths: ["<synthetic-path>"]) { _, _ in }
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(
+            try requests.map { try decodeForm($0.httpBody)["method"] },
+            ["start", "status"]
+        )
+        try assertFormRequest(try XCTUnwrap(requests.first), matches: fixture)
     }
 
-    func test移动请求与共享Fixture一致() throws {
+    func test移动请求经Repository调用链后与共享Fixture一致() async throws {
         let fixture = try loadFixture(
             "file-station/move/synthetic-task/request.json"
         )
-        let request = try DsmRequestBuilder.build(
-            baseURL: try XCTUnwrap(URL(string: "https://nas.example.invalid:5001")),
-            path: fixture.api.resolvedPath,
-            api: fixture.api.name,
-            version: fixture.api.resolvedVersion,
-            method: fixture.api.method,
-            requestFormat: .form,
-            parameters: [
-                "path": .stringArray(["<synthetic-path>"]),
-                "dest_folder_path": .string("<synthetic-destination>"),
-                "remove_src": .boolean(true),
-                "overwrite": .boolean(true),
-                "accurate_progress": .boolean(true),
-            ],
-            credential: testCredential
+        let transport = MockHTTPTransport(responses: [
+            response(#"{"success":true,"data":{"taskid":"synthetic-move-task"}}"#),
+            response(#"{"success":true,"data":{"finished":true}}"#),
+        ])
+        let repository = try makeRepository(
+            capabilities: CapabilitySet([
+                DsmAPIName.fileStationCopyMove: capability(
+                    DsmAPIName.fileStationCopyMove,
+                    version: fixture.api.resolvedVersion
+                ),
+            ]),
+            transport: transport
         )
 
-        try assertFormRequest(request, matches: fixture)
+        try await repository.move(
+            paths: ["<synthetic-path>"],
+            to: "<synthetic-destination>",
+            overwrite: true
+        ) { _, _ in }
+
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(
+            try requests.map { try decodeForm($0.httpBody)["method"] },
+            ["start", "status"]
+        )
+        try assertFormRequest(try XCTUnwrap(requests.first), matches: fixture)
     }
 
     func test覆盖上传请求与共享Fixture一致() async throws {

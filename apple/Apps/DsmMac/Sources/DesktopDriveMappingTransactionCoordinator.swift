@@ -7,11 +7,13 @@ protocol DesktopDriveSessionBridging: Sendable {
     func remove() async throws
 }
 
-protocol DesktopDriveConfigurationTransactionStoring: Sendable {
-    func saveMapping(_ mapping: DesktopDriveMapping) async throws
-    func removeMapping(id: UUID) async throws
+protocol DesktopDriveConfigurationReading: Sendable {
     func mappings(profileID: UUID?) async throws -> [DesktopDriveMapping]
     func runtime(mappingID: UUID) async throws -> DesktopDriveMappingRuntime
+}
+
+protocol DesktopDriveConfigurationWriting: Sendable {
+    func saveMapping(_ mapping: DesktopDriveMapping) async throws
     func setMappingState(
         _ state: DesktopDriveMappingState,
         mappingID: UUID,
@@ -19,8 +21,56 @@ protocol DesktopDriveConfigurationTransactionStoring: Sendable {
     ) async throws
 }
 
-extension DesktopDriveConfigurationStore:
-    DesktopDriveConfigurationTransactionStoring {}
+extension DesktopDriveConfigurationReading {
+    func mappings() async throws -> [DesktopDriveMapping] {
+        try await mappings(profileID: nil)
+    }
+}
+
+extension DesktopDriveConfigurationWriting {
+    func setMappingState(
+        _ state: DesktopDriveMappingState,
+        mappingID: UUID
+    ) async throws {
+        try await setMappingState(
+            state,
+            mappingID: mappingID,
+            successfulCheckAt: nil
+        )
+    }
+}
+
+protocol DesktopDriveConfigurationTransactionStoring:
+    DesktopDriveConfigurationReading,
+    DesktopDriveConfigurationWriting {
+    func removeMapping(id: UUID) async throws
+    func pendingSessionRemovalProfileIDs() async throws -> Set<UUID>
+    func setSessionRemovalPending(
+        _ isPending: Bool,
+        profileID: UUID
+    ) async throws
+}
+
+protocol DesktopDriveManagerStoring:
+    DesktopDriveConfigurationTransactionStoring {
+    func setProviderAvailable(_ isAvailable: Bool) async throws
+    func registerItemPaths(
+        mappingID: UUID,
+        remotePaths: [String]
+    ) async throws
+    func setPinnedPaths(_ paths: [String], mappingID: UUID) async throws
+    func removeCacheEntries(
+        remotePaths: [String],
+        mappingID: UUID
+    ) async throws
+    func setMappingPaused(_ isPaused: Bool, mappingID: UUID) async throws
+    func completeRuntimeRecovery(
+        mappingID: UUID,
+        successfulCheckAt: Date
+    ) async throws
+}
+
+extension DesktopDriveConfigurationStore: DesktopDriveManagerStoring {}
 
 @MainActor
 protocol DesktopDriveDomainRegistrationControlling {
@@ -39,7 +89,15 @@ enum DesktopDriveMappingRecoveryResult: Equatable {
     case activated
     case removed
     case needsCacheVolume
+    case recoveryRequired
     case failed
+}
+
+enum DesktopDriveSessionRecoveryResult: Equatable {
+    case ready
+    case unused
+    case cleanupPending
+    case authenticationRequired
 }
 
 struct DesktopDriveOrphanCleanupResult: Equatable {
@@ -126,7 +184,7 @@ struct DesktopDriveMappingTransactionCoordinator {
                     )
                 }
             }
-            await removeSessionIfUnused(profileID: mapping.profileID)
+            try await removeSessionIfUnused(profileID: mapping.profileID)
             throw error
         }
     }
@@ -138,8 +196,51 @@ struct DesktopDriveMappingTransactionCoordinator {
             successfulCheckAt: nil
         )
         try await domainController.remove(domainController.domain(for: mapping))
+        try await removeSessionBeforeRemovingLastMapping(mapping)
         try await store.removeMapping(id: mapping.id)
-        await removeSessionIfUnused(profileID: mapping.profileID)
+    }
+
+    func restoreSharedSession(
+        for mappings: [DesktopDriveMapping],
+        profileID: UUID
+    ) async -> DesktopDriveSessionRecoveryResult {
+        guard !mappings.isEmpty else {
+            do {
+                try await removeSharedSessionTransaction(profileID: profileID)
+                return .unused
+            } catch {
+                return .cleanupPending
+            }
+        }
+        var activeMappings: [DesktopDriveMapping] = []
+        for mapping in mappings {
+            let state = try? await store.runtime(mappingID: mapping.id).state
+            if state != .removing {
+                activeMappings.append(mapping)
+            }
+        }
+        guard !activeMappings.isEmpty else {
+            return .ready
+        }
+        guard let sessionBridge else {
+            await markAuthenticationRequired(activeMappings)
+            return .authenticationRequired
+        }
+        do {
+            try await sessionBridge.publish()
+        } catch {
+            await markAuthenticationRequired(activeMappings)
+            return .authenticationRequired
+        }
+        do {
+            try await store.setSessionRemovalPending(
+                false,
+                profileID: profileID
+            )
+            return .ready
+        } catch {
+            return .cleanupPending
+        }
     }
 
     func recover(
@@ -159,9 +260,13 @@ struct DesktopDriveMappingTransactionCoordinator {
                         domainController.domain(for: mapping)
                     )
                 }
+                try await removeSessionBeforeRemovingLastMapping(mapping)
                 try await store.removeMapping(id: mapping.id)
-                await removeSessionIfUnused(profileID: mapping.profileID)
                 return .removed
+            }
+
+            if runtime.state == .recoveryRequired {
+                return .recoveryRequired
             }
 
             if !isRegistered {
@@ -183,6 +288,7 @@ struct DesktopDriveMappingTransactionCoordinator {
             guard [
                 DesktopDriveMappingState.preparing,
                 .cacheVolumeUnavailable,
+                .failed,
             ].contains(runtime.state) || !isRegistered else {
                 return .unchanged
             }
@@ -238,11 +344,55 @@ struct DesktopDriveMappingTransactionCoordinator {
         )
     }
 
-    private func removeSessionIfUnused(profileID: UUID) async {
-        guard let mappings = try? await store.mappings(profileID: profileID),
-              mappings.isEmpty else {
+    private func removeSessionIfUnused(profileID: UUID) async throws {
+        let mappings = try await store.mappings(profileID: profileID)
+        guard mappings.isEmpty else {
             return
         }
-        try? await sessionBridge?.remove()
+        try await removeSharedSessionTransaction(profileID: profileID)
+    }
+
+    private func removeSessionBeforeRemovingLastMapping(
+        _ mapping: DesktopDriveMapping
+    ) async throws {
+        let remainingMappings = try await store.mappings(
+            profileID: mapping.profileID
+        ).filter { $0.id != mapping.id }
+        guard remainingMappings.isEmpty else { return }
+        try await removeSharedSessionTransaction(profileID: mapping.profileID)
+    }
+
+    /// 先持久化待清理标记，再执行可重复的 Keychain 删除；只有两步都成功才清标记。
+    private func removeSharedSessionTransaction(profileID: UUID) async throws {
+        try await store.setSessionRemovalPending(true, profileID: profileID)
+        guard let sessionBridge else {
+            throw DesktopDriveConfigurationStoreError.connectionUnavailable
+        }
+        try await sessionBridge.remove()
+        try await store.setSessionRemovalPending(false, profileID: profileID)
+    }
+
+    private func markAuthenticationRequired(
+        _ mappings: [DesktopDriveMapping]
+    ) async {
+        for mapping in mappings {
+            let state = try? await store.runtime(mappingID: mapping.id).state
+            guard state != .removing, state != .recoveryRequired else {
+                continue
+            }
+            if state?.canTransition(to: .authenticationRequired) == false {
+                // Store 会强制状态机；先进入检查态，再记录重新认证要求。
+                try? await store.setMappingState(
+                    .checking,
+                    mappingID: mapping.id,
+                    successfulCheckAt: nil
+                )
+            }
+            try? await store.setMappingState(
+                .authenticationRequired,
+                mappingID: mapping.id,
+                successfulCheckAt: nil
+            )
+        }
     }
 }

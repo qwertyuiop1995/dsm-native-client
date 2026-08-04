@@ -19,9 +19,15 @@ final class DesktopDriveDiagnosticsTests: XCTestCase {
             "192.168.1.10",
             "_sid=SECRET",
             "SynoToken=PRIVATE_TOKEN",
+            "Cookie: id=PRIVATE_COOKIE",
+            "did=PRIVATE_DEVICE_ID",
+            "fingerprint=AA:BB:CC:DD",
+            "NSURLErrorDomain -1001 request timed out for /volume1/private",
             "QuickConnect-ID",
             "private-user",
             privatePath,
+            "真实文件名.pdf",
+            "private-share",
             mappingID.uuidString,
             profileID.uuidString,
             "private-volume-id",
@@ -75,8 +81,51 @@ final class DesktopDriveDiagnosticsTests: XCTestCase {
         XCTAssertEqual(summary.desktopDrive.mappingCount, 1)
         XCTAssertEqual(summary.desktopDrive.stateCounts["paused"], 1)
         XCTAssertEqual(summary.desktopDrive.keptOfflineBytes, 128)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(
+            Set(object.keys),
+            ["schemaVersion", "generatedAt", "app", "system", "desktopDrive"]
+        )
+        XCTAssertEqual(
+            Set(try XCTUnwrap(object["app"] as? [String: Any]).keys),
+            ["version", "build"]
+        )
+        XCTAssertEqual(
+            Set(try XCTUnwrap(object["system"] as? [String: Any]).keys),
+            ["platform", "version", "architecture"]
+        )
+        XCTAssertEqual(
+            Set(try XCTUnwrap(object["desktopDrive"] as? [String: Any]).keys),
+            [
+                "providerAvailable", "mappingCount", "stateCounts",
+                "manuallyPausedCount", "activeOfflineOperationCount",
+                "cacheLocationCounts", "temporaryCacheItemCount",
+                "temporaryCacheBytes", "keptOfflineItemCount",
+                "keptOfflineBytes",
+            ]
+        )
         for value in sensitiveValues {
             XCTAssertFalse(text.contains(value))
         }
+        for forbiddenKey in [
+            "url", "host", "path", "displayName", "query", "error",
+            "message", "cookie", "sid", "synoToken", "did", "fingerprint",
+        ] {
+            XCTAssertFalse(containsKey(forbiddenKey, in: object))
+        }
+    }
+
+    private func containsKey(_ key: String, in value: Any) -> Bool {
+        if let dictionary = value as? [String: Any] {
+            return dictionary.keys.contains {
+                $0.caseInsensitiveCompare(key) == .orderedSame
+            } || dictionary.values.contains { containsKey(key, in: $0) }
+        }
+        if let array = value as? [Any] {
+            return array.contains { containsKey(key, in: $0) }
+        }
+        return false
     }
 }

@@ -1,12 +1,13 @@
 {
   "$schema": "../../schemas/community-compatibility-report.schema.json",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "reportId": "cc-000000",
   "sourceRef": "issue-1",
   "submittedAt": "2026-07-29",
   "reviewStatus": "submitted",
   "app": {
     "version": "0.0.0-example",
+    "commit": "unknown",
     "platform": "macOS",
     "platformVersion": "example"
   },
@@ -35,12 +36,84 @@
       "status": "passed"
     },
     {
+      "capabilityId": "authentication.password",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "authentication.otp",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "authentication.restore-session",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "files.list-shares",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "files.browse",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "files.search",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "files.download",
+      "status": "skipped"
+    },
+    {
       "capabilityId": "files.upload",
       "status": "failed",
-      "failureCategory": "operation-failed"
+      "failure": {
+        "stage": "submission",
+        "errorCategory": "operation-failed",
+        "apiName": "SYNO.FileStation.Upload",
+        "apiVersion": 2,
+        "httpStatus": 200,
+        "retryPerformed": false,
+        "rawResponseIncluded": false
+      }
+    },
+    {
+      "capabilityId": "files.create-folder",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "files.rename",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "files.copy-move",
+      "status": "skipped"
     },
     {
       "capabilityId": "files.recycle",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "files.restore",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "desktop-drive.mount",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "desktop-drive.browse",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "desktop-drive.download-resume",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "desktop-drive.keep-offline",
+      "status": "skipped"
+    },
+    {
+      "capabilityId": "desktop-drive.upgrade-restore",
       "status": "skipped"
     }
   ],

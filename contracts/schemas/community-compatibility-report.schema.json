@@ -26,7 +26,7 @@
       "const": "../../schemas/community-compatibility-report.schema.json"
     },
     "schemaVersion": {
-      "const": 1
+      "const": 2
     },
     "reportId": {
       "type": "string",
@@ -50,11 +50,22 @@
         "superseded"
       ]
     },
+    "supersedes": {
+      "description": "由维护者填写的新报告所取代的旧报告 ID；本地提交草稿不得生成此字段。",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^cc-[0-9]{6}$"
+      }
+    },
     "app": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "version",
+        "commit",
         "platform",
         "platformVersion"
       ],
@@ -63,6 +74,10 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 40
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-fA-F]{7,40}|unknown)$"
         },
         "platform": {
           "enum": [
@@ -172,6 +187,7 @@
       ]
     },
     "testSuiteVersion": {
+      "description": "报告必须包含该测试套件版本引入的全部能力；未执行的能力也要明确标记为 skipped 或 not-supported。",
       "enum": [
         1,
         2
@@ -180,6 +196,7 @@
     "results": {
       "type": "array",
       "minItems": 1,
+      "uniqueItems": true,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -201,21 +218,154 @@
               "not-supported"
             ]
           },
-          "failureCategory": {
-            "enum": [
-              "permission-denied",
-              "operation-failed",
-              "connection-failed",
-              "unexpected-result",
-              "app-crashed",
-              "unknown"
-            ]
+          "failure": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "stage",
+              "errorCategory",
+              "apiName",
+              "apiVersion",
+              "httpStatus",
+              "retryPerformed",
+              "rawResponseIncluded"
+            ],
+            "properties": {
+              "stage": {
+                "enum": [
+                  "setup",
+                  "discovery",
+                  "authentication",
+                  "request",
+                  "submission",
+                  "readback",
+                  "final-state",
+                  "cleanup",
+                  "unknown"
+                ]
+              },
+              "errorCategory": {
+                "enum": [
+                  "permission-denied",
+                  "operation-failed",
+                  "connection-failed",
+                  "unexpected-result",
+                  "app-crashed",
+                  "unknown"
+                ]
+              },
+              "apiName": {
+                "type": "string",
+                "pattern": "^(?:SYNO(?:\\.[A-Za-z0-9_]+)+|unknown)$"
+              },
+              "apiVersion": {
+                "oneOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99
+                  },
+                  {
+                    "const": "unknown"
+                  }
+                ]
+              },
+              "httpStatus": {
+                "oneOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 599
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "retryPerformed": {
+                "type": "boolean"
+              },
+              "rawResponseIncluded": {
+                "const": false
+              }
+            }
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "failed",
+                    "partial"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "required": [
+                "failure"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "failure"
+                ]
+              }
+            }
+          }
+        ]
       }
     },
     "privacyAttestation": {
       "const": true
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "testSuiteVersion": {
+            "const": 1
+          }
+        },
+        "required": [
+          "testSuiteVersion"
+        ]
+      },
+      "then": {
+        "properties": {
+          "results": {
+            "minItems": 14,
+            "maxItems": 14
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "testSuiteVersion": {
+            "const": 2
+          }
+        },
+        "required": [
+          "testSuiteVersion"
+        ]
+      },
+      "then": {
+        "properties": {
+          "results": {
+            "minItems": 19,
+            "maxItems": 19
+          }
+        }
+      }
+    }
+  ]
 }

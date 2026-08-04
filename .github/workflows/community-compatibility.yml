@@ -6,7 +6,7 @@ on:
       - ".github/ISSUE_TEMPLATE/compatibility_report.yml"
       - ".github/workflows/community-compatibility.yml"
       - "contracts/community-compatibility/**"
-      - "contracts/schemas/community-compatibility-report.schema.json"
+      - "contracts/schemas/community-compatibility-*.schema.json"
       - "docs/compatibility/COMMUNITY_COMPATIBILITY_*.md"
       - "docs/compatibility/COMMUNITY_TEST_GUIDE_*.md"
       - "tools/community-compatibility/**"
@@ -15,7 +15,7 @@ on:
       - ".github/ISSUE_TEMPLATE/compatibility_report.yml"
       - ".github/workflows/community-compatibility.yml"
       - "contracts/community-compatibility/**"
-      - "contracts/schemas/community-compatibility-report.schema.json"
+      - "contracts/schemas/community-compatibility-*.schema.json"
       - "docs/compatibility/COMMUNITY_COMPATIBILITY_*.md"
       - "docs/compatibility/COMMUNITY_TEST_GUIDE_*.md"
       - "tools/community-compatibility/**"
@@ -30,9 +30,18 @@ jobs:
       - name: 检出仓库 / Check out repository
         uses: actions/checkout@v4
 
+      - name: 配置 Python / Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装 Schema 校验依赖 / Install schema validation dependency
+        run: python -m pip install --disable-pip-version-check jsonschema==4.25.1
+
       - name: 校验双语兼容性表单 YAML / Validate bilingual form YAML
         shell: ruby {0}
         run: |
+          require "json"
           require "yaml"
           form = YAML.load_file(".github/ISSUE_TEMPLATE/compatibility_report.yml")
           unless form.is_a?(Hash) && form["name"].is_a?(String) &&
@@ -41,12 +50,141 @@ jobs:
           end
           ids = form["body"].map { |item| item["id"] }.compact
           abort "兼容性表单包含重复 ID" unless ids.uniq.length == ids.length
+          required_v2_ids = %w[
+            schema_version test_suite_version app_version app_commit
+            dsm_version dsm_build dsm_update failure_details
+          ]
+          missing_v2_ids = required_v2_ids - ids
+          unless missing_v2_ids.empty?
+            abort "兼容性表单缺少 v2 字段：#{missing_v2_ids.sort.join(', ')}"
+          end
+
+          registry = JSON.parse(
+            File.read("contracts/community-compatibility/capabilities.json")
+          )
+          suite_version = registry.fetch("testSuiteVersion")
+          expected_capabilities = registry.fetch("capabilities")
+            .select do |capability|
+              capability.fetch("introducedInTestSuiteVersion") <= suite_version
+            end
+            .map { |capability| capability.fetch("id") }
+          form_fragments = form["body"].each_with_object([]) do |item, fragments|
+            attributes = item["attributes"]
+            next unless attributes.is_a?(Hash)
+            fragments << attributes.values
+              .select { |value| value.is_a?(String) }
+              .join("\n")
+          end
+          form_text = form_fragments.join("\n")
+          declared_capabilities = form_text.scan(
+            /^\s*([a-z0-9]+(?:[.-][a-z0-9]+)*):\s*(?:skipped|not-supported)\s*$/
+          ).flatten
+          missing = expected_capabilities - declared_capabilities
+          unexpected = declared_capabilities - expected_capabilities
+          duplicates = declared_capabilities
+            .group_by { |capability_id| capability_id }
+            .select { |_capability_id, occurrences| occurrences.length != 1 }
+            .keys
+          abort "兼容性表单缺少能力：#{missing.sort.join(', ')}" unless missing.empty?
+          abort "兼容性表单包含未知能力：#{unexpected.sort.join(', ')}" unless unexpected.empty?
+          abort "兼容性表单能力重复：#{duplicates.sort.join(', ')}" unless duplicates.empty?
+          required_failure_fields = %w[
+            stage errorCategory apiName apiVersion httpStatus
+            retryPerformed rawResponseIncluded
+          ]
+          missing_failure_fields = required_failure_fields.reject do |field|
+            form_text.include?(field)
+          end
+          unless missing_failure_fields.empty?
+            abort "兼容性表单缺少失败字段：#{missing_failure_fields.join(', ')}"
+          end
+          unless form_text.include?("rawResponseIncluded: false")
+            abort "兼容性表单必须固定 rawResponseIncluded: false"
+          end
+          forbidden_failure_fields = %w[message body path host]
+          failure_item = form["body"].find { |item| item["id"] == "failure_details" }
+          failure_template = failure_item.dig("attributes", "value").to_s
+          leaked_fields = forbidden_failure_fields.select do |field|
+            failure_template.match?(/^\s*#?\s*#{field}:/)
+          end
+          unless leaked_fields.empty?
+            abort "兼容性失败模板包含禁止字段：#{leaked_fields.join(', ')}"
+          end
+
+      - name: 自检 Draft 2020-12 Schema / Check Draft 2020-12 schema
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from jsonschema import Draft202012Validator
+
+          schema_paths = sorted(
+              Path("contracts/schemas").glob(
+                  "community-compatibility-*.schema.json"
+              )
+          )
+          for schema_path in schema_paths:
+              with schema_path.open(encoding="utf-8") as source:
+                  schema = json.load(source)
+              Draft202012Validator.check_schema(schema)
+              print(f"Schema 自检通过 / schema check passed: {schema_path}")
+          PY
+
+      - name: 使用 Schema 校验示例和报告 / Validate examples and reports with schema
+        run: |
+          python - <<'PY'
+          import json
+          from copy import deepcopy
+          from pathlib import Path
+
+          from jsonschema import Draft202012Validator, FormatChecker, ValidationError
+
+          schema_path = Path(
+              "contracts/schemas/community-compatibility-report.schema.json"
+          )
+          with schema_path.open(encoding="utf-8") as source:
+              schema = json.load(source)
+          validator = Draft202012Validator(
+              schema,
+              format_checker=FormatChecker(),
+          )
+          instance_paths = sorted(
+              Path("contracts/community-compatibility/examples").glob("*.json")
+          ) + sorted(
+              Path("contracts/community-compatibility/reports").glob("*.json")
+          )
+          for instance_path in instance_paths:
+              with instance_path.open(encoding="utf-8") as source:
+                  instance = json.load(source)
+              validator.validate(instance)
+              print(f"实例通过 / instance passed: {instance_path}")
+          example_path = Path(
+              "contracts/community-compatibility/examples/example-report.json"
+          )
+          with example_path.open(encoding="utf-8") as source:
+              invalid_date_instance = deepcopy(json.load(source))
+          invalid_date_instance["submittedAt"] = "2026-02-30"
+          try:
+              validator.validate(invalid_date_instance)
+          except ValidationError as error:
+              if error.validator != "format" or list(error.absolute_path) != [
+                  "submittedAt"
+              ]:
+                  raise
+          else:
+              raise RuntimeError(
+                  "非法 submittedAt 未被 format checker 拒绝 / invalid date accepted"
+              )
+          print("非法日期负例已拒绝 / invalid date probe rejected")
+          print(f"Schema 实例校验完成 / validated instances: {len(instance_paths)}")
+          PY
 
       - name: 校验社区兼容性报告 / Validate compatibility reports
-        run: python3 tools/community-compatibility/validate.py
+        run: python tools/community-compatibility/validate.py
 
       - name: 运行社区兼容性工具测试 / Test compatibility tools
-        run: python3 -m unittest discover -s tools/community-compatibility/tests -p 'test_*.py'
+        run: python -m unittest discover -s tools/community-compatibility/tests -p 'test_*.py'
 
       - name: 检查中英文兼容矩阵已更新 / Check generated matrices
-        run: python3 tools/community-compatibility/generate.py --check
+        run: python tools/community-compatibility/generate.py --check

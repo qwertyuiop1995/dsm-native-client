@@ -324,12 +324,22 @@ public sealed partial class DsmRepository(
     public Task DeleteContainerAsync(
         string id,
         CancellationToken cancellationToken = default) =>
-        DeleteResourceAsync("SYNO.Docker.Container", "containers", id, cancellationToken);
+        DeleteResourceAsync(
+            "SYNO.Docker.Container",
+            "containers",
+            id,
+            new Dictionary<string, string> { ["id"] = id },
+            cancellationToken);
 
     public Task DeleteContainerImageAsync(
         string id,
         CancellationToken cancellationToken = default) =>
-        DeleteResourceAsync("SYNO.Docker.Image", "images", id, cancellationToken);
+        DeleteResourceAsync(
+            "SYNO.Docker.Image",
+            "images",
+            id,
+            new Dictionary<string, string> { ["id"] = id },
+            cancellationToken);
 
     public async Task CreateContainerNetworkAsync(
         string name,
@@ -458,12 +468,25 @@ public sealed partial class DsmRepository(
 
     public Task DeleteVirtualMachineAsync(
         string id,
-        CancellationToken cancellationToken = default) =>
-        DeleteResourceAsync(
-            Preferred("SYNO.Virtualization.Guest", "SYNO.Virtualization.API.Guest"),
+        CancellationToken cancellationToken = default)
+    {
+        var apiName = Preferred(
+            "SYNO.Virtualization.Guest",
+            "SYNO.Virtualization.API.Guest");
+        var parameters = apiName == "SYNO.Virtualization.API.Guest"
+            ? new Dictionary<string, string> { ["guest_id"] = id }
+            : new Dictionary<string, string>
+            {
+                ["guest_id"] = id,
+                ["id"] = id,
+            };
+        return DeleteResourceAsync(
+            apiName,
             "guests",
             id,
+            parameters,
             cancellationToken);
+    }
 
     public async Task RenameVirtualMachineNetworkAsync(
         string id,
@@ -501,6 +524,11 @@ public sealed partial class DsmRepository(
             Preferred("SYNO.Virtualization.Network", "SYNO.Virtualization.API.Network"),
             "networks",
             id,
+            new Dictionary<string, string>
+            {
+                ["network_id"] = id,
+                ["id"] = id,
+            },
             cancellationToken);
 
     public Task DeleteVirtualMachineImageAsync(
@@ -512,6 +540,11 @@ public sealed partial class DsmRepository(
                 "SYNO.Virtualization.API.Guest.Image"),
             "images",
             id,
+            new Dictionary<string, string>
+            {
+                ["image_id"] = id,
+                ["id"] = id,
+            },
             cancellationToken);
 
     public async Task<IReadOnlyList<ChatConversation>> LoadConversationsAsync(
@@ -639,18 +672,14 @@ public sealed partial class DsmRepository(
         string apiName,
         string root,
         string id,
+        IReadOnlyDictionary<string, string> parameters,
         CancellationToken cancellationToken)
     {
+        // 参数由调用点按实际选中的 API 契约构造，禁止通用层猜测并混发标识。
         await CallAsync(
             apiName,
             "delete",
-            new Dictionary<string, string>
-            {
-                ["id"] = id,
-                ["guest_id"] = id,
-                ["network_id"] = id,
-                ["image_id"] = id,
-            },
+            parameters,
             cancellationToken).ConfigureAwait(false);
         await WaitUntilAsync(
             async () =>

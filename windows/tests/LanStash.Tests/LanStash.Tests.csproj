@@ -20,5 +20,14 @@
     <None Include="..\..\..\contracts\fixtures-redacted\file-station\list-folder\**\response.json"
           Link="Fixtures\%(RecursiveDir)%(Filename)%(Extension)"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\contracts\request-fixtures\file-station\delete\synthetic-task\request.json"
+          Link="RequestFixtures\FileStationDelete.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\contracts\request-fixtures\container-manager\delete\synthetic-container\request.json"
+          Link="RequestFixtures\ContainerDelete.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\contracts\request-fixtures\vmm\delete\synthetic-virtual-machine\request.json"
+          Link="RequestFixtures\VirtualMachineDelete.json"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

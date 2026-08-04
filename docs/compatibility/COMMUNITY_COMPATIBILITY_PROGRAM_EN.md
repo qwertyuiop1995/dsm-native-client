@@ -10,6 +10,13 @@ A community report is a voluntarily submitted observation. It is not a maintaine
 
 Most users should open the GitHub “社区兼容性报告 / Community compatibility report” form. Contributors familiar with GitHub may instead submit a structured report Pull Request based on [`example-report.json`](../../contracts/community-compatibility/examples/example-report.json).
 
+The macOS app can prepare and preview a local
+`community-compatibility-submission.schema.json` draft under Settings > General >
+Community compatibility report. Export remains disabled until the user records every result and
+confirms the privacy statement. A draft intentionally omits `reportId`, `sourceRef`, and
+`reviewStatus`; only a maintainer may add those fields after checking the public source. The app
+does not upload, submit, or persist the draft automatically.
+
 Before submitting:
 
 1. Use a released LanStash build without temporary debugging code.
@@ -20,16 +27,30 @@ Before submitting:
 
 ## Data collected
 
-The first version collects:
+The public form produces `schemaVersion: 2` reports and collects:
 
-- LanStash version, client platform, and platform version.
+- LanStash version, source commit (`unknown` or 7-40 hexadecimal characters in either case),
+  client platform, and platform version.
 - Public NAS product model and CPU architecture.
 - DSM version, build, and update number.
 - Versions of packages relevant to the test.
 - Connection category, account-role category, and certificate category.
 - Passed, failed, partial, skipped, or unsupported outcomes for registered capability IDs.
-- A fixed failure category instead of raw error text.
+- For failed or partial results, only the allowlisted structured fields `stage`,
+  `errorCategory`, `apiName`, `apiVersion`, `httpStatus`, `retryPerformed`, and
+  `rawResponseIncluded: false`.
 - The public source Issue or Pull Request number for review and deduplication; the structured data does not retain the contributor username.
+
+`schemaVersion` describes the report data structure; it does not describe which checks were
+performed. `testSuiteVersion` selects the capability checklist. Schema version 2 accepts
+test-suite version 1 or 2 so existing 14-capability observations remain representable.
+
+The capability registry uses `introducedInTestSuiteVersion` to identify the first test-suite
+version that contains each capability. A report must list every capability introduced by its
+selected version: 14 results for version 1 and 19 for version 2. Checks that were not performed
+or are unsupported must be recorded explicitly as `skipped` or `not-supported`, not omitted.
+The version 2 `desktop-drive.*` capabilities apply only to macOS; every other platform must
+record them as `not-supported`.
 
 A NAS product model is a public product identifier and may be submitted. Never submit:
 
@@ -38,7 +59,11 @@ A NAS product model is a public product identifier and may be submitted. Never s
 - A share name, volume name, file name, file path, chat content, or container environment variable.
 - A log, screenshot, HAR or PCAP capture, raw DSM response, crash dump, or user file.
 
-The first phase does not accept log attachments. Select only a fixed failure category. If a failure needs investigation, use [`SECURITY.md`](../../SECURITY.md) to decide between a public bug report and the private security channel.
+The public report does not accept log attachments or free-form failure diagnostics. Fields such
+as `message`, `body`, `path`, `host`, and raw-error text are not part of the allowlist and must
+not be submitted. `rawResponseIncluded` must always be `false`. If a failure needs further
+investigation, use [`SECURITY.md`](../../SECURITY.md) to decide between a separate public bug
+report and the private security channel.
 
 ## Review and evidence status
 
@@ -52,6 +77,13 @@ The first phase does not accept log attachments. Select only a fixed failure cat
 | `superseded` | A newer test for the same environment replaces this report |
 
 Review confirms that the structure is reasonable and no obvious private data remains. It does not guarantee that a result is accurate or complete. The community matrix preserves counts and conflicts instead of allowing a majority result to hide failures.
+
+The optional formal-report `supersedes` field is maintained manually. A new report explicitly
+points to older report IDs it replaces, and each target must be marked `superseded`. The relationship
+is never inferred from a model, date, or result and never appears in an app submission draft.
+Validation blocks dangling links, self-reference, cycles, reversed dates, and superseded reports
+without a successor; other suspicious relationships and same-environment evidence remain warnings
+for maintainer review.
 
 ## Source data and generation
 
@@ -67,6 +99,7 @@ Run:
 
 ```bash
 python3 tools/community-compatibility/validate.py
+python3 tools/community-compatibility/validate_submission.py <draft.json>
 python3 tools/community-compatibility/generate.py
 ```
 
@@ -93,8 +126,21 @@ When enabling the program, a repository administrator should create the `compati
 
 1. Check the Issue or Pull Request for prohibited data.
 2. If the report cannot be made safe, close it and ask for a new submission. Do not repeat sensitive content in a comment.
-3. Assign the next `cc-NNNNNN` report ID.
-4. Record the public source as `issue-N` or `pull-N`, then add the fixed fields under `contracts/community-compatibility/reports/`.
+3. For content already represented as a submission JSON, run the read-only candidate helper. It
+   allocates the next `cc-NNNNNN` after the highest existing ID and never reuses a gap:
+
+   ```bash
+   python3 tools/community-compatibility/prepare_candidate.py \
+     --submission /path/to/submission.json \
+     --source-ref issue-123 \
+     --submitted-at 2026-08-04 \
+     --confirm-privacy-reviewed \
+     --format diff
+   ```
+
+4. Review the candidate report and bilingual matrix diff written to standard output, then apply
+   the required changes explicitly. The helper does not write the repository, run Git, access the
+   network, or parse an entire Issue, comment thread, or attachment.
 5. Set the evidence status supported by the review.
 6. Run validation and matrix generation.
 7. Commit only the structured report, generated matrices, and necessary documentation; never retain raw attachments.
@@ -105,8 +151,14 @@ Do not merge or copy suspected credentials or real user data to another system.
 
 Phase 2 continues to use the structured-data contract established in Phase 1. Expansion should happen only when real report volume, maintenance cost, or user demand demonstrates a need.
 
-1. Add a maintainer helper that converts a reviewed Issue into candidate JSON, allocates a report ID, validates capability IDs, and produces a diff for review. It must never write directly to the default branch.
-2. Detect duplicate sources, duplicate environments, conflicting outcomes for the same environment, and reports replaced by newer versions. Use these signals to help maintainers assign `corroborated`, `disputed`, and `superseded`.
+1. A read-only maintainer helper now converts a manually reviewed submission JSON into a candidate
+   report, allocates its report ID, validates capability IDs, and renders a candidate report plus
+   bilingual matrix diff. It deliberately does not parse a whole Issue body because free text may
+   contain private data.
+2. Formal-report relationship and evidence auditing now blocks duplicate identities and invalid
+   supersession graphs, while matching environments, conflicting results, and review-status
+   mismatches produce warnings. These findings help maintainers assign `corroborated`, `disputed`,
+   and `superseded`; the tool never changes a conclusion automatically.
 3. Add versioned test suites for Photos, Chat, Download Station, Container Manager, Virtual Machine Manager, and Storage Manager while keeping older reports readable.
 4. When the Markdown matrix becomes demonstrably hard to use, generate a static filtering page from the same reviewed JSON. It may filter by NAS model, DSM build, platform, LanStash version, package, and result, but must not introduce a separate user database.
 5. Design a local “compatibility diagnostic summary” exporter across all five clients. It must use an allowlist, show a local preview before export, require explicit confirmation, exclude log bodies by default, and include matching English, Simplified Chinese, and accessibility coverage.

@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "岚仓社区兼容性提交草稿 / LanStash Community Compatibility Submission Draft",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "submissionSchemaVersion",
+    "reportSchemaVersion",
+    "generatedAt",
+    "app",
+    "nas",
+    "dsm",
+    "packages",
+    "connectionType",
+    "accountRole",
+    "certificateType",
+    "testSuiteVersion",
+    "results",
+    "privacyAttestation"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "community-compatibility-submission.schema.json"
+    },
+    "submissionSchemaVersion": {
+      "const": 1
+    },
+    "reportSchemaVersion": {
+      "const": 2
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "app": {
+      "$ref": "community-compatibility-report.schema.json#/properties/app"
+    },
+    "nas": {
+      "$ref": "community-compatibility-report.schema.json#/properties/nas"
+    },
+    "dsm": {
+      "$ref": "community-compatibility-report.schema.json#/properties/dsm"
+    },
+    "packages": {
+      "$ref": "community-compatibility-report.schema.json#/properties/packages"
+    },
+    "connectionType": {
+      "$ref": "community-compatibility-report.schema.json#/properties/connectionType"
+    },
+    "accountRole": {
+      "$ref": "community-compatibility-report.schema.json#/properties/accountRole"
+    },
+    "certificateType": {
+      "$ref": "community-compatibility-report.schema.json#/properties/certificateType"
+    },
+    "testSuiteVersion": {
+      "$ref": "community-compatibility-report.schema.json#/properties/testSuiteVersion"
+    },
+    "results": {
+      "$ref": "community-compatibility-report.schema.json#/properties/results"
+    },
+    "privacyAttestation": {
+      "$ref": "community-compatibility-report.schema.json#/properties/privacyAttestation"
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "community-compatibility-report.schema.json#/allOf/0"
+    },
+    {
+      "$ref": "community-compatibility-report.schema.json#/allOf/1"
+    }
+  ]
+}

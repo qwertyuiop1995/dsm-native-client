@@ -177,6 +177,7 @@ class DsmRepository(
             mapOf(
                 "path" to jsonStrings(paths),
                 "recursive" to "true",
+                "accurate_progress" to "true",
             ),
         )
         waitUntil {
@@ -372,7 +373,13 @@ class DsmRepository(
 
     suspend fun deleteVirtualMachine(id: String) {
         val guestApi = preferred("SYNO.Virtualization.Guest", "SYNO.Virtualization.API.Guest")
-        call(guestApi, "delete", mapOf("guest_id" to id, "id" to id))
+        val parameters = if (guestApi == "SYNO.Virtualization.API.Guest") {
+            mapOf("guest_id" to id)
+        } else {
+            // 内部旧接口尚未形成共享请求契约，保持现有兼容参数不变。
+            mapOf("guest_id" to id, "id" to id)
+        }
+        call(guestApi, "delete", parameters)
         verifyResourceMissing(guestApi, "guests", id)
     }
 

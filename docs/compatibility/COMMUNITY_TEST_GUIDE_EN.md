@@ -2,12 +2,26 @@
 
 [简体中文](COMMUNITY_TEST_GUIDE_ZH.md)
 
-This guide corresponds to `testSuiteVersion: 2`. The goal is to check user-visible LanStash behavior for a version combination. It is not a private-API discovery process and does not require network captures or diagnostic logs. Version 1 reports remain valid but do not include desktop cloud-drive checks.
+This guide uses the `schemaVersion: 2` report structure and describes `testSuiteVersion: 2`.
+The schema version identifies the data structure; the test-suite version identifies the checks.
+Test-suite version 1 reports remain valid but contain only the 14 base capabilities and no desktop
+cloud-drive checks. The goal is to check user-visible LanStash behavior for a version combination.
+It is not a private-API discovery process and does not require network captures or diagnostic logs.
+
+Every report must list every capability introduced by its selected test-suite version: 14
+capabilities for version 1 and 19 for version 2. Do not omit a check that was not performed;
+mark it as `skipped`, or use `not-supported` when the platform explicitly does not support it.
+The five `desktop-drive.*` capabilities in version 2 apply only to macOS. Reports from iPhone,
+iPad, Android, and Windows must mark all five as `not-supported`. A macOS report may use
+`skipped` when a properly signed test build was unavailable or the check was not performed;
+regular file browsing and unsigned builds cannot be treated as a passing result.
 
 ## Before testing
 
 - Confirm that you own the NAS and account or have explicit authorization to test them.
-- Record the LanStash version, client platform version, public NAS product model, complete DSM build, and relevant package versions.
+- Record the LanStash version, source commit (`unknown` or 7-40 hexadecimal
+  characters in either case), client platform version, public NAS product model, separate DSM version/build/update
+  fields, and relevant package versions.
 - Do not record a serial number, device name, address, QuickConnect ID, or account name.
 - Prefer a normal account that does not affect other users. Record `administrator` only when the normal product flow genuinely requires it.
 - Use a new empty folder and a small disposable file for write tests. Never use real photos, documents, or backups.
@@ -23,16 +37,39 @@ This guide corresponds to `testSuiteVersion: 2`. The goal is to check user-visib
 | `skipped` | The environment was unsuitable or you chose not to perform the test |
 | `not-supported` | The environment explicitly reported that the capability is unavailable |
 
-For `failed` and `partial`, also select one fixed failure category:
+For every `failed` or `partial` result, add one structured failure entry. Only these fields are
+allowed:
 
-- `permission-denied`
-- `operation-failed`
-- `connection-failed`
-- `unexpected-result`
-- `app-crashed`
-- `unknown`
+| Field | Allowed value |
+| --- | --- |
+| `stage` | `setup`, `discovery`, `authentication`, `request`, `submission`, `readback`, `final-state`, `cleanup`, or `unknown` |
+| `errorCategory` | `permission-denied`, `operation-failed`, `connection-failed`, `unexpected-result`, `app-crashed`, or `unknown` |
+| `apiName` | A `SYNO.*` API name when the App exposes it safely, otherwise `unknown`; never a URL or path |
+| `apiVersion` | An integer from 1 through 99 when safely known, otherwise `unknown` |
+| `httpStatus` | An HTTP status from 100 through 599 when safely known, otherwise `null` |
+| `retryPerformed` | `true` or `false` |
+| `rawResponseIncluded` | Always `false` |
 
-Do not paste a raw error, log, path, or screenshot.
+Example:
+
+```yaml
+- capabilityId: files.download
+  status: failed
+  failure:
+    stage: request
+    errorCategory: connection-failed
+    apiName: unknown
+    apiVersion: unknown
+    httpStatus: null
+    retryPerformed: false
+    rawResponseIncluded: false
+```
+
+Do not add `message`, `body`, `path`, `host`, raw-error text, a raw response, a log, or a
+screenshot. Do not inspect a response solely to populate optional metadata; use `unknown` when the
+App does not expose a safe structured value. Use `unknown` for `apiName` and `apiVersion`, and
+`null` for an unavailable HTTP status. A `failure` object is required only for `failed` and
+`partial`; it is prohibited for every other status.
 
 ## macOS desktop cloud-drive tests
 
@@ -145,4 +182,5 @@ Restore only the item produced by the previous test and confirm that it returns 
 - Delete local downloads and temporary test content.
 - Before submitting, confirm again that the report contains no account, host, path, file name, log, or raw response.
 
-If cleanup fails, do not repeat a dangerous operation. Stop testing and select the appropriate failure category.
+If cleanup fails, do not repeat a dangerous operation. Stop testing and add an allowlisted failure
+entry with `stage: cleanup`.

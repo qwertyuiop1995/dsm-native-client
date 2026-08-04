@@ -2,12 +2,22 @@
 
 [English](COMMUNITY_TEST_GUIDE_EN.md)
 
-本指南对应 `testSuiteVersion: 2`。测试目标是确认岚仓在指定版本组合中的用户可见行为，不用于发现私有 API，也不要求抓包或读取诊断日志。版本 1 报告仍可保留和校验，但不包含桌面云盘检查。
+本指南采用 `schemaVersion: 2` 报告结构，并说明 `testSuiteVersion: 2`。结构版本表示数据
+格式，测试套件版本表示检查清单；测试套件版本 1 报告仍然有效，但只包含 14 项基础
+能力，不含桌面云盘检查。测试目标是确认岚仓在指定版本组合中的用户可见行为，不用于
+发现私有 API，也不要求抓包或读取诊断日志。
+
+每份报告必须列出所选测试套件版本的全部能力：版本 1 共 14 项，版本 2 共 19 项。
+没有执行的项目也不能省略，应明确填写 `skipped`；平台明确不支持时填写
+`not-supported`。版本 2 中的五项 `desktop-drive.*` 只适用于 macOS，iPhone、iPad、
+Android 和 Windows 必须全部填写 `not-supported`。macOS 没有正式签名测试包或没有
+执行对应检查时可以填写 `skipped`，不得从普通文件浏览或无签名构建推断通过。
 
 ## 测试前准备
 
 - 确认 NAS 和账号属于你，或你已获得明确授权。
-- 记录岚仓版本、客户端平台版本、NAS 产品型号、DSM 完整 Build 和相关套件版本。
+- 记录岚仓版本、源码提交（`unknown` 或 7 至 40 位十六进制，大小写均可）、客户端平台版本、
+  NAS 产品型号、拆分的 DSM 版本/Build/Update 字段和相关套件版本。
 - 不要记录序列号、设备名称、地址、QuickConnect ID 或账号。
 - 选择一个不会影响他人的普通账号；只有正常使用确实需要管理员权限时才记录 `administrator`。
 - 写操作测试应使用一个新建的空目录和可以丢弃的小型测试文件。不要使用真实照片、文档或备份。
@@ -23,16 +33,37 @@
 | `skipped` | 环境不具备条件，或你选择不执行 |
 | `not-supported` | 当前环境明确显示不支持该能力 |
 
-`failed` 和 `partial` 还需选择一个固定失败类别：
+每个 `failed` 或 `partial` 结果还必须增加一条结构化失败记录，只允许以下字段：
 
-- `permission-denied`
-- `operation-failed`
-- `connection-failed`
-- `unexpected-result`
-- `app-crashed`
-- `unknown`
+| 字段 | 允许值 |
+| --- | --- |
+| `stage` | `setup`、`discovery`、`authentication`、`request`、`submission`、`readback`、`final-state`、`cleanup` 或 `unknown` |
+| `errorCategory` | `permission-denied`、`operation-failed`、`connection-failed`、`unexpected-result`、`app-crashed` 或 `unknown` |
+| `apiName` | App 能安全显示时填写 `SYNO.*` API 名称，否则填写 `unknown`；禁止 URL 或路径 |
+| `apiVersion` | 能安全确认时填写 1 至 99 的整数，否则填写 `unknown` |
+| `httpStatus` | 能安全确认时填写 100 至 599 的 HTTP 状态，否则填写 `null` |
+| `retryPerformed` | `true` 或 `false` |
+| `rawResponseIncluded` | 必须始终为 `false` |
 
-不要粘贴原始错误、日志、路径或截图。
+示例：
+
+```yaml
+- capabilityId: files.download
+  status: failed
+  failure:
+    stage: request
+    errorCategory: connection-failed
+    apiName: unknown
+    apiVersion: unknown
+    httpStatus: null
+    retryPerformed: false
+    rawResponseIncluded: false
+```
+
+禁止增加 `message`、`body`、`path`、`host`、原始错误正文、原始响应、日志或截图。
+不得为了填写可选元数据而专门读取响应；App 没有安全显示结构值时，`apiName` 和
+`apiVersion` 填写 `unknown`，HTTP 状态填写 `null`。只有 `failed` 和 `partial` 才必须
+包含 `failure` 对象，其他状态禁止包含。
 
 ## macOS 桌面云盘测试
 
@@ -139,4 +170,5 @@ NAS 文件。
 - 删除本地下载副本和临时测试内容。
 - 提交前再次确认报告不含账号、主机、路径、文件名、日志或响应。
 
-如果清理失败，不要重复执行危险操作；停止测试并选择相应失败类别。
+如果清理失败，不要重复执行危险操作；停止测试，并增加一条 `stage: cleanup` 的白名单
+失败记录。

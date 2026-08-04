@@ -115,6 +115,8 @@ def environment_key(report: dict[str, Any]) -> tuple[str, ...]:
         report["app"]["platform"],
         report["app"]["platformVersion"],
         report["app"]["version"],
+        report["app"]["commit"],
+        str(report["testSuiteVersion"]),
         report["connectionType"],
         report["accountRole"],
         report["certificateType"],
@@ -163,7 +165,16 @@ def render_overview(
                 platform=escape_cell(report["app"]["platform"]),
                 platform_version=escape_cell(report["app"]["platformVersion"]),
                 app_version=escape_cell(report["app"]["version"]),
-                connection=escape_cell(report["connectionType"]),
+                connection=escape_cell(
+                    (
+                        "测试套件 v"
+                        if language == "zh-Hans"
+                        else "Test suite v"
+                    )
+                    + str(report["testSuiteVersion"])
+                    + "<br>"
+                    + report["connectionType"]
+                ),
                 role=escape_cell(report["accountRole"]),
                 certificate=escape_cell(report["certificateType"]),
                 packages=package_label(report, no_packages),
@@ -213,6 +224,8 @@ def render_coverage(
             platform,
             platform_version,
             app_version,
+            app_commit,
+            test_suite_version,
             connection,
             role,
             certificate,
@@ -220,7 +233,10 @@ def render_coverage(
         ) = key
         environment = (
             f"{model} / {architecture}<br>{dsm}<br>"
-            f"{platform} {platform_version} / LanStash {app_version}<br>"
+            f"{platform} {platform_version} / LanStash {app_version} "
+            f"({'提交' if language == 'zh-Hans' else 'commit'} {app_commit})<br>"
+            f"{'测试套件' if language == 'zh-Hans' else 'Test suite'} "
+            f"v{test_suite_version}<br>"
             f"{connection} / {role} / {certificate}<br>{packages or '-'}"
         )
         for capability_id in capabilities:

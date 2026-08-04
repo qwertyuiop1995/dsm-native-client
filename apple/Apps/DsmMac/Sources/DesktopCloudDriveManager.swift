@@ -92,6 +92,136 @@ struct DesktopDriveCacheSummary: Equatable {
     }
 }
 
+struct DesktopDriveVolumeCapacity: Equatable {
+    let name: String?
+    let totalBytes: Int64
+    let availableBytes: Int64
+}
+
+private enum DesktopDriveOfflineCapacityFailure: Error {
+    case unavailable
+    case insufficient
+}
+
+private struct DesktopDriveOfflineCapacitySnapshot {
+    let completedPaths: Set<String>
+}
+
+/// 将主 App 使用的 File Provider 与文件系统操作集中为可注入边界。
+@MainActor
+struct DesktopDriveSystemOperations {
+    var hasDomain: (DesktopDriveMapping) -> Bool
+    var userVisibleURL: (DesktopDriveMapping) async throws -> URL
+    var reveal: (URL) -> Void
+    var evict: (
+        NSFileProviderItemIdentifier,
+        DesktopDriveMapping
+    ) async throws -> Void
+    var requestDownload: (
+        NSFileProviderItemIdentifier,
+        DesktopDriveMapping
+    ) async throws -> Void
+    var signalRoot: (DesktopDriveMapping) async throws -> Void
+    var disconnect: (DesktopDriveMapping, String) async throws -> Void
+    var reconnect: (DesktopDriveMapping) async throws -> Void
+    var eligibleCacheLocation: (URL) throws -> DesktopDriveCacheLocation
+    var mountedVolumeName: (String) -> String?
+    var volumeCapacity: (URL) throws -> DesktopDriveVolumeCapacity
+    var now: () -> Date
+    var waitForProgress: () async throws -> Void
+
+    static func live(
+        domainController: DesktopDriveDomainController = .init()
+    ) -> Self {
+        func manager(
+            _ mapping: DesktopDriveMapping
+        ) throws -> NSFileProviderManager {
+            guard let manager = domainController.manager(for: mapping) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            return manager
+        }
+        return .init(
+            hasDomain: { domainController.manager(for: $0) != nil },
+            userVisibleURL: {
+                try await domainController.userVisibleURL(
+                    manager: manager($0)
+                )
+            },
+            reveal: { NSWorkspace.shared.activateFileViewerSelecting([$0]) },
+            evict: { identifier, mapping in
+                try await domainController.evict(
+                    identifier: identifier,
+                    manager: manager(mapping)
+                )
+            },
+            requestDownload: { identifier, mapping in
+                try await domainController.requestDownload(
+                    identifier: identifier,
+                    manager: manager(mapping)
+                )
+            },
+            signalRoot: {
+                try await domainController.signalRoot(manager($0))
+            },
+            disconnect: { mapping, reason in
+                try await domainController.disconnect(
+                    manager(mapping),
+                    reason: reason
+                )
+            },
+            reconnect: {
+                try await domainController.reconnect(manager($0))
+            },
+            eligibleCacheLocation: { selectedURL in
+                let volumeURL = try selectedURL.resourceValues(
+                    forKeys: [.volumeURLForRemountingKey]
+                ).volumeURLForRemounting ?? selectedURL
+                guard #available(macOS 15.0, *),
+                      case .eligible =
+                        try NSFileProviderManager
+                            .checkDomainsCanBeStoredOnVolume(at: volumeURL),
+                      let identifier = try volumeURL.resourceValues(
+                        forKeys: [.volumeUUIDStringKey]
+                      ).volumeUUIDString,
+                      !identifier.isEmpty else {
+                    throw CocoaError(.fileWriteUnsupportedScheme)
+                }
+                return .eligibleVolume(id: identifier)
+            },
+            mountedVolumeName: { identifier in
+                guard #available(macOS 15.0, *),
+                      let volumeURL = DesktopDriveDomainController
+                        .mountedVolumeURL(identifier: identifier) else {
+                    return nil
+                }
+                return try? volumeURL.resourceValues(
+                    forKeys: [.volumeNameKey]
+                ).volumeName
+            },
+            volumeCapacity: { url in
+                let values = try url.resourceValues(forKeys: [
+                    .volumeNameKey,
+                    .volumeTotalCapacityKey,
+                    .volumeAvailableCapacityForImportantUsageKey,
+                ])
+                guard let totalBytes = values.volumeTotalCapacity,
+                      let availableBytes =
+                        values.volumeAvailableCapacityForImportantUsage else {
+                    throw CocoaError(.fileWriteOutOfSpace)
+                }
+                return .init(
+                    name: values.volumeName,
+                    totalBytes: Int64(totalBytes),
+                    availableBytes: availableBytes
+                )
+            },
+            now: Date.init,
+            waitForProgress: { try await Task.sleep(for: .seconds(1)) }
+        )
+    }
+}
+
 @MainActor
 @Observable
 final class DesktopCloudDriveManager {
@@ -107,24 +237,30 @@ final class DesktopCloudDriveManager {
 
     private let profile: NasProfile
     private let repository: any FileRepository
-    private let store: DesktopDriveConfigurationStore
+    private let store: any DesktopDriveManagerStoring
     private let sessionBridge: (any DesktopDriveSessionBridging)?
-    private let domainController = DesktopDriveDomainController()
+    private let domainController: any DesktopDriveDomainRegistrationControlling
+    private let systemOperations: DesktopDriveSystemOperations
     private let transactionCoordinator: DesktopDriveMappingTransactionCoordinator
     @ObservationIgnored private var offlineTasks: [UUID: Task<Void, Never>] = [:]
 
     init(
         profile: NasProfile,
         repository: any FileRepository,
-        store: DesktopDriveConfigurationStore = .init(),
+        store: any DesktopDriveManagerStoring = DesktopDriveConfigurationStore(),
         sessionBridge: (any DesktopDriveSessionBridging)? = nil,
-        isAvailable: Bool = DesktopCloudDriveAvailability.isAvailable
+        isAvailable: Bool = DesktopCloudDriveAvailability.isAvailable,
+        domainController: any DesktopDriveDomainRegistrationControlling =
+            DesktopDriveDomainController(),
+        systemOperations: DesktopDriveSystemOperations? = nil
     ) {
         self.profile = profile
         self.repository = repository
         self.store = store
         self.sessionBridge = sessionBridge
         self.isAvailable = isAvailable
+        self.domainController = domainController
+        self.systemOperations = systemOperations ?? .live()
         transactionCoordinator = DesktopDriveMappingTransactionCoordinator(
             store: store,
             sessionBridge: sessionBridge,
@@ -139,16 +275,41 @@ final class DesktopCloudDriveManager {
             statusIsError = false
             return
         }
+        let previousMappings = mappings
+        let previousRuntimes = runtimes
+        let previousCacheBytes = cacheBytes
+        let previousCacheSummaries = cacheSummaries
         do {
             try await store.setProviderAvailable(true)
             mappings = try await store.mappings(profileID: profile.id)
-            if mappings.isEmpty {
-                try? await sessionBridge?.remove()
-            } else {
-                try await sessionBridge?.publish()
-            }
             for mapping in mappings {
                 runtimes[mapping.id] = try await store.runtime(mappingID: mapping.id)
+            }
+            await recoverRemovingTransactions()
+            mappings = try await store.mappings(profileID: profile.id)
+            runtimes = [:]
+            for mapping in mappings {
+                runtimes[mapping.id] = try await store.runtime(mappingID: mapping.id)
+            }
+            let sessionResult = await transactionCoordinator
+                .restoreSharedSession(
+                    for: mappings,
+                    profileID: profile.id
+                )
+            if sessionResult == .authenticationRequired {
+                for mapping in mappings {
+                    runtimes[mapping.id] = try await store.runtime(
+                        mappingID: mapping.id
+                    )
+                }
+                await refreshCacheSizes()
+                setError("desktopDrive.error.authenticationRequired")
+                return
+            }
+            if sessionResult == .cleanupPending {
+                await refreshCacheSizes()
+                setError("desktopDrive.error.load")
+                return
             }
             await recoverInterruptedTransactions()
             mappings = try await store.mappings(profileID: profile.id)
@@ -162,7 +323,11 @@ final class DesktopCloudDriveManager {
                 await enforceTemporaryLimit(mapping)
             }
         } catch {
-            mappings = []
+            // 加载链路失败时保留最后一次完整呈现，避免把瞬时故障误报为映射已消失。
+            mappings = previousMappings
+            runtimes = previousRuntimes
+            cacheBytes = previousCacheBytes
+            cacheSummaries = previousCacheSummaries
             setError("desktopDrive.error.load")
         }
     }
@@ -213,20 +378,7 @@ final class DesktopCloudDriveManager {
     func eligibleCacheLocation(
         selectedURL: URL
     ) throws -> DesktopDriveCacheLocation {
-        let volumeURL = try selectedURL.resourceValues(
-            forKeys: [.volumeURLForRemountingKey]
-        ).volumeURLForRemounting ?? selectedURL
-        guard case .eligible =
-                try NSFileProviderManager.checkDomainsCanBeStoredOnVolume(
-                    at: volumeURL
-                ),
-              let identifier = try volumeURL.resourceValues(
-                forKeys: [.volumeUUIDStringKey]
-              ).volumeUUIDString,
-              !identifier.isEmpty else {
-            throw CocoaError(.fileWriteUnsupportedScheme)
-        }
-        return .eligibleVolume(id: identifier)
+        try systemOperations.eligibleCacheLocation(selectedURL)
     }
 
     func cacheLocationText(_ mapping: DesktopDriveMapping) -> String {
@@ -234,12 +386,9 @@ final class DesktopCloudDriveManager {
         case .systemDefault:
             return L10n.string("desktopDrive.cache.location.system")
         case .eligibleVolume(let identifier):
-            guard #available(macOS 15.0, *),
-                  let volumeURL = DesktopDriveDomainController
-                    .mountedVolumeURL(identifier: identifier),
-                  let volumeName = try? volumeURL.resourceValues(
-                    forKeys: [.volumeNameKey]
-                  ).volumeName else {
+            guard let volumeName = systemOperations.mountedVolumeName(
+                identifier
+            ) else {
                 return L10n.string("desktopDrive.cache.location.unavailable")
             }
             return L10n.string(
@@ -268,23 +417,20 @@ final class DesktopCloudDriveManager {
     }
 
     func reveal(_ mapping: DesktopDriveMapping) async {
-        guard let manager = domainController.manager(for: mapping) else {
+        guard systemOperations.hasDomain(mapping) else {
             setError("desktopDrive.error.open")
             return
         }
         do {
-            let url = try await domainController.userVisibleURL(
-                manager: manager
-            )
-            NSWorkspace.shared.activateFileViewerSelecting([url])
+            let url = try await systemOperations.userVisibleURL(mapping)
+            systemOperations.reveal(url)
         } catch {
             setError("desktopDrive.error.open")
         }
     }
 
     func clearCache(_ mapping: DesktopDriveMapping) async {
-        guard !isBusy,
-              let manager = domainController.manager(for: mapping) else {
+        guard !isBusy, systemOperations.hasDomain(mapping) else {
             setError("desktopDrive.error.clearCache")
             return
         }
@@ -299,9 +445,9 @@ final class DesktopCloudDriveManager {
             var failureCount = 0
             for path in paths {
                 do {
-                    try await domainController.evict(
-                        identifier: itemIdentifier(path: path, mapping: mapping),
-                        manager: manager
+                    try await systemOperations.evict(
+                        itemIdentifier(path: path, mapping: mapping),
+                        mapping
                     )
                     released.append(path)
                 } catch {
@@ -342,17 +488,21 @@ final class DesktopCloudDriveManager {
             if let index = mappings.firstIndex(where: { $0.id == mapping.id }) {
                 mappings[index] = updated
             }
-            await enforceTemporaryLimit(updated)
-            setSuccess("desktopDrive.status.cacheLimitUpdated")
+            if await enforceTemporaryLimit(updated) {
+                setSuccess("desktopDrive.status.cacheLimitUpdated")
+            } else {
+                setError("desktopDrive.error.cacheLimit")
+            }
         } catch {
             setError("desktopDrive.error.cacheLimit")
         }
     }
 
-    func enforceTemporaryLimit(_ mapping: DesktopDriveMapping) async {
-        guard let manager = domainController.manager(for: mapping),
+    @discardableResult
+    func enforceTemporaryLimit(_ mapping: DesktopDriveMapping) async -> Bool {
+        guard systemOperations.hasDomain(mapping),
               let runtime = try? await store.runtime(mappingID: mapping.id) else {
-            return
+            return false
         }
         let paths = DesktopDriveCacheEvictionPlanner.temporaryPathsToEvict(
             entries: Array(runtime.cacheEntries.values),
@@ -360,25 +510,32 @@ final class DesktopCloudDriveManager {
         )
         guard !paths.isEmpty else {
             await refreshCacheSize(mapping)
-            return
+            return true
         }
         var released: [String] = []
+        var failureCount = 0
         for path in paths {
             do {
-                try await domainController.evict(
-                    identifier: itemIdentifier(path: path, mapping: mapping),
-                    manager: manager
+                try await systemOperations.evict(
+                    itemIdentifier(path: path, mapping: mapping),
+                    mapping
                 )
                 released.append(path)
             } catch {
                 // 仍被其他 App 使用的文件暂时保留，下次维护时再次尝试。
+                failureCount += 1
             }
         }
-        try? await store.removeCacheEntries(
-            remotePaths: released,
-            mappingID: mapping.id
-        )
+        do {
+            try await store.removeCacheEntries(
+                remotePaths: released,
+                mappingID: mapping.id
+            )
+        } catch {
+            failureCount += 1
+        }
         await refreshCacheSize(mapping)
+        return failureCount == 0
     }
 
     func keepMappingOffline(_ mapping: DesktopDriveMapping) {
@@ -427,7 +584,7 @@ final class DesktopCloudDriveManager {
     func releaseOffline(_ items: [FileItem]) async {
         guard !items.isEmpty,
               let mapping = mapping(containing: items.map(\.path)),
-              let manager = domainController.manager(for: mapping) else {
+              systemOperations.hasDomain(mapping) else {
             setError("desktopDrive.error.notMapped")
             return
         }
@@ -463,15 +620,18 @@ final class DesktopCloudDriveManager {
                         }
                 }
                 .map(\.remotePath)
-            try await store.setPinnedPaths(remainingPins, mappingID: mapping.id)
-            try await domainController.signalRoot(manager)
+            try await replacePinnedPathsAndSignal(
+                remainingPins,
+                previousPaths: runtime.pinnedPaths,
+                mapping: mapping
+            )
             var released: [String] = []
             var failureCount = 0
             for path in cachedPaths {
                 do {
-                    try await domainController.evict(
-                        identifier: itemIdentifier(path: path, mapping: mapping),
-                        manager: manager
+                    try await systemOperations.evict(
+                        itemIdentifier(path: path, mapping: mapping),
+                        mapping
                     )
                     released.append(path)
                 } catch {
@@ -568,8 +728,7 @@ final class DesktopCloudDriveManager {
     }
 
     func releaseOffline(_ mapping: DesktopDriveMapping) async {
-        guard !isBusy,
-              let manager = domainController.manager(for: mapping) else {
+        guard !isBusy, systemOperations.hasDomain(mapping) else {
             setError("desktopDrive.error.releaseOffline")
             return
         }
@@ -581,15 +740,18 @@ final class DesktopCloudDriveManager {
             let keptPaths = runtime.cacheEntries.values
                 .filter { $0.kind == .keptOffline }
                 .map(\.remotePath)
-            try await store.setPinnedPaths([], mappingID: mapping.id)
-            try await domainController.signalRoot(manager)
+            try await replacePinnedPathsAndSignal(
+                [],
+                previousPaths: runtime.pinnedPaths,
+                mapping: mapping
+            )
             var released: [String] = []
             var failureCount = 0
             for path in keptPaths {
                 do {
-                    try await domainController.evict(
-                        identifier: itemIdentifier(path: path, mapping: mapping),
-                        manager: manager
+                    try await systemOperations.evict(
+                        itemIdentifier(path: path, mapping: mapping),
+                        mapping
                     )
                     released.append(path)
                 } catch {
@@ -612,44 +774,94 @@ final class DesktopCloudDriveManager {
     }
 
     func pause(_ mapping: DesktopDriveMapping) async {
-        guard let manager = domainController.manager(for: mapping) else {
+        guard systemOperations.hasDomain(mapping) else {
             setError("desktopDrive.error.pause")
             return
         }
         cancelOffline(mapping)
+        var disconnected = false
         do {
-            try await domainController.disconnect(
-                manager,
-                reason: L10n.string("desktopDrive.pause.reason")
+            try await systemOperations.disconnect(
+                mapping,
+                L10n.string("desktopDrive.pause.reason")
             )
+            disconnected = true
             try await store.setMappingPaused(true, mappingID: mapping.id)
             await refreshRuntime(mapping)
             setSuccess("desktopDrive.status.paused")
         } catch {
+            if disconnected {
+                // 系统断开后本地提交失败时尝试恢复连接，避免界面与 domain 状态分裂。
+                try? await systemOperations.reconnect(mapping)
+            }
             setError("desktopDrive.error.pause")
         }
     }
 
     func resume(_ mapping: DesktopDriveMapping) async {
-        guard let manager = domainController.manager(for: mapping) else {
+        guard systemOperations.hasDomain(mapping) else {
             setError("desktopDrive.error.resume")
             return
         }
-        do {
-            try await domainController.reconnect(manager)
-            try await store.setMappingPaused(false, mappingID: mapping.id)
-            try await verifyReadable(mapping)
-            try await store.setMappingState(
-                .available,
-                mappingID: mapping.id,
-                successfulCheckAt: Date()
-            )
+        let sessionResult = await transactionCoordinator.restoreSharedSession(
+            for: [mapping],
+            profileID: profile.id
+        )
+        if sessionResult == .authenticationRequired {
             await refreshRuntime(mapping)
-            setSuccess("desktopDrive.status.resumed")
-        } catch {
-            try? await store.setMappingState(.offline, mappingID: mapping.id)
+            setError("desktopDrive.error.authenticationRequired")
+            return
+        }
+        guard sessionResult == .ready else {
             await refreshRuntime(mapping)
             setError("desktopDrive.error.resume")
+            return
+        }
+        let requiresRuntimeRecovery =
+            (try? await store.runtime(mappingID: mapping.id).state)
+            == .recoveryRequired
+        var reconnected = false
+        do {
+            try await systemOperations.reconnect(mapping)
+            reconnected = true
+            if !requiresRuntimeRecovery {
+                try await store.setMappingPaused(false, mappingID: mapping.id)
+            }
+            try await verifyReadable(mapping)
+            if requiresRuntimeRecovery {
+                try await store.completeRuntimeRecovery(
+                    mappingID: mapping.id,
+                    successfulCheckAt: Date()
+                )
+            } else {
+                try await store.setMappingState(
+                    .available,
+                    mappingID: mapping.id,
+                    successfulCheckAt: Date()
+                )
+            }
+            await refreshRuntime(mapping)
+            setSuccess(
+                requiresRuntimeRecovery
+                    ? "desktopDrive.status.localStateRecovered"
+                    : "desktopDrive.status.resumed"
+            )
+        } catch {
+            if reconnected {
+                try? await systemOperations.disconnect(
+                    mapping,
+                    L10n.string("desktopDrive.pause.reason")
+                )
+            }
+            if !requiresRuntimeRecovery {
+                try? await store.setMappingState(.offline, mappingID: mapping.id)
+            }
+            await refreshRuntime(mapping)
+            setError(
+                requiresRuntimeRecovery
+                    ? "desktopDrive.error.localStateRecovery"
+                    : "desktopDrive.error.resume"
+            )
         }
     }
 
@@ -736,6 +948,7 @@ final class DesktopCloudDriveManager {
         defer { offlineTasks[mapping.id] = nil }
         let previousRuntime = (try? await store.runtime(mappingID: mapping.id))
             ?? .init()
+        var replacedPinnedPaths = false
         do {
             offlineProgress[mapping.id] = .init(phase: .planning)
             let plan = await DesktopDriveTreePlanner.build(
@@ -777,55 +990,18 @@ final class DesktopCloudDriveManager {
                 await refreshRuntime(mapping)
                 return
             }
-            guard let manager = domainController.manager(for: mapping) else {
+            guard systemOperations.hasDomain(mapping) else {
                 throw CocoaError(.fileNoSuchFile)
             }
             offlineProgress[mapping.id]?.phase = .checkingSpace
-            let rootURL = try await domainController.userVisibleURL(
-                manager: manager
+            offlineProgress[mapping.id]?.totalFiles = plan.files.count
+            offlineProgress[mapping.id]?.totalBytes = plan.totalBytes
+            let rootURL = try await systemOperations.userVisibleURL(mapping)
+            _ = try await checkOfflineCapacity(
+                mapping: mapping,
+                plan: plan,
+                rootURL: rootURL
             )
-            let volume = try rootURL.resourceValues(forKeys: [
-                .volumeNameKey,
-                .volumeTotalCapacityKey,
-                .volumeAvailableCapacityForImportantUsageKey,
-            ])
-            guard let totalCapacity = volume.volumeTotalCapacity,
-                  let availableCapacity = volume.volumeAvailableCapacityForImportantUsage else {
-                throw CocoaError(.fileWriteOutOfSpace)
-            }
-            let candidates = plan.files.map { file in
-                DesktopDriveCacheCandidate(
-                    sizeBytes: file.sizeBytes,
-                    locallyAvailableBytes:
-                        previousRuntime.cacheEntries[file.remotePath]?.logicalSizeBytes ?? 0
-                )
-            }
-            let decision = DesktopDriveCacheSpaceCalculator.evaluate(
-                candidates: candidates,
-                volumeCapacityBytes: Int64(totalCapacity),
-                availableCapacityBytes: availableCapacity,
-                transientPeakBytes: plan.largestFileBytes
-            )
-            switch decision {
-            case .allowed(let required, let available):
-                offlineProgress[mapping.id]?.requiredBytes = required
-                offlineProgress[mapping.id]?.availableBytes = available
-            case .insufficient(let required, let available, let shortage):
-                offlineProgress[mapping.id]?.requiredBytes = required
-                offlineProgress[mapping.id]?.availableBytes = available
-                offlineProgress[mapping.id]?.shortageBytes = shortage
-                offlineProgress[mapping.id]?.volumeName = volume.volumeName
-                offlineProgress[mapping.id]?.phase = .failed
-                try await store.setMappingState(
-                    .insufficientLocalSpace,
-                    mappingID: mapping.id
-                )
-                await refreshRuntime(mapping)
-                setError("desktopDrive.error.insufficientSpace")
-                return
-            case .unknownSize, .invalidCapacity:
-                throw CocoaError(.fileWriteOutOfSpace)
-            }
 
             let allPins = Array(
                 Set(previousRuntime.pinnedPaths + pinRoots)
@@ -835,48 +1011,56 @@ final class DesktopCloudDriveManager {
                 remotePaths: plan.files.map(\.remotePath)
             )
             try await store.setPinnedPaths(allPins, mappingID: mapping.id)
+            replacedPinnedPaths = true
             try await store.setMappingState(.checking, mappingID: mapping.id)
-            try await domainController.signalRoot(manager)
+
+            // 固定范围写入后、通知 File Provider 接收内容前再次读取卷容量。
+            _ = try await checkOfflineCapacity(
+                mapping: mapping,
+                plan: plan,
+                rootURL: rootURL
+            )
+            try await systemOperations.signalRoot(mapping)
 
             offlineProgress[mapping.id]?.phase = .requesting
-            offlineProgress[mapping.id]?.totalFiles = plan.files.count
-            offlineProgress[mapping.id]?.totalBytes = plan.totalBytes
-            for (index, file) in plan.files.enumerated() {
+            for file in plan.files {
                 try Task.checkCancellation()
-                try await domainController.requestDownload(
-                    identifier: itemIdentifier(
+                let snapshot = try await checkOfflineCapacity(
+                    mapping: mapping,
+                    plan: plan,
+                    rootURL: rootURL
+                )
+                guard !snapshot.completedPaths.contains(file.remotePath) else {
+                    continue
+                }
+                try await systemOperations.requestDownload(
+                    itemIdentifier(
                         path: file.remotePath,
                         mapping: mapping
                     ),
-                    manager: manager
+                    mapping
                 )
-                offlineProgress[mapping.id]?.completedFiles = index + 1
             }
 
             offlineProgress[mapping.id]?.phase = .downloading
             var previousCompletedCount = -1
-            var lastProgressAt = Date()
+            var lastProgressAt = systemOperations.now()
             while true {
                 try Task.checkCancellation()
-                let runtime = try await store.runtime(mappingID: mapping.id)
-                let completed = plan.files.filter { file in
-                    guard let entry = runtime.cacheEntries[file.remotePath] else {
-                        return false
-                    }
-                    return entry.logicalSizeBytes == file.sizeBytes
-                }
-                let completedBytes = completed.reduce(Int64(0)) {
-                    $0 + $1.sizeBytes
-                }
-                offlineProgress[mapping.id]?.completedFiles = completed.count
-                offlineProgress[mapping.id]?.completedBytes = completedBytes
-                if completed.count != previousCompletedCount {
-                    previousCompletedCount = completed.count
-                    lastProgressAt = Date()
-                } else if Date().timeIntervalSince(lastProgressAt) > 600 {
+                let snapshot = try await checkOfflineCapacity(
+                    mapping: mapping,
+                    plan: plan,
+                    rootURL: rootURL
+                )
+                let completedCount = snapshot.completedPaths.count
+                if completedCount != previousCompletedCount {
+                    previousCompletedCount = completedCount
+                    lastProgressAt = systemOperations.now()
+                } else if systemOperations.now()
+                    .timeIntervalSince(lastProgressAt) > 600 {
                     throw URLError(.timedOut)
                 }
-                if completed.count == plan.files.count {
+                if completedCount == plan.files.count {
                     offlineProgress[mapping.id]?.phase = .completed
                     try await store.setMappingState(
                         .available,
@@ -887,20 +1071,49 @@ final class DesktopCloudDriveManager {
                     setSuccess("desktopDrive.status.offlineReady")
                     return
                 }
-                try await Task.sleep(for: .seconds(1))
+                try await systemOperations.waitForProgress()
             }
-        } catch is CancellationError {
-            try? await store.setPinnedPaths(
-                previousRuntime.pinnedPaths,
+        } catch let failure as DesktopDriveOfflineCapacityFailure {
+            if replacedPinnedPaths {
+                try? await store.setPinnedPaths(
+                    previousRuntime.pinnedPaths,
+                    mappingID: mapping.id
+                )
+                if systemOperations.hasDomain(mapping) {
+                    try? await systemOperations.signalRoot(mapping)
+                }
+            }
+            offlineProgress[mapping.id]?.phase = .failed
+            try? await store.setMappingState(
+                .insufficientLocalSpace,
                 mappingID: mapping.id
             )
-            if let manager = domainController.manager(for: mapping) {
-                try? await domainController.signalRoot(manager)
-            }
-            offlineProgress[mapping.id]?.phase = .cancelled
-            try? await store.setMappingState(.available, mappingID: mapping.id)
             await refreshRuntime(mapping)
-            setSuccess("desktopDrive.status.offlineCancelled")
+            switch failure {
+            case .unavailable, .insufficient:
+                setError("desktopDrive.error.insufficientSpace")
+            }
+        } catch is CancellationError {
+            do {
+                try await store.setPinnedPaths(
+                    previousRuntime.pinnedPaths,
+                    mappingID: mapping.id
+                )
+                if systemOperations.hasDomain(mapping) {
+                    try await systemOperations.signalRoot(mapping)
+                }
+                offlineProgress[mapping.id]?.phase = .cancelled
+                try await store.setMappingState(
+                    .available,
+                    mappingID: mapping.id
+                )
+                await refreshRuntime(mapping)
+                setSuccess("desktopDrive.status.offlineCancelled")
+            } catch {
+                offlineProgress[mapping.id]?.phase = .failed
+                await refreshRuntime(mapping)
+                setError("desktopDrive.error.keepOffline")
+            }
         } catch {
             offlineProgress[mapping.id]?.phase = .failed
             try? await store.setMappingState(.degraded, mappingID: mapping.id)
@@ -909,9 +1122,98 @@ final class DesktopCloudDriveManager {
         }
     }
 
+    private func checkOfflineCapacity(
+        mapping: DesktopDriveMapping,
+        plan: DesktopDriveCachePlan,
+        rootURL: URL
+    ) async throws -> DesktopDriveOfflineCapacitySnapshot {
+        let runtime = try await store.runtime(mappingID: mapping.id)
+        var completedPaths = Set<String>()
+        var completedBytes: Int64 = 0
+        var candidates: [DesktopDriveCacheCandidate] = []
+        var largestMissingBytes: Int64 = 0
+        candidates.reserveCapacity(plan.files.count)
+        for file in plan.files {
+            let locallyAvailableBytes = min(
+                max(
+                    runtime.cacheEntries[file.remotePath]?.logicalSizeBytes ?? 0,
+                    0
+                ),
+                file.sizeBytes
+            )
+            let missingBytes = file.sizeBytes - locallyAvailableBytes
+            largestMissingBytes = max(largestMissingBytes, missingBytes)
+            candidates.append(
+                .init(
+                    sizeBytes: file.sizeBytes,
+                    locallyAvailableBytes: locallyAvailableBytes
+                )
+            )
+            if missingBytes == 0 {
+                completedPaths.insert(file.remotePath)
+                completedBytes += file.sizeBytes
+            }
+        }
+        offlineProgress[mapping.id]?.completedFiles = completedPaths.count
+        offlineProgress[mapping.id]?.completedBytes = completedBytes
+
+        let volume: DesktopDriveVolumeCapacity
+        do {
+            volume = try systemOperations.volumeCapacity(rootURL)
+        } catch {
+            offlineProgress[mapping.id]?.availableBytes = nil
+            offlineProgress[mapping.id]?.shortageBytes = nil
+            offlineProgress[mapping.id]?.volumeName = nil
+            throw DesktopDriveOfflineCapacityFailure.unavailable
+        }
+        let decision = DesktopDriveCacheSpaceCalculator.evaluate(
+            candidates: candidates,
+            volumeCapacityBytes: volume.totalBytes,
+            availableCapacityBytes: volume.availableBytes,
+            transientPeakBytes: largestMissingBytes
+        )
+        offlineProgress[mapping.id]?.volumeName = volume.name
+        switch decision {
+        case .allowed(let required, let available):
+            offlineProgress[mapping.id]?.requiredBytes = required
+            offlineProgress[mapping.id]?.availableBytes = available
+            offlineProgress[mapping.id]?.shortageBytes = nil
+        case .insufficient(let required, let available, let shortage):
+            offlineProgress[mapping.id]?.requiredBytes = required
+            offlineProgress[mapping.id]?.availableBytes = available
+            offlineProgress[mapping.id]?.shortageBytes = shortage
+            throw DesktopDriveOfflineCapacityFailure.insufficient
+        case .unknownSize, .invalidCapacity:
+            offlineProgress[mapping.id]?.requiredBytes = nil
+            offlineProgress[mapping.id]?.availableBytes = volume.availableBytes
+            offlineProgress[mapping.id]?.shortageBytes = nil
+            throw DesktopDriveOfflineCapacityFailure.unavailable
+        }
+        return .init(completedPaths: completedPaths)
+    }
+
+    /// pin 写入后系统通知失败时恢复旧值；补偿失败仍由调用方按失败处理。
+    private func replacePinnedPathsAndSignal(
+        _ paths: [String],
+        previousPaths: [String],
+        mapping: DesktopDriveMapping
+    ) async throws {
+        try await store.setPinnedPaths(paths, mappingID: mapping.id)
+        do {
+            try await systemOperations.signalRoot(mapping)
+        } catch {
+            try? await store.setPinnedPaths(
+                previousPaths,
+                mappingID: mapping.id
+            )
+            try? await systemOperations.signalRoot(mapping)
+            throw error
+        }
+    }
+
     private func restoreDomains() async {
         for mapping in mappings {
-            guard let manager = domainController.manager(for: mapping),
+            guard systemOperations.hasDomain(mapping),
                   let runtime = runtimes[mapping.id] else {
                 continue
             }
@@ -919,18 +1221,23 @@ final class DesktopCloudDriveManager {
                 DesktopDriveMappingState.removing,
                 .failed,
                 .cacheVolumeUnavailable,
+                .recoveryRequired,
             ].contains(runtime.state) {
                 continue
             }
             if runtime.isManuallyPaused {
-                try? await domainController.disconnect(
-                    manager,
-                    reason: L10n.string("desktopDrive.pause.reason")
+                try? await systemOperations.disconnect(
+                    mapping,
+                    L10n.string("desktopDrive.pause.reason")
                 )
                 continue
             }
             do {
-                try await domainController.reconnect(manager)
+                try await store.setMappingState(
+                    .checking,
+                    mappingID: mapping.id
+                )
+                try await systemOperations.reconnect(mapping)
                 try await verifyReadable(mapping)
                 try await store.setMappingState(
                     .available,
@@ -956,6 +1263,22 @@ final class DesktopCloudDriveManager {
             return
         }
         for mapping in mappings {
+            _ = await transactionCoordinator.recover(
+                mapping,
+                registeredDomainIdentifiers: identifiers,
+                verifyReadable: verifyReadable
+            )
+        }
+    }
+
+    private func recoverRemovingTransactions() async {
+        guard let identifiers =
+                try? await transactionCoordinator.registeredDomainIdentifiers()
+        else {
+            return
+        }
+        for mapping in mappings
+        where runtimes[mapping.id]?.state == .removing {
             _ = await transactionCoordinator.recover(
                 mapping,
                 registeredDomainIdentifiers: identifiers,

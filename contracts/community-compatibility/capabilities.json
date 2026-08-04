@@ -7,6 +7,7 @@
       "module": "connection",
       "operation": "read",
       "required": true,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "发现并连接 NAS",
         "en": "Discover and connect to the NAS"
@@ -17,6 +18,7 @@
       "module": "authentication",
       "operation": "read",
       "required": true,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "账号密码登录",
         "en": "Password sign-in"
@@ -27,6 +29,7 @@
       "module": "authentication",
       "operation": "read",
       "required": false,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "两步验证登录",
         "en": "Two-factor sign-in"
@@ -37,6 +40,7 @@
       "module": "authentication",
       "operation": "read",
       "required": true,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "重新打开 App 后恢复登录",
         "en": "Restore sign-in after reopening the app"
@@ -47,6 +51,7 @@
       "module": "files",
       "operation": "read",
       "required": true,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "显示共享文件夹",
         "en": "List shared folders"
@@ -57,6 +62,7 @@
       "module": "files",
       "operation": "read",
       "required": true,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "浏览目录",
         "en": "Browse folders"
@@ -67,6 +73,7 @@
       "module": "files",
       "operation": "read",
       "required": true,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "搜索文件",
         "en": "Search files"
@@ -77,6 +84,7 @@
       "module": "files",
       "operation": "read",
       "required": true,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "下载文件",
         "en": "Download a file"
@@ -87,6 +95,7 @@
       "module": "files",
       "operation": "controlled-write",
       "required": false,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "上传测试文件",
         "en": "Upload a test file"
@@ -97,6 +106,7 @@
       "module": "files",
       "operation": "controlled-write",
       "required": false,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "新建测试文件夹",
         "en": "Create a test folder"
@@ -107,6 +117,7 @@
       "module": "files",
       "operation": "controlled-write",
       "required": false,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "重命名测试项目",
         "en": "Rename a test item"
@@ -117,6 +128,7 @@
       "module": "files",
       "operation": "controlled-write",
       "required": false,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "复制或移动测试项目",
         "en": "Copy or move a test item"
@@ -127,6 +139,7 @@
       "module": "files",
       "operation": "controlled-write",
       "required": false,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "将测试项目移入回收站",
         "en": "Move a test item to the recycle bin"
@@ -137,6 +150,7 @@
       "module": "files",
       "operation": "controlled-write",
       "required": false,
+      "introducedInTestSuiteVersion": 1,
       "name": {
         "zh-Hans": "恢复测试项目",
         "en": "Restore a test item"
@@ -147,6 +161,7 @@
       "module": "desktop-drive",
       "operation": "controlled-write",
       "required": false,
+      "introducedInTestSuiteVersion": 2,
       "name": {
         "zh-Hans": "在 Finder 中添加和移除云盘映射",
         "en": "Add and remove a cloud-drive mapping in Finder"
@@ -157,6 +172,7 @@
       "module": "desktop-drive",
       "operation": "read",
       "required": false,
+      "introducedInTestSuiteVersion": 2,
       "name": {
         "zh-Hans": "在 Finder 中浏览大目录",
         "en": "Browse a large folder in Finder"
@@ -167,6 +183,7 @@
       "module": "desktop-drive",
       "operation": "read",
       "required": false,
+      "introducedInTestSuiteVersion": 2,
       "name": {
         "zh-Hans": "按需下载、中断和继续下载",
         "en": "Download on demand, interrupt, and resume"
@@ -177,6 +194,7 @@
       "module": "desktop-drive",
       "operation": "controlled-write",
       "required": false,
+      "introducedInTestSuiteVersion": 2,
       "name": {
         "zh-Hans": "保留离线、取消和释放本地副本",
         "en": "Keep offline, cancel, and release local copies"
@@ -187,6 +205,7 @@
       "module": "desktop-drive",
       "operation": "read",
       "required": false,
+      "introducedInTestSuiteVersion": 2,
       "name": {
         "zh-Hans": "升级 App 后恢复云盘映射",
         "en": "Restore cloud-drive mappings after an app upgrade"

@@ -4625,6 +4625,7 @@ private struct SettingsView: View {
     @State private var showsMappingCreator = false
     @State private var showsDiagnosticPreview = false
     @State private var diagnosticPreview = ""
+    @State private var showsCommunityReport = false
 
     init(
         model: WorkspaceModel,
@@ -4727,6 +4728,9 @@ private struct SettingsView: View {
         }
         .sheet(isPresented: $showsDiagnosticPreview) {
             DesktopDriveDiagnosticExportSheet(preview: diagnosticPreview)
+        }
+        .sheet(isPresented: $showsCommunityReport) {
+            CommunityCompatibilitySubmissionSheet()
         }
         .alert(L10n.string("ui.baa1159c128223dd"), isPresented: $showsRenamePrompt) {
             TextField(L10n.string("ui.65d8f92232ae77b0"), text: $renamedNAS)
@@ -4832,6 +4836,23 @@ private struct SettingsView: View {
             SettingsRow(label: L10n.string("ui.1a3f0617d6de8e52"), value: model.profile.usernameHint ?? L10n.string("ui.6a1be012c99c34e8"))
             Divider().opacity(0.3)
             SettingsRow(label: L10n.string("ui.b8f945ea49ff3774"), value: L10n.string("ui.39c35b1b42f8d938"))
+        }
+
+        SettingsSectionCard(
+            title: L10n.string("communityReport.settings.title"),
+            icon: "checklist.checked",
+            iconColor: .green
+        ) {
+            Text(L10n.string("communityReport.settings.message"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button(L10n.string("communityReport.settings.action")) {
+                    showsCommunityReport = true
+                }
+            }
         }
     }
 
@@ -5085,8 +5106,19 @@ private struct SettingsView: View {
                         Button(L10n.string("desktopDrive.open")) {
                             Task { await desktopDriveManager.reveal(mapping) }
                         }
+                        .disabled(isRuntimeRecoveryRequired(mapping))
                         Menu(L10n.string("desktopDrive.more")) {
-                            if isOfflineTaskRunning(mapping) {
+                            if isRuntimeRecoveryRequired(mapping) {
+                                Button(
+                                    L10n.string(
+                                        "desktopDrive.recoverLocalState"
+                                    )
+                                ) {
+                                    Task {
+                                        await desktopDriveManager.resume(mapping)
+                                    }
+                                }
+                            } else if isOfflineTaskRunning(mapping) {
                                 Button(L10n.string("desktopDrive.cancel")) {
                                     desktopDriveManager.cancelOffline(mapping)
                                 }
@@ -5102,58 +5134,66 @@ private struct SettingsView: View {
                                     desktopDriveManager.keepMappingOffline(mapping)
                                 }
                             }
-                            Divider()
-                            if desktopDriveManager.runtimes[mapping.id]?
-                                .isManuallyPaused == true {
-                                Button(L10n.string("desktopDrive.resume")) {
-                                    Task {
-                                        await desktopDriveManager.resume(mapping)
-                                    }
-                                }
-                            } else {
-                                Button(L10n.string("desktopDrive.pause")) {
-                                    Task {
-                                        await desktopDriveManager.pause(mapping)
-                                    }
-                                }
-                            }
-                            Button(L10n.string("desktopDrive.clearCache")) {
-                                Task {
-                                    await desktopDriveManager.clearCache(mapping)
-                                }
-                            }
-                            Menu(L10n.string("desktopDrive.cache.limit")) {
-                                ForEach(
-                                    [Int64(5), 10, 20, 50],
-                                    id: \.self
-                                ) { gibibytes in
-                                    let bytes = gibibytes
-                                        * 1_024 * 1_024 * 1_024
-                                    Button {
+                            if !isRuntimeRecoveryRequired(mapping) {
+                                Divider()
+                                if shouldReconnect(mapping) {
+                                    Button(L10n.string("desktopDrive.reconnect")) {
                                         Task {
-                                            await desktopDriveManager
-                                                .setTemporaryCacheLimit(
-                                                    bytes,
-                                                    mapping: mapping
-                                                )
+                                            await desktopDriveManager.resume(mapping)
                                         }
-                                    } label: {
-                                        if mapping.cachePolicy
-                                            .temporaryLimitBytes == bytes {
-                                            Label(
-                                                L10n.string(
-                                                    "desktopDrive.cache.limitGiB",
-                                                    gibibytes
-                                                ),
-                                                systemImage: "checkmark"
-                                            )
-                                        } else {
-                                            Text(
-                                                L10n.string(
-                                                    "desktopDrive.cache.limitGiB",
-                                                    gibibytes
+                                    }
+                                } else if desktopDriveManager.runtimes[mapping.id]?
+                                    .isManuallyPaused == true {
+                                    Button(L10n.string("desktopDrive.resume")) {
+                                        Task {
+                                            await desktopDriveManager.resume(mapping)
+                                        }
+                                    }
+                                } else {
+                                    Button(L10n.string("desktopDrive.pause")) {
+                                        Task {
+                                            await desktopDriveManager.pause(mapping)
+                                        }
+                                    }
+                                }
+                                Button(L10n.string("desktopDrive.clearCache")) {
+                                    Task {
+                                        await desktopDriveManager.clearCache(mapping)
+                                    }
+                                }
+                                Menu(L10n.string("desktopDrive.cache.limit")) {
+                                    ForEach(
+                                        [Int64(5), 10, 20, 50],
+                                        id: \.self
+                                    ) { gibibytes in
+                                        let bytes = gibibytes
+                                            * 1_024 * 1_024 * 1_024
+                                        Button {
+                                            Task {
+                                                await desktopDriveManager
+                                                    .setTemporaryCacheLimit(
+                                                        bytes,
+                                                        mapping: mapping
+                                                    )
+                                            }
+                                        } label: {
+                                            if mapping.cachePolicy
+                                                .temporaryLimitBytes == bytes {
+                                                Label(
+                                                    L10n.string(
+                                                        "desktopDrive.cache.limitGiB",
+                                                        gibibytes
+                                                    ),
+                                                    systemImage: "checkmark"
                                                 )
-                                            )
+                                            } else {
+                                                Text(
+                                                    L10n.string(
+                                                        "desktopDrive.cache.limitGiB",
+                                                        gibibytes
+                                                    )
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -5230,6 +5270,7 @@ private struct SettingsView: View {
         case .insufficientLocalSpace:
             "desktopDrive.state.insufficientLocalSpace"
         case .degraded: "desktopDrive.state.degraded"
+        case .recoveryRequired: "desktopDrive.state.recoveryRequired"
         case .removing: "desktopDrive.state.removing"
         case .failed: "desktopDrive.state.failed"
         }
@@ -5245,13 +5286,30 @@ private struct SettingsView: View {
         case .paused:
             return "pause.circle"
         case .offline, .authenticationRequired, .cacheVolumeUnavailable,
-             .insufficientLocalSpace, .degraded:
+             .insufficientLocalSpace, .degraded, .recoveryRequired:
             return "exclamationmark.triangle"
         case .removing:
             return "minus.circle"
         case .failed:
             return "xmark.circle"
         }
+    }
+
+    private func shouldReconnect(_ mapping: DesktopDriveMapping) -> Bool {
+        guard let state = desktopDriveManager.runtimes[mapping.id]?.state else {
+            return false
+        }
+        return [
+            DesktopDriveMappingState.offline,
+            .authenticationRequired,
+            .failed,
+        ].contains(state)
+    }
+
+    private func isRuntimeRecoveryRequired(
+        _ mapping: DesktopDriveMapping
+    ) -> Bool {
+        desktopDriveManager.runtimes[mapping.id]?.state == .recoveryRequired
     }
 
     @ViewBuilder

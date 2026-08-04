@@ -48,6 +48,17 @@ let package = Package(
                 .linkedFramework("UserNotifications")
             ]
         ),
+        .target(
+            name: "DsmFileProviderRuntime",
+            dependencies: ["DsmCore", "DsmNetwork"],
+            path: "Apps/DsmMac/FileProviderExtension",
+            exclude: [
+                "FileProviderExtension.swift",
+                "ProviderEnumerator.swift",
+                "ProviderErrorMapper.swift"
+            ],
+            sources: ["ProviderItem.swift", "ProviderRuntime.swift"]
+        ),
         .testTarget(
             name: "DsmCoreTests",
             dependencies: ["DsmCore", "DsmLocalization"],
@@ -67,6 +78,11 @@ let package = Package(
             name: "DsmMacTests",
             dependencies: ["DsmCore", "DsmLocalization", "DsmMacExecutable"],
             path: "Apps/DsmMac/Tests"
+        ),
+        .testTarget(
+            name: "DsmFileProviderRuntimeTests",
+            dependencies: ["DsmCore", "DsmFileProviderRuntime"],
+            path: "Apps/DsmMac/FileProviderExtensionTests"
         )
     ]
 )

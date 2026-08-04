@@ -148,7 +148,8 @@ contracts/request-fixtures/
 
 - 已从 `DsmRequestBuilder` 和当前 Repository 建立审核后的结构化对照测试。
 - 已覆盖 File Station 删除、移动和覆盖上传，验证 API、方法、版本、路径、参数编码
-  和认证材料位置。
+  和认证材料位置；删除与移动已进一步通过 `DsmFileRepository` 的实际
+  `start → status` 调用链捕获请求，不再停留在请求构建器级对照。
 - 已覆盖 DSM 账号创建、账号删除和群组删除；密码只验证参数存在与传输位置，不进入
   Fixture。
 - 已覆盖套件启动、停止、卸载、容器删除和 VMM 公开 API 虚拟机删除；内部接口
@@ -178,8 +179,21 @@ contracts/request-fixtures/
 
 ### RC2：Android 与 Windows 对齐
 
+状态：Android 首批为 `UNIT_TESTED`；Windows 首批源码与静态工程检查完成，等待具备
+`.NET 10 SDK` 的 Windows CI 编译和测试。
+
 - 使用同一 Fixture 验证 API、方法、版本、路径、参数集合和策略。
 - 平台特有 HTTP 实现可以不同，但可观察请求语义必须一致。
+- Android 已从 Repository 实际调用链读取并对照 File Station 删除、容器删除和公开
+  VMM 虚拟机删除三份共享 Fixture；File Station 删除补齐
+  `accurate_progress=true`，公开 VMM 请求只发送 `guest_id`，未验证的旧内部 API
+  继续保留原兼容参数。
+- Windows 已为相同三份 Fixture 增加 Repository 请求测试源码，并把通用删除层改为
+  由实际 API 调用点提供资源标识参数；公开 VMM 只发送 `guest_id`，旧内部 Guest
+  保留 `guest_id + id`，网络和映像不再混入无关资源标识。当前 macOS 没有 .NET 10
+  编译器，不能把静态检查写成 Windows 测试通过。
+- 下一批继续把套件卸载、容器/VMM 映像与网络、网络和防火墙请求扩展到 Android/
+  Windows；平台没有生产写入口的能力只建立契约消费测试，不为对齐而新增未经验证入口。
 
 ### MR0：结果类型与序列化
 

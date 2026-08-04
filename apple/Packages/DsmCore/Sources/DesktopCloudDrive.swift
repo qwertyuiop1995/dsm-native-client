@@ -42,6 +42,7 @@ public enum DesktopDriveMappingState: String, Codable, CaseIterable, Sendable {
     case cacheVolumeUnavailable
     case insufficientLocalSpace
     case degraded
+    case recoveryRequired
     case removing
     case failed
 
@@ -51,35 +52,42 @@ public enum DesktopDriveMappingState: String, Codable, CaseIterable, Sendable {
         case .preparing:
             return [
                 .available, .paused, .offline, .authenticationRequired,
-                .cacheVolumeUnavailable, .insufficientLocalSpace, .failed,
+                .cacheVolumeUnavailable, .insufficientLocalSpace,
+                .recoveryRequired, .removing, .failed,
             ].contains(target)
         case .available:
             return [
                 .checking, .paused, .offline, .authenticationRequired,
                 .cacheVolumeUnavailable, .insufficientLocalSpace, .degraded,
-                .removing, .failed,
+                .recoveryRequired, .removing, .failed,
             ].contains(target)
         case .checking:
             return [
                 .available, .paused, .offline, .authenticationRequired,
                 .cacheVolumeUnavailable, .insufficientLocalSpace, .degraded,
-                .removing, .failed,
+                .recoveryRequired, .removing, .failed,
             ].contains(target)
         case .paused:
-            return [.checking, .removing, .failed].contains(target)
+            return [.checking, .recoveryRequired, .removing, .failed].contains(target)
         case .offline:
-            return [.checking, .paused, .authenticationRequired, .removing, .failed].contains(target)
+            return [
+                .checking, .paused, .authenticationRequired,
+                .recoveryRequired, .removing, .failed,
+            ].contains(target)
         case .authenticationRequired:
-            return [.checking, .paused, .removing, .failed].contains(target)
+            return [.checking, .paused, .recoveryRequired, .removing, .failed].contains(target)
         case .cacheVolumeUnavailable:
-            return [.checking, .paused, .removing, .failed].contains(target)
+            return [.checking, .paused, .recoveryRequired, .removing, .failed].contains(target)
         case .insufficientLocalSpace:
-            return [.checking, .paused, .removing, .failed].contains(target)
+            return [.checking, .paused, .recoveryRequired, .removing, .failed].contains(target)
         case .degraded:
             return [
                 .checking, .available, .paused, .offline, .authenticationRequired,
-                .cacheVolumeUnavailable, .insufficientLocalSpace, .removing, .failed,
+                .cacheVolumeUnavailable, .insufficientLocalSpace,
+                .recoveryRequired, .removing, .failed,
             ].contains(target)
+        case .recoveryRequired:
+            return [.checking, .removing, .failed].contains(target)
         case .removing:
             return [.failed].contains(target)
         case .failed:

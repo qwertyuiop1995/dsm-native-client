@@ -3,19 +3,137 @@ import DsmNetwork
 import FileProvider
 import Foundation
 
+protocol ProviderRuntimeConfigurationStoring: Sendable {
+    func configuration(
+        mappingID: UUID
+    ) async throws -> DesktopDriveProviderConfiguration?
+    func runtime(mappingID: UUID) async throws -> DesktopDriveMappingRuntime
+    func registerItemPaths(
+        mappingID: UUID,
+        remotePaths: [String]
+    ) async throws
+    func remotePath(
+        mappingID: UUID,
+        itemIdentifier: String
+    ) async throws -> String?
+    func recordCacheEntry(
+        _ entry: DesktopDriveCacheEntry,
+        mappingID: UUID
+    ) async throws
+    func removeCacheEntries(
+        remotePaths: [String],
+        mappingID: UUID
+    ) async throws
+    func isProviderAvailable() async throws -> Bool
+}
+
+extension DesktopDriveConfigurationStore: ProviderRuntimeConfigurationStoring {}
+
+protocol ProviderRuntimeRepository: Sendable {
+    func listShares(offset: Int, limit: Int) async throws -> FilePage
+    func listFolder(path: String, offset: Int, limit: Int) async throws -> FilePage
+    func getInfo(paths: [String]) async throws -> [FileItem]
+    func download(
+        remotePath: String,
+        to localURL: URL,
+        expectedSize: Int64?,
+        progress: @escaping FileTransferProgress
+    ) async throws
+    func removePartialDownload(to localURL: URL) async
+}
+
+extension DsmFileRepository: ProviderRuntimeRepository {}
+
+struct ProviderRuntimeDependencies: Sendable {
+    var configurationStore: any ProviderRuntimeConfigurationStoring
+    var makeRepository: @Sendable (
+        DesktopDriveProviderConfiguration
+    ) async throws -> any ProviderRuntimeRepository
+    var temporaryDirectory: @Sendable (DesktopDriveMapping) throws -> URL
+    var ensureCacheSpace: @Sendable (Int64?, URL) throws -> Void
+    var evictItem: @Sendable (
+        NSFileProviderItemIdentifier,
+        DesktopDriveMapping
+    ) async throws -> Void
+    var removeItem: @Sendable (URL) -> Void
+    var capacityRecheckIntervalBytes: Int64
+
+    static func live() -> Self {
+        let configurationStore = DesktopDriveConfigurationStore()
+        let sessionStore = SharedKeychainSessionStore()
+        return .init(
+            configurationStore: configurationStore,
+            makeRepository: { configuration in
+                guard let session: AuthSession = try await sessionStore.load(
+                    for: configuration.mapping.profileID
+                ) else {
+                    throw NSFileProviderError(.notAuthenticated)
+                }
+                return try DsmFileRepository(
+                    profile: configuration.connection.profile,
+                    capabilities: configuration.connection.capabilitySet,
+                    session: session
+                )
+            },
+            temporaryDirectory: { mapping in
+                let domain = ProviderRuntime.domain(for: mapping)
+                guard let manager = NSFileProviderManager(for: domain) else {
+                    throw NSFileProviderError(.providerNotFound)
+                }
+                return try manager.temporaryDirectoryURL()
+            },
+            ensureCacheSpace: ProviderRuntime.ensureCacheSpace,
+            evictItem: { identifier, mapping in
+                let domain = ProviderRuntime.domain(for: mapping)
+                guard let manager = NSFileProviderManager(for: domain) else {
+                    throw NSFileProviderError(.providerNotFound)
+                }
+                try await ProviderRuntime.evictItem(
+                    identifier: identifier,
+                    manager: manager
+                )
+            },
+            removeItem: { try? FileManager.default.removeItem(at: $0) },
+            capacityRecheckIntervalBytes: 8 * 1_024 * 1_024
+        )
+    }
+}
+
 struct ProviderRequestedVersion: Equatable, Sendable {
     let content: Data
     let metadata: Data
 }
 
 actor ProviderRuntime {
+    private struct TemporaryReservation {
+        let remotePath: String
+        let bytes: Int64
+    }
+
     private let mappingID: UUID?
-    private let configurationStore = DesktopDriveConfigurationStore()
-    private let sessionStore = SharedKeychainSessionStore()
+    private let dependencies: ProviderRuntimeDependencies
     private let metadata = DesktopDriveMetadataCoordinator()
+    private var temporaryReservations: [UUID: TemporaryReservation] = [:]
+    private var temporaryAdmissionIsLocked = false
+    private var temporaryAdmissionWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(mappingIdentifier: String) {
+        self.init(
+            mappingIdentifier: mappingIdentifier,
+            dependencies: .live()
+        )
+    }
+
+    init(
+        mappingIdentifier: String,
+        dependencies: ProviderRuntimeDependencies
+    ) {
         mappingID = UUID(uuidString: mappingIdentifier)
+        self.dependencies = dependencies
+    }
+
+    private var configurationStore: any ProviderRuntimeConfigurationStoring {
+        dependencies.configurationStore
     }
 
     func invalidate() async {
@@ -140,11 +258,9 @@ actor ProviderRuntime {
         ) else {
             throw NSFileProviderError(.noSuchItem)
         }
-        let domain = Self.domain(for: context.configuration.mapping)
-        guard let manager = NSFileProviderManager(for: domain) else {
-            throw NSFileProviderError(.providerNotFound)
-        }
-        let stagingDirectory = try manager.temporaryDirectoryURL()
+        let stagingDirectory = try dependencies.temporaryDirectory(
+            context.configuration.mapping
+        )
             .appendingPathComponent("LanStashStaging", isDirectory: true)
         try FileManager.default.createDirectory(
             at: stagingDirectory,
@@ -158,6 +274,16 @@ actor ProviderRuntime {
                 at: temporaryURL,
                 expectedSize: remoteItem.sizeBytes
             ) {
+                let temporaryReservation = try await admitTemporaryDownload(
+                    mapping: context.configuration.mapping,
+                    remotePath: path,
+                    incomingBytes: remoteItem.sizeBytes
+                )
+                defer {
+                    if let temporaryReservation {
+                        temporaryReservations[temporaryReservation] = nil
+                    }
+                }
                 let result = try await recordMaterializedFile(
                     at: temporaryURL,
                     remoteItem: remoteItem,
@@ -167,16 +293,57 @@ actor ProviderRuntime {
                 progress(result.sizeBytes, remoteItem.sizeBytes)
                 return (temporaryURL, result.item)
             }
-            try ensureCacheSpace(
+            let temporaryReservation: UUID?
+            do {
+                try dependencies.ensureCacheSpace(
+                    remoteItem.sizeBytes,
+                    temporaryURL.deletingLastPathComponent()
+                )
+                temporaryReservation = try await admitTemporaryDownload(
+                    mapping: context.configuration.mapping,
+                    remotePath: path,
+                    incomingBytes: remoteItem.sizeBytes
+                )
+            } catch {
+                await context.repository.removePartialDownload(to: temporaryURL)
+                dependencies.removeItem(temporaryURL)
+                throw error
+            }
+            defer {
+                if let temporaryReservation {
+                    temporaryReservations[temporaryReservation] = nil
+                }
+            }
+            let monitor = ProviderDownloadCapacityMonitor(
                 expectedSize: remoteItem.sizeBytes,
-                at: temporaryURL.deletingLastPathComponent()
+                directory: temporaryURL.deletingLastPathComponent(),
+                intervalBytes: dependencies.capacityRecheckIntervalBytes,
+                ensureCacheSpace: dependencies.ensureCacheSpace
             )
-            try await context.repository.download(
-                remotePath: path,
-                to: temporaryURL,
-                expectedSize: remoteItem.sizeBytes,
-                progress: progress
-            )
+            let downloadTask = Task {
+                try await context.repository.download(
+                    remotePath: path,
+                    to: temporaryURL,
+                    expectedSize: remoteItem.sizeBytes
+                ) { completedBytes, totalBytes in
+                    monitor.observe(completedBytes: completedBytes)
+                    progress(completedBytes, totalBytes)
+                }
+            }
+            monitor.attachCancellation {
+                downloadTask.cancel()
+            }
+            do {
+                try await downloadTask.value
+                try monitor.throwIfCapacityCheckFailed()
+            } catch {
+                if let capacityError = monitor.capacityCheckFailure() {
+                    await context.repository.removePartialDownload(to: temporaryURL)
+                    dependencies.removeItem(temporaryURL)
+                    throw capacityError
+                }
+                throw error
+            }
             let result = try await recordMaterializedFile(
                 at: temporaryURL,
                 remoteItem: remoteItem,
@@ -190,7 +357,7 @@ actor ProviderRuntime {
         } catch {
             if !(error is CancellationError),
                (error as? AppError)?.category != .cancelled {
-                try? FileManager.default.removeItem(at: temporaryURL)
+                dependencies.removeItem(temporaryURL)
             }
             throw error
         }
@@ -258,6 +425,153 @@ actor ProviderRuntime {
         }
     }
 
+    /// 临时内容只有在驱逐成功且配置记录同步后才允许开始接收。
+    private func admitTemporaryDownload(
+        mapping: DesktopDriveMapping,
+        remotePath: String,
+        incomingBytes: Int64?
+    ) async throws -> UUID? {
+        await acquireTemporaryAdmissionLock()
+        defer { releaseTemporaryAdmissionLock() }
+        try Task.checkCancellation()
+
+        var runtime = try await configurationStore.runtime(mappingID: mapping.id)
+        guard !runtime.keepsOffline(remotePath) else { return nil }
+        guard let incomingBytes, incomingBytes >= 0,
+              incomingBytes <= mapping.cachePolicy.temporaryLimitBytes else {
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
+        let reservedBytes = reservedTemporaryBytes()
+        let excludedPaths = Set(
+            temporaryReservations.values.map(\.remotePath) + [remotePath]
+        )
+        guard !fitsTemporaryLimit(
+            runtime: runtime,
+            excludingPaths: excludedPaths,
+            reservedBytes: reservedBytes,
+            incomingBytes: incomingBytes,
+            limitBytes: mapping.cachePolicy.temporaryLimitBytes
+        ) else {
+            return reserveTemporaryBytes(
+                incomingBytes,
+                remotePath: remotePath
+            )
+        }
+
+        let limitWithoutIncoming = mapping.cachePolicy.temporaryLimitBytes
+            - incomingBytes
+        guard reservedBytes <= limitWithoutIncoming else {
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
+        let remainingLimit = limitWithoutIncoming - reservedBytes
+        let paths = DesktopDriveCacheEvictionPlanner.temporaryPathsToEvict(
+            entries: runtime.cacheEntries.values.filter {
+                !excludedPaths.contains($0.remotePath)
+            },
+            limitBytes: remainingLimit
+        )
+        for path in paths {
+            guard let identifier = DesktopDriveItemIdentity.identifier(
+                mappingID: mapping.id,
+                remotePath: path
+            ) else {
+                throw CocoaError(.fileWriteOutOfSpace)
+            }
+            try await dependencies.evictItem(
+                NSFileProviderItemIdentifier(identifier),
+                mapping
+            )
+            // 驱逐与记录删除逐项提交；任一步失败都保守拒绝新下载。
+            try await configurationStore.removeCacheEntries(
+                remotePaths: [path],
+                mappingID: mapping.id
+            )
+        }
+
+        runtime = try await configurationStore.runtime(mappingID: mapping.id)
+        guard !runtime.keepsOffline(remotePath),
+              fitsTemporaryLimit(
+                runtime: runtime,
+                excludingPaths: excludedPaths,
+                reservedBytes: reservedBytes,
+                incomingBytes: incomingBytes,
+                limitBytes: mapping.cachePolicy.temporaryLimitBytes
+              ) else {
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
+        return reserveTemporaryBytes(incomingBytes, remotePath: remotePath)
+    }
+
+    private func temporaryBytes(
+        in runtime: DesktopDriveMappingRuntime,
+        excludingPaths: Set<String> = []
+    ) -> Int64 {
+        runtime.cacheEntries.values.reduce(Int64(0)) { total, entry in
+            guard entry.kind == .temporary,
+                  !excludingPaths.contains(entry.remotePath) else {
+                return total
+            }
+            let result = total.addingReportingOverflow(entry.allocatedSizeBytes)
+            return result.overflow ? .max : result.partialValue
+        }
+    }
+
+    private func fitsTemporaryLimit(
+        runtime: DesktopDriveMappingRuntime,
+        excludingPaths: Set<String>,
+        reservedBytes: Int64,
+        incomingBytes: Int64,
+        limitBytes: Int64
+    ) -> Bool {
+        let withReservations = temporaryBytes(
+            in: runtime,
+            excludingPaths: excludingPaths
+        )
+            .addingReportingOverflow(reservedBytes)
+        guard !withReservations.overflow else { return false }
+        let withIncoming = withReservations.partialValue
+            .addingReportingOverflow(incomingBytes)
+        return !withIncoming.overflow && withIncoming.partialValue <= limitBytes
+    }
+
+    private func reservedTemporaryBytes() -> Int64 {
+        temporaryReservations.values.reduce(Int64(0)) { total, reservation in
+            let result = total.addingReportingOverflow(reservation.bytes)
+            return result.overflow ? .max : result.partialValue
+        }
+    }
+
+    private func reserveTemporaryBytes(
+        _ bytes: Int64,
+        remotePath: String
+    ) -> UUID {
+        let identifier = UUID()
+        temporaryReservations[identifier] = .init(
+            remotePath: remotePath,
+            bytes: bytes
+        )
+        return identifier
+    }
+
+    /// Actor 在 await 期间可重入，因此驱逐与准入决策需要显式串行化。
+    private func acquireTemporaryAdmissionLock() async {
+        if !temporaryAdmissionIsLocked {
+            temporaryAdmissionIsLocked = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            temporaryAdmissionWaiters.append(continuation)
+        }
+    }
+
+    private func releaseTemporaryAdmissionLock() {
+        guard !temporaryAdmissionWaiters.isEmpty else {
+            temporaryAdmissionIsLocked = false
+            return
+        }
+        temporaryAdmissionWaiters.removeFirst().resume()
+    }
+
     private func enforceTemporaryCacheLimit(
         mapping: DesktopDriveMapping
     ) async {
@@ -271,9 +585,6 @@ actor ProviderRuntime {
             limitBytes: mapping.cachePolicy.temporaryLimitBytes
         )
         guard !paths.isEmpty else { return }
-        let domain = Self.domain(for: mapping)
-        guard let manager = NSFileProviderManager(for: domain) else { return }
-        var released: [String] = []
         for path in paths {
             guard let identifier = DesktopDriveItemIdentity.identifier(
                 mappingID: mapping.id,
@@ -282,22 +593,21 @@ actor ProviderRuntime {
                 continue
             }
             do {
-                try await evict(
-                    identifier: NSFileProviderItemIdentifier(identifier),
-                    manager: manager
+                try await dependencies.evictItem(
+                    NSFileProviderItemIdentifier(identifier),
+                    mapping
                 )
-                released.append(path)
+                try await configurationStore.removeCacheEntries(
+                    remotePaths: [path],
+                    mappingID: mapping.id
+                )
             } catch {
                 // 文件可能仍被前台程序占用，保留记录供下一轮维护重试。
             }
         }
-        try? await configurationStore.removeCacheEntries(
-            remotePaths: released,
-            mappingID: mapping.id
-        )
     }
 
-    private func evict(
+    fileprivate static func evictItem(
         identifier: NSFileProviderItemIdentifier,
         manager: NSFileProviderManager
     ) async throws {
@@ -313,7 +623,7 @@ actor ProviderRuntime {
         }
     }
 
-    private func ensureCacheSpace(
+    fileprivate static func ensureCacheSpace(
         expectedSize: Int64?,
         at directory: URL
     ) throws {
@@ -337,7 +647,7 @@ actor ProviderRuntime {
 
     private func makeContext() async throws -> (
         configuration: DesktopDriveProviderConfiguration,
-        repository: DsmFileRepository
+        repository: any ProviderRuntimeRepository
     ) {
         guard let mappingID,
               let configuration = try await configurationStore.configuration(
@@ -352,16 +662,7 @@ actor ProviderRuntime {
         guard !runtime.isManuallyPaused else {
             throw NSFileProviderError(.serverUnreachable)
         }
-        guard let session: AuthSession = try await sessionStore.load(
-            for: configuration.mapping.profileID
-        ) else {
-            throw NSFileProviderError(.notAuthenticated)
-        }
-        let repository = try DsmFileRepository(
-            profile: configuration.connection.profile,
-            capabilities: configuration.connection.capabilitySet,
-            session: session
-        )
+        let repository = try await dependencies.makeRepository(configuration)
         return (configuration, repository)
     }
 
@@ -403,7 +704,7 @@ actor ProviderRuntime {
         }
     }
 
-    private static func domain(
+    fileprivate static func domain(
         for mapping: DesktopDriveMapping
     ) -> NSFileProviderDomain {
         NSFileProviderDomain(
@@ -412,5 +713,77 @@ actor ProviderRuntime {
             ),
             displayName: mapping.displayName
         )
+    }
+}
+
+/// 进度回调本身不可抛错，因此记录容量错误并取消实际下载 Task，等待下载返回后再清理。
+private final class ProviderDownloadCapacityMonitor: @unchecked Sendable {
+    private let lock = NSLock()
+    private let expectedSize: Int64?
+    private let directory: URL
+    private let intervalBytes: Int64
+    private let ensureCacheSpace: @Sendable (Int64?, URL) throws -> Void
+    private var nextCheckBytes: Int64
+    private var failure: Error?
+    private var cancelDownload: (@Sendable () -> Void)?
+
+    init(
+        expectedSize: Int64?,
+        directory: URL,
+        intervalBytes: Int64,
+        ensureCacheSpace: @escaping @Sendable (Int64?, URL) throws -> Void
+    ) {
+        self.expectedSize = expectedSize
+        self.directory = directory
+        self.intervalBytes = max(intervalBytes, 1)
+        self.ensureCacheSpace = ensureCacheSpace
+        nextCheckBytes = max(intervalBytes, 1)
+    }
+
+    func attachCancellation(_ action: @escaping @Sendable () -> Void) {
+        let shouldCancel = lock.withLock {
+            cancelDownload = action
+            return failure != nil
+        }
+        if shouldCancel {
+            action()
+        }
+    }
+
+    func observe(completedBytes: Int64) {
+        let shouldCheck = lock.withLock { () -> Bool in
+            guard failure == nil, completedBytes >= nextCheckBytes else {
+                return false
+            }
+            let completedIntervals = completedBytes / intervalBytes
+            nextCheckBytes = (completedIntervals + 1) * intervalBytes
+            return true
+        }
+        guard shouldCheck else { return }
+
+        do {
+            let remainingBytes = expectedSize.map {
+                max($0 - max(completedBytes, 0), 0)
+            }
+            try ensureCacheSpace(remainingBytes, directory)
+        } catch {
+            let cancellation = lock.withLock {
+                if failure == nil {
+                    failure = error
+                }
+                return cancelDownload
+            }
+            cancellation?()
+        }
+    }
+
+    func capacityCheckFailure() -> Error? {
+        lock.withLock { failure }
+    }
+
+    func throwIfCapacityCheckFailed() throws {
+        if let failure = capacityCheckFailure() {
+            throw failure
+        }
     }
 }

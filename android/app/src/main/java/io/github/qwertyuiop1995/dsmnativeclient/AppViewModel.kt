@@ -55,6 +55,8 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSettings
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskPage
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskSummary
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileShareLink
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBrowserState
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileSortOption
@@ -617,6 +619,34 @@ data class PendingFileUploads(
     val uris: List<Uri>,
     val destinationPath: String,
     val conflictCount: Int,
+    val profileId: String,
+    val module: Module,
+    val generation: Long,
+)
+
+internal data class FileUploadPreflightToken(
+    val profileId: String,
+    val module: Module,
+    val destinationPath: String,
+    val generation: Long,
+)
+
+internal fun WorkspaceState.matchesFileUploadPreflight(
+    token: FileUploadPreflightToken,
+    currentGeneration: Long,
+): Boolean = token.generation == currentGeneration &&
+    profile.id == token.profileId && selectedModule == token.module &&
+    fileBrowser.path == token.destinationPath
+
+private data class FileUploadPreflightClaim(
+    val repository: DsmRepository,
+    val token: FileUploadPreflightToken,
+)
+
+private data class FileServerTransferClaim(
+    val repository: DsmRepository,
+    val profileId: String,
+    val sourceModule: Module,
 )
 
 enum class PreviewOwner { FILES, PHOTOS }
@@ -1453,6 +1483,41 @@ internal data class VirtualMachineOverviewRequestToken(
     val generation: Long,
 )
 
+internal enum class FileBackgroundTaskRequestKind { REFRESH, LOAD_MORE }
+
+internal data class FileBackgroundTaskRequestToken(
+    val profileId: String,
+    val generation: Long,
+    val offset: Int,
+    val kind: FileBackgroundTaskRequestKind,
+)
+
+internal fun fileBackgroundTaskCallbackMatches(
+    repositoryMatches: Boolean,
+    selectedModule: Module,
+    currentProfileId: String,
+    token: FileBackgroundTaskRequestToken,
+    currentGeneration: Long,
+): Boolean = repositoryMatches && selectedModule == Module.TRANSFERS &&
+    currentProfileId == token.profileId && currentGeneration == token.generation
+
+internal fun appendFileBackgroundTaskPage(
+    current: FileBackgroundTaskPage,
+    incoming: FileBackgroundTaskPage,
+    expectedOffset: Int,
+): FileBackgroundTaskPage? {
+    if (current.nextOffset != expectedOffset || incoming.offset != expectedOffset) return null
+    val seenIds = current.tasks.mapTo(mutableSetOf(), FileBackgroundTaskSummary::id)
+    val appended = incoming.tasks.filter { seenIds.add(it.id) }
+    return FileBackgroundTaskPage(
+        tasks = current.tasks + appended,
+        offset = current.offset,
+        nextOffset = incoming.nextOffset,
+        total = maxOf(current.tasks.size + appended.size, incoming.total),
+        hasMore = incoming.hasMore,
+    )
+}
+
 data class WorkspaceState(
     val profile: NasProfile,
     val selectedModule: Module = Module.FILES,
@@ -1674,6 +1739,9 @@ data class WorkspaceState(
     val diskTestMutationRefreshCompleted: Boolean = false,
     val diskTestMutationGeneration: Long = 0L,
     val transfers: List<TransferTask> = emptyList(),
+    val fileBackgroundTasks: Loadable<FileBackgroundTaskPage> = Loadable.Idle,
+    val fileBackgroundTaskIsLoadingMore: Boolean = false,
+    val fileBackgroundTasksLoadMoreFailure: DsmFailure? = null,
     val previewItem: FileItem? = null,
     val preview: Loadable<FilePreviewContent> = Loadable.Idle,
     val previewOwner: PreviewOwner? = null,
@@ -1697,6 +1765,8 @@ data class WorkspaceState(
     val remoteAccessMutationRefreshInProgress get() = remoteAccessState.mutationRefreshInProgress
     val remoteAccessMutationRefreshCompleted get() = remoteAccessState.mutationRefreshCompleted
     val remoteAccessMutationGeneration get() = remoteAccessState.mutationGeneration
+    val fileBackgroundTasksHasMore: Boolean
+        get() = (fileBackgroundTasks as? Loadable.Ready)?.value?.hasMore == true
 }
 
 internal fun canonicalDownloadTask(task: DownloadTask): DownloadTask? {
@@ -2928,6 +2998,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var nasSwitchJob: Job? = null
     private var isSwitchingNas = false
     private val transferJobs = mutableMapOf<String, Job>()
+    private var fileBackgroundTaskJob: Job? = null
+    private val fileUploadPreflightJobs = mutableMapOf<String, Job>()
+    private var fileUploadPreflightBusyToken: FileUploadPreflightToken? = null
     private val foregroundDownloadExecutionIds = mutableMapOf<String, String>()
     private val transferWatchJobs = mutableMapOf<String, Job>()
     private var previewJob: Job? = null
@@ -2949,7 +3022,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var downloadDiscoverySearchJob: Job? = null
     private val fileBrowserRequestGeneration = AtomicLong(0)
     private val fileStationMutationGeneration = AtomicLong(0)
+    private val fileUploadPreflightGeneration = AtomicLong(0)
     private val downloadListRequestGeneration = AtomicLong(0)
+    private val fileBackgroundTaskRequestGeneration = AtomicLong(0)
     private val downloadCreationMutationGeneration = AtomicLong(0)
     private val downloadControlMutationGeneration = AtomicLong(0)
     private val downloadSettingsMutationGeneration = AtomicLong(0)
@@ -3122,6 +3197,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 chatLocalReadMarkers = emptyMap()
                 fileBrowserRequestGeneration.incrementAndGet()
                 downloadListRequestGeneration.incrementAndGet()
+                fileBackgroundTaskRequestGeneration.incrementAndGet()
                 repository = repo
                 _login.value = LoginState(
                     profiles = store.profiles(),
@@ -3236,6 +3312,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 chatLocalReadMarkers = emptyMap()
                 fileBrowserRequestGeneration.incrementAndGet()
                 downloadListRequestGeneration.incrementAndGet()
+                fileBackgroundTaskRequestGeneration.incrementAndGet()
                 repository = repo
                 _login.update { it.copy(isConnecting = false, connectionStatus = null) }
                 val availability = repo.availability()
@@ -3430,6 +3507,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (state.selectedModule == Module.CHAT && module != Module.CHAT) {
             invalidateChatAttachmentPreflights()
         }
+        if (state.selectedModule == Module.FILES && module != Module.FILES) {
+            invalidateFileUploadPreflights()
+        }
+        if (state.selectedModule == Module.TRANSFERS && module != Module.TRANSFERS) {
+            invalidateFileBackgroundTaskRequests()
+        }
         val discardSettledFileMutation = state.selectedModule != module &&
             shouldDiscardSettledFileStationMutationOnModuleChange(
                 state.fileStationMutationState,
@@ -3444,6 +3527,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     current.fileStationMutationState
                 },
+                pendingFileUploads = current.pendingFileUploads.takeIf { module == Module.FILES },
+                fileBackgroundTasks = if (
+                    module != Module.TRANSFERS && current.fileBackgroundTasks is Loadable.Loading
+                ) {
+                    Loadable.Idle
+                } else {
+                    current.fileBackgroundTasks
+                },
+                fileBackgroundTaskIsLoadingMore = current.fileBackgroundTaskIsLoadingMore &&
+                    module == Module.TRANSFERS,
+                fileBackgroundTasksLoadMoreFailure = current.fileBackgroundTasksLoadMoreFailure
+                    .takeIf { module == Module.TRANSFERS },
                 downloadDetailsTask = current.downloadDetailsTask.takeIf {
                     module == Module.DOWNLOADS && current.selectedModule == Module.DOWNLOADS
                 },
@@ -3713,10 +3808,144 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         ) ?: current
                     }
                 }
-                Module.TRANSFERS -> Unit
+                Module.TRANSFERS -> {
+                    if (_workspace.value?.fileBackgroundTasks is Loadable.Idle) {
+                        refreshFileBackgroundTasks()
+                    }
+                }
                 Module.SETTINGS -> refreshRegenerableCacheUsage()
             }
         }
+    }
+
+    fun refreshFileBackgroundTasks() {
+        val repo = repository ?: return
+        val token = synchronized(downloadMutationCoordinatorLock) {
+            val current = _workspace.value ?: return@synchronized null
+            if (repository !== repo || current.selectedModule != Module.TRANSFERS) {
+                return@synchronized null
+            }
+            fileBackgroundTaskJob?.cancel()
+            FileBackgroundTaskRequestToken(
+                profileId = current.profile.id,
+                generation = fileBackgroundTaskRequestGeneration.incrementAndGet(),
+                offset = 0,
+                kind = FileBackgroundTaskRequestKind.REFRESH,
+            ).also {
+                _workspace.value = current.copy(
+                    fileBackgroundTasks = Loadable.Loading,
+                    fileBackgroundTaskIsLoadingMore = false,
+                    fileBackgroundTasksLoadMoreFailure = null,
+                )
+            }
+        } ?: return
+        launchFileBackgroundTaskRequest(repo, token)
+    }
+
+    fun loadMoreFileBackgroundTasks() {
+        val repo = repository ?: return
+        val token = synchronized(downloadMutationCoordinatorLock) {
+            val current = _workspace.value ?: return@synchronized null
+            val page = (current.fileBackgroundTasks as? Loadable.Ready)?.value
+                ?: return@synchronized null
+            if (repository !== repo || current.selectedModule != Module.TRANSFERS ||
+                current.fileBackgroundTaskIsLoadingMore || !page.hasMore
+            ) {
+                return@synchronized null
+            }
+            FileBackgroundTaskRequestToken(
+                profileId = current.profile.id,
+                generation = fileBackgroundTaskRequestGeneration.incrementAndGet(),
+                offset = page.nextOffset,
+                kind = FileBackgroundTaskRequestKind.LOAD_MORE,
+            ).also {
+                _workspace.value = current.copy(
+                    fileBackgroundTaskIsLoadingMore = true,
+                    fileBackgroundTasksLoadMoreFailure = null,
+                )
+            }
+        } ?: return
+        launchFileBackgroundTaskRequest(repo, token)
+    }
+
+    private fun launchFileBackgroundTaskRequest(
+        repo: DsmRepository,
+        token: FileBackgroundTaskRequestToken,
+    ) {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val outcome = try {
+                Result.success(repo.listFileBackgroundTasks(offset = token.offset, limit = 100))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                Result.failure(error)
+            }
+            synchronized(downloadMutationCoordinatorLock) {
+                val current = _workspace.value ?: return@synchronized
+                if (!fileBackgroundTaskCallbackMatches(
+                        repositoryMatches = repository === repo,
+                        selectedModule = current.selectedModule,
+                        currentProfileId = current.profile.id,
+                        token = token,
+                        currentGeneration = fileBackgroundTaskRequestGeneration.get(),
+                    )
+                ) {
+                    return@synchronized
+                }
+                val page = outcome.getOrNull()
+                val failure = outcome.exceptionOrNull()?.asDsmFailure()
+                _workspace.value = when (token.kind) {
+                    FileBackgroundTaskRequestKind.REFRESH -> current.copy(
+                        fileBackgroundTasks = page?.let { Loadable.Ready(it) }
+                            ?: Loadable.Failed(checkNotNull(failure)),
+                        fileBackgroundTaskIsLoadingMore = false,
+                        fileBackgroundTasksLoadMoreFailure = null,
+                    )
+                    FileBackgroundTaskRequestKind.LOAD_MORE -> {
+                        val existing = (current.fileBackgroundTasks as? Loadable.Ready)?.value
+                        val merged = if (existing != null && page != null) {
+                            appendFileBackgroundTaskPage(existing, page, token.offset)
+                        } else {
+                            null
+                        }
+                        current.copy(
+                            fileBackgroundTasks = merged?.let { Loadable.Ready(it) }
+                                ?: current.fileBackgroundTasks,
+                            fileBackgroundTaskIsLoadingMore = false,
+                            fileBackgroundTasksLoadMoreFailure = when {
+                                failure != null -> failure
+                                merged == null -> DsmFailure(
+                                    null,
+                                    "The NAS returned an unrecognized task page",
+                                    "Refresh the NAS tasks and try again.",
+                                    kind = DsmErrorKind.INVALID_RESPONSE,
+                                )
+                                else -> null
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        synchronized(downloadMutationCoordinatorLock) {
+            if (fileBackgroundTaskRequestGeneration.get() != token.generation || repository !== repo) {
+                job.cancel()
+                return@synchronized
+            }
+            fileBackgroundTaskJob = job
+        }
+        job.invokeOnCompletion {
+            synchronized(downloadMutationCoordinatorLock) {
+                if (fileBackgroundTaskJob === job) fileBackgroundTaskJob = null
+            }
+        }
+        job.start()
+    }
+
+    private fun invalidateFileBackgroundTaskRequests() = synchronized(downloadMutationCoordinatorLock) {
+        fileBackgroundTaskRequestGeneration.incrementAndGet()
+        fileBackgroundTaskJob?.cancel()
+        fileBackgroundTaskJob = null
     }
 
     fun openConversation(conversation: ChatConversation) {
@@ -6347,9 +6576,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun prepareFileUploads(uris: List<Uri>) {
-        val repo = repository ?: return
-        val state = _workspace.value ?: return
-        val destination = state.fileBrowser.path
+        val destination = _workspace.value?.fileBrowser?.path.orEmpty()
         if (destination.isBlank()) {
             _workspace.update {
                 it?.copy(message = getApplication<Application>().getString(R.string.open_folder_before_upload))
@@ -6369,33 +6596,48 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         val selected = uris.distinct()
         if (selected.isEmpty()) return
-        viewModelScope.launch {
-            _workspace.update { it?.copy(isPerformingAction = true, message = null) }
-            runCatching {
+        val claim = claimFileUploadPreflight(destination, markWorkspaceBusy = true) ?: return
+        launchFileUploadPreflight(claim) {
+            try {
                 val sources = selected.map { uri -> uri to resolveUploadSource(uri) }
                 if (sources.map { it.second.displayName.lowercase(Locale.ROOT) }.distinct().size !=
                     sources.size
                 ) {
                     throw DuplicateUploadNamesException()
                 }
-                val conflicts = repo.existingChildNames(
+                val conflicts = claim.repository.existingChildNames(
                     destination,
                     sources.map { it.second.displayName },
                 ).size
-                sources to conflicts
-            }.onSuccess { (_, conflicts) ->
-                _workspace.update {
-                    it?.copy(
+                val accepted = synchronized(fileStationMutationLock) {
+                    val current = _workspace.value ?: return@synchronized false
+                    if (!fileUploadPreflightMatches(claim, current)) return@synchronized false
+                    if (fileUploadPreflightBusyToken == claim.token) {
+                        fileUploadPreflightBusyToken = null
+                    }
+                    _workspace.value = current.copy(
                         isPerformingAction = false,
                         pendingFileUploads = if (conflicts > 0) {
-                            PendingFileUploads(selected, destination, conflicts)
+                            PendingFileUploads(
+                                selected,
+                                destination,
+                                conflicts,
+                                claim.token.profileId,
+                                claim.token.module,
+                                claim.token.generation,
+                            )
                         } else {
                             null
                         },
                     )
+                    true
                 }
-                if (conflicts == 0) queueFileUploads(selected, destination, overwrite = false)
-            }.onFailure { error ->
+                if (accepted && conflicts == 0) {
+                    queueFileUploads(selected, overwrite = false, claim = claim)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                 val message = if (error is DuplicateUploadNamesException) {
                     getApplication<Application>().getString(R.string.upload_duplicate_names)
                 } else if (error is DsmFailure) {
@@ -6403,63 +6645,112 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     getApplication<Application>().getString(R.string.upload_source_unavailable)
                 }
-                _workspace.update {
-                    it?.copy(isPerformingAction = false, message = message)
+                synchronized(fileStationMutationLock) {
+                    val current = _workspace.value ?: return@synchronized
+                    if (fileUploadPreflightMatches(claim, current)) {
+                        if (fileUploadPreflightBusyToken == claim.token) {
+                            fileUploadPreflightBusyToken = null
+                        }
+                        _workspace.value = current.copy(isPerformingAction = false, message = message)
+                    }
                 }
             }
         }
     }
 
     fun confirmPendingFileUploads() {
-        val pending = _workspace.value?.pendingFileUploads ?: return
-        _workspace.update { it?.copy(pendingFileUploads = null) }
-        queueFileUploads(pending.uris, pending.destinationPath, overwrite = true)
+        val request = synchronized(fileStationMutationLock) {
+            val repo = repository ?: return@synchronized null
+            val current = _workspace.value ?: return@synchronized null
+            val pending = current.pendingFileUploads ?: return@synchronized null
+            val token = FileUploadPreflightToken(
+                profileId = pending.profileId,
+                module = pending.module,
+                destinationPath = pending.destinationPath,
+                generation = pending.generation,
+            )
+            _workspace.value = current.copy(pendingFileUploads = null)
+            if (!current.matchesFileUploadPreflight(token, fileUploadPreflightGeneration.get())) {
+                return@synchronized null
+            }
+            pending to FileUploadPreflightClaim(repo, token)
+        } ?: return
+        queueFileUploads(request.first.uris, overwrite = true, claim = request.second)
     }
 
     fun cancelPendingFileUploads() {
-        _workspace.update { it?.copy(pendingFileUploads = null) }
+        synchronized(fileStationMutationLock) {
+            invalidateFileUploadPreflights()
+            _workspace.update { it?.copy(pendingFileUploads = null) }
+        }
     }
 
-    private fun queueFileUploads(uris: List<Uri>, destination: String, overwrite: Boolean) {
-        val state = _workspace.value ?: return
-        val backgroundCapable = store.session(state.profile.id) != null
+    private fun queueFileUploads(
+        uris: List<Uri>,
+        overwrite: Boolean,
+        claim: FileUploadPreflightClaim,
+    ) {
+        val backgroundCapable = store.session(claim.token.profileId) != null
         uris.forEach { uri ->
-            if (backgroundCapable) {
-                viewModelScope.launch {
-                    val source = runCatching { resolveUploadSource(uri) }.getOrNull()
-                    if (source == null) {
-                        _workspace.update {
-                            it?.copy(message = getApplication<Application>().getString(R.string.upload_source_unavailable))
+            launchFileUploadPreflight(claim) {
+                val source = try {
+                    resolveUploadSource(uri)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Throwable) {
+                    synchronized(fileStationMutationLock) {
+                        val current = _workspace.value ?: return@synchronized
+                        if (fileUploadPreflightMatches(claim, current)) {
+                            _workspace.value = current.copy(
+                                message = getApplication<Application>()
+                                    .getString(R.string.upload_source_unavailable),
+                            )
                         }
-                        return@launch
                     }
-                    val grantTaken = runCatching {
-                        getApplication<Application>().contentResolver.takePersistableUriPermission(
-                            uri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                        )
-                    }.isSuccess
-                    if (!grantTaken) {
-                        enqueueUpload(uri, overwrite, destination)
-                        return@launch
-                    }
-                    val record = PersistedUpload(
-                        id = UUID.randomUUID().toString(),
-                        profileId = state.profile.id,
-                        sourceUri = uri.toString(),
-                        title = source.displayName,
-                        contentType = source.contentType,
-                        expectedBytes = source.contentLength,
-                        destinationPath = destination,
-                        destinationRootPath = destination,
-                        backupMode = false,
-                        overwrite = overwrite,
-                    )
-                    transferStore.upsert(record)
-                    enqueuePersistedFileUpload(record)
+                    return@launchFileUploadPreflight
                 }
-            } else {
-                enqueueUpload(uri, overwrite, destination)
+                if (!backgroundCapable) {
+                    startForegroundUpload(claim, source, overwrite)
+                    return@launchFileUploadPreflight
+                }
+                val currentBeforeGrant = synchronized(fileStationMutationLock) {
+                    _workspace.value?.let { fileUploadPreflightMatches(claim, it) } == true
+                }
+                if (!currentBeforeGrant) return@launchFileUploadPreflight
+                val grantTaken = runCatching {
+                    getApplication<Application>().contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                }.isSuccess
+                if (!grantTaken) {
+                    startForegroundUpload(claim, source, overwrite)
+                    return@launchFileUploadPreflight
+                }
+                var grantClaimed = false
+                try {
+                    synchronized(fileStationMutationLock) {
+                        val current = _workspace.value ?: return@synchronized
+                        if (!fileUploadPreflightMatches(claim, current)) return@synchronized
+                        val record = PersistedUpload(
+                            id = UUID.randomUUID().toString(),
+                            profileId = claim.token.profileId,
+                            sourceUri = uri.toString(),
+                            title = source.displayName,
+                            contentType = source.contentType,
+                            expectedBytes = source.contentLength,
+                            destinationPath = claim.token.destinationPath,
+                            destinationRootPath = claim.token.destinationPath,
+                            backupMode = false,
+                            overwrite = overwrite,
+                        )
+                        transferStore.upsert(record)
+                        grantClaimed = true
+                        enqueuePersistedFileUpload(record)
+                    }
+                } finally {
+                    if (!grantClaimed) releasePersistedReadPermission(uri)
+                }
             }
         }
     }
@@ -6469,7 +6760,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         overwrite: Boolean = false,
         destinationSnapshot: String? = null,
     ) {
-        val repo = repository ?: return
         val destination = resolveUploadDestination(
             destinationSnapshot = destinationSnapshot,
             currentBrowserPath = _workspace.value?.fileBrowser?.path.orEmpty(),
@@ -6480,14 +6770,38 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
-        viewModelScope.launch {
-            val source = runCatching { resolveUploadSource(uri) }.getOrElse { error ->
-                val message = error.asDsmFailure()
-                    .localize(getApplication<Application>())
-                    .combined
-                _workspace.update { it?.copy(message = message) }
-                return@launch
+        val claim = claimFileUploadPreflight(destination, markWorkspaceBusy = false) ?: return
+        launchFileUploadPreflight(claim) {
+            val source = try {
+                resolveUploadSource(uri)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                synchronized(fileStationMutationLock) {
+                    val current = _workspace.value ?: return@synchronized
+                    if (fileUploadPreflightMatches(claim, current)) {
+                        _workspace.value = current.copy(
+                            message = error.asDsmFailure()
+                                .localize(getApplication<Application>())
+                                .combined,
+                        )
+                    }
+                }
+                return@launchFileUploadPreflight
             }
+            startForegroundUpload(claim, source, overwrite)
+        }
+    }
+
+    private fun startForegroundUpload(
+        claim: FileUploadPreflightClaim,
+        source: UploadSource,
+        overwrite: Boolean,
+    ): Boolean {
+        val destination = claim.token.destinationPath
+        return synchronized(fileStationMutationLock) {
+            val current = _workspace.value ?: return@synchronized false
+            if (!fileUploadPreflightMatches(claim, current)) return@synchronized false
             val taskId = UUID.randomUUID().toString()
             val task = TransferTask(
                 id = taskId,
@@ -6497,9 +6811,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 state = TransferState.WAITING,
                 totalBytes = source.contentLength,
             )
-            _workspace.update { it?.copy(transfers = listOf(task) + it.transfers) }
-            val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
-                updateTransfer(taskId) {
+            lateinit var job: Job
+            job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+                updateFileUploadTransfer(claim, taskId) {
                     it.copy(
                         state = TransferState.RUNNING,
                         detail = getApplication<Application>().getString(R.string.transfer_uploading),
@@ -6507,8 +6821,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 try {
-                    val result = repo.uploadResult(source, destination, overwrite = overwrite) { completed, total ->
-                        updateTransfer(taskId) {
+                    val result = claim.repository.uploadResult(
+                        source,
+                        destination,
+                        overwrite = overwrite,
+                    ) { completed, total ->
+                        updateFileUploadTransfer(claim, taskId) {
                             it.copy(completedBytes = completed, totalBytes = total)
                         }
                     }
@@ -6518,7 +6836,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
                         MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
                     )
-                    updateTransfer(taskId) {
+                    updateFileUploadTransfer(claim, taskId) {
                         it.copy(
                             state = when {
                                 succeeded -> TransferState.SUCCEEDED
@@ -6531,28 +6849,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             requiresRefresh = result.requiresRefresh,
                         )
                     }
-                    if (
-                        (result.submitted || result.requiresRefresh) &&
-                        currentCoroutineContext().isActive &&
+                    if ((result.submitted || result.requiresRefresh) && currentCoroutineContext().isActive &&
+                        repository === claim.repository &&
+                        _workspace.value?.profile?.id == claim.token.profileId &&
+                        _workspace.value?.selectedModule == Module.FILES &&
                         _workspace.value?.fileBrowser?.path == destination
                     ) {
-                        loadFileBrowser(repo)
+                        loadFileBrowser(claim.repository)
                     }
-                    _workspace.update { it?.copy(message = message) }
+                    updateFileUploadWorkspaceMessage(claim, message)
                 } catch (_: CancellationException) {
-                    val submitted = _workspace.value?.transfers
-                        ?.firstOrNull { it.id == taskId }
-                        ?.completedBytes
-                        ?.let { it > 0 } == true
-                    updateTransfer(taskId) {
+                    val submitted = _workspace.value?.takeIf {
+                        repository === claim.repository && it.profile.id == claim.token.profileId
+                    }?.transfers?.firstOrNull { it.id == taskId }?.completedBytes?.let { it > 0 } == true
+                    updateFileUploadTransfer(claim, taskId) {
                         it.copy(
                             state = TransferState.CANCELLED,
                             detail = getApplication<Application>().getString(
-                                if (submitted) {
-                                    R.string.transfer_cancelled_refresh
-                                } else {
-                                    R.string.transfer_cancelled
-                                },
+                                if (submitted) R.string.transfer_cancelled_refresh else R.string.transfer_cancelled,
                             ),
                             requiresRefresh = submitted,
                         )
@@ -6565,7 +6879,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         DsmErrorKind.CHANGE_NOT_CONFIRMED,
                         DsmErrorKind.UPLOAD_LENGTH_MISMATCH,
                     )
-                    updateTransfer(taskId) {
+                    updateFileUploadTransfer(claim, taskId) {
                         it.copy(
                             state = TransferState.FAILED,
                             detail = getApplication<Application>().getString(R.string.transfer_failed),
@@ -6579,10 +6893,115 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
+            _workspace.value = current.copy(transfers = listOf(task) + current.transfers)
             transferJobs[taskId] = job
-            job.invokeOnCompletion { transferJobs.remove(taskId) }
+            job.invokeOnCompletion { transferJobs.remove(taskId, job) }
             job.start()
+            true
         }
+    }
+
+    private fun updateFileUploadTransfer(
+        claim: FileUploadPreflightClaim,
+        taskId: String,
+        transform: (TransferTask) -> TransferTask,
+    ) {
+        synchronized(fileStationMutationLock) {
+            val current = _workspace.value ?: return
+            if (repository !== claim.repository || current.profile.id != claim.token.profileId) return
+            _workspace.value = current.copy(
+                transfers = current.transfers.map { task ->
+                    if (task.id == taskId) transform(task) else task
+                },
+            )
+        }
+    }
+
+    private fun updateFileUploadWorkspaceMessage(claim: FileUploadPreflightClaim, message: String) {
+        synchronized(fileStationMutationLock) {
+            val current = _workspace.value ?: return
+            if (repository === claim.repository && current.profile.id == claim.token.profileId) {
+                _workspace.value = current.copy(message = message)
+            }
+        }
+    }
+
+    private fun claimFileUploadPreflight(
+        destination: String,
+        markWorkspaceBusy: Boolean,
+    ): FileUploadPreflightClaim? = synchronized(fileStationMutationLock) {
+        val repo = repository ?: return@synchronized null
+        invalidateFileUploadPreflights()
+        val current = _workspace.value ?: return@synchronized null
+        if (isSwitchingNas || current.selectedModule != Module.FILES ||
+            current.fileBrowser.path != destination || markWorkspaceBusy && current.isPerformingAction
+        ) return@synchronized null
+        val token = FileUploadPreflightToken(
+            profileId = current.profile.id,
+            module = Module.FILES,
+            destinationPath = destination,
+            generation = fileUploadPreflightGeneration.get(),
+        )
+        if (markWorkspaceBusy) {
+            fileUploadPreflightBusyToken = token
+            _workspace.value = current.copy(isPerformingAction = true, message = null)
+        }
+        FileUploadPreflightClaim(repo, token)
+    }
+
+    private fun fileUploadPreflightMatches(
+        claim: FileUploadPreflightClaim,
+        current: WorkspaceState,
+    ): Boolean = repository === claim.repository &&
+        current.matchesFileUploadPreflight(claim.token, fileUploadPreflightGeneration.get())
+
+    private fun launchFileUploadPreflight(
+        claim: FileUploadPreflightClaim,
+        block: suspend () -> Unit,
+    ): Job? {
+        val jobId = UUID.randomUUID().toString()
+        lateinit var job: Job
+        job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                block()
+            } finally {
+                synchronized(fileStationMutationLock) {
+                    fileUploadPreflightJobs.remove(jobId, job)
+                }
+            }
+        }
+        val registered = synchronized(fileStationMutationLock) {
+            val current = _workspace.value
+            if (current == null || !fileUploadPreflightMatches(claim, current)) {
+                false
+            } else {
+                fileUploadPreflightJobs[jobId] = job
+                true
+            }
+        }
+        if (!registered) {
+            job.cancel()
+            return null
+        }
+        job.start()
+        return job
+    }
+
+    private fun invalidateFileUploadPreflights() = synchronized(fileStationMutationLock) {
+        val busyToken = fileUploadPreflightBusyToken
+        val current = _workspace.value
+        if (busyToken != null && current != null && current.isPerformingAction &&
+            current.matchesFileUploadPreflight(
+                busyToken,
+                fileUploadPreflightGeneration.get(),
+            )
+        ) {
+            _workspace.value = current.copy(isPerformingAction = false)
+        }
+        fileUploadPreflightBusyToken = null
+        fileUploadPreflightGeneration.incrementAndGet()
+        fileUploadPreflightJobs.values.forEach(Job::cancel)
+        fileUploadPreflightJobs.clear()
     }
 
     fun enqueuePhotoBackups(uris: List<Uri>) {
@@ -12852,7 +13271,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             isSwitchingNas = true
             fileBrowserRequestGeneration.incrementAndGet()
             fileStationMutationGeneration.incrementAndGet()
+            invalidateFileUploadPreflights()
             downloadListRequestGeneration.incrementAndGet()
+            invalidateFileBackgroundTaskRequests()
             downloadCreationMutationGeneration.incrementAndGet()
             downloadControlMutationGeneration.incrementAndGet()
             downloadSettingsMutationGeneration.incrementAndGet()
@@ -12943,6 +13364,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val state = synchronized(downloadMutationCoordinatorLock) {
             val candidate = _workspace.value ?: return
             if (candidate.isPerformingAction || candidate.hasBlockingStructuredNasMutation() ||
+                hasBlockingFileServerTransfer(candidate.transfers) ||
                 fileStationMutationBlocksWorkspaceExit(candidate.fileStationMutationState) ||
                 downloadCreationBlocksWorkspaceExit(candidate.downloadCreationState) ||
                 downloadControlBlocksWorkspaceExit(candidate.downloadControlState) ||
@@ -12958,7 +13380,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             fileBrowserRequestGeneration.incrementAndGet()
             fileStationMutationGeneration.incrementAndGet()
+            invalidateFileUploadPreflights()
             downloadListRequestGeneration.incrementAndGet()
+            invalidateFileBackgroundTaskRequests()
             downloadCreationMutationGeneration.incrementAndGet()
             downloadControlMutationGeneration.incrementAndGet()
             downloadSettingsMutationGeneration.incrementAndGet()
@@ -15349,11 +15773,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             state = TransferState.RUNNING,
             startedAtEpochMillis = System.currentTimeMillis(),
         )
-        _workspace.update { it?.copy(transfers = listOf(task) + it.transfers, message = null) }
+        val claim = synchronized(fileStationMutationLock) {
+            val current = _workspace.value ?: return
+            if (repository !== repo || current.selectedModule != Module.FILES) return
+            _workspace.value = current.copy(
+                transfers = listOf(task) + current.transfers,
+                message = null,
+            )
+            FileServerTransferClaim(repo, current.profile.id, current.selectedModule)
+        }
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val result = block(repo) { completed, total ->
-                    updateTransfer(taskId) {
+                    updateServerTransfer(claim, taskId) {
                         it.copy(completedBytes = completed, totalBytes = total)
                     }
                 }
@@ -15363,7 +15795,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
                     MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
                 )
-                updateTransfer(taskId) {
+                updateServerTransfer(claim, taskId) {
                     it.copy(
                         state = when {
                             completed -> TransferState.SUCCEEDED
@@ -15375,9 +15807,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         requiresRefresh = result.requiresRefresh,
                     )
                 }
-                _workspace.update { it?.copy(message = message) }
+                updateServerTransferMessage(claim, message)
             } catch (_: CancellationException) {
-                updateTransfer(taskId) {
+                updateServerTransfer(claim, taskId) {
                     it.copy(
                         state = TransferState.CANCELLED,
                         detail = application.getString(R.string.transfer_cancelled_refresh),
@@ -15386,7 +15818,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (error: Throwable) {
                 val message = error.asDsmFailure().localize(application).combined
-                updateTransfer(taskId) {
+                updateServerTransfer(claim, taskId) {
                     it.copy(
                         state = TransferState.FAILED,
                         detail = application.getString(R.string.transfer_failed),
@@ -15397,8 +15829,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         transferJobs[taskId] = job
-        job.invokeOnCompletion { transferJobs.remove(taskId) }
+        job.invokeOnCompletion { transferJobs.remove(taskId, job) }
         job.start()
+    }
+
+    private fun updateServerTransfer(
+        claim: FileServerTransferClaim,
+        taskId: String,
+        transform: (TransferTask) -> TransferTask,
+    ) {
+        _workspace.update { current ->
+            current?.takeIf {
+                repository === claim.repository && it.profile.id == claim.profileId
+            }?.copy(
+                transfers = current.transfers.map { task ->
+                    if (task.id == taskId) transform(task) else task
+                },
+            ) ?: current
+        }
+    }
+
+    private fun updateServerTransferMessage(claim: FileServerTransferClaim, message: String) {
+        _workspace.update { current ->
+            current?.takeIf {
+                repository === claim.repository && it.profile.id == claim.profileId &&
+                    it.selectedModule == claim.sourceModule
+            }?.copy(message = message) ?: current
+        }
     }
 
     private fun action(@StringRes success: Int, block: suspend (DsmRepository) -> Unit) {
@@ -16440,6 +16897,12 @@ internal fun canSafelySwitchNas(
             transfer.state !in TERMINAL_TRANSFER_STATES
     }
 }
+
+internal fun hasBlockingFileServerTransfer(transfers: List<TransferTask>): Boolean =
+    transfers.any { transfer ->
+        transfer.direction == TransferDirection.SERVER &&
+            (transfer.state !in TERMINAL_TRANSFER_STATES || transfer.requiresRefresh)
+    }
 
 internal fun <K, V : Any> MutableMap<K, V>.removeIfSame(key: K, expected: V): Boolean {
     if (this[key] !== expected) return false

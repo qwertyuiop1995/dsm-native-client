@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "file-station.background-task.synthetic-page",
+  "module": "file-station",
+  "operation": "listBackgroundTasks",
+  "api": {
+    "name": "SYNO.FileStation.BackgroundTask",
+    "method": "list",
+    "preferredVersion": 3,
+    "resolvedVersion": 3,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "api_filter",
+      "valueType": "stringArray",
+      "encodedValue": "[\"SYNO.FileStation.CopyMove\",\"SYNO.FileStation.Delete\",\"SYNO.FileStation.Extract\",\"SYNO.FileStation.Compress\"]"
+    },
+    {
+      "name": "limit",
+      "valueType": "integer",
+      "encodedValue": "100"
+    },
+    {
+      "name": "offset",
+      "valueType": "integer",
+      "encodedValue": "0"
+    },
+    {
+      "name": "sort_by",
+      "valueType": "string",
+      "encodedValue": "crtime"
+    },
+    {
+      "name": "sort_direction",
+      "valueType": "string",
+      "encodedValue": "desc"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "readOnlyAutomatic",
+    "risk": "read",
+    "readbackPolicy": "none"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "publicDocumentation"
+  }
+}

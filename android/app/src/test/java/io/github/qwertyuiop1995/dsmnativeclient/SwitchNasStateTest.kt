@@ -117,6 +117,31 @@ class SwitchNasStateTest {
         )
     }
 
+    @Test
+    fun `退出门禁保留运行中和待核对NAS文件任务`() {
+        assertTrue(
+            hasBlockingFileServerTransfer(
+                listOf(transfer(TransferDirection.SERVER, TransferState.RUNNING)),
+            ),
+        )
+        assertTrue(
+            hasBlockingFileServerTransfer(
+                listOf(
+                    transfer(
+                        TransferDirection.SERVER,
+                        TransferState.CANCELLED,
+                        requiresRefresh = true,
+                    ),
+                ),
+            ),
+        )
+        assertFalse(
+            hasBlockingFileServerTransfer(
+                listOf(transfer(TransferDirection.SERVER, TransferState.SUCCEEDED)),
+            ),
+        )
+    }
+
     private fun download(
         state: TransferState,
         workId: String?,
@@ -149,11 +174,13 @@ class SwitchNasStateTest {
     private fun transfer(
         direction: TransferDirection,
         state: TransferState,
+        requiresRefresh: Boolean = false,
     ) = TransferTask(
         id = "transfer-${direction.name}-${state.name}",
         title = "synthetic",
         detail = "synthetic",
         direction = direction,
         state = state,
+        requiresRefresh = requiresRefresh,
     )
 }

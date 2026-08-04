@@ -33,6 +33,10 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadSettings
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskKind
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskPage
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskSummary
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FilePage
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileShareLink
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FavoriteLocation
@@ -362,6 +366,106 @@ class DsmRepository(
             ),
         )
         return filePage(data, "files").items.firstOrNull { it.path == path }
+    }
+
+    /**
+     * 读取 File Station 官方后台任务的有限分页脱敏摘要。
+     *
+     * 官方响应中的 `params`、`path`、`processing_path` 和消息字段不在白名单中，解析时
+     * 直接丢弃。`finished=true` 只映射为任务已结束，不推断成功。
+     */
+    suspend fun listFileBackgroundTasks(
+        offset: Int = 0,
+        limit: Int = 100,
+    ): FileBackgroundTaskPage {
+        val requestedOffset = offset.coerceAtLeast(0)
+        // 官方的 limit=0 会返回全部任务；客户端始终使用有限分页。
+        val requestedLimit = limit.coerceIn(1, MAX_FILE_BACKGROUND_TASK_PAGE_SIZE)
+        val data = call(
+            FILE_STATION_BACKGROUND_TASK_API,
+            "list",
+            mapOf(
+                "offset" to requestedOffset.toString(),
+                "limit" to requestedLimit.toString(),
+                "sort_by" to "crtime",
+                "sort_direction" to "desc",
+                "api_filter" to jsonStrings(FILE_BACKGROUND_TASK_APIS),
+            ),
+            version = 3,
+        )
+        val rawTasks = (data["tasks"] as? JsonArray)?.take(requestedLimit).orEmpty()
+        val seenIds = mutableSetOf<String>()
+        val tasks = rawTasks.mapNotNull { element ->
+            val summary = (element as? JsonObject)?.let(::fileBackgroundTaskSummary)
+                ?: return@mapNotNull null
+            summary.takeIf { seenIds.add(it.id) }
+        }
+        val resolvedOffset = (data.long("offset") ?: requestedOffset.toLong())
+            .coerceIn(0, Int.MAX_VALUE.toLong())
+            .toInt()
+        val nextOffset = (resolvedOffset.toLong() + rawTasks.size)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+        val reportedTotal = (data.long("total") ?: nextOffset.toLong())
+            .coerceIn(0, Int.MAX_VALUE.toLong())
+            .toInt()
+        val total = maxOf(nextOffset, reportedTotal)
+        return FileBackgroundTaskPage(
+            tasks = tasks,
+            offset = resolvedOffset,
+            nextOffset = nextOffset,
+            total = total,
+            hasMore = rawTasks.isNotEmpty() && nextOffset < total,
+        )
+    }
+
+    private fun fileBackgroundTaskSummary(payload: JsonObject): FileBackgroundTaskSummary? {
+        val id = normalizedFileBackgroundTaskId(payload.string("taskid")) ?: return null
+        val kind = when (payload.string("api")) {
+            FILE_STATION_COPY_MOVE_API -> FileBackgroundTaskKind.COPY_OR_MOVE
+            FILE_STATION_DELETE_API -> FileBackgroundTaskKind.DELETE
+            FILE_STATION_COMPRESS_API -> FileBackgroundTaskKind.COMPRESS
+            FILE_STATION_EXTRACT_API -> FileBackgroundTaskKind.EXTRACT
+            else -> return null
+        }
+        val state = when (payload.bool("finished")) {
+            true -> FileBackgroundTaskState.FINISHED
+            false -> FileBackgroundTaskState.ACTIVE
+            null -> return null
+        }
+        val progress = payload.number("progress")?.takeIf { it > 0.0 && it <= 1.0 }
+        val nowEpochSeconds = System.currentTimeMillis() / 1_000
+        val createdAt = payload.number("crtime")
+            ?.takeIf { it >= MIN_FILE_BACKGROUND_TASK_EPOCH_SECONDS && it <= nowEpochSeconds + 86_400 }
+            ?.toLong()
+        val processedItems = payload.long("processed_num")
+            ?.takeIf { it in 0..Int.MAX_VALUE.toLong() }
+            ?.toInt()
+        val processedBytes = payload.long("processed_size")?.takeIf { it >= 0 }
+        val total = payload.long("total")?.takeIf { it >= 0 }
+        return FileBackgroundTaskSummary(
+            id = id,
+            kind = kind,
+            state = state,
+            progress = progress,
+            createdAtEpochSeconds = createdAt,
+            processedItemCount = processedItems,
+            totalItemCount = if (kind == FileBackgroundTaskKind.DELETE) {
+                total?.takeIf { it <= Int.MAX_VALUE }?.toInt()
+            } else {
+                null
+            },
+            processedBytes = processedBytes,
+            totalBytes = if (kind == FileBackgroundTaskKind.COPY_OR_MOVE) total else null,
+        )
+    }
+
+    private fun normalizedFileBackgroundTaskId(value: String?): String? {
+        val normalized = value?.trim()?.takeIf(String::isNotEmpty) ?: return null
+        if (normalized.encodeToByteArray().size > MAX_FILE_BACKGROUND_TASK_ID_BYTES) return null
+        return normalized.takeIf { id ->
+            id.all { character -> character.isLetterOrDigit() || character in "._-:" }
+        }
     }
 
     suspend fun search(path: String, keyword: String): FilePage {
@@ -14967,7 +15071,17 @@ class DsmRepository(
         const val FILE_STATION_SHARING_API = "SYNO.FileStation.Sharing"
         const val FILE_STATION_COMPRESS_API = "SYNO.FileStation.Compress"
         const val FILE_STATION_EXTRACT_API = "SYNO.FileStation.Extract"
+        const val FILE_STATION_BACKGROUND_TASK_API = "SYNO.FileStation.BackgroundTask"
         const val FILE_STATION_VIRTUAL_FOLDER_API = "SYNO.FileStation.VirtualFolder"
+        val FILE_BACKGROUND_TASK_APIS = listOf(
+            FILE_STATION_COPY_MOVE_API,
+            FILE_STATION_DELETE_API,
+            FILE_STATION_EXTRACT_API,
+            FILE_STATION_COMPRESS_API,
+        )
+        const val MAX_FILE_BACKGROUND_TASK_PAGE_SIZE = 100
+        const val MAX_FILE_BACKGROUND_TASK_ID_BYTES = 256
+        const val MIN_FILE_BACKGROUND_TASK_EPOCH_SECONDS = 946_684_800.0
         const val MAXIMUM_DUPLICATE_CANDIDATES = 400
         const val MAX_DOWNLOAD_URI_CHARACTERS = 8_192
         const val MAX_DOWNLOAD_DESTINATION_CHARACTERS = 2_048

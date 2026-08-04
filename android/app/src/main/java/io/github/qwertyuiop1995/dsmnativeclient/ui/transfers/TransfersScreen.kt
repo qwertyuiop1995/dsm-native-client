@@ -2,12 +2,15 @@ package io.github.qwertyuiop1995.dsmnativeclient.ui.transfers
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -17,10 +20,14 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.UploadFile
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -33,15 +40,27 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.qwertyuiop1995.dsmnativeclient.AppViewModel
+import io.github.qwertyuiop1995.dsmnativeclient.Loadable
 import io.github.qwertyuiop1995.dsmnativeclient.R
 import io.github.qwertyuiop1995.dsmnativeclient.WorkspaceState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskKind
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskPage
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskSummary
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferDirection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferState
+import io.github.qwertyuiop1995.dsmnativeclient.localization.localize
 import io.github.qwertyuiop1995.dsmnativeclient.ui.EmptyState
 import io.github.qwertyuiop1995.dsmnativeclient.ui.formatBytes
 import io.github.qwertyuiop1995.dsmnativeclient.ui.formatRemainingDuration
@@ -53,6 +72,10 @@ internal enum class TransferSourceFilter {
     NAS_TASKS,
 }
 
+internal enum class TransferPage { APP_TRANSFERS, FILE_TASKS }
+
+internal enum class FileBackgroundTaskFilter { ALL, ACTIVE, FINISHED }
+
 internal fun TransferSourceFilter.matches(direction: TransferDirection): Boolean = when (this) {
     TransferSourceFilter.ALL -> true
     TransferSourceFilter.DOWNLOADS -> direction == TransferDirection.DOWNLOAD
@@ -62,6 +85,36 @@ internal fun TransferSourceFilter.matches(direction: TransferDirection): Boolean
 
 @Composable
 internal fun TransfersScreen(state: WorkspaceState, model: AppViewModel) {
+    var page by rememberSaveable(state.profile.id) { mutableStateOf(TransferPage.APP_TRANSFERS) }
+    Column(Modifier.fillMaxSize()) {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(TransferPage.entries, key = TransferPage::name) { option ->
+                FilterChip(
+                    selected = page == option,
+                    onClick = { page = option },
+                    label = { Text(stringResource(option.labelResource())) },
+                )
+            }
+        }
+        when (page) {
+            TransferPage.APP_TRANSFERS -> AppTransfersContent(state, model)
+            TransferPage.FILE_TASKS -> FileBackgroundTasksContent(
+                tasks = state.fileBackgroundTasks,
+                isLoadingMore = state.fileBackgroundTaskIsLoadingMore,
+                loadMoreFailure = state.fileBackgroundTasksLoadMoreFailure,
+                onRefresh = model::refreshFileBackgroundTasks,
+                onRetry = model::refreshFileBackgroundTasks,
+                onLoadMore = model::loadMoreFileBackgroundTasks,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppTransfersContent(state: WorkspaceState, model: AppViewModel) {
     if (state.transfers.isEmpty()) {
         EmptyState(
             stringResource(R.string.no_transfer_tasks),
@@ -131,48 +184,302 @@ internal fun TransfersScreen(state: WorkspaceState, model: AppViewModel) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(filteredTransfers, key = { it.id }) { task ->
-                Card {
-                    ListItem(
-                        headlineContent = {
-                            Text(task.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        },
-                        supportingContent = {
-                            TransferTaskDetails(task)
-                        },
-                        leadingContent = {
-                            Icon(
-                                when (task.state) {
-                                    TransferState.SUCCEEDED -> Icons.Outlined.CheckCircle
-                                    TransferState.FAILED -> Icons.Outlined.ErrorOutline
-                                    TransferState.CANCELLED -> Icons.Outlined.Info
-                                    else -> when (task.direction) {
-                                        TransferDirection.DOWNLOAD -> Icons.Outlined.Download
-                                        TransferDirection.UPLOAD -> Icons.Outlined.UploadFile
-                                        TransferDirection.SERVER -> Icons.Outlined.SwapVert
-                                    }
-                                },
-                                contentDescription = null,
-                                tint = when (task.state) {
-                                    TransferState.SUCCEEDED -> MaterialTheme.colorScheme.primary
-                                    TransferState.FAILED -> MaterialTheme.colorScheme.error
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
-                        },
-                        trailingContent = {
-                            TransferActions(
-                                state = task.state,
-                                direction = task.direction,
-                                canPause = model.canPauseTransfer(task.id),
-                                canResume = model.canResumeTransfer(task.id),
-                                canRetry = model.canRetryTransfer(task.id),
-                                onPause = { model.pauseTransfer(task.id) },
-                                onResume = { model.resumeTransfer(task.id) },
-                                onCancel = { model.cancelTransfer(task.id) },
-                                onRetry = { model.retryTransfer(task.id) },
-                            )
-                        },
+                TransferTaskCard(
+                    task = task,
+                    canPause = model.canPauseTransfer(task.id),
+                    canResume = model.canResumeTransfer(task.id),
+                    canRetry = model.canRetryTransfer(task.id),
+                    onPause = { model.pauseTransfer(task.id) },
+                    onResume = { model.resumeTransfer(task.id) },
+                    onCancel = { model.cancelTransfer(task.id) },
+                    onRetry = { model.retryTransfer(task.id) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun FileBackgroundTasksContent(
+    tasks: Loadable<FileBackgroundTaskPage>,
+    isLoadingMore: Boolean,
+    loadMoreFailure: DsmFailure?,
+    onRefresh: () -> Unit,
+    onRetry: () -> Unit,
+    onLoadMore: () -> Unit,
+) {
+    var filter by rememberSaveable { mutableStateOf(FileBackgroundTaskFilter.ALL) }
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.file_background_tasks_title),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            IconButton(onClick = onRefresh, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Outlined.Refresh, stringResource(R.string.refresh))
+            }
+        }
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(FileBackgroundTaskFilter.entries, key = FileBackgroundTaskFilter::name) { option ->
+                FilterChip(
+                    selected = filter == option,
+                    onClick = { filter = option },
+                    label = { Text(stringResource(option.labelResource())) },
+                )
+            }
+        }
+        when (tasks) {
+            Loadable.Idle, Loadable.Loading -> Box(
+                Modifier.fillMaxSize().semantics { liveRegion = LiveRegionMode.Polite },
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Text(
+                        stringResource(R.string.file_background_tasks_loading),
+                        modifier = Modifier.padding(top = 12.dp),
                     )
+                }
+            }
+
+            is Loadable.Failed -> {
+                val failure = tasks.error.localize(LocalContext.current)
+                Box(
+                    Modifier.fillMaxSize().semantics { liveRegion = LiveRegionMode.Assertive },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(Icons.Outlined.ErrorOutline, contentDescription = null)
+                        Text(failure.message, style = MaterialTheme.typography.titleMedium)
+                        Text(failure.recovery, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.retry))
+                        }
+                    }
+                }
+            }
+
+            is Loadable.Ready -> {
+                val page = tasks.value
+                val visibleTasks = page.tasks.filter(filter::matches)
+                if (page.tasks.isEmpty()) {
+                    EmptyState(
+                        stringResource(R.string.no_file_background_tasks),
+                        stringResource(R.string.no_file_background_tasks_description),
+                        Icons.Outlined.SwapVert,
+                    )
+                } else if (visibleTasks.isEmpty()) {
+                    Column(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                            EmptyState(
+                                stringResource(R.string.no_filtered_file_background_tasks),
+                                stringResource(R.string.no_filtered_file_background_tasks_description),
+                                Icons.Outlined.SwapVert,
+                            )
+                        }
+                        if (page.hasMore) FileBackgroundTasksLoadMoreFooter(
+                            loading = isLoadingMore,
+                            failure = loadMoreFailure,
+                            onLoadMore = onLoadMore,
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(visibleTasks, key = FileBackgroundTaskSummary::id) { task ->
+                            FileBackgroundTaskCard(task)
+                        }
+                        if (page.hasMore) {
+                            item {
+                                FileBackgroundTasksLoadMoreFooter(
+                                    loading = isLoadingMore,
+                                    failure = loadMoreFailure,
+                                    onLoadMore = onLoadMore,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FileBackgroundTasksLoadMoreFooter(
+    loading: Boolean,
+    failure: DsmFailure?,
+    onLoadMore: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        failure?.let {
+            val localized = it.localize(LocalContext.current)
+            Card(
+                Modifier
+                    .fillMaxWidth()
+                    .semantics { liveRegion = LiveRegionMode.Assertive },
+            ) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.file_background_tasks_load_more_failed),
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        localized.recovery,
+                        modifier = Modifier.padding(top = 6.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        TextButton(
+            onClick = onLoadMore,
+            enabled = !loading,
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) {
+            if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            Text(
+                stringResource(
+                    if (loading) R.string.file_background_tasks_loading_more
+                    else R.string.file_background_tasks_load_more,
+                ),
+                modifier = Modifier.padding(start = if (loading) 8.dp else 0.dp),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun FileBackgroundTaskCard(task: FileBackgroundTaskSummary) {
+    Card {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                stringResource(task.kind.labelResource()),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                stringResource(task.state.labelResource()),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            if (task.state == FileBackgroundTaskState.ACTIVE) {
+                task.progress?.toFloat()?.let { progress ->
+                    LinearProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        stringResource(
+                            R.string.nas_task_percent_progress,
+                            (progress * 100).toInt().coerceIn(0, 100),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            if (task.processedItemCount != null && task.totalItemCount != null) {
+                Text(
+                    stringResource(
+                        R.string.file_background_task_items_progress,
+                        task.processedItemCount,
+                        task.totalItemCount,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (task.processedBytes != null && task.totalBytes != null) {
+                Text(
+                    stringResource(
+                        R.string.transfer_bytes_progress,
+                        formatBytes(task.processedBytes),
+                        formatBytes(task.totalBytes),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun TransferTaskCard(
+    task: io.github.qwertyuiop1995.dsmnativeclient.domain.TransferTask,
+    canPause: Boolean,
+    canResume: Boolean,
+    canRetry: Boolean,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onCancel: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    Card {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val actionsAtBottom = maxWidth < 480.dp || LocalDensity.current.fontScale >= 1.5f
+            val actions: @Composable () -> Unit = {
+                TransferActions(
+                    state = task.state,
+                    direction = task.direction,
+                    canPause = canPause,
+                    canResume = canResume,
+                    canRetry = canRetry,
+                    onPause = onPause,
+                    onResume = onResume,
+                    onCancel = onCancel,
+                    onRetry = onRetry,
+                )
+            }
+            Column(Modifier.fillMaxWidth()) {
+                ListItem(
+                    headlineContent = {
+                        Text(task.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    },
+                    supportingContent = { TransferTaskDetails(task) },
+                    leadingContent = {
+                        Icon(
+                            when (task.state) {
+                                TransferState.SUCCEEDED -> Icons.Outlined.CheckCircle
+                                TransferState.FAILED -> Icons.Outlined.ErrorOutline
+                                TransferState.CANCELLED -> Icons.Outlined.Info
+                                else -> when (task.direction) {
+                                    TransferDirection.DOWNLOAD -> Icons.Outlined.Download
+                                    TransferDirection.UPLOAD -> Icons.Outlined.UploadFile
+                                    TransferDirection.SERVER -> Icons.Outlined.SwapVert
+                                }
+                            },
+                            contentDescription = null,
+                            tint = when (task.state) {
+                                TransferState.SUCCEEDED -> MaterialTheme.colorScheme.primary
+                                TransferState.FAILED -> MaterialTheme.colorScheme.error
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    },
+                    trailingContent = if (actionsAtBottom) null else actions,
+                )
+                if (actionsAtBottom) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        actions()
+                    }
                 }
             }
         }
@@ -184,10 +491,16 @@ internal fun TransferTaskDetails(
     task: io.github.qwertyuiop1995.dsmnativeclient.domain.TransferTask,
     nowEpochMillis: Long = System.currentTimeMillis(),
 ) {
+    val statusLiveRegion = if (task.errorMessage != null || task.requiresRefresh) {
+        LiveRegionMode.Assertive
+    } else {
+        LiveRegionMode.Polite
+    }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             task.detail,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.semantics { liveRegion = statusLiveRegion },
         )
         val transferProgress = task.progress
         val isActive = task.state in setOf(
@@ -278,6 +591,35 @@ private fun TransferSourceFilter.labelResource(): Int = when (this) {
     TransferSourceFilter.NAS_TASKS -> R.string.transfer_filter_nas_tasks
 }
 
+private fun TransferPage.labelResource(): Int = when (this) {
+    TransferPage.APP_TRANSFERS -> R.string.app_transfers_title
+    TransferPage.FILE_TASKS -> R.string.file_background_tasks_title
+}
+
+private fun FileBackgroundTaskFilter.matches(task: FileBackgroundTaskSummary): Boolean = when (this) {
+    FileBackgroundTaskFilter.ALL -> true
+    FileBackgroundTaskFilter.ACTIVE -> task.state == FileBackgroundTaskState.ACTIVE
+    FileBackgroundTaskFilter.FINISHED -> task.state == FileBackgroundTaskState.FINISHED
+}
+
+private fun FileBackgroundTaskFilter.labelResource(): Int = when (this) {
+    FileBackgroundTaskFilter.ALL -> R.string.file_background_task_filter_all
+    FileBackgroundTaskFilter.ACTIVE -> R.string.file_background_task_filter_active
+    FileBackgroundTaskFilter.FINISHED -> R.string.file_background_task_filter_finished
+}
+
+private fun FileBackgroundTaskKind.labelResource(): Int = when (this) {
+    FileBackgroundTaskKind.COPY_OR_MOVE -> R.string.file_background_task_kind_copy_move
+    FileBackgroundTaskKind.DELETE -> R.string.file_background_task_kind_delete
+    FileBackgroundTaskKind.COMPRESS -> R.string.file_background_task_kind_compress
+    FileBackgroundTaskKind.EXTRACT -> R.string.file_background_task_kind_extract
+}
+
+private fun FileBackgroundTaskState.labelResource(): Int = when (this) {
+    FileBackgroundTaskState.ACTIVE -> R.string.file_background_task_state_active
+    FileBackgroundTaskState.FINISHED -> R.string.file_background_task_state_finished
+}
+
 @Composable
 internal fun TransferActions(
     state: TransferState,
@@ -297,19 +639,19 @@ internal fun TransferActions(
         )
 
         canResume -> Column(horizontalAlignment = Alignment.End) {
-            TextButton(onClick = onResume) {
+            TextButton(onClick = onResume, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(stringResource(R.string.resume_download))
             }
-            TextButton(onClick = onCancel) {
+            TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(stringResource(R.string.cancel))
             }
         }
 
-        canPause -> TextButton(onClick = onPause) {
+        canPause -> TextButton(onClick = onPause, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(R.string.pause_download))
         }
 
-        canRetry -> TextButton(onClick = onRetry) {
+        canRetry -> TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(
                 stringResource(
                     if (direction == TransferDirection.DOWNLOAD) {
@@ -322,7 +664,7 @@ internal fun TransferActions(
         }
 
         state in setOf(TransferState.WAITING, TransferState.RUNNING, TransferState.PAUSED) -> {
-            TextButton(onClick = onCancel) {
+            TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(stringResource(R.string.cancel))
             }
         }

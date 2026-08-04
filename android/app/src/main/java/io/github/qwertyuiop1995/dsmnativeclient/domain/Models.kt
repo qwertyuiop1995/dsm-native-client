@@ -183,6 +183,38 @@ data class FilePage(
     val offset: Int,
 )
 
+/** File Station 在 NAS 上执行的只读后台任务类别。 */
+enum class FileBackgroundTaskKind { COPY_OR_MOVE, DELETE, COMPRESS, EXTRACT }
+
+/** `FINISHED` 只表示任务已经结束，不代表任务成功。 */
+enum class FileBackgroundTaskState { ACTIVE, FINISHED }
+
+/**
+ * NAS 后台文件任务的脱敏摘要。
+ *
+ * 此模型刻意不包含任务参数、源/目标路径、当前处理路径或服务端消息，避免敏感内容进入
+ * 界面、日志或持久化数据。
+ */
+data class FileBackgroundTaskSummary(
+    val id: String,
+    val kind: FileBackgroundTaskKind,
+    val state: FileBackgroundTaskState,
+    val progress: Double?,
+    val createdAtEpochSeconds: Long?,
+    val processedItemCount: Int?,
+    val totalItemCount: Int?,
+    val processedBytes: Long?,
+    val totalBytes: Long?,
+)
+
+data class FileBackgroundTaskPage(
+    val tasks: List<FileBackgroundTaskSummary>,
+    val offset: Int,
+    val nextOffset: Int,
+    val total: Int,
+    val hasMore: Boolean,
+)
+
 data class FavoriteLocation(
     val path: String,
     val name: String,

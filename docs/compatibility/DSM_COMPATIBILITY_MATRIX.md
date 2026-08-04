@@ -32,7 +32,7 @@
 | 含糊扩展名识别 | Download 的 4 KiB Range 文件头 + 文件签名 | macOS 已实现；三端共享识别契约 | 验证 `.ts` 的 MPEG 传输流与 TypeScript；禁止按文件大小猜测 |
 | 上传断点续传 | Upload multipart | 不支持字节续传 | 公开 API 未提供 offset/token；暂停后从头重新上传 |
 | 子目录搜索 | `SYNO.FileStation.Search` 官方 API | 已实现 | 验证任务清理、中文、正则结果上限和无权限目录 |
-| NAS 后台文件任务摘要 | `SYNO.FileStation.BackgroundTask.list` v3 官方 API | Apple 共享领域、Adapter 与 macOS 传输中心已实现：App 传输/NAS 文件任务使用独立数据源，NAS 任务支持全部/进行中/已结束筛选、刷新、有限分页及加载/空/筛选空/错误/正常五态；每页 `limit=1...100`、按 `crtime desc` 排序，只请求 CopyMove/Delete/Extract/Compress 四类任务，敏感参数和路径在解码边界丢弃，`clear_finished` 保持关闭 | 尚未实机验证 API 发现、普通用户/管理员可见范围、分页变化、任务字段差异，以及“已结束”与实际成功/失败的判定来源 |
+| NAS 后台文件任务摘要 | `SYNO.FileStation.BackgroundTask.list` v3 官方 API | Apple 共享领域、Adapter、macOS 传输中心以及 Android Repository、Workspace 和传输中心已实现：App 传输/NAS 文件任务使用独立数据源，NAS 任务支持全部/进行中/已结束筛选、刷新、有限分页及加载/空/筛选空/错误/正常五态；每页 `limit=1...100`、按 `crtime desc` 排序，只请求 CopyMove/Delete/Extract/Compress 四类任务，敏感参数和路径在解码边界丢弃，`clear_finished` 保持关闭 | 尚未实机验证 API 发现、普通用户/管理员可见范围、分页变化、任务字段差异，以及“已结束”与实际成功/失败的判定来源 |
 | 文件夹大小计算 | `SYNO.FileStation.DirSize` v2 官方 API 的 `start/status/stop` | Apple 共享仓库与 macOS 属性窗口已实现显式计算、重新计算和取消；窗口关闭后允许后台继续，关闭 File Station 模块或断连时取消；同路径防重复、有界轮询、`start` 禁止自动重放，仅能力缺失时回退客户端递归；路径和任务 ID 不进入领域结果、错误或持久化 | 尚未实机验证 API 发现、普通用户权限、大目录/远程挂载/加密目录、计数与逻辑字节语义、并发变化、超时、取消和任务丢失；官方 `stop` 表格疑似把 `taskid` 误写为 `tasked`，客户端按示例使用 `taskid` |
 | 收藏夹 | `SYNO.FileStation.Favorite` 官方 API | 已实现 | 验证新增、移除和失效路径 |
 | 分享链接管理 | `SYNO.FileStation.Sharing` 官方 API | 已实现 | 验证密码、有效期、批量路径、复制和取消分享 |

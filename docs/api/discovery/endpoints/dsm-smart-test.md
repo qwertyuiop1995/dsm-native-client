@@ -16,10 +16,10 @@
 
 | 字段 | 值 |
 | --- | --- |
-| API 名称 | `SYNO.Core.Storage.Disk` |
+| API 名称 | `SYNO.Storage.CGI.Storage`、`SYNO.Core.Storage.Disk` |
 | 路径 | 运行时通过 `SYNO.API.Info` 发现 |
 | HTTP 方法 | `POST` |
-| API 版本 | v1 |
+| API 版本 | 存储列表、状态、历史与写入均固定 v1；能力范围包含 v1 才启用 |
 | 鉴权机制 | DSM 会话 Cookie/表单与令牌请求头/表单，不记录值 |
 | 内容类型 | `application/x-www-form-urlencoded` |
 
@@ -27,18 +27,26 @@
 
 | 方法 | 参数 | 类型 | 必需 | 含义 | 脱敏示例 |
 | --- | --- | --- | --- | --- | --- |
+| `load_info` | 无业务参数 | - | - | 从严格唯一的 `disks` 数组读取硬盘目标 | - |
 | `get_smart_test_log` | `device` | `string` | 是 | 从存储列表取得的硬盘设备标识 | `<synthetic-device>` |
 | `disk_test_log_get` | `device`、`offset`、`limit`、`sort_by`、`sort_direction`、`type` | 多类型 | 是 | 读取检测历史 | 合成设备标识，`type=smart` |
 | `do_smart_test` | `device`、`type` | `string` | 是 | 启动快速/完整检测或停止当前检测 | `quick`、`extend`、`stop` |
 
 界面使用的稳定硬盘 `id` 只用于定位存储列表项；所有检测请求必须使用同一项返回的
-`device`，两者不得混用或接受用户输入。
+`device`，两者不得混用或接受用户输入。Android 写操作以
+`id + deviceId + supportsSmartTest` 组成稳定目标；温度、健康和展示状态变化不改变目标，
+但设备标识或检测能力变化必须按目标冲突失败关闭且零写入。存储列表必须是唯一
+`disks` 数组，其中每一项均为对象，`id` 与 `device` 非空且各自不可重复。
 
 ## 响应与错误
 
-`get_smart_test_log` 从 `testInfo` 读取 `testing`、`test_type`、`remain`、
-`ihm_testing`、`perf_testing` 和最近结果。`disk_test_log_get` 从 `testLog` 分别
-选择最近的快速和完整检测记录。
+`get_smart_test_log` 的 `testInfo` 必须是唯一数组且仅包含一个对象。Android 对
+`testing/is_testing`、`test_type/testType/type`、`remain/progress`、
+`latest_test_result/result` 做别名归一；布尔、字符串和数组类型必须合法，同时出现的
+别名必须表达一致值。缺失必需状态、未知检测类型或别名冲突均视为契约错误，失败关闭且
+写前零请求。`ihm_testing` 与 `perf_testing` 必须是合法布尔值；只有明确非 S.M.A.R.T.
+运行且其中之一为真时才标记为其他检测占用。`disk_test_log_get` 的 `testLog` 同样必须是
+唯一对象数组，并分别选择最近的快速和完整检测记录。
 
 | 场景 | 错误语义 | 是否可重试 | 降级或恢复 |
 | --- | --- | --- | --- |
@@ -49,6 +57,11 @@
 | 提交断网、超时或响应无效 | 启停结果未知 | 否 | 立即回读检测状态，不自动重放 |
 | 提交成功但轮询超时 | 最终状态尚未确认 | 否 | 保持未知提示并继续允许手动刷新 |
 | 提交后取消 | 请求可能已生效 | 否 | 停止等待，刷新后再决定下一步 |
+
+Android 的正常提交与模糊提交确认最多执行 6 次只读回读，每次间隔 1 秒。连接失败或
+`unknown` 读取错误可以消耗剩余重试次数；权限、认证、不支持和严格契约错误立即保留原始
+分类，不会被吞掉或改写成普通超时。提交后取消与提交前取消分开处理：提交前取消为零写，
+提交后取消只做一次专项只读确认；任何路径均不重放原写请求。
 
 ## 版本验证
 
@@ -70,13 +83,21 @@
 ## 客户端与测试
 
 - Apple Adapter：`DsmNasAdministrationRepository`。
-- Android Adapter：复用领域结果类型，调用链尚未迁移。
+- Android Adapter：存储列表与 Disk API 均固定使用 v1；快速、完整与停止共享同一硬盘
+  原子锁，预检稳定目标和状态基线后才提交。写后仅回读同一目标，启动必须确认精确的
+  `quick/extended` 类型，停止必须确认明确非运行状态，不自动重放。
+- Android 专项活动状态读取不请求历史；状态可信且仍为同一稳定硬盘时，客户端合并既有
+  可信历史。普通状态读取绑定 NAS 设置请求代次；NAS 设置刷新开始会清除失效的 Loading，
+  刷新成功后按 `id + deviceId + supportsSmartTest` 清理状态缓存，避免同 `diskId` 换盘
+  后沿用旧状态。
+- Android 界面持久保留八类 `MutationResult`、三项计数、异常和专项刷新状态；危险未知
+  结果完成专项刷新前会阻止关闭反馈，以及切换 NAS 或退出登录。
 - Windows Adapter：复用领域结果类型，调用链尚未迁移。
 - Schema：复用 `MutationResult` 与请求 Fixture Schema。
 - 脱敏 Fixture：
   - `contracts/request-fixtures/storage/start-smart-test/synthetic-disk/request.json`
   - `contracts/request-fixtures/storage/stop-smart-test/synthetic-disk/request.json`
-- 自动化测试：覆盖启停确认成功、提交断网、超时后回读成功、同硬盘重复提交与提交后取消。
+- 自动化测试：Apple 覆盖启停确认成功、提交断网、超时后回读成功、同硬盘重复提交与提交后取消；Android 第 54 批 33 项 JVM 专测覆盖固定版本、严格结构与别名一致性、稳定目标、基线、三类轮询、取消、无重放、锁释放、缓存代次和持久反馈策略；API 35 专项 8/8 通过。以上均为合成响应和客户端自动化证据，不提升真实环境接口证据等级。
 - 产品兼容矩阵条目：`NAS 设置`、`统一写操作结果 MR0/MR1/MR2`。
 
 ## 安全与副作用
@@ -84,13 +105,16 @@
 - 会读取的数据类别：硬盘设备标识、检测运行状态、进度与历史结果。
 - 可能产生的副作用：增加硬盘负载，完整检测可能持续较长时间，停止会中断当前检测。
 - 所需权限：由 DSM 返回的能力和当前会话权限决定。
-- 重复提交保护：Repository 与 macOS 模型均按稳定硬盘标识阻止并发启停。
-- 写后结果校验：轮询同一硬盘状态并确认 `testing` 达到目标值；未知结果不得重放。
+- 重复提交保护：Apple 与 Android Repository 均按稳定硬盘标识阻止并发启停；Android
+  的快速、完整和停止共享同一目标锁，并在取消与异常路径原子释放。
+- 写后结果校验：轮询同一稳定硬盘状态；启动确认 `testing=true` 且类型精确匹配，停止
+  确认 `testing=false`。未知结果不得重放，权限与契约错误不得被轮询吞掉。
 - 临时数据清理：不保存真实设备标识、序列号、响应正文、任务日志或主机信息。
 
 ## 未验证事项
 
 - 当前环境未在专用测试硬盘完成快速/完整检测启动、停止、权限不足、提交断网和长期
   轮询行为验收。
-- 不同 DSM build、HDD/SSD 类型和 USB/eSATA 扩展设备的字段与错误码差异尚未验证。
-- Android、Windows 以及 iPhone、iPad 调用链尚未迁移。
+- 当前仅有已登记环境的只读核对；真实 NAS 写行为和跨 DSM/Storage Manager 版本矩阵均
+  未验证。不同 DSM build、HDD/SSD 类型和 USB/eSATA 扩展设备的字段与错误码差异尚未验证。
+- Windows 以及 iPhone、iPad 调用链尚未迁移；Android 仍待专用硬盘、真实 DSM 与设备交互验收。

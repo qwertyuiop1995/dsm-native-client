@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "file-station.add-favorite.synthetic-location",
+  "module": "file-station",
+  "operation": "favoriteAdd",
+  "api": {
+    "name": "SYNO.FileStation.Favorite",
+    "method": "add",
+    "preferredVersion": 2,
+    "resolvedVersion": 2,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "name",
+      "valueType": "string",
+      "encodedValue": "<synthetic-name>"
+    },
+    {
+      "name": "path",
+      "valueType": "string",
+      "encodedValue": "<synthetic-path>"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "standardWrite",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

@@ -90,11 +90,11 @@
 ## 客户端与测试
 
 - Apple Adapter：`DsmNasAdministrationRepository`。
-- Android Adapter：尚未迁移。
+- Android Adapter：`DsmRepository.saveEthernetInterfaceResult`；列表 v2 与详情/设置 v1 均按发现范围严格校验，版本不足时关闭写入口。
 - Windows Adapter：尚未迁移。
 - Schema：复用 `MutationResult` 与请求 Fixture Schema。
 - 脱敏 fixture：`contracts/request-fixtures/network/set-ethernet/synthetic-interface/request.json`。
-- 自动化测试：覆盖确认成功、提交断网、回读超时、重复提交和提交后取消。
+- 自动化测试：Android `EthernetMutationResultTest` 的 10 项合成测试覆盖共享 Fixture、DHCP/静态 IPv4/VLAN、直接数组列表、版本不足零请求、输入拒绝、无变化、权限拒绝、提交响应丢失、回读断线和同网卡重复提交；Apple 既有测试覆盖确认成功、提交断网、回读超时、重复提交和提交后取消。
 - 产品兼容矩阵条目：`NAS 设置`、`统一写操作结果 MR0/MR1/MR2`。
 
 ## 安全与副作用
@@ -102,7 +102,7 @@
 - 会读取的数据类别：网卡状态、地址配置、默认网关、MTU 与 VLAN 设置。
 - 可能产生的副作用：当前连接中断、NAS 地址变化、默认路由或 VLAN 改变。
 - 所需权限：由 DSM 返回的能力和当前会话权限决定。
-- 重复提交保护：Repository 与 macOS 模型均按稳定网卡标识阻止并发保存。
+- 重复提交保护：Android/Apple Repository 与 macOS 模型均按稳定网卡标识阻止并发保存。
 - 写后结果校验：按 `ifname` 回读所有已提交字段；未知结果不得自动重放。
 - 临时数据清理：不生成 HAR、响应转储或含地址的 Fixture。
 
@@ -111,4 +111,4 @@
 - 当前环境未在专用测试网络完成 DHCP/静态地址、默认网关、MTU、VLAN、权限不足、
   连接中断和回滚行为验收。
 - 不同 DSM build 的地址生效时序、旧地址保留时间和错误码差异尚未验证。
-- Android、Windows 以及 iPhone、iPad 调用链尚未迁移。
+- Android 调用链已迁移但尚未做设备及真实 DSM 写操作验收；Windows 以及 iPhone、iPad 调用链尚未迁移。

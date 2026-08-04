@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "chat.open-direct.synthetic-user",
+  "module": "chat",
+  "operation": "openDirect",
+  "api": {
+    "name": "SYNO.Chat.Channel.Anonymous",
+    "method": "initiate",
+    "preferredVersion": 2,
+    "resolvedVersion": 2,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": { "httpMethod": "POST", "requestFormat": "form" },
+  "parameters": [
+    { "name": "user_ids", "valueType": "stringArray", "encodedValue": "[\"synthetic-user\"]" },
+    { "name": "encrypted", "valueType": "boolean", "encodedValue": "false" },
+    { "name": "channel_key_encs", "valueType": "stringArray", "encodedValue": "[]" }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "standardWrite",
+    "readbackPolicy": "required"
+  },
+  "source": { "kind": "synthetic", "evidence": "sourceReviewed" }
+}

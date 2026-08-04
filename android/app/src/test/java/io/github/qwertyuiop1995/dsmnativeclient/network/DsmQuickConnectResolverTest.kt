@@ -85,6 +85,8 @@ class DsmQuickConnectResolverTest {
         assertEquals(QuickConnectEndpointKind.RELAY, descriptor.endpoint.kind)
         assertTrue(resolver.isTrustedRelayHost(descriptor.endpoint.host))
         assertFalse(resolver.isTrustedRelayHost("family-nas.r1.quickconnect.to.evil.example"))
+        assertFalse(resolver.isTrustedRelayHost("family-nas.direct.quickconnect.to"))
+        assertTrue(isTrustedQuickConnectRelayHost("family-nas.r1.quickconnect.cn"))
     }
 
     @Test

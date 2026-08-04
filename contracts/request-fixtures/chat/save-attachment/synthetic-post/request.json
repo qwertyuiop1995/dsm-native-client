@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "chat.save-attachment.synthetic-post",
+  "module": "chat",
+  "operation": "saveAttachment",
+  "api": {
+    "name": "SYNO.Chat.Post.File",
+    "method": "get",
+    "preferredVersion": 2,
+    "resolvedVersion": 2,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": { "httpMethod": "GET", "requestFormat": "form" },
+  "parameters": [
+    { "name": "post_id", "valueType": "string", "encodedValue": "synthetic-post" }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie"],
+    "synoTokenLocations": ["header"]
+  },
+  "policy": {
+    "retryPolicy": "readOnlyAutomatic",
+    "risk": "read",
+    "readbackPolicy": "none"
+  },
+  "source": { "kind": "synthetic", "evidence": "sourceReviewed" }
+}

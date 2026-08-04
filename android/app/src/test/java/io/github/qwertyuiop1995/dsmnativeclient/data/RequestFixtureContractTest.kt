@@ -2,6 +2,7 @@ package io.github.qwertyuiop1995.dsmnativeclient.data
 
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ApiCapability
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmApiClient
 import java.nio.file.Files
@@ -22,6 +23,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -40,15 +42,16 @@ class RequestFixtureContractTest {
     }
 
     @Test
-    fun `容器删除请求与共享 Fixture 一致`() = runTest {
+    fun `容器删除在行为未验证时保持关闭`() = runTest {
         val fixture = loadFixture(
             "container-manager/delete/synthetic-container/request.json"
         )
         val harness = RequestHarness(fixture)
 
-        harness.repository.deleteContainer("<synthetic-container>")
+        val result = harness.repository.deleteContainerResult("<synthetic-container>")
 
-        assertRequestMatchesFixture(harness.mutationRequest(), fixture)
+        assertEquals(MutationResultStatus.UNSUPPORTED, result.status)
+        assertFalse(harness.hasMutationRequest())
     }
 
     @Test
@@ -58,7 +61,7 @@ class RequestFixtureContractTest {
         )
         val harness = RequestHarness(fixture)
 
-        harness.repository.deleteVirtualMachine("<synthetic-virtual-machine>")
+        harness.repository.deleteVirtualMachineResult("<synthetic-virtual-machine>")
 
         assertRequestMatchesFixture(harness.mutationRequest(), fixture)
     }
@@ -78,7 +81,7 @@ class RequestFixtureContractTest {
                 parameter.getValue("encodedValue").jsonPrimitive.content
         }
         val actualParameters = values.filterKeys {
-            it !in setOf("api", "version", "method", "_sid")
+            it !in setOf("api", "version", "method", "_sid", "SynoToken")
         }
 
         assertEquals(
@@ -132,18 +135,31 @@ private class RequestHarness(fixture: JsonObject) {
     private val apiName = api.getValue("name").jsonPrimitive.content
     private val method = api.getValue("method").jsonPrimitive.content
     private val version = api.getValue("resolvedVersion").jsonPrimitive.content.toInt()
+    private var mutationSubmitted = false
     private val client = OkHttpClient.Builder()
         .addInterceptor { chain ->
-            requests += chain.request()
+            val request = chain.request()
+            requests += request
+            val body = request.body as? FormBody
+            val values = body?.let {
+                (0 until it.size).associate { index -> it.name(index) to it.value(index) }
+            }.orEmpty()
+            val responseBody = when {
+                values["api"] == "SYNO.Virtualization.API.Guest" &&
+                    values["method"] == "list" && !mutationSubmitted ->
+                    """{"success":true,"data":{"guests":[{"id":"<synthetic-virtual-machine>","name":"Synthetic","status":"stopped"}]}}"""
+                values["api"] == apiName && values["method"] == method -> {
+                    mutationSubmitted = true
+                    """{"success":true,"data":{}}"""
+                }
+                else -> """{"success":true,"data":{"shares":[],"containers":[],"guests":[]}}"""
+            }
             Response.Builder()
-                .request(chain.request())
+                .request(request)
                 .protocol(Protocol.HTTP_1_1)
                 .code(200)
                 .message("OK")
-                .body(
-                    """{"success":true,"data":{"shares":[],"containers":[],"guests":[]}}"""
-                        .toResponseBody("application/json".toMediaType())
-                )
+                .body(responseBody.toResponseBody("application/json".toMediaType()))
                 .build()
         }
         .build()
@@ -179,6 +195,12 @@ private class RequestHarness(fixture: JsonObject) {
 
     fun mutationRequest(): Request = requests.first { request ->
         val body = request.body as? FormBody ?: return@first false
+        val values = (0 until body.size).associate { body.name(it) to body.value(it) }
+        values["api"] == apiName && values["method"] == method
+    }
+
+    fun hasMutationRequest(): Boolean = requests.any { request ->
+        val body = request.body as? FormBody ?: return@any false
         val values = (0 until body.size).associate { body.name(it) to body.value(it) }
         values["api"] == apiName && values["method"] == method
     }

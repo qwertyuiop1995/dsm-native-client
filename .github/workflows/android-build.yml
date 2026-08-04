@@ -1,21 +1,31 @@
 name: Android Build
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - "android/**"
+      - "contracts/request-fixtures/**"
+      - "contracts/fixtures-redacted/**"
       - ".github/workflows/android-build.yml"
   pull_request:
     paths:
       - "android/**"
+      - "contracts/request-fixtures/**"
+      - "contracts/fixtures-redacted/**"
       - ".github/workflows/android-build.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: 检出仓库
         uses: actions/checkout@v4
@@ -27,9 +37,18 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: 运行测试并构建
+      - name: 运行 Android 构建与静态门禁
         working-directory: android
-        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --stacktrace
+        run: >-
+          ./gradlew
+          :app:testDebugUnitTest
+          :app:assembleDebug
+          :app:assembleRelease
+          :app:minifyReleaseWithR8
+          :app:assembleDebugAndroidTest
+          :app:lintDebug
+          --no-parallel
+          --stacktrace
 
       - name: 上传调试包
         uses: actions/upload-artifact@v4
@@ -37,3 +56,28 @@ jobs:
           name: LanStash-Android-debug
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: 上传 Release 测试包
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanStash-Android-release-unsigned
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: 上传仪器测试包
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanStash-Android-instrumentation
+          path: android/app/build/outputs/apk/androidTest/debug/*.apk
+          if-no-files-found: error
+
+      - name: 上传测试与 lint 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanStash-Android-reports
+          path: |
+            android/app/build/reports/tests/**
+            android/app/build/reports/lint-results-debug.html
+            android/app/build/reports/lint-results-debug.xml
+          if-no-files-found: warn

@@ -87,14 +87,16 @@
 ## 客户端与测试
 
 - Apple Adapter：`DsmNasAdministrationRepository`。
-- Android、Windows、iPhone 与 iPad：复用领域结果类型，DDNS 调用链尚未迁移。
+- Android Adapter：`DsmRepository` 的 `testDdnsResult`、`saveDdnsResult(original, desired)`、`deleteDdnsResult(original)` 与 `refreshDdnsResult(expectedProviderIds)`；四类操作保持独立，固定使用 Provider/Record v1。Provider/Record 根、对象项、稳定身份与重复项均严格校验；Record 仅要求契约承诺的 `provider/hostname/username/enable/heartbeat`，可选网络字段若出现则严格检查。
+- Windows、iPhone 与 iPad：复用领域结果类型，DDNS 调用链尚未迁移。
 - 脱敏 Fixture：
   - `contracts/request-fixtures/ddns/test-provider/synthetic-record/request.json`
   - `contracts/request-fixtures/ddns/create-record/synthetic-record/request.json`
   - `contracts/request-fixtures/ddns/update-address/synthetic-record/request.json`
   - `contracts/request-fixtures/ddns/delete-record/synthetic-record/request.json`
 - 自动化测试覆盖四类操作隔离、保存/删除超时后的单次回读、结果未确认、无效输入、
-  能力缺失、权限反馈、按服务商和全局重复提交保护，以及 macOS 用户反馈。
+  能力缺失、权限反馈、按服务商和全局重复提交保护，以及 macOS 用户反馈；Android
+  `DdnsMutationResultTest` 的 24 项合成测试另覆盖双 v1 零请求门禁、严格根/行/重复校验、合法五字段最小响应、四操作隔离、按服务商/全局双向防重复、提交前后取消解锁、陈旧保存/删除基线、模糊提交单次回读不重放和输入边界。Android 另有 9 项状态/策略 JVM 与 10 项 Compose 设备测试覆盖草稿恢复、密码清除、四类确认和持久反馈、专项刷新门禁、目标变化、深色 2× 字体与无障碍语义。
 
 ## 安全与副作用
 
@@ -110,4 +112,5 @@
   尚未验证。
 - 服务商特定错误码、频率限制、双因素认证、IPv6 和外部地址探测差异尚未收集。
 - `update_ip_address` 被接受后的公网 DNS 传播时间与公共解析器收敛没有权威状态字段。
-- Android、Windows、iPhone 与 iPad 调用链尚未迁移。
+- Android 调用链已迁移，但尚未做设备及真实 DSM/服务商写行为验收；Windows、iPhone
+  与 iPad 调用链尚未迁移。

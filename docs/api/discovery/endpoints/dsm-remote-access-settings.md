@@ -58,6 +58,11 @@ QuickConnect 读取响应提供 `relay_enabled`；Upnp 读取响应提供 `enabl
 | --- | --- | --- | --- | --- | --- |
 | `lab-a-dsm-7-2-1-69057-u12-20260729` | `observed` | QuickConnect v3；Upnp v1 | 读取结构和网页接口线索已记录；写入只完成合成请求、部分成功、断网和取消测试，未执行真实行为验收 | 2026-07-27 | `docs/api/DSM_WEB_API_REFERENCE_ZH.md` |
 
+机器可读兼容记录继续保持 `observed / degraded`。Android 第 55 批的合成请求、故障注入、
+领域与 Compose 测试只证明客户端契约和保护逻辑，不提升真实环境证据等级；既有
+QuickConnect 登录、隧道建立或 `SYNO.API.Info` 探测证据也不外推为本端点的读取或写入
+行为证据。
+
 ## 能力探测与降级
 
 - 启用条件：成功读取当前设置，并一次性确认所有实际变化所需 API 与版本。
@@ -72,14 +77,18 @@ QuickConnect 读取响应提供 `relay_enabled`；Upnp 读取响应提供 `enabl
 ## 客户端与测试
 
 - Apple Adapter：`DsmNasAdministrationRepository`。
-- Android Adapter：复用领域结果类型，调用链尚未迁移。
+- Android Adapter：正式 Repository 固定 QuickConnect v3 与 Upnp v1，严格解析 Boolean；
+  单项读取失败保留另一项并以 `null` 降级。只有完整匹配已记录 DSM build 与 Update 的
+  环境开放写入口，保存仅提交实际变化字段并执行专项回读。
 - Windows Adapter：复用领域结果类型，调用链尚未迁移。
 - Schema：复用 `MutationResult` 与请求 Fixture Schema。
 - 脱敏 Fixture：
   - `contracts/request-fixtures/network/set-relay/synthetic-setting/request.json`
   - `contracts/request-fixtures/network/set-router-configuration/synthetic-setting/request.json`
-- 自动化测试：覆盖两项确认成功、中途超时后的部分成功、提交断网且回读失败、同一
-  Repository 重复提交、提交后取消和当前中继连接保护。
+- 自动化测试：第 55 批远程访问专项共 36 项 JVM 与 12 项 Compose 测试，覆盖单字段与
+  双字段计数、严格 Boolean/缺失字段、环境门禁、可信中继保护、两项确认成功、中途
+  超时后的部分成功、提交断网且回读失败、Repository 重复提交、提交后取消、不重放、
+  持久结果反馈、专项刷新门槛、迟到回调和切换 NAS 隔离。
 - 产品兼容矩阵条目：`NAS 设置`、`统一写操作结果 MR0/MR1/MR2`。
 
 ## 安全与副作用
@@ -87,7 +96,8 @@ QuickConnect 读取响应提供 `relay_enabled`；Upnp 读取响应提供 `enabl
 - 会读取的数据类别：QuickConnect 中继和路由器自动配置开关。
 - 可能产生的副作用：改变外部访问路径、端口映射或当前可用连接，可能导致连接中断。
 - 所需权限：由 DSM 返回的能力和当前会话权限决定。
-- 重复提交保护：Repository 和 macOS 模型均阻止并发远程访问设置保存。
+- 重复提交保护：Repository、Android AppViewModel 和 macOS 模型均阻止并发远程访问
+  设置保存。
 - 写后结果校验：按两个稳定逻辑子操作整体回读并计数；部分成功与未知结果不得重放。
 - 临时数据清理：不记录 QuickConnect ID、主机、外网地址、路由器地址、会话或响应。
 
@@ -96,4 +106,5 @@ QuickConnect 读取响应提供 `relay_enabled`；Upnp 读取响应提供 `enabl
 - 当前环境未在专用测试网络完成中继、路由器自动配置、权限不足、连接切换、中途断网
   和端口映射副作用验收。
 - `set_misc_config` 与 Upnp 字段在不同 DSM build、路由器和权限组合中的差异尚未验证。
-- Android、Windows 以及 iPhone、iPad 调用链尚未迁移。
+- Windows 以及 iPhone、iPad 调用链尚未迁移；Android 已完成合成契约与界面测试，
+  但尚未在真实 NAS 和路由器上执行写操作。

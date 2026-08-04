@@ -73,7 +73,7 @@
 ## 客户端与测试
 
 - Apple Adapter：`DsmNasAdministrationRepository`。
-- Android Adapter：复用领域结果类型，调用链尚未迁移。
+- Android Adapter：`DsmRepository`、`AppViewModel` 与 `NasSecuritySettingsScreen`；四个子操作使用原始/目标双基线、固定版本能力预检、共享 NAS 设置原子门闩、逐步取消检查、配置档任务轮询/清理、整体回读、持久结果与专项刷新，部分成功和未知结果不得清除后重放。
 - Windows Adapter：复用领域结果类型，调用链尚未迁移。
 - Schema：复用 `MutationResult` 与请求 Fixture Schema。
 - 脱敏 Fixture：
@@ -82,7 +82,7 @@
   - `contracts/request-fixtures/security/set-port-scan/synthetic-settings/request.json`
   - `contracts/request-fixtures/security/disable-firewall/synthetic-settings/request.json`
   - `contracts/request-fixtures/security/apply-firewall-profile/synthetic-profile/request.json`
-- 自动化测试：覆盖四段确认成功、中途部分成功、提交断网且回读失败、重复提交和提交后取消。
+- 自动化测试：Apple 覆盖四段确认成功、中途部分成功、提交断网且回读失败、重复提交和提交后取消；Android 本批 7 项正式 Repository 测试覆盖双基线、多步骤计数、第二步在途取消与不可取消整体回读，8 项状态策略和 6 项界面策略覆盖原子门闩、专项刷新、可写字段规范化及结果关闭门禁；API 35 安全/硬件专项设备测试包含五态、确认拒绝、48dp 整行开关和深色 2× 字体。
 - 产品兼容矩阵条目：`NAS 设置`、`统一写操作结果 MR0/MR1/MR2`。
 
 ## 安全与副作用
@@ -90,7 +90,7 @@
 - 会读取的数据类别：安全开关、失败次数策略、网卡标识、防火墙状态和配置档显示名称。
 - 可能产生的副作用：登录封锁策略改变、网络防护改变、已有连接或新连接被防火墙阻止。
 - 所需权限：由 DSM 返回的能力和当前会话权限决定。
-- 重复提交保护：Repository 与 macOS 模型均阻止并发安全设置保存。
+- 重复提交保护：Repository 与 macOS/Android 模型均阻止并发安全设置保存。
 - 写后结果校验：按四个稳定子操作整体回读并计数；部分成功和未知结果不得自动重放。
 - 临时数据清理：不生成 HAR、响应转储、任务标识或含设备信息的 Fixture。
 
@@ -99,4 +99,4 @@
 - 当前环境未在专用测试目标完成自动封锁、DoS、防端口扫描、防火墙启停、权限不足、
   中途断网、配置档任务超时和回滚行为验收。
 - 不同 DSM build 的任务状态字段、接口错误码和防火墙生效时序尚未验证。
-- Android、Windows 以及 iPhone、iPad 调用链尚未迁移。
+- Windows 以及 iPhone、iPad 调用链尚未迁移；Android 自动化与 API 35 模拟器门禁已通过，仍待真实设备、真实 DSM 和权限矩阵验收。

@@ -6,6 +6,9 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import java.io.IOException
+import java.io.InputStream
+import java.io.File
+import java.io.OutputStream
 import java.net.URI
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -23,9 +26,16 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.FormBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.BufferedSink
 
 /**
  * DSM WebAPI 的统一传输层。请求正文、SID、令牌和用户数据不会写入日志。
@@ -34,10 +44,14 @@ class DsmApiClient(
     private val http: OkHttpClient = OkHttpClient.Builder()
         .followRedirects(false)
         .followSslRedirects(false)
-        .retryOnConnectionFailure(true)
+        // 写请求结果未知时必须先回读，不能由传输层自动重放。
+        .retryOnConnectionFailure(false)
         .build(),
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
+    internal fun openWebSocket(request: Request, listener: WebSocketListener): WebSocket =
+        http.newWebSocket(request, listener)
+
     fun endpoint(profile: NasProfile): String {
         val raw = profile.address.trim()
         if (raw.endsWith("://")) {
@@ -173,6 +187,539 @@ class DsmApiClient(
         return requireSuccess(post(profile, path, requestParameters, session))
     }
 
+    suspend fun upload(
+        profile: NasProfile,
+        session: DsmSession,
+        capability: ApiCapability,
+        destinationPath: String,
+        filename: String,
+        contentType: String?,
+        contentLength: Long,
+        overwrite: Boolean,
+        openInputStream: () -> InputStream,
+        onProgress: (Long, Long) -> Unit,
+    ): JsonObject = withContext(Dispatchers.IO) {
+        require(contentLength >= 0) { "Upload content length is required" }
+        val resolvedVersion = capability.version(2)
+        val requestBody = InputStreamRequestBody(
+            contentType = contentType,
+            contentLength = contentLength,
+            openInputStream = openInputStream,
+            onProgress = onProgress,
+        )
+        val multipart = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("api", capability.name)
+            .addFormDataPart("version", resolvedVersion.toString())
+            .addFormDataPart("method", "upload")
+            .addFormDataPart("_sid", session.sid)
+            .addFormDataPart("path", destinationPath)
+            .addFormDataPart("create_parents", "false")
+            .addFormDataPart("overwrite", overwrite.toString())
+            .apply {
+                session.synoToken?.takeIf { it.isNotBlank() }?.let {
+                    addFormDataPart("SynoToken", it)
+                    addFormDataPart("synotoken", it)
+                }
+            }
+            // DSM 要求文件二进制部分位于 multipart 正文末尾。
+            .addFormDataPart("file", filename, requestBody)
+            .build()
+        val relativePath = if (capability.path.startsWith('/')) {
+            capability.path
+        } else {
+            "/webapi/${capability.path}"
+        }
+        val requestUrl = "${endpoint(profile)}$relativePath".toHttpUrl().newBuilder()
+            .addQueryParameter("api", capability.name)
+            .addQueryParameter("version", resolvedVersion.toString())
+            .addQueryParameter("method", "upload")
+            .addQueryParameter("_sid", session.sid)
+            .apply {
+                session.synoToken?.takeIf { it.isNotBlank() }?.let {
+                    addQueryParameter("SynoToken", it)
+                    addQueryParameter("synotoken", it)
+                }
+            }
+            .build()
+        val multipartLength = multipart.contentLength()
+        if (multipartLength < 0) {
+            throw DsmFailure(
+                null,
+                "The upload size could not be prepared",
+                "Choose the file again and retry.",
+                kind = DsmErrorKind.UPLOAD_LENGTH_MISMATCH,
+            )
+        }
+        val request = Request.Builder()
+            .url(requestUrl)
+            .post(multipart)
+            .header("Content-Length", multipartLength.toString())
+            .header("Accept", "application/json")
+            .header("User-Agent", "LanStash-Android/0.1")
+            .header("Cookie", "id=${session.sid}")
+            .apply {
+                session.synoToken?.takeIf { it.isNotBlank() }?.let {
+                    header("X-SYNO-TOKEN", it)
+                }
+            }
+            .build()
+        http.newCall(request).await().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw DsmFailure(
+                    response.code,
+                    "Could not upload the file",
+                    "Check the connection and try again.",
+                    kind = DsmErrorKind.CONNECTION_FAILED,
+                )
+            }
+            requireSuccess(
+                runCatching { json.parseToJsonElement(text).jsonObject }
+                    .getOrElse {
+                        throw DsmFailure(
+                            null,
+                            "The NAS returned an unrecognized upload response",
+                            "Refresh the folder and check whether the file was uploaded.",
+                            kind = DsmErrorKind.INVALID_RESPONSE,
+                        )
+                    },
+            )
+        }
+    }
+
+    suspend fun uploadDownloadTaskFile(
+        profile: NasProfile,
+        session: DsmSession,
+        capability: ApiCapability,
+        filename: String,
+        contentType: String?,
+        contentLength: Long,
+        destination: String?,
+        unzipPassword: String?,
+        openInputStream: () -> InputStream,
+    ): JsonObject = withContext(Dispatchers.IO) {
+        require(contentLength in 0..MAX_DOWNLOAD_TASK_FILE_BYTES)
+        val safeFilename = filename.replace(Regex("[\\r\\n\"]"), "_")
+        val multipart = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .apply {
+                addFormDataPart("_sid", session.sid)
+                session.synoToken?.takeIf(String::isNotBlank)?.let {
+                    addFormDataPart("SynoToken", it)
+                    addFormDataPart("synotoken", it)
+                }
+                destination?.takeIf(String::isNotBlank)?.let {
+                    addFormDataPart("destination", it)
+                }
+                unzipPassword?.takeIf(String::isNotBlank)?.let {
+                    addFormDataPart("unzip_password", it)
+                }
+            }
+            .addFormDataPart(
+                "file",
+                safeFilename,
+                InputStreamRequestBody(
+                    contentType = contentType,
+                    contentLength = contentLength,
+                    openInputStream = openInputStream,
+                    onProgress = { _, _ -> },
+                ),
+            )
+            .build()
+        val path = if (capability.path.startsWith('/')) {
+            capability.path
+        } else {
+            "/webapi/${capability.path}"
+        }
+        val url = "${endpoint(profile)}$path".toHttpUrl().newBuilder()
+            .addQueryParameter("api", capability.name)
+            .addQueryParameter("version", capability.maxVersion.toString())
+            .addQueryParameter("method", "create")
+            .build()
+        val request = Request.Builder()
+            .url(url)
+            .post(multipart)
+            .header("Cookie", "id=${session.sid}")
+            .apply {
+                session.synoToken?.takeIf(String::isNotBlank)?.let {
+                    header("X-SYNO-TOKEN", it)
+                }
+            }
+            .build()
+        http.newCall(request).await().use { response ->
+            val text = response.body?.string() ?: throw invalidBinaryResponse()
+            val envelope = runCatching { json.parseToJsonElement(text).jsonObject }
+                .getOrElse { throw invalidBinaryResponse() }
+            requireSuccess(envelope)
+        }
+    }
+
+    suspend fun uploadChatAttachment(
+        profile: NasProfile,
+        session: DsmSession,
+        capability: ApiCapability,
+        conversationId: String,
+        message: String,
+        filename: String,
+        contentType: String?,
+        contentLength: Long,
+        openInputStream: () -> InputStream,
+        onProgress: (Long, Long) -> Unit,
+    ): JsonObject = withContext(Dispatchers.IO) {
+        require(contentLength >= 0)
+        val version = 5
+        if (version !in capability.minVersion..capability.maxVersion) throw DsmFailure(
+            103,
+            "Chat attachments are unavailable",
+            "Update Synology Chat or use Chat in a browser.",
+            kind = DsmErrorKind.FEATURE_UNSUPPORTED,
+        )
+        val safeFilename = filename.replace(Regex("[\\r\\n\"]"), "_")
+        val multipart = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("api", capability.name)
+            .addFormDataPart("version", version.toString())
+            .addFormDataPart("method", "create")
+            .addFormDataPart("channel_id", conversationId)
+            .addFormDataPart("type", "file")
+            .addFormDataPart("message", message)
+            .addFormDataPart("is_thread", "false")
+            .addFormDataPart("_sid", session.sid)
+            .apply {
+                session.synoToken?.takeIf(String::isNotBlank)?.let {
+                    addFormDataPart("SynoToken", it)
+                    addFormDataPart("synotoken", it)
+                }
+            }
+            .addFormDataPart(
+                "file",
+                safeFilename,
+                InputStreamRequestBody(contentType, contentLength, openInputStream, onProgress),
+            )
+            .build()
+        val path = if (capability.path.startsWith('/')) capability.path else "/webapi/${capability.path}"
+        val url = "${endpoint(profile)}$path".toHttpUrl().newBuilder()
+            .addQueryParameter("api", capability.name)
+            .addQueryParameter("version", version.toString())
+            .addQueryParameter("method", "create")
+            .build()
+        val multipartLength = multipart.contentLength()
+        if (multipartLength < 0) throw DsmFailure(
+            null,
+            "The attachment size could not be prepared",
+            "Choose the file again and retry.",
+            kind = DsmErrorKind.UPLOAD_LENGTH_MISMATCH,
+        )
+        val request = Request.Builder()
+            .url(url)
+            .post(multipart)
+            .header("Content-Length", multipartLength.toString())
+            .header("Accept", "application/json")
+            .header("User-Agent", "LanStash-Android/0.1")
+            .header("Cookie", "id=${session.sid}")
+            .apply {
+                session.synoToken?.takeIf(String::isNotBlank)?.let { header("X-SYNO-TOKEN", it) }
+            }
+            .build()
+        http.newCall(request).await().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw DsmFailure(
+                response.code,
+                "The attachment could not be uploaded",
+                "Check the connection and try again.",
+                kind = DsmErrorKind.CONNECTION_FAILED,
+            )
+            requireSuccess(
+                runCatching { json.parseToJsonElement(text).jsonObject }
+                    .getOrElse { throw invalidBinaryResponse() },
+            )
+        }
+    }
+
+    suspend fun readBinary(
+        profile: NasProfile,
+        session: DsmSession,
+        capability: ApiCapability,
+        preferredVersion: Int,
+        method: String,
+        parameters: Map<String, String>,
+        maximumBytes: Long,
+        range: LongRange? = null,
+    ): ByteArray = withContext(Dispatchers.IO) {
+        require(maximumBytes in 1..MAX_BINARY_RESPONSE_BYTES)
+        val request = binaryRequest(
+            profile = profile,
+            session = session,
+            capability = capability,
+            preferredVersion = preferredVersion,
+            method = method,
+            parameters = parameters,
+            range = range,
+        )
+        http.newCall(request).await().use { response ->
+            val rangeBytes = validateBinaryResponse(response, maximumBytes, range)
+            val body = response.body ?: throw invalidBinaryResponse()
+            body.contentLength().takeIf { it >= 0 }?.let { length ->
+                if (length > maximumBytes) throw binaryTooLarge()
+                if (rangeBytes != null && length != rangeBytes) throw invalidBinaryResponse()
+            }
+            val output = java.io.ByteArrayOutputStream()
+            var total = 0L
+            body.byteStream().use { input ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    val nextTotal = total + count
+                    if (nextTotal > maximumBytes) throw binaryTooLarge()
+                    if (rangeBytes != null && nextTotal > rangeBytes) {
+                        throw invalidBinaryResponse()
+                    }
+                    output.write(buffer, 0, count)
+                    total = nextTotal
+                }
+            }
+            if (rangeBytes != null && total != rangeBytes) throw invalidBinaryResponse()
+            output.toByteArray()
+        }
+    }
+
+    suspend fun downloadBinaryToFile(
+        profile: NasProfile,
+        session: DsmSession,
+        capability: ApiCapability,
+        preferredVersion: Int,
+        method: String,
+        parameters: Map<String, String>,
+        destination: File,
+        expectedBytes: Long?,
+        maximumBytes: Long,
+        onProgress: (Long, Long?) -> Unit = { _, _ -> },
+    ): Long {
+        try {
+            destination.parentFile?.mkdirs()
+            return destination.outputStream().buffered().use { output ->
+                downloadBinaryToOutput(
+                    profile = profile,
+                    session = session,
+                    capability = capability,
+                    preferredVersion = preferredVersion,
+                    method = method,
+                    parameters = parameters,
+                    output = output,
+                    expectedBytes = expectedBytes,
+                    maximumBytes = maximumBytes,
+                    onProgress = onProgress,
+                )
+            }
+        } catch (error: Throwable) {
+            destination.delete()
+            throw error
+        }
+    }
+
+    suspend fun downloadBinaryToOutput(
+        profile: NasProfile,
+        session: DsmSession,
+        capability: ApiCapability,
+        preferredVersion: Int,
+        method: String,
+        parameters: Map<String, String>,
+        output: OutputStream,
+        expectedBytes: Long?,
+        maximumBytes: Long? = null,
+        range: LongRange? = null,
+        initialBytes: Long = 0,
+        onProgress: (Long, Long?) -> Unit = { _, _ -> },
+    ): Long = withContext(Dispatchers.IO) {
+        maximumBytes?.let { require(it in 1..MAX_STREAM_RESPONSE_BYTES) }
+        require(initialBytes >= 0)
+        expectedBytes?.takeIf { it >= 0 }?.let { expected ->
+            if (maximumBytes != null && expected > maximumBytes) throw binaryTooLarge()
+            if (initialBytes > expected) throw downloadLengthMismatch()
+        }
+        val request = binaryRequest(
+            profile = profile,
+            session = session,
+            capability = capability,
+            preferredVersion = preferredVersion,
+            method = method,
+            parameters = parameters,
+            range = range,
+        )
+        http.newCall(request).await().use { response ->
+            val rangeBytes = validateBinaryResponse(
+                response,
+                maximumBytes ?: MAX_ERROR_RESPONSE_BYTES,
+                range = range,
+                expectedBytes = expectedBytes,
+            )
+            val body = response.body ?: throw invalidBinaryResponse()
+            val declared = body.contentLength().takeIf { it >= 0 }
+            val remainingExpected = expectedBytes
+                ?.takeIf { it >= 0 }
+                ?.let { it - initialBytes }
+            val responseLimit = remainingExpected ?: rangeBytes
+            if (declared != null && responseLimit != null && declared != responseLimit) {
+                throw binaryBodyLengthMismatch(expectedBytes)
+            }
+            if (maximumBytes != null && declared != null && declared > maximumBytes) {
+                throw binaryTooLarge()
+            }
+            var total = 0L
+            body.byteStream().use { input ->
+                val buffer = ByteArray(STREAM_BUFFER_BYTES)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    val countBytes = count.toLong()
+                    if (responseLimit != null &&
+                        (total > responseLimit || countBytes > responseLimit - total)
+                    ) {
+                        throw binaryBodyLengthMismatch(expectedBytes)
+                    }
+                    if (maximumBytes != null &&
+                        (total > maximumBytes || countBytes > maximumBytes - total)
+                    ) {
+                        throw binaryTooLarge()
+                    }
+                    val nextTotal = total + count
+                    output.write(buffer, 0, count)
+                    total = nextTotal
+                    onProgress(initialBytes + total, expectedBytes ?: declared?.let { initialBytes + it })
+                }
+            }
+            output.flush()
+            if (rangeBytes != null && total != rangeBytes) {
+                throw binaryBodyLengthMismatch(expectedBytes)
+            }
+            if (remainingExpected != null && total != remainingExpected) throw downloadLengthMismatch()
+            initialBytes + total
+        }
+    }
+
+    private fun binaryRequest(
+        profile: NasProfile,
+        session: DsmSession,
+        capability: ApiCapability,
+        preferredVersion: Int,
+        method: String,
+        parameters: Map<String, String>,
+        range: LongRange?,
+    ): Request {
+        val relativePath = if (capability.path.startsWith('/')) {
+            capability.path
+        } else {
+            "/webapi/${capability.path}"
+        }
+        val url = "${endpoint(profile)}$relativePath".toHttpUrl().newBuilder()
+            .addQueryParameter("api", capability.name)
+            .addQueryParameter("version", capability.version(preferredVersion).toString())
+            .addQueryParameter("method", method)
+            .apply {
+                parameters.forEach(::addQueryParameter)
+            }
+            .build()
+        return Request.Builder()
+            .url(url)
+            .get()
+            .header("Accept", "application/octet-stream, image/*, application/pdf, text/plain")
+            .header("User-Agent", "LanStash-Android/0.1")
+            .header("Cookie", "id=${session.sid}")
+            .apply {
+                session.synoToken?.takeIf { it.isNotBlank() }?.let {
+                    header("X-SYNO-TOKEN", it)
+                }
+                range?.let { header("Range", "bytes=${it.first}-${it.last}") }
+            }
+            .build()
+    }
+
+    private fun validateBinaryResponse(
+        response: Response,
+        maximumBytes: Long,
+        range: LongRange?,
+        expectedBytes: Long? = null,
+    ): Long? {
+        val contentType = response.header("Content-Type").orEmpty().lowercase()
+        if (contentType.contains("application/json") || contentType.contains("text/html")) {
+            val text = response.body?.source()?.let { source ->
+                source.request(minOf(maximumBytes, 1_048_576L))
+                source.buffer.clone().readUtf8(minOf(source.buffer.size, 1_048_576L))
+            }.orEmpty()
+            val envelope = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
+            if (envelope != null) requireSuccess(envelope)
+            throw invalidBinaryResponse()
+        }
+        if (range != null) {
+            if (response.code != 206) throw invalidBinaryResponse()
+            val contentRange = response.header("Content-Range")
+                ?: throw invalidBinaryResponse()
+            val match = CONTENT_RANGE_PATTERN.matchEntire(contentRange.trim())
+                ?: throw invalidBinaryResponse()
+            val start = match.groupValues[1].toLongOrNull() ?: throw invalidBinaryResponse()
+            val end = match.groupValues[2].toLongOrNull() ?: throw invalidBinaryResponse()
+            val totalToken = match.groupValues[3]
+            val total = if (totalToken == "*") {
+                null
+            } else {
+                totalToken.toLongOrNull() ?: throw invalidBinaryResponse()
+            }
+            if (start != range.first || end < start || end != range.last) {
+                throw invalidBinaryResponse()
+            }
+            if (total != null && total <= end) throw invalidBinaryResponse()
+            expectedBytes?.takeIf { it >= 0 }?.let { expected ->
+                if (total != expected) throw invalidBinaryResponse()
+            }
+            val distance = end - start
+            if (distance == Long.MAX_VALUE) throw invalidBinaryResponse()
+            return distance + 1
+        } else {
+            if (response.code == 206 || response.header("Content-Range") != null) {
+                throw invalidBinaryResponse()
+            }
+            if (!response.isSuccessful) {
+                throw DsmFailure(
+                    response.code,
+                    "Could not read this file",
+                    "Check the connection and try again.",
+                    kind = DsmErrorKind.CONNECTION_FAILED,
+                )
+            }
+        }
+        return null
+    }
+
+    private fun binaryTooLarge() = DsmFailure(
+        null,
+        "This file is too large to preview safely",
+        "Download the file or use DSM to open it.",
+        kind = DsmErrorKind.PREVIEW_TOO_LARGE,
+    )
+
+    private fun invalidBinaryResponse() = DsmFailure(
+        null,
+        "The NAS returned an invalid preview response",
+        "Close the preview and try again.",
+        kind = DsmErrorKind.INVALID_RESPONSE,
+    )
+
+    private fun binaryBodyLengthMismatch(expectedBytes: Long?) =
+        if (expectedBytes != null && expectedBytes >= 0) {
+            downloadLengthMismatch()
+        } else {
+            invalidBinaryResponse()
+        }
+
+    private fun downloadLengthMismatch() = DsmFailure(
+        null,
+        "The downloaded file size did not match",
+        "Delete the incomplete file and try again.",
+        kind = DsmErrorKind.DOWNLOAD_LENGTH_MISMATCH,
+    )
+
     suspend fun call(
         profile: NasProfile,
         session: DsmSession,
@@ -200,6 +747,7 @@ class DsmApiClient(
         val body = FormBody.Builder().apply {
             parameters.forEach { (key, value) -> add(key, value) }
             session?.sid?.let { add("_sid", it) }
+            session?.synoToken?.takeIf { it.isNotBlank() }?.let { add("SynoToken", it) }
         }.build()
         val request = Request.Builder()
             .url("${endpoint(profile)}$path")
@@ -239,7 +787,11 @@ class DsmApiClient(
 
     private fun requireSuccess(envelope: JsonObject): JsonObject {
         if (envelope["success"]?.jsonPrimitive?.booleanOrNull == true) {
-            return envelope["data"] as? JsonObject ?: JsonObject(emptyMap())
+            return when (val data = envelope["data"]) {
+                is JsonObject -> data
+                is kotlinx.serialization.json.JsonArray -> JsonObject(mapOf("_array" to data))
+                else -> JsonObject(emptyMap())
+            }
         }
         val code = (envelope["error"] as? JsonObject)?.int("code")
         throw mapFailure(code)
@@ -256,6 +808,10 @@ class DsmApiClient(
         406 -> DsmFailure(code, "Two-factor code required", "Enter the current code from your authenticator.", true, DsmErrorKind.OTP_REQUIRED)
         407 -> DsmFailure(code, "Two-factor code is incorrect", "Use the latest code and try again.", true, DsmErrorKind.OTP_INVALID)
         408, 409 -> DsmFailure(code, "Device confirmation required", "Confirm the device in DSM and try again.", true, DsmErrorKind.DEVICE_CONFIRMATION_REQUIRED)
+        108 -> DsmFailure(code, "The upload was not completed", "Choose the file again and retry.", kind = DsmErrorKind.UPLOAD_FAILED)
+        115 -> DsmFailure(code, "The NAS did not allow this upload", "Check folder permissions and available space.", kind = DsmErrorKind.UPLOAD_NOT_ALLOWED)
+        1800 -> DsmFailure(code, "The upload size could not be verified", "Choose the file again and retry.", kind = DsmErrorKind.UPLOAD_LENGTH_MISMATCH)
+        1801, 1802, 1803, 1804, 1805 -> DsmFailure(code, "The NAS could not accept this file", "Check the file name, folder permissions, and available space.", kind = DsmErrorKind.UPLOAD_FAILED)
         else -> DsmFailure(code, "NAS operation failed", "Refresh and try again.", kind = DsmErrorKind.REQUEST_FAILED)
     }
 
@@ -283,6 +839,45 @@ class DsmApiClient(
     private object BuildPolicy {
         // Debug 也保持 HTTPS，避免测试配置意外进入正式行为。
         const val allowCleartext = false
+    }
+
+    private companion object {
+        const val MAX_BINARY_RESPONSE_BYTES = 256L * 1024L * 1024L
+        const val MAX_STREAM_RESPONSE_BYTES = 1024L * 1024L * 1024L * 1024L
+        const val MAX_ERROR_RESPONSE_BYTES = 1024L * 1024L
+        const val MAX_DOWNLOAD_TASK_FILE_BYTES = 100L * 1024L * 1024L
+        const val STREAM_BUFFER_BYTES = 64 * 1024
+        val CONTENT_RANGE_PATTERN = Regex("bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)", RegexOption.IGNORE_CASE)
+    }
+}
+
+private class InputStreamRequestBody(
+    contentType: String?,
+    private val contentLength: Long,
+    private val openInputStream: () -> InputStream,
+    private val onProgress: (Long, Long) -> Unit,
+) : RequestBody() {
+    private val mediaType = contentType?.toMediaTypeOrNull()
+
+    override fun contentType() = mediaType
+
+    override fun contentLength() = contentLength
+
+    override fun writeTo(sink: BufferedSink) {
+        var completed = 0L
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        openInputStream().use { input ->
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                sink.write(buffer, 0, count)
+                completed += count
+                onProgress(completed, contentLength)
+            }
+        }
+        if (completed != contentLength) {
+            throw IOException("Upload source length changed")
+        }
     }
 }
 

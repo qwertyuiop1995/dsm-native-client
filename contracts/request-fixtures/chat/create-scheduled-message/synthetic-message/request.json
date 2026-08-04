@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "chat.create-scheduled-message.synthetic-message",
+  "module": "chat",
+  "operation": "createScheduledMessage",
+  "api": { "name": "SYNO.Chat.Post.Schedule", "method": "create", "preferredVersion": 1, "resolvedVersion": 1, "resolvedPath": "entry.cgi" },
+  "transport": { "httpMethod": "POST", "requestFormat": "form" },
+  "parameters": [
+    { "name": "channel_id", "valueType": "string", "encodedValue": "synthetic-channel" },
+    { "name": "message", "valueType": "string", "encodedValue": "Synthetic scheduled message" },
+    { "name": "send_at", "valueType": "integer", "encodedValue": "1800000000000" }
+  ],
+  "authentication": { "required": true, "synoTokenRequired": false, "sessionLocations": ["cookie", "form"], "synoTokenLocations": ["header", "form"] },
+  "policy": { "retryPolicy": "queryStateBeforeDecision", "risk": "standardWrite", "readbackPolicy": "required" },
+  "source": { "kind": "synthetic", "evidence": "sourceReviewed" }
+}

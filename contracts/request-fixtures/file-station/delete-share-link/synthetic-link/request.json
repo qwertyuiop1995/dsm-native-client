@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "file-station.delete-share-link.synthetic-link",
+  "module": "file-station",
+  "operation": "deleteShareLink",
+  "api": {
+    "name": "SYNO.FileStation.Sharing",
+    "method": "delete",
+    "preferredVersion": 3,
+    "resolvedVersion": 3,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "id",
+      "valueType": "stringArray",
+      "encodedValue": "[\"<synthetic-share-link>\"]"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "destructive",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "publicDocumentation"
+  }
+}

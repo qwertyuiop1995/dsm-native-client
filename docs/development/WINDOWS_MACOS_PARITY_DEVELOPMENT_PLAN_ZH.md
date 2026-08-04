@@ -1,0 +1,412 @@
+# Windows 对齐 macOS 功能开发计划
+
+- 状态：规划基线，尚未开始实施
+- 上位计划：[macOS 功能对齐总控计划](MACOS_PARITY_REPLICATION_MASTER_PLAN_ZH.md)
+- 目标技术栈：C#、WinUI 3、HttpClient、Windows Cloud Files API
+
+## 1. 目标
+
+在不修改 macOS 和 Android 的前提下，把 macOS 当前版本已有的业务能力、安全语义和失败恢复完整迁移到 Windows，并保持 Windows 用户熟悉的窗口、键鼠、触控、通知区域和文件资源管理器体验。
+
+Windows 完成标准不是“Shell 中出现入口”，而是对应工作流达到总控计划定义的业务、安全、平台、状态、质量和验证六项等价。
+
+## 2. 当前 Windows 基线
+
+### 2.1 已有基础
+
+| 领域 | 当前证据 | 已有边界 | 本计划起始证据等级 |
+| --- | --- | --- | --- |
+| 工程 | `LanStash.Domain`、`LanStash.Infrastructure`、`LanStash.App`、`LanStash.Tests` | 分层存在，但领域模型、Repository 和通用工作区仍是大文件 | 静态源码存在；本次未构建 |
+| 登录 | `AppViewModel.cs`、`DsmConnectionResolver.cs`、`NasAddressParser.cs` | HTTPS、地址解析、OTP、资料恢复、自动登录 | 源码/测试路径存在；本次未复验 |
+| QuickConnect | `DsmQuickConnectResolver.cs` | 直连/中继、官方域名限制和中继身份核对已有代码 | 源码/测试路径存在；Windows 设备未验证 |
+| 安全存储 | `CredentialSessionStore.cs`、`CredentialPasswordStore.cs` | 会话和可选密码进入 Credential Locker，非秘密资料单独保存 | 源码/测试路径存在；Windows 运行时未验证 |
+| 本地化 | `LocalizationService.cs`、英语/简中 `.resw` | 系统语言、App 内选择、回退英语和持久化已有 | 源码/资源存在；本次未复验 |
+| Shell | `ShellPage.xaml` | `NavigationView` 与模块入口、退出确认 | 静态源码存在；UI/设备未验证 |
+| 文件 | `DsmRepository.cs`、`WorkspaceViewModel.cs` | 共享/目录列表、搜索、新建文件夹、重命名、单项删除的基础切片 | 浅层源码，未对齐 |
+| Photos | `WorkspaceViewModel.cs` | 只筛出 `/photo` 第一页非目录项目，不是照片管理实现 | 占位/浅层源码 |
+| Chat | `LoadConversationsAsync` | 只有会话列表，没有消息工作流 | 占位/浅层源码 |
+| Download Station | `DsmRepository.cs` | URL 创建、列表、暂停/继续/删除的基础切片 | 浅层源码，未对齐 |
+| Container/VMM | `DsmRepository.cs` | 通用列表与少量生命周期/删除/网络操作；无完整详情或向导 | 内部 API 浅层源码；设备写未验证 |
+| NAS 设置 | `LoadNasSettingsAsync` | 少数类别的浅层只读聚合 | 浅层源码，未对齐 |
+| 写结果 | `MutationResult.cs` | 类型已存在，尚未完整接入实际 Repository 调用链 | 类型存在，未形成端到端证据 |
+| Cloud Files | `CloudDrive/**`、`DesktopCloudDrive*.cs` | 同步根、占位、分段读取、固定/释放、缓存、名称兼容与恢复原型；普通应用创建/修改是否安全失败尚未证明 | 源码/部分测试路径存在；Explorer/设备未验证 |
+| 窗口生命周期 | `MainWindow.xaml.cs`、`TrayIcon.cs` | 关闭隐藏到通知区域、打开、云盘暂停/恢复和显式退出 | 静态源码存在；Windows 生命周期未验证 |
+
+`windows/README.md` 中“已接入”的模块描述只代表入口或基础切片，不能据此标记为 macOS 对齐。实时测试数量以 `docs/progress/STATUS.md` 为准，但 README、STATUS 或平台矩阵都不能在没有可复现命令/设备记录时自行提升验证等级。
+
+### 2.2 结构性问题
+
+- `Models.cs`、`IDsmRepository`、`DsmRepository.cs`、`WorkspaceViewModel.cs` 和 `WorkspacePage` 聚合过多领域，不利于 typed model、专项状态和多 agent 并行。
+- 多个模块使用 `ResourceItem + Metadata` 或宽松 JSON 猜测，容易丢失权限、状态和字段白名单语义。
+- 现有页面主要只有“加载/消息/列表”，没有加载、空内容、筛选空、错误、正常五态。
+- `MutationResult` 没有贯穿确认、提交、防重复、回读和部分成功。
+- Cloud Files 的 Range 读取需要补齐 `206 Content-Range`、起点、总长度和内容版本一致性校验，避免远端变化时拼接不一致。
+- 当前 WinUI 工程是 unpackaged，`WindowsPackageType=None`；安装、更新、通知激活、启动注册和卸载清理必须按当前发布形态分别验证。
+
+## 3. 不变量与非目标
+
+### 3.1 必须保持
+
+- `profileId` 是凭据、证书、能力、模块、导航、缓存、传输和本地状态的隔离边界。
+- API 固定选择已验证的版本；不能简单使用能力返回的最高版本。
+- 官方公开 API 与内部 API 使用不同 Adapter 或至少物理文件边界。内部只读必须有兼容记录和能力探测，失败时独立降级；内部写在未知 DSM build/套件版本默认关闭。QuickConnect 按登录前服务契约、官方域名和身份校验单独管理，不能套用登录后 DSM build 门。
+- 批量写操作只移除已确认成功的选择；部分成功、提交未确认和取消后复查必须保留。
+- Cloud Files 的目标仍是只读，但当前尚未证明普通应用创建/修改会安全失败；W1-C 补齐并实机证明创建、写入、改名、删除均不会写回 NAS 前，不能宣传为完整只读同步根或双向同步。
+- 凭据和远端真实路径不得进入 UI 诊断、通知、剪贴板、同步根 identity 或普通设置。
+
+### 3.2 当前不做
+
+- 不实现 macOS 尚未完成的完整 Container 创建/Compose/终端、VMM 高级迁移、Chat 加密等候选能力。
+- 不在本计划中改为 MSIX、改变 Identity、签名或最低版本；若发布验收证明 unpackaged 形态无法满足需求，单独提交必要性、迁移和回滚方案取得用户批准。
+- 不新增第三方 UI、MVVM、媒体或测试依赖。确需新增时先走审批，不以“提高效率”为由默认引入。
+- 不新建 `LanStash.Application` 或 `LanStash.CloudFiles` 工程作为既定动作；先在现有三层工程内按目录建立逻辑边界，新工程拆分属于后续工具链决策门。
+
+## 4. 目标代码结构
+
+在保持现有 solution 和项目数量的前提下，逐步形成以下目录边界：
+
+```text
+windows/src/LanStash.Domain/
+  Auth/ Files/ Photos/ Chat/ Downloads/ Containers/ VirtualMachines/ NasAdmin/
+  Mutations/ Transfers/ DesktopCloudDrive/
+
+windows/src/LanStash.Infrastructure/
+  Transport/ Auth/ Capability/
+  Features/<同名领域>/PublicApi/
+  Features/<同名领域>/PrivateApi/
+  Storage/
+
+windows/src/LanStash.App/
+  Shell/
+  Features/<领域>/Pages/
+  Features/<领域>/ViewModels/
+  Platform/Pickers/
+  Platform/Notifications/
+  Platform/Windowing/
+  Platform/DragDrop/
+  CloudDrive/
+
+windows/tests/LanStash.Tests/
+  Auth/ Files/ Photos/ Chat/ Services/ NasAdmin/ Transfers/ CloudDrive/
+```
+
+实施约束：
+
+- `IDsmRepository` 在 W1 先以兼容 facade 保留，新增聚焦接口后再逐调用方迁移；不能一次性重写全部调用链。
+- 大类可以改为 `partial` 并先做无行为变化的机械拆分；机械拆分和功能改造不得混在同一切片。
+- UI 只依赖 typed ViewModel 状态，不直接解析 JSON 或调用 DSM API。
+- Cloud Files 回调不引用 WinUI 控件，只向平台无关协调器报告状态。
+- 所有写操作进入统一协调器：能力检查 → 权限/存在性/状态预检与影响摘要 → 仅危险操作确认 → 获取稳定目标锁 → 再次预检 → 单次提交 → 持久记录“已提交、禁止自动重放” → 最终状态回读 → `MutationResult`。不得在等待用户确认时长期占锁。
+- App 字节传输与 NAS 服务器后台任务使用不同数据源，展示层再统一到活动中心。
+
+## 5. WinUI 原生体验映射
+
+| macOS 交互 | Windows 方案 |
+| --- | --- |
+| 工作区侧栏 | `NavigationView` 左侧 Auto 模式，按“内容、消息、任务与服务、NAS、设置”分组；不随页面重建 |
+| 路径与返回 | `BreadcrumbBar` + BackStack；支持 `Alt+Left`、`Alt+Up`，返回恢复选择、滚动、排序和筛选 |
+| 文件列表/图标 | 采用锁定 Windows App SDK 可用的原生虚拟化控件；列表/网格共用选择模型，禁止两套状态 |
+| 工具栏 | `CommandBar`，当前场景主操作可见，低频动作进入 overflow；危险动作与普通动作分隔 |
+| 多选 | `Extended` 选择、Ctrl/Shift/Ctrl+A、触控“选择”入口；右键不破坏已有多选 |
+| 上下文菜单 | 指针右键是快捷入口，所有关键动作同时存在于命令栏或详情面板 |
+| 拖放 | 进程内只传 opaque token；目标高亮，落下后才做权限、同名和父子路径检查 |
+| 文件导入导出 | Windows 系统文件/文件夹选择器；系统拖入只接收用户授权的 `StorageItem` |
+| 详情/属性 | 宽窗口右侧 Inspector，窄窗口使用对话框或独立窗口；技术字段默认折叠 |
+| 图片/媒体预览 | 独立 `AppWindow` 或宽窗详情区，支持键盘前后、缩放、旋转、全屏和明确关闭 |
+| VMM 控制台 | 短生命周期独立 `AppWindow`；连接状态、键盘捕获和退出路径可见，token 不进入 URL/日志 |
+| 通知 | 原型验证后使用 Windows App SDK App Notification；正文只显示通用结果，点击恢复到活动中心 |
+| 后台 | 首版为通知区域驻留 + 安全任务持久化/启动恢复，不把驻留进程宣传成系统后台任务 |
+| 动效 | 使用 Fluent 原生导航和内容过渡，通常 150–250ms；遵循系统关闭动画设置，无装饰性循环 |
+| 无障碍 | Narrator 名称/角色/状态、可见焦点、高对比度、键盘完整可达和 100–200% 缩放 |
+
+`ui-ux-pro-max` 生成的 Web 字体、Bento 营销布局、GSAP 和夸张大标题与 WinUI 冲突，明确舍弃。界面使用系统字体、Fluent 主题资源和系统图标，不新增运行时设计依赖。
+
+## 6. 分阶段实施 DAG
+
+```text
+W0 基线、账本与 ZIP/安装器决策门
+  └─ W1 机械拆分 + Auth/Capability/Mutation/Workspace 基础
+       └─ W1-R FileRangeReadResult / 内容版本契约冻结
+            ├─ W1-C Cloud Files 完整性与回归护栏
+            └─ W2 Files + Transfers + Pickers
+                 ├─ W3-A Preview + Photos
+                 ├─ W3-B1 Chat 核心
+                 ├─ W4-A Download Station + Container Manager
+                 ├─ W4-B VMM + Console
+                 └─ W4-C NAS Administration
+  W3-A + W3-B1 出口通过 ─ W3-B2 Chat Attachments
+  全部分支 ─ W5 Windows 系统体验与集成
+                 └─ W6 双架构、交付生命周期与发布验收
+```
+
+### W0：冻结事实基线
+
+工作项：
+
+- 从总控计划复制本次 Windows 对齐账本，逐行补 macOS 源码/测试、API 类型、证据等级和 Windows 当前状态。
+- 对 Windows 当前请求做合成快照，确认 API 名、版本、方法、路径、参数、认证材料位置和安全策略。
+- 给现有入口标记“完整、部分、占位、关闭”，纠正 README 或进度中的模糊描述。
+- 为所有共享热点指定 owner，记录用户现有工作区改动。
+- 冻结交付形态：默认仍是 framework-dependent ZIP 的解压部署/覆盖更新/用户主动清理；若希望 installer、self-contained 或 MSIX，先提交依赖、Identity、迁移、回滚和签名方案并取得用户批准。
+
+出口：每个切片都能追溯到固定 macOS 基线；没有把内部候选或未实机功能当稳定功能。
+
+### W1：基础分层、认证与写操作结果
+
+工作项：
+
+- 先对大文件做有测试保护的机械拆分，建立功能目录和聚焦 Repository 接口。
+- 补自签名证书审阅、按 profile 指纹绑定、证书变化阻断和系统信任优先；只有结构/有效期合格的叶证书可固定，变化时展示旧/新指纹，QuickConnect relay 只走系统信任，路由发现阶段不发送登录凭据。
+- 在 Shell 中加入多 NAS 新建、切换、管理和当前连接方式提示；切换与退出登录分离。
+- 固定已验证 API 版本、typed response、响应大小/字段白名单和错误映射。
+- 将 `MutationResult` 接入至少一个低风险和一个高风险试点，再迁移其余写操作。
+- 建立按 profile 隔离的 NavigationState、ModuleAvailability 和恢复模型。
+
+出口：
+
+- 登录、OTP、取消、恢复、证书首次核对/变化、QuickConnect 身份不匹配均有单元测试。
+- 能力不可用有用户原因和下一步，不静默隐藏。
+- 成功、部分成功、权限拒绝、提交未确认和取消后复查可由 ViewModel 稳定呈现。
+- x64/arm64 目标编译通过；没有改变发布身份或包形态。
+
+### W1-R：Range 与内容版本契约冻结
+
+- 由 `windows/src/LanStash.Infrastructure/DsmApiClient.cs` 唯一 owner 建立 typed `FileRangeReadResult`，至少包含状态码、请求/响应 Range 起点与长度、总长度、实际字节数及服务端可证明的内容版本。
+- 删除“非 206 后在客户端跳过字节”的宽松语义；状态码、`Content-Range` 或长度不一致必须失败。
+- 若公开响应无法提供跨分段一致性依据，契约返回明确“不可安全分段”，调用方只能整段读取或降级，不能从路径、时间或本地缓存推断版本。
+- 先冻结接口、合成 fixture 与测试，再允许 Cloud Files owner 实施 W1-C，避免 Auth/Transport 与 Cloud Files 同时修改同一文件。
+
+出口：契约审查和请求测试通过；所有消费方只依赖冻结结果，不再解析原始响应。
+
+### W1-C：Cloud Files 完整性护栏
+
+此切片和普通 Files UI 分开，由独占 owner 处理：
+
+- 严格验证 `206`、`Content-Range` 起点/总长度、实际字节数和远端内容版本。
+- 远端版本改变时终止本次水合，不能把不同版本片段拼成一个文件。
+- 若 W1-R 判断当前公开响应不能证明跨分段版本一致，停止多段水合并明确降级。
+- 回归同步根、占位分页、取消、固定/释放、空间预检、LRU、外部 NTFS、非法名称、大小写冲突和恢复事务。
+- 补齐本地创建、普通写入/截断、自动保存、改名、删除的安全拒绝或隔离；任何路径都不能产生 NAS 写回副作用。
+- 最小共享会话不得包含密码，诊断不得包含同步根真实路径或远端路径。
+
+出口：除领域测试外，还要在 x64/arm64 分别验证 P/Invoke 结构体大小/偏移、常量、回调生命周期和 `CfExecute` 终态恰好一次。Word、记事本和直接 Win32 创建/写入/自动保存/改名/删除在真实 Explorer 同步根全部安全失败且 NAS 无副作用，是阻断出口；重启、磁盘拔插等继续单独记录 `DEVICE_VERIFIED`。
+
+### W2：File Station 与传输闭环
+
+工作项：
+
+- 分页、目录历史、面包屑、列表/网格、排序、分组、筛选、递归搜索。
+- 收藏、最近、回收站、远程位置、分享链接和当前账号可见空间；公开 VirtualFolder 浏览与内部挂载管理分离，内部创建/修改/断开在未知环境关闭。
+- 系统选择器上传、文件/文件夹/批量下载、取消和可解释恢复。下载仅在严格 Range 验证后续传；公开上传没有 offset 契约时暂停后只能“从头重试”，不得显示断点继续。
+- 复制/移动、跨 NAS 有界流、同名预检、跳过/替换、拖放和限时撤销。
+- ZIP/7z 压缩解压、密码、编码、目录结构和覆盖保护。
+- 新建/重命名/删除/恢复/分享全部接入统一写操作协调器。
+- App 传输与 NAS 后台任务进入同一活动中心但保留来源和不同控制能力。
+
+出口：核心文件工作流达到总控账本范围；多 NAS、弱网、权限、部分成功和提交未知均有自动化；UI 五态完整。
+
+### W3-A：预览与文件系统照片库
+
+工作项：
+
+- 建立有界缩略图/预览缓存、可见窗口优先加载和离页取消。
+- 图片、PDF、UTF 文本、Range 音视频预览；文本编辑、格式整理和未保存保护。
+- 通过公开 File Station 扫描 `/home/Photos` 与 `/photo`，实现个人/共享空间、文件夹、时间线、文件夹式相册、分页、搜索和年/月定位。
+- HEIC/MOV/Live Photo 能力探测与可解释降级，EXIF 只展示白名单字段。
+- 上传、导出、分享、移动、删除和恢复复用 W2 传输/写操作。
+
+语义要求：界面必须称为文件系统照片库；真正 Synology Photos 相册、人物、地点、标签等内部能力仍关闭。
+
+出口：大目录/大图库不在 UI 线程解码；缓存有上限；图片、视频、PDF、文本和不可支持格式均有状态测试。
+
+### W3-B1：Chat 核心
+
+工作项：
+
+- typed 会话、用户、消息、成员和分页模型；首次单聊与非加密私人群聊。
+- 草稿、本地置顶/已读、文字/Emoji、失败重试、删除本人消息和关闭会话。
+- 消息转发、服务端消息置顶/取消置顶按各自内部能力 gate；语音发送和完整加密实现不在当前 parity 范围。
+- Socket.IO 前台实时与轮询降级，离线/恢复/重复事件去重。
+- 提醒、纯文字定时消息、投票当前 macOS 范围；每个内部写能力独立 gate。
+
+出口：未记录 DSM build + Chat Server 完整版本时写入口关闭；Bot/Webhook 不替代普通用户 Chat；加密会话明确不支持而非明文降级。核心出口不依赖附件 UI。
+
+### W3-B2：Chat 附件
+
+- 等 W2 传输、W3-A 预览和 W3-B1 Chat 核心出口全部通过后，再接入单附件上传/保存、缩略图和预览。
+- 取消和重试复用统一任务语义，不重复发送；临时文件、通知和诊断不得泄露消息、路径或附件正文。
+
+出口：弱网、取消、失败重试、会话切换和 App 重启不会重复发送或遗留无界临时文件。
+
+### W4-A：Download Station 与 Container Manager
+
+Download Station：
+
+- 列表/筛选/详情/进度/速度/目标和任务文件；任务文件导入必须复用已验收的 W2 Picker/Transfer 边界。
+- URL/magnet/torrent/nzb/txt 创建、NAS 目标目录选择。
+- 暂停/继续/删除数据分支、官方基础设置和写后回读。
+
+Container Manager：
+
+- 概览、容器、映像、网络、项目、事件的 typed 页面。
+- 生命周期/删除、Registry 搜索/标签/拉取、映像删除、网络创建/删除。
+- 每个分区读失败独立降级，不阻断其他分区。
+
+出口：官方 API 优先；`download-station2-fallback` 当前为 `observed:degraded`，任务文件上传/设置写未行为验证；`container-manager-internal` 当前为 `observed:degraded`，镜像拉取曾在发送前终止且写未验证。完整 Compose、终端和日志流不属于本阶段。
+
+### W4-B：VMM 与控制台
+
+- 机器、主机、存储、网络、映像、保护和事件 typed 页面。
+- 三步基础创建、停止态常规编辑、电源、删除、网络编辑/删除和映像删除。
+- 独立控制台窗口使用 WebView2 非持久配置和精确 NAS origin allowlist；SID 仅以内存 Cookie 注入，不落盘、不进 URL/日志/历史/诊断，禁止外部导航和新窗口，退出时清理。WebView2 Runtime 缺失时提供通俗降级，不绕过安全策略。
+- 电源和删除操作使用稳定目标锁、确认与最终状态复查。
+
+出口：`vmm-internal` 只读证据当前为 `read-verified:degraded`，创建/修改/网络写/删除未行为验证；未知 VMM 版本所有内部写关闭。控制台安全原型与退出清理通过后才开放；高级磁盘/迁移/克隆等继续排除。
+
+### W4-C：NAS 管理与统一存储
+
+- 概览、性能、更新检查/说明、存储/硬盘/SMART、外接存储、ZRAM。
+- 文件服务、SSH/Telnet、代理、接口、硬件/休眠、UPS、远程访问、安全、区域时间、DDNS。
+- 套件、计划任务、账号/群组、当前账号共享访问、进程、日志分页和连接。
+- 共享/类型/所有者/大文件/时间/重复内容的可取消统一存储分析。
+
+边界：外接存储、ZRAM、电源计划、进程和当前账号共享访问保持只读；系统升级安装、套件安装/升级和管理员 ACL 矩阵继续关闭，除非后续获得稳定契约与独立授权。
+
+出口：危险操作均有影响说明、权限/状态预检、防重复和回读；可能断网、改时、重启/关机的操作在专用测试环境单独验收。
+
+### W5：Windows 系统体验收口
+
+- Shell、BackStack、窗口大小、选择/滚动/筛选和多 NAS 状态恢复。
+- 键盘快捷键、触控入口、拖放、右键、多窗口预览和控制台。
+- App Notification 原型验证注册/注销、点击激活、重启恢复和隐私正文；当前 unpackaged 形态可用性以实测记录，不预设必须迁移 package identity。
+- 托盘驻留、显式退出、安全任务保存和下次启动恢复。
+- 深色、高对比、Narrator、文本缩放、关闭动画和所有页面五态。
+
+出口：不依赖鼠标也能完成关键流程；通知被拒绝不影响 App 内结果；显式退出不会留下不可解释写操作。
+
+### W6：双架构与交付验收
+
+- x64、真实 arm64。
+- Windows 10 2004 与项目支持的 Windows 11。
+- 默认 framework-dependent ZIP：在干净机器核对 Windows App Runtime/.NET 运行时前提，完成解压、首次启动、覆盖更新、重装和用户主动清理；不能称作安装包、自动更新或卸载器。
+- 若用户另行批准 installer、self-contained 或 MSIX，再按获批方案增加安装、原位升级、卸载与回滚验收，不得由本计划默认改变发布身份。
+- 无论采用哪种交付，验证 Run 与通知激活的注册/注销、同步根注销、Credential Locker、缓存及已水合普通文件的保留/清理边界。
+- Explorer 与 Cloud Files 的注册、重启、睡眠、离线、外盘和清理。
+- 受控真实 NAS 的权限、版本、弱网和危险操作矩阵。
+- 核对 W0 已冻结的交付决策；需要变化时回到审批门，不在 W6 临时改变。
+
+出口：每项功能取得准确验证等级；当前 ZIP 交付和任何另行获批的安装方案分别记录，不混用“安装/卸载”术语；所有 `SIGNING_REQUIRED`、`DEVICE_VERIFIED` 缺口和回滚步骤完整。
+
+## 7. Codex 子 agent 文件所有权
+
+### 7.1 拆分前热点
+
+以下文件在 W1 机械拆分完成前只允许一个 agent 修改：
+
+- `windows/src/LanStash.Domain/Models.cs`
+- `windows/src/LanStash.Infrastructure/DsmRepository.cs`
+- `windows/src/LanStash.App/ViewModels/AppViewModel.cs`
+- `windows/src/LanStash.App/ViewModels/WorkspaceViewModel.cs`
+- `windows/src/LanStash.App/Views/ShellPage.*`
+- `windows/src/LanStash.App/Views/WorkspacePage.*`
+- `windows/src/LanStash.Infrastructure/DsmApiClient.cs`
+- `windows/src/LanStash.App/App.xaml*`
+- `windows/src/LanStash.App/MainWindow.xaml*`
+- `windows/src/LanStash.App/TrayIcon.cs`
+- `windows/src/LanStash.App/app.manifest`
+- 两份 `Resources.resw`
+- `windows/Directory.Build.props`、`windows/package.ps1`、`.csproj`、`.slnx` 和 CI
+
+先由一个基础 agent 做机械拆分并跑回归，主 agent 验收行为未变化后，才允许按功能目录并行。
+
+### 7.2 推荐波次
+
+| 波次 | Agent A | Agent B | Agent C |
+| --- | --- | --- | --- |
+| 0 | 单一 owner：热点机械拆分 | 只读基线/测试盘点 | 只读安全审查 |
+| 1 | Auth/证书/能力；独占 Transport 契约 | Workspace/Shell/状态 | W1-R 通过后才做 Cloud Files |
+| 2 | Files/Transfers | Chat 核心（不接附件） | 独立 Container/NAS 只读模型 |
+| 3-A | Preview/Photos | Download/Container 写流程 | W3-A/W3-B1 出口只读复核 |
+| 3-B | Chat 附件 | 对应 Preview/Chat 回归测试 | 独立 QA；不得抢改生产文件 |
+| 4 | VMM/Console | NAS Admin/Storage Analysis | 系统集成唯一 owner |
+| 5 | 页面 owner 修复键鼠/触控/动效 | 无障碍/主题/本地化只读审查 | 发布/恢复只读审查 |
+
+共享 `.resw`、工程文件、Shell 路由、契约和进度文档始终由单一集成 owner 串行修改。功能 agent 在任务开始前拿到现成资源键；若缺键，只提交“键、英语、简中、参数”清单，不抢改资源文件。
+
+测试 agent 可拥有对应功能的新测试目录，不能修改生产代码或降低既有断言。高风险模块由未参与实现的 agent 做只读对抗审查。无障碍审查 agent 不直接修改各功能 XAML，问题交回该页面唯一 owner，避免与输入/窗口切片重叠。
+
+## 8. 自动化与构建门禁
+
+以下命令从仓库根目录在 Windows 环境执行，实际结果必须原样记录：
+
+```powershell
+dotnet restore .\windows\LanStash.slnx
+dotnet test .\windows\tests\LanStash.Tests\LanStash.Tests.csproj -c Release --no-restore
+dotnet build .\windows\src\LanStash.App\LanStash.App.csproj -c Release -r win-x64 --no-restore
+dotnet build .\windows\src\LanStash.App\LanStash.App.csproj -c Release -r win-arm64 --no-restore
+dotnet build .\windows\src\LanStash.App\LanStash.App.csproj -c Debug -r win-x64 --no-restore
+
+python .\tools\localization\check_localization.py
+python .\tools\contract-validation\validate_fixtures.py
+python .\tools\request-contract\validate_contracts.py
+git diff --check
+```
+
+W6 还必须在 Windows 干净工作区用脚本已有的非交互模式生成当前 ZIP 交付物，并记录产物启动结果：
+
+```powershell
+$env:LANSTASH_NON_INTERACTIVE='1'
+$env:LANSTASH_TARGET_PLATFORM='both'
+$env:LANSTASH_RUN_TESTS='1'
+$env:LANSTASH_LAUNCH_AFTER='0'
+.\windows\package.ps1
+```
+
+CI 后续应覆盖：
+
+- x64 与 arm64 编译；
+- `contracts/**` 改动触发 Windows 测试；
+- 分域请求 fixture、状态机和 ViewModel 测试；
+- Cloud Files P/Invoke 独立编译；
+- XAML 编译 + 不依赖真实 NAS 的 ViewModel 五态测试。
+
+当前仓库只有 xUnit，没有 WinUI UI test harness。新增 XAML 加载/UI 自动化工程或框架若带来第三方依赖或工具链变化，先取得用户批准；在此之前只把 XAML 编译、ViewModel 五态测试和人工 Accessibility Insights 记录列为门禁，不虚构页面自动化覆盖。
+
+## 9. Windows 实机验收矩阵
+
+- x64 和真实 ARM64 设备。
+- 鼠标、键盘、触控、Narrator、高对比、100%/150%/200% 缩放与系统关闭动画。
+- 窄窗口、常规窗口、最大化、多显示器和 DPI 切换。
+- 局域网、公网直连、QuickConnect 中继、网络切换、会话过期、自签名首次核对和证书变化。
+- 窗口关闭驻留、通知点击、显式退出、系统重启、睡眠/唤醒和任务恢复。
+- Cloud Files 固定/释放、Explorer/系统重启、空间不足、外置 NTFS 拔插、长路径、非法名称、大小写冲突。
+- Word、记事本等应用尝试创建、自动保存、改名和删除时必须安全失败，且 NAS 无写回。
+- ZIP 解压/覆盖/主动清理后同步根、缓存和凭据行为可预测；若另行批准安装器，再增加安装/升级/卸载矩阵。
+- 危险写仅用专用测试 NAS 和虚构数据，覆盖普通账号、受限管理员、权限拒绝、超时、部分成功、提交未知和取消。
+
+## 10. 风险与决策门
+
+| 风险 | 处理 |
+| --- | --- |
+| 私有 API 范围大 | 内部只读按兼容记录探测并可失败降级；内部写绑定 DSM build + 套件版本，未知环境默认关闭；QuickConnect 单独管理 |
+| 当前写操作只靠页面忙碌锁 | 迁移到稳定 profile/操作/目标 key 的协调器，并以回读决定结果 |
+| Credential Locker 与证书信任不对齐 | W1 先完成证书模型；密码永不共享给 Cloud Files |
+| Cloud Files Range/版本不足 | 先冻结 W1-R 契约，W1-C 为阻断级出口，未通过前不扩大系统集成 |
+| unpackaged 发布生命周期 | W5 原型验证；MSIX/Identity/签名单独审批 |
+| x64 结果被当作 arm64 | 两个 Runtime 与真实设备分别记录，P/Invoke/回调专门压力测试 |
+| 通用页面继续膨胀 | W1 后禁止向 `WorkspacePage` 增加新领域行为，改用功能专页 |
+| macOS 基线继续变化 | 每个大阶段结束做一次受控增量盘点，不在切片中途追逐变化 |
+| ZIP 被误当安装器 | 默认只验收解压/覆盖/主动清理；installer、self-contained 或 MSIX 必须另行批准 |
+
+## 11. 参考资料
+
+- [macOS 功能对齐总控计划](MACOS_PARITY_REPLICATION_MASTER_PLAN_ZH.md)
+- [平台功能矩阵](../progress/PLATFORM_MATRIX.md)
+- [请求契约与写操作结果计划](REQUEST_CONTRACT_AND_MUTATION_RESULT_PLAN_ZH.md)
+- [桌面云盘专项计划](NATIVE_DSM_DESKTOP_CLOUD_DRIVE_DEVELOPMENT_PLAN_ZH.md)
+- [Microsoft NavigationView](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/navigationview)
+- [Microsoft Windows Controls](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/)
+- [Microsoft Cloud Files Functions](https://learn.microsoft.com/en-us/windows/win32/cfapi/cloud-files-functions)
+- [Microsoft CfRegisterSyncRoot](https://learn.microsoft.com/en-us/windows/win32/api/cfapi/nf-cfapi-cfregistersyncroot)
+- [Microsoft unpackaged App 部署责任](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/deploy-unpackaged-apps)
+- [Microsoft Windows App SDK 通知](https://learn.microsoft.com/en-us/windows/apps/develop/notifications/)

@@ -75,11 +75,13 @@ LanStash 的 DSM 会话使用 HTTP/HTTPS，不把它误判为 SSH 或 Telnet 会
 ## 客户端与测试
 
 - Apple Adapter：`DsmNasAdministrationRepository`。
-- Android、Windows、iPhone 与 iPad：复用领域结果类型，设置调用链尚未迁移。
+- Android Adapter：`DsmRepository.terminalSettings` 与 `saveTerminalSettingsResult`；一次提交完整字段，提交后只回读一次并按实际变化字段统计结果。
+- Windows、iPhone 与 iPad：复用领域结果类型，设置调用链尚未迁移。
 - 脱敏 Fixture：
   `contracts/request-fixtures/terminal/set-settings/synthetic-settings/request.json`。
 - 自动化测试覆盖确认成功、回读不一致、超时后部分字段生效、断网且回读失败、无效
-  端口、全局重复提交、提交后取消和 macOS 用户反馈。
+  端口、全局重复提交、提交后取消和 macOS 用户反馈；Android 合成测试另覆盖完整字段、
+  响应丢失后的部分成功、无变化零写请求和权限拒绝后只回读。
 
 ## 安全与副作用
 
@@ -93,4 +95,5 @@ LanStash 的 DSM 会话使用 HTTP/HTTPS，不把它误判为 SSH 或 Telnet 会
 
 - 不同 DSM build、权限、SSH 活跃会话和防火墙组合下的真实写入副作用尚未验证。
 - DSM 对已占用端口、保留端口和 Telnet 策略的具体错误码尚未收集。
-- Android、Windows、iPhone 与 iPad 调用链尚未迁移。
+- Android 调用链已迁移但尚未做设备及真实 DSM 写行为验收；Windows、iPhone 与 iPad
+  调用链尚未迁移。

@@ -40,6 +40,8 @@
   - `SYNO.LogCenter.History`：客户端范围 v1；无记录时允许空结果。
 - 降级：性能、连接、日志或更新检查失败时各自显示不可用，不阻断其他 NAS 管理能力。
 - 电源动作稳定记录：[DSM 关机与重启内部 API](dsm-system-power-actions.md)。
+- 当前连接稳定记录：[DSM 当前连接内部 API](dsm-current-connection.md)。列表已只读核对，
+  断开写行为仍待专用目标验证。
 - 系统更新检查稳定记录：[DSM 系统更新检查内部 API](dsm-system-update-check.md)。当前
   仅允许 `check` 只读请求，下载、安装、取消和重启任务保持关闭。
 - 系统进程稳定记录：[DSM 系统进程与服务进程组内部 API](dsm-system-processes.md)。
@@ -157,6 +159,7 @@
 
 ### `container-manager-internal`
 
+- 稳定记录：[Container Manager 内部接口](container-manager-internal.md)
 - 组件：`container-manager`
 - API：`SYNO.Docker.Container`、`Image`、`Registry`、`Network`、`Project`、`Log`
 - 客户端范围：全部 v1

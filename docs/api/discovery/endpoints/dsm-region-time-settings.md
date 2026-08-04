@@ -86,17 +86,17 @@
 ## 客户端与测试
 
 - Apple Adapter：`DsmNasAdministrationRepository`。
-- Android、Windows、iPhone 与 iPad：复用领域结果类型，设置调用链尚未迁移。
+- Android Adapter：`DsmRepository` 与 `NasRegionSettingsScreen`；具备固定版本、输入/时区预检、全局防重复、配置回读、条件校时、部分成功与未知结果不重放。
+- Windows、iPhone 与 iPad：复用领域结果类型，设置调用链尚未迁移。
 - 脱敏 Fixture：
   - `contracts/request-fixtures/region/set-settings/synthetic-settings/request.json`
   - `contracts/request-fixtures/region/synchronize-time/synthetic-servers/request.json`
-- 自动化测试覆盖确认成功、配置提交超时、校时超时、无效输入、能力缺失、全局重复
-  提交、提交后取消、未编辑手动时间和 macOS 用户反馈。
+- Apple 自动化测试覆盖确认成功、配置提交超时、校时超时、无效输入、能力缺失、全局重复提交、提交后取消、未编辑手动时间和 macOS 用户反馈；Android 合成测试覆盖固定版本/参数、未编辑手动时间、配置提交超时、校时超时、非法服务器和非设备时区。
 
 ## 安全与副作用
 
 - 修改时区或时间可能使当前会话、OTP、证书判断、计划任务和日志时间发生变化。
-- macOS 在保存前使用高风险确认；Repository 与模型共同阻止并发保存。
+- macOS 与 Android 在保存前使用高风险确认；Repository 与模型共同阻止并发保存。
 - 请求 Fixture 只使用 `.example.invalid` 合成服务器，不记录真实服务器、NAS 地址、
   会话、时间响应或用户数据。
 - 本批次不修改 NTP 服务实现、证书信任、账号、计划任务或网络配置。
@@ -106,5 +106,4 @@
 - 不同 DSM build、权限、直连与 QuickConnect 下的真实写入、会话续期和证书行为未验证。
 - 不可达服务器、多个服务器、IPv6 字面值和 DSM 特定错误码尚未收集。
 - `sync` 接受后实际时钟收敛时间与偏差没有权威字段，仍需专用测试环境独立测量。
-- Android、Windows、iPhone 与 iPad 调用链尚未迁移。
-
+- Windows、iPhone 与 iPad 调用链尚未迁移；Android 仍待设备、真实 DSM 和权限矩阵验收。

@@ -71,7 +71,8 @@
 ## 客户端与测试
 
 - Apple Adapter：`DsmNasAdministrationRepository`。
-- Android、Windows、iPhone 与 iPad：复用领域结果类型，设置调用链尚未迁移。
+- Android Adapter：`DsmRepository.fileServiceSettings` 与 `saveFileServiceSettingsResult`；六组能力在首个写请求前一次性预检，只提交实际变化组，提交开始后整体回读并按组统计确认、部分成功或未知结果。
+- Windows、iPhone 与 iPad：复用领域结果类型，设置调用链尚未迁移。
 - 脱敏 Fixture：
   - `contracts/request-fixtures/file-services/set-smb/synthetic-settings/request.json`
   - `contracts/request-fixtures/file-services/set-nfs/synthetic-settings/request.json`
@@ -80,7 +81,9 @@
   - `contracts/request-fixtures/file-services/set-web-discovery/synthetic-settings/request.json`
   - `contracts/request-fixtures/file-services/set-time-machine/synthetic-settings/request.json`
 - 自动化测试覆盖六类请求确认成功、一次性能力预检、冲突端口、部分成功、断网后回读
-  失败、全局重复提交、提交后取消和 macOS 用户反馈。
+  失败、全局重复提交、提交后取消和 macOS 用户反馈；Android
+  `NasServiceSettingsMutationTest` 另覆盖六组固定参数/版本、只提交变化组、后续能力缺失
+  零写请求、前序生效后断线的部分成功以及 Time Machine 依赖。
 
 ## 安全与副作用
 
@@ -95,4 +98,5 @@
 - 六类写操作在目标 DSM build、不同权限和活跃客户端连接下的真实副作用尚未验证。
 - SMB 与 Time Machine、FTP/FTPS 与 SFTP 端口约束在不同 DSM build 上的服务端错误
   细节尚未收集。
-- Android、Windows、iPhone 与 iPad 调用链尚未迁移。
+- Android 调用链已迁移但尚未做设备及真实 DSM 写行为验收；Windows、iPhone 与 iPad
+  调用链尚未迁移。

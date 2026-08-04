@@ -55,3 +55,7 @@ jobs:
             echo "仓库包含禁止提交的敏感文件类型"
             exit 1
           fi
+          if git ls-files | grep -E '(^|/)keystore\.properties$'; then
+            echo "仓库包含禁止提交的 Android 签名配置文件 keystore.properties"
+            exit 1
+          fi

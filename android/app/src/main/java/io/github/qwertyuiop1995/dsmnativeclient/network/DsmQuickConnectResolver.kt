@@ -46,6 +46,22 @@ internal data class QuickConnectRelayDescriptor(
     val pingPongPath: String,
 )
 
+/** 只识别解析器实际可建立的官方中继域；QuickConnect 直连域必须明确排除。 */
+internal fun isTrustedQuickConnectRelayHost(host: String): Boolean {
+    val labels = host.trim().trimEnd('.').lowercase(Locale.ROOT).split('.')
+    return labels.size == 4 &&
+        labels[1] != "direct" &&
+        labels[2] == "quickconnect" &&
+        labels[3] in setOf("to", "cn") &&
+        labels[0].isQuickConnectHostLabel() &&
+        labels[1].isQuickConnectHostLabel()
+}
+
+private fun String.isQuickConnectHostLabel(): Boolean =
+    length in 1..63 && !startsWith('-') && !endsWith('-') && all { character ->
+        character in 'a'..'z' || character in '0'..'9' || character == '-'
+    }
+
 /**
  * QuickConnect 的受限解析器。
  *
@@ -335,14 +351,7 @@ internal class DsmQuickConnectResolver(
             labels.all(::isValidHostLabel)
     }
 
-    internal fun isTrustedRelayHost(host: String): Boolean {
-        val labels = host.lowercase().split('.')
-        return labels.size == 4 &&
-            labels[2] == "quickconnect" &&
-            labels[3] in setOf("to", "cn") &&
-            isValidHostLabel(labels[0]) &&
-            isValidHostLabel(labels[1])
-    }
+    internal fun isTrustedRelayHost(host: String): Boolean = isTrustedQuickConnectRelayHost(host)
 
     private fun isTrustedControlHost(host: String): Boolean =
         (host.endsWith(".quickconnect.to") || host.endsWith(".quickconnect.cn")) &&

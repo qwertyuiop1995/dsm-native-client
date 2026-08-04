@@ -19,15 +19,17 @@ fun DsmFailure.localize(context: Context): LocalizedFailure {
     )
 }
 
-fun ModuleUnavailableReason.localize(context: Context): String = context.getString(
-    when (this) {
+@StringRes
+fun ModuleUnavailableReason.messageResource(): Int = when (this) {
         ModuleUnavailableReason.CHAT_SERVICE -> R.string.module_unavailable_chat
         ModuleUnavailableReason.DOWNLOAD_STATION -> R.string.module_unavailable_downloads
         ModuleUnavailableReason.CONTAINER_MANAGER -> R.string.module_unavailable_containers
         ModuleUnavailableReason.VIRTUAL_MACHINE_MANAGER ->
             R.string.module_unavailable_virtual_machines
-    }
-)
+}
+
+fun ModuleUnavailableReason.localize(context: Context): String =
+    context.getString(messageResource())
 
 private fun DsmFailure.resources(): Pair<Int, Int> = when (kind) {
     DsmErrorKind.MISSING_LOGIN_FIELDS ->
@@ -83,6 +85,18 @@ private fun DsmFailure.resources(): Pair<Int, Int> = when (kind) {
         R.string.error_empty_file_unsupported to R.string.error_empty_file_unsupported_recovery
     DsmErrorKind.CHANGE_NOT_CONFIRMED ->
         R.string.error_change_not_confirmed to R.string.error_change_not_confirmed_recovery
+    DsmErrorKind.UPLOAD_FAILED ->
+        R.string.error_upload_failed to R.string.error_upload_failed_recovery
+    DsmErrorKind.UPLOAD_NOT_ALLOWED ->
+        R.string.error_upload_not_allowed to R.string.error_upload_not_allowed_recovery
+    DsmErrorKind.UPLOAD_LENGTH_MISMATCH ->
+        R.string.error_upload_length_mismatch to R.string.error_upload_length_mismatch_recovery
+    DsmErrorKind.DOWNLOAD_FAILED ->
+        R.string.error_download_failed to R.string.error_download_failed_recovery
+    DsmErrorKind.DOWNLOAD_LENGTH_MISMATCH ->
+        R.string.error_download_length_mismatch to R.string.error_download_length_mismatch_recovery
+    DsmErrorKind.PREVIEW_TOO_LARGE ->
+        R.string.error_preview_too_large to R.string.error_preview_too_large_recovery
     DsmErrorKind.UNKNOWN,
     DsmErrorKind.REQUEST_FAILED ->
         R.string.operation_not_completed to R.string.try_again_later

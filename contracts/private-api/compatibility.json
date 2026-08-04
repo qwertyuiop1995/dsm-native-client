@@ -175,6 +175,7 @@
           "evidenceRefs": [
             "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
             "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md",
+            "docs/api/discovery/endpoints/dsm-current-connection.md",
             "docs/api/discovery/endpoints/dsm-system-update-check.md"
           ],
           "notes": "连接断开属于写行为，本环境未执行，不能继承只读证据等级；系统更新只读检查已记录，下载与安装保持关闭。"
@@ -624,7 +625,8 @@
             "SYNO.Core.Terminal / FileServ.SMB / FileServ.NFS": "客户端范围 v1-v3",
             "SYNO.Core.Network.Proxy": "客户端范围 v1；写行为未验证",
             "SYNO.Core.Web.DSM / Network.Ethernet / Security.DoS": "客户端范围 v1-v2",
-            "SYNO.Core.QuickConnect": "客户端范围 v1-v3",
+            "SYNO.Core.QuickConnect": "get_misc_config / set_misc_config 固定 v3；Android 严格 Boolean、null 局部降级、已记录环境写门禁与可信中继保护；真实写行为未验证",
+            "SYNO.Core.QuickConnect.Upnp": "get / set 固定 v1；Android 仅提交实际变化字段，取消或断线后专项回读且不重放；真实 NAS/路由器写行为未验证",
             "SYNO.Core.Region.NTP": "get/set v3、listzone v1、sync v2；真实写行为未验证",
             "SYNO.Core.DDNS.Provider / DDNS.Record": "v1；list/test/create/set/update_ip_address/delete 真实写行为未验证",
             "其余已列 DSM 控制面板 API": "客户端范围 v1"
@@ -645,7 +647,7 @@
             "docs/api/discovery/endpoints/dsm-package-control.md",
             "docs/api/discovery/endpoints/dsm-package-installation.md"
           ],
-          "notes": "只读结构和网页请求已有记录；套件启动/停止的合成请求、故障注入和回读测试不提升当前环境的写行为证据等级，危险写操作仍未形成统一行为验证结论。"
+          "notes": "只读结构和网页请求已有记录；套件启动/停止及 Android 远程访问设置的合成请求、故障注入、持久反馈和回读测试不提升当前环境的写行为证据等级。兼容结论仍为 observed/degraded；未执行真实 NAS 或路由器写操作，既有登录、QuickConnect 隧道和 SYNO.API.Info 证据不得外推。"
         }
       ]
     },
@@ -759,7 +761,7 @@
         "POST"
       ],
       "fallback": "读取按能力逐项降级；没有专用目标行为证据时关闭写能力。",
-      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "documentRef": "docs/api/discovery/endpoints/container-manager-internal.md",
       "verifications": [
         {
           "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "chat.send-attachment.synthetic-file",
+  "module": "chat",
+  "operation": "sendAttachment",
+  "api": {
+    "name": "SYNO.Chat.Post",
+    "method": "create",
+    "preferredVersion": 5,
+    "resolvedVersion": 5,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": { "httpMethod": "POST", "requestFormat": "multipart" },
+  "parameters": [
+    { "name": "channel_id", "valueType": "string", "encodedValue": "synthetic-channel" },
+    { "name": "type", "valueType": "string", "encodedValue": "file" },
+    { "name": "message", "valueType": "string", "encodedValue": "Synthetic caption" },
+    { "name": "is_thread", "valueType": "boolean", "encodedValue": "false" },
+    { "name": "file", "valueType": "binary", "encodedValue": "<synthetic-binary>" }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "multipart"],
+    "synoTokenLocations": ["header", "multipart"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "standardWrite",
+    "readbackPolicy": "required"
+  },
+  "source": { "kind": "synthetic", "evidence": "sourceReviewed" }
+}

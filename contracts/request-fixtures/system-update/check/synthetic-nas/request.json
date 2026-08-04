@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "system-update.check.synthetic-nas",
+  "module": "system-update",
+  "operation": "checkSystemUpdate",
+  "api": {
+    "name": "SYNO.Core.Upgrade.Server",
+    "method": "check",
+    "preferredVersion": 3,
+    "resolvedVersion": 3,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "user_reading",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "need_auto_smallupdate",
+      "valueType": "boolean",
+      "encodedValue": "true"
+    },
+    {
+      "name": "need_promotion",
+      "valueType": "boolean",
+      "encodedValue": "false"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "never",
+    "risk": "read",
+    "readbackPolicy": "none"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "sourceReviewed"
+  }
+}

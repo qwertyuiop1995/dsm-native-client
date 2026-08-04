@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "chat.delete-scheduled-message.synthetic-message",
+  "module": "chat",
+  "operation": "deleteScheduledMessage",
+  "api": { "name": "SYNO.Chat.Post.Schedule", "method": "delete", "preferredVersion": 1, "resolvedVersion": 1, "resolvedPath": "entry.cgi" },
+  "transport": { "httpMethod": "POST", "requestFormat": "form" },
+  "parameters": [
+    { "name": "cronjob_id", "valueType": "string", "encodedValue": "synthetic-job" }
+  ],
+  "authentication": { "required": true, "synoTokenRequired": false, "sessionLocations": ["cookie", "form"], "synoTokenLocations": ["header", "form"] },
+  "policy": { "retryPolicy": "queryStateBeforeDecision", "risk": "standardWrite", "readbackPolicy": "required" },
+  "source": { "kind": "synthetic", "evidence": "sourceReviewed" }
+}

@@ -15,7 +15,7 @@
 | macOS | Swift 6、SwiftUI、Swift Package Manager | 完成度最高；文件、照片、消息、下载、容器、虚拟机和 NAS 管理主流程已建立 |
 | iPhone | Swift 6、SwiftUI | 通用移动工程可构建，已接入登录、模块导航、语言选择和第一批管理页面 |
 | iPad | Swift 6、SwiftUI | 与 iPhone 共用通用工程，并针对大屏布局和多栏体验适配 |
-| Android | Kotlin、Jetpack Compose | 原生工程可构建，已接入登录、模块导航、管理骨架和双语资源 |
+| Android | Kotlin、Jetpack Compose | 主要模块源码和自动化闭环已建立；当前完成率、剩余目标与验收缺口见[开发状态](docs/progress/STATUS.md) |
 | Windows | C#、WinUI 3 | 原生工程可构建，已接入登录、模块导航、管理骨架和双语资源 |
 
 “已建立”表示源码路径和自动化测试存在，不等于所有 DSM 型号、系统版本和套件版本都已完成实机兼容验证。高影响写操作仍需能力发现、权限检查、用户确认、重复提交保护和结果校验。
@@ -97,8 +97,11 @@ xcodebuild \
 
 ```bash
 cd android
-./gradlew test assembleDebug
+./gradlew :app:testDebugUnitTest :app:assembleDebug
 ```
+
+以上是快速冒烟；Release、R8、仪器测试 APK、lint、API 35 和仓库契约的完整命令见
+[Android 原生客户端完善计划](docs/development/ANDROID_CLIENT_COMPLETION_PLAN_ZH.md)。
 
 ### Windows
 
@@ -127,6 +130,7 @@ dotnet build src/LanStash.App/LanStash.App.csproj --configuration Release --runt
 ## 文档入口
 
 - [当前开发与验收计划](docs/development/NATIVE_DSM_FILE_APP_DEVELOPMENT_PLAN_ZH.md)
+- [Android 原生客户端完善、进度与换电脑计划](docs/development/ANDROID_CLIENT_COMPLETION_PLAN_ZH.md)
 - [当前进度](docs/progress/STATUS.md)
 - [产品路线图](docs/progress/ROADMAP.md)
 - [平台功能矩阵](docs/progress/PLATFORM_MATRIX.md)

@@ -1,0 +1,833 @@
+package io.github.qwertyuiop1995.dsmnativeclient.ui.services
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ListAlt
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import io.github.qwertyuiop1995.dsmnativeclient.AppViewModel
+import io.github.qwertyuiop1995.dsmnativeclient.Loadable
+import io.github.qwertyuiop1995.dsmnativeclient.R
+import io.github.qwertyuiop1995.dsmnativeclient.VirtualMachineLifecycleOperation
+import io.github.qwertyuiop1995.dsmnativeclient.WorkspaceState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.ContainerRegistryImage
+import io.github.qwertyuiop1995.dsmnativeclient.domain.ContainerSection
+import io.github.qwertyuiop1995.dsmnativeclient.domain.ContainerSectionCount
+import io.github.qwertyuiop1995.dsmnativeclient.domain.LogEntry
+import io.github.qwertyuiop1995.dsmnativeclient.domain.LogLevel
+import io.github.qwertyuiop1995.dsmnativeclient.domain.ManagedResource
+import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineOverview
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSection
+import io.github.qwertyuiop1995.dsmnativeclient.domain.toSummary
+import io.github.qwertyuiop1995.dsmnativeclient.localization.localize
+import io.github.qwertyuiop1995.dsmnativeclient.ui.ActionRow
+import io.github.qwertyuiop1995.dsmnativeclient.ui.EmptyState
+import io.github.qwertyuiop1995.dsmnativeclient.ui.LoadableContent
+import io.github.qwertyuiop1995.dsmnativeclient.ui.ResourceList
+import io.github.qwertyuiop1995.dsmnativeclient.ui.displayName
+import java.text.DateFormat
+import java.util.Date
+
+internal const val CONTAINER_REGISTRY_SCROLL_TEST_TAG = "container_registry_scroll"
+
+@Composable
+internal fun ContainersScreen(state: WorkspaceState, model: AppViewModel) {
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var selected by remember { mutableStateOf<ManagedResource?>(null) }
+    val titles = listOf(
+        stringResource(R.string.overview),
+        stringResource(R.string.containers),
+        stringResource(R.string.images),
+        stringResource(R.string.networks),
+        stringResource(R.string.projects),
+        stringResource(R.string.events),
+    )
+    Column {
+        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
+            titles.forEachIndexed { index, title ->
+                Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
+            }
+        }
+        ListItem(
+            headlineContent = { Text(stringResource(R.string.container_management_read_only)) },
+            leadingContent = {
+                Icon(
+                    Icons.Outlined.Info,
+                    contentDescription = null,
+                )
+            },
+        )
+        HorizontalDivider()
+        LoadableContent(
+            value = state.containers,
+            emptyTitle = stringResource(R.string.no_items),
+            emptyMessage = stringResource(R.string.no_category_items),
+            onRetry = { model.load(Module.CONTAINERS) },
+        ) { overview ->
+            val unavailable = when (tab) {
+                2 -> ContainerSection.IMAGES
+                3 -> ContainerSection.NETWORKS
+                4 -> ContainerSection.PROJECTS
+                5 -> ContainerSection.EVENTS
+                else -> null
+            } in overview.unavailableSections
+            if (unavailable) {
+                ServiceSectionUnavailable { model.load(Module.CONTAINERS) }
+                return@LoadableContent
+            }
+            if (tab == 0) {
+                ContainerOverviewSummaryContent(overview)
+                return@LoadableContent
+            }
+            if (tab == 5) {
+                LogList(overview.events)
+                return@LoadableContent
+            }
+            val resources = when (tab) {
+                1 -> overview.containers
+                2 -> overview.images
+                3 -> overview.networks
+                else -> overview.projects
+            }
+            ResourceList(
+                resources = resources.map { resource -> resource.copy(detail = "") },
+                emptyTitle = stringResource(R.string.no_named_items, titles[tab]),
+                onSelect = { selected = it },
+                headerAction = when {
+                    tab == 2 && state.supportsContainerRegistry -> {
+                        {
+                            FilledTonalButton(onClick = model::showContainerRegistry) {
+                                Icon(Icons.Outlined.Search, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.search_images))
+                            }
+                        }
+                    }
+                    else -> null
+                },
+            )
+        }
+    }
+    selected?.let { resource ->
+        AlertDialog(
+            onDismissRequest = { selected = null },
+            title = { Text(resource.name) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(resource.state.displayName())
+                    Text(stringResource(R.string.container_management_read_only))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { selected = null }) {
+                    Text(stringResource(R.string.close))
+                }
+            },
+        )
+    }
+    if (state.containerRegistryVisible) {
+        ContainerRegistryDialog(state, model)
+    }
+}
+
+@Composable
+private fun ContainerOverviewSummaryContent(
+    overview: io.github.qwertyuiop1995.dsmnativeclient.domain.ContainerOverview,
+) {
+    val summary = overview.toSummary()
+    val running = pluralStringResource(
+        R.plurals.container_overview_running_count,
+        summary.runningContainers,
+        summary.runningContainers,
+    )
+    val stopped = pluralStringResource(
+        R.plurals.container_overview_stopped_count,
+        summary.stoppedContainers,
+        summary.stoppedContainers,
+    )
+    val other = pluralStringResource(
+        R.plurals.container_overview_other_count,
+        summary.otherContainers,
+        summary.otherContainers,
+    )
+    LazyColumn(Modifier.fillMaxSize()) {
+        item {
+            ListItem(
+                headlineContent = {
+                    Text(
+                        pluralStringResource(
+                            R.plurals.container_overview_total,
+                            summary.totalContainers,
+                            summary.totalContainers,
+                        ),
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        stringResource(
+                            R.string.container_overview_state_counts,
+                            running,
+                            stopped,
+                            other,
+                        ),
+                    )
+                },
+            )
+        }
+        item { ContainerOverviewSectionCount(R.string.images, summary.images) }
+        item { ContainerOverviewSectionCount(R.string.networks, summary.networks) }
+        item { ContainerOverviewSectionCount(R.string.projects, summary.projects) }
+    }
+}
+
+@Composable
+private fun ContainerOverviewSectionCount(
+    @androidx.annotation.StringRes title: Int,
+    count: ContainerSectionCount,
+) {
+    val sectionTitle = stringResource(title)
+    ListItem(
+        headlineContent = {
+            Text(
+                when (count) {
+                    is ContainerSectionCount.Available -> pluralStringResource(
+                        R.plurals.container_overview_section_count,
+                        count.count,
+                        sectionTitle,
+                        count.count,
+                    )
+                    ContainerSectionCount.Unavailable -> stringResource(
+                        R.string.container_overview_section_unavailable,
+                        sectionTitle,
+                    )
+                },
+            )
+        },
+    )
+}
+
+@Composable
+private fun ContainerRegistryDialog(state: WorkspaceState, model: AppViewModel) {
+    val canSearch = state.containerRegistryQuery.isNotBlank() &&
+        state.containerRegistryResults !is Loadable.Loading
+    AlertDialog(
+        onDismissRequest = model::closeContainerRegistry,
+        title = { Text(stringResource(R.string.container_registry)) },
+        text = {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 560.dp)
+                    .testTag(CONTAINER_REGISTRY_SCROLL_TEST_TAG),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 8.dp),
+            ) {
+                item {
+                    OutlinedTextField(
+                        value = state.containerRegistryQuery,
+                        onValueChange = model::updateContainerRegistryQuery,
+                        label = { Text(stringResource(R.string.image_name)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = { if (canSearch) model.searchContainerRegistry() },
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                item {
+                    FilledTonalButton(
+                        onClick = model::searchContainerRegistry,
+                        enabled = canSearch,
+                    ) {
+                        Icon(Icons.Outlined.Search, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.search_images))
+                    }
+                }
+                when (val results = state.containerRegistryResults) {
+                    Loadable.Idle -> item {
+                        Text(stringResource(R.string.container_registry_search_hint))
+                    }
+                    Loadable.Loading -> item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .semantics { liveRegion = LiveRegionMode.Polite },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            CircularProgressIndicator(Modifier.padding(16.dp))
+                            Text(stringResource(R.string.container_registry_searching))
+                        }
+                    }
+                    is Loadable.Failed -> item {
+                        Text(
+                            results.error.localize(
+                                androidx.compose.ui.platform.LocalContext.current,
+                            ).combined,
+                            modifier = Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                            },
+                        )
+                    }
+                    is Loadable.Ready -> if (results.value.isEmpty()) {
+                        item { Text(stringResource(R.string.no_container_registry_results)) }
+                    } else {
+                        results.value.forEach { image ->
+                            item(key = "image:${image.id}") {
+                                ListItem(
+                                    headlineContent = { Text(image.name) },
+                                    supportingContent = {
+                                        Text(
+                                            listOfNotNull(
+                                                image.registry,
+                                                image.description,
+                                                stringResource(
+                                                    R.string.container_registry_stars,
+                                                    image.starCount,
+                                                ),
+                                            ).joinToString(" · "),
+                                        )
+                                    },
+                                    modifier = Modifier.selectable(
+                                        selected = state.selectedContainerRegistryImage?.id == image.id,
+                                        onClick = { model.selectContainerRegistryImage(image) },
+                                    ),
+                                )
+                            }
+                            if (state.selectedContainerRegistryImage?.id == image.id) {
+                                containerRegistryTags(
+                                    image = image,
+                                    tags = state.containerRegistryTags,
+                                    onRetry = { model.selectContainerRegistryImage(image) },
+                                )
+                            }
+                        }
+                    }
+                }
+                item { Text(stringResource(R.string.container_registry_read_only_hint)) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = model::closeContainerRegistry) {
+                Text(stringResource(R.string.close))
+            }
+        },
+    )
+}
+
+private fun LazyListScope.containerRegistryTags(
+    image: ContainerRegistryImage,
+    tags: Loadable<List<String>>,
+    onRetry: () -> Unit,
+) {
+    item(key = "tags-heading:${image.id}") {
+        Text(
+            stringResource(R.string.container_registry_tags_for, image.name),
+            modifier = Modifier.semantics { heading() },
+        )
+    }
+    when (tags) {
+        Loadable.Idle -> Unit
+        Loadable.Loading -> item(key = "tags-loading:${image.id}") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                CircularProgressIndicator(Modifier.padding(8.dp))
+                Text(
+                    stringResource(
+                        R.string.container_registry_loading_tags_for,
+                        image.name,
+                    ),
+                )
+            }
+        }
+        is Loadable.Failed -> item(key = "tags-failed:${image.id}") {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+            ) {
+                Text(
+                    tags.error.localize(
+                        androidx.compose.ui.platform.LocalContext.current,
+                    ).combined,
+                )
+                TextButton(onClick = onRetry) {
+                    Text(stringResource(R.string.retry_container_registry_tags))
+                }
+            }
+        }
+        is Loadable.Ready -> if (tags.value.isEmpty()) {
+            item(key = "tags-empty:${image.id}") {
+                Text(stringResource(R.string.no_container_registry_tags))
+            }
+        } else {
+            item(key = "tags-count:${image.id}") {
+                Text(
+                    pluralStringResource(
+                        R.plurals.container_registry_tag_count,
+                        tags.value.size,
+                        tags.value.size,
+                    ),
+                )
+            }
+            itemsIndexed(
+                items = tags.value,
+                key = { index, tag -> "tag:${image.id}:$index\u0000$tag" },
+            ) { _, tag ->
+                ListItem(headlineContent = { Text(tag) })
+            }
+        }
+    }
+}
+
+@Composable
+internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var protectionTab by rememberSaveable { mutableIntStateOf(0) }
+    var selected by remember { mutableStateOf<ManagedResource?>(null) }
+    val mutation = state.virtualMachineMutationState
+    val writeBlocked = state.isPerformingAction || mutation.creationEditorVisible ||
+        mutation.settingsEditorVisible || mutation.lifecycleConfirmationRequested ||
+        mutation.target != null || mutation.mutationInProgress || mutation.mutationRefreshInProgress ||
+        mutation.mutationResult != null || mutation.mutationFailure != null
+    val titles = listOf(
+        stringResource(R.string.virtual_machines),
+        stringResource(R.string.hosts),
+        stringResource(R.string.storage),
+        stringResource(R.string.networks),
+        stringResource(R.string.images),
+        stringResource(R.string.protection),
+        stringResource(R.string.logs),
+    )
+    Column {
+        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
+            titles.forEachIndexed { index, title ->
+                Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
+            }
+        }
+        LoadableContent(
+            value = state.virtualMachines,
+            emptyTitle = stringResource(R.string.no_items),
+            emptyMessage = stringResource(R.string.no_category_items),
+            onRetry = { model.load(Module.VIRTUAL_MACHINES) },
+        ) { overview ->
+            val unavailable = when (tab) {
+                1 -> VirtualMachineSection.HOSTS
+                2 -> VirtualMachineSection.STORAGES
+                3 -> VirtualMachineSection.NETWORKS
+                4 -> VirtualMachineSection.IMAGES
+                5 -> VirtualMachineSection.PROTECTION
+                6 -> VirtualMachineSection.LOGS
+                else -> null
+            } in overview.unavailableSections
+            if (unavailable) {
+                ServiceSectionUnavailable { model.load(Module.VIRTUAL_MACHINES) }
+                return@LoadableContent
+            }
+            when (tab) {
+                5 -> ProtectionContent(overview, protectionTab) { protectionTab = it }
+                6 -> LogList(overview.logs)
+                else -> {
+                    val resources = overview.forTab(tab)
+                    if (tab == 0 && resources.isEmpty()) {
+                        VirtualMachineEmptyContent(
+                            supportsCreation = state.supportsOfficialVirtualMachineCreation,
+                            hasStorage = overview.storages.isNotEmpty(),
+                            enabled = !writeBlocked,
+                            onCreate = model::openVirtualMachineCreationEditor,
+                        )
+                    } else {
+                        ResourceList(
+                            resources,
+                            stringResource(R.string.no_named_items, titles[tab]),
+                            onSelect = { selected = it },
+                            headerAction = if (
+                                tab == 0 && state.supportsOfficialVirtualMachineCreation
+                            ) {
+                                {
+                                    FilledTonalButton(
+                                        onClick = { model.openVirtualMachineCreationEditor() },
+                                        enabled = !writeBlocked && overview.storages.isNotEmpty(),
+                                        modifier = Modifier.heightIn(min = 48.dp),
+                                    ) {
+                                        Icon(Icons.Outlined.Add, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(stringResource(R.string.create_virtual_machine))
+                                    }
+                                }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+    selected?.let { resource ->
+        AlertDialog(
+            onDismissRequest = { selected = null },
+            title = { Text(resource.name) },
+            text = {
+                Column {
+                    if (writeBlocked) {
+                        Text(stringResource(R.string.virtual_machine_action_in_progress))
+                    } else {
+                        if (tab == 0) {
+                            ActionRow(Icons.Outlined.PlayArrow, stringResource(R.string.start)) {
+                                if (model.requestVirtualMachineLifecycleConfirmation(
+                                        resource.id,
+                                        VirtualMachineLifecycleOperation.CONTROL,
+                                        "poweron",
+                                    )
+                                ) selected = null
+                            }
+                            if (state.supportsOfficialVirtualMachineSettings) {
+                                ActionRow(
+                                    Icons.Outlined.Edit,
+                                    stringResource(R.string.edit_virtual_machine),
+                                ) {
+                                    if (model.openVirtualMachineSettingsEditor(resource.id)) selected = null
+                                }
+                            }
+                            ActionRow(Icons.Outlined.Pause, stringResource(R.string.normal_shutdown)) {
+                                if (model.requestVirtualMachineLifecycleConfirmation(
+                                        resource.id,
+                                        VirtualMachineLifecycleOperation.CONTROL,
+                                        "shutdown",
+                                    )
+                                ) selected = null
+                            }
+                        }
+                        if (virtualMachineTabSupportsDeletion(tab)) {
+                            ActionRow(
+                                Icons.Outlined.DeleteOutline,
+                                stringResource(R.string.delete),
+                                destructive = true,
+                            ) {
+                                val operation = when (tab) {
+                                    0 -> VirtualMachineLifecycleOperation.DELETE_MACHINE
+                                    else -> VirtualMachineLifecycleOperation.DELETE_IMAGE
+                                }
+                                if (model.requestVirtualMachineLifecycleConfirmation(
+                                        resource.id,
+                                        operation,
+                                    )
+                                ) selected = null
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { selected = null },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(stringResource(R.string.close))
+                }
+            },
+        )
+    }
+    if (mutation.target != null) {
+        VirtualMachineMutationFeedbackDialog(
+            state = mutation,
+            onRefresh = model::refreshVirtualMachineMutation,
+            onContinueEditing = model::continueEditingVirtualMachineMutation,
+            onDismiss = model::dismissVirtualMachineMutation,
+        )
+    } else {
+        val overview = (state.virtualMachines as? Loadable.Ready)?.value
+        if (mutation.creationEditorVisible && mutation.creationDraft != null && overview != null) {
+            VirtualMachineCreationDialog(
+                overview = overview,
+                draft = mutation.creationDraft,
+                submitting = mutation.mutationInProgress || mutation.mutationRefreshInProgress,
+                onDraftChange = model::updateVirtualMachineCreationDraft,
+                onConfirm = model::confirmVirtualMachineCreation,
+                onDismiss = model::closeVirtualMachineCreationEditor,
+            )
+        }
+        if (
+            mutation.settingsEditorVisible && mutation.settingsDraft != null &&
+            mutation.settingsBaseline != null
+        ) {
+            VirtualMachineSettingsDialog(
+                draft = mutation.settingsDraft,
+                baseline = mutation.settingsBaseline,
+                submitting = mutation.mutationInProgress || mutation.mutationRefreshInProgress,
+                onDraftChange = model::updateVirtualMachineSettingsDraft,
+                onConfirm = model::confirmVirtualMachineSettings,
+                onDismiss = model::closeVirtualMachineSettingsEditor,
+            )
+        }
+        if (mutation.lifecycleConfirmationRequested && mutation.lifecycleConfirmationTarget != null) {
+            val target = mutation.lifecycleConfirmationTarget
+            val resourceName = overview?.resourceName(target.operation, target.resourceId)
+                ?: stringResource(R.string.virtual_machine_selection_unavailable)
+            VirtualMachineLifecycleConfirmationDialog(
+                target = target,
+                resourceName = resourceName,
+                onConfirm = model::confirmVirtualMachineLifecycle,
+                onDismiss = model::cancelVirtualMachineLifecycleConfirmation,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun VirtualMachineEmptyContent(
+    supportsCreation: Boolean,
+    hasStorage: Boolean,
+    enabled: Boolean,
+    onCreate: () -> Boolean,
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(Icons.Outlined.Info, contentDescription = null)
+        Text(
+            stringResource(R.string.virtual_machine_empty_title),
+            modifier = Modifier.padding(top = 12.dp),
+        )
+        Text(
+            stringResource(
+                when {
+                    supportsCreation && !hasStorage -> R.string.virtual_machine_no_storage
+                    supportsCreation -> R.string.virtual_machine_empty_create_message
+                    else -> R.string.virtual_machine_empty_external_message
+                },
+            ),
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        if (supportsCreation) {
+            FilledTonalButton(
+                onClick = { onCreate() },
+                enabled = enabled && hasStorage,
+                modifier = Modifier.padding(top = 16.dp).heightIn(min = 48.dp),
+            ) {
+                Icon(Icons.Outlined.Add, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.create_virtual_machine))
+            }
+        }
+    }
+}
+
+internal fun virtualMachineTabSupportsDeletion(tab: Int): Boolean = tab == 0 || tab == 4
+
+private fun VirtualMachineOverview.resourceName(
+    operation: VirtualMachineLifecycleOperation,
+    id: String,
+): String? = when (operation) {
+    VirtualMachineLifecycleOperation.DELETE_IMAGE -> images
+    VirtualMachineLifecycleOperation.DELETE_NETWORK,
+    VirtualMachineLifecycleOperation.RENAME_NETWORK,
+    -> networks
+    else -> machines
+}.firstOrNull { it.id == id }?.name
+
+@Composable
+private fun ServiceSectionUnavailable(onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(Icons.Outlined.ErrorOutline, contentDescription = null)
+        Text(
+            stringResource(R.string.service_section_unavailable_title),
+            modifier = Modifier.padding(top = 12.dp),
+        )
+        Text(
+            stringResource(R.string.service_section_unavailable_message),
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        TextButton(onClick = onRetry, modifier = Modifier.padding(top = 8.dp)) {
+            Text(stringResource(R.string.retry))
+        }
+    }
+}
+
+@Composable
+private fun ProtectionContent(
+    overview: VirtualMachineOverview,
+    selected: Int,
+    onSelected: (Int) -> Unit,
+) {
+    val titles = listOf(
+        stringResource(R.string.protection_plans),
+        stringResource(R.string.schedule_policies),
+        stringResource(R.string.retention_policies),
+    )
+    val resources = when (selected) {
+        0 -> overview.protectionPlans
+        1 -> overview.protectionSchedules
+        else -> overview.retentionPolicies
+    }
+    Column {
+        ScrollableTabRow(selectedTabIndex = selected, edgePadding = 12.dp, divider = {}) {
+            titles.forEachIndexed { index, title ->
+                Tab(
+                    selected = index == selected,
+                    onClick = { onSelected(index) },
+                    text = { Text(title) },
+                )
+            }
+        }
+        ResourceList(
+            resources,
+            stringResource(R.string.no_named_items, titles[selected]),
+            onSelect = {},
+        )
+    }
+}
+
+@Composable
+internal fun LogList(logs: List<LogEntry>) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var level by rememberSaveable { mutableStateOf<LogLevel?>(null) }
+    val filtered = logs.filter { log ->
+        (level == null || log.level == level) &&
+            (query.isBlank() || log.event.contains(query, true) || log.user.contains(query, true))
+    }
+    Column {
+        LazyRow(
+            contentPadding = PaddingValues(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item {
+                AssistChip(onClick = { level = null }, label = { Text(stringResource(R.string.all)) })
+            }
+            items(LogLevel.entries) { value ->
+                AssistChip(onClick = { level = value }, label = { Text(value.displayName()) })
+            }
+        }
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text(stringResource(R.string.search_logs)) },
+            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        )
+        if (filtered.isEmpty()) {
+            EmptyState(
+                stringResource(R.string.no_log_entries),
+                stringResource(R.string.no_records_for_filter),
+                Icons.AutoMirrored.Outlined.ListAlt,
+            )
+        } else {
+            LazyColumn {
+                items(filtered, key = LogEntry::id) { log ->
+                    ListItem(
+                        headlineContent = { Text(log.event) },
+                        supportingContent = {
+                            Text(
+                                listOfNotNull(
+                                    log.user,
+                                    log.timeEpochSeconds?.let(::formatDate),
+                                ).joinToString(" · "),
+                            )
+                        },
+                        leadingContent = {
+                            Icon(log.level.icon(), contentDescription = log.level.displayName())
+                        },
+                    )
+                    HorizontalDivider(Modifier.padding(start = 72.dp))
+                }
+            }
+        }
+    }
+}
+
+private fun VirtualMachineOverview.forTab(tab: Int): List<ManagedResource> = when (tab) {
+    0 -> machines
+    1 -> hosts
+    2 -> storages
+    3 -> networks
+    4 -> images
+    else -> emptyList()
+}
+
+@Composable
+private fun LogLevel.displayName(): String = when (this) {
+    LogLevel.INFO -> stringResource(R.string.info)
+    LogLevel.WARNING -> stringResource(R.string.warning)
+    LogLevel.ERROR -> stringResource(R.string.error)
+    LogLevel.UNKNOWN -> stringResource(R.string.other)
+}
+
+private fun LogLevel.icon(): ImageVector = when (this) {
+    LogLevel.INFO -> Icons.Outlined.Info
+    LogLevel.WARNING -> Icons.Outlined.WarningAmber
+    LogLevel.ERROR -> Icons.Outlined.ErrorOutline
+    LogLevel.UNKNOWN -> Icons.AutoMirrored.Outlined.ListAlt
+}
+
+private fun formatDate(epochSeconds: Long): String =
+    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+        .format(Date(epochSeconds * 1_000))

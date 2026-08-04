@@ -63,6 +63,8 @@
 ## 能力探测与降级
 
 - 启用条件：`SYNO.API.Info` 返回对应 API、v1 和可用路径，当前会话具备页面权限。
+- Android 对账号与群组列表分别保留读取成功状态；请求失败时即使列表回退为空，也将
+  `accountsAvailable` / `groupsAvailable` 标记为不可用，不把失败误认为真实空目录。
 - 新版本默认行为：未记录的新 DSM build 上内部写入口保持关闭，完成重新观察和专用
   环境行为验收后再形成兼容结论。
 - 接口缺失：账号管理页面独立降级，不阻断文件浏览等公开 API 主流程。
@@ -75,15 +77,31 @@
 ## 客户端与测试
 
 - Apple Adapter：`apple/Packages/DsmNetwork/Sources/DsmNasAdministrationRepository.swift`
-- Android Adapter：尚未迁移。
+- Android Adapter：`DsmRepository.deleteAccountResult` / `deleteGroupResult` 使用用户确认时看到的
+  完整 `NasAccount` / `NasGroup` 作为删除基线；写前以固定 v1 严格重读并比较数字标识、名称、
+  说明、账号邮件、停用状态和删除许可，任何漂移均按冲突零写入。严格列表要求唯一数组根、
+  对象行、非空且唯一的稳定名称以及类型正确的权限字段；普通快照同时保留
+  `additional.uid` / `additional.gid`，避免同一响应在写前产生伪基线漂移。列表只在
+  `can_delete=true` 时开放入口，并额外保护当前账号和系统保留名称。
+- Android 删除结果通过持久状态保存确认目标、确认阶段、提交结果、专项刷新结果与失败；
+  写后只调用严格账号或群组目录回读。畸形、缺根、重复身份或读取失败不能证明目标消失，
+  也不会触发删除重放。
 - Windows Adapter：尚未迁移。
 - Schema：`contracts/schemas/request-fixture.schema.json`
 - 合成 Fixture：
   - `contracts/request-fixtures/users/create/synthetic-account/request.json`
   - `contracts/request-fixtures/users/delete/synthetic-account/request.json`
+  - `contracts/request-fixtures/groups/delete/synthetic-group/request.json`
 - 自动化测试：
   - `apple/Packages/DsmNetwork/Tests/RequestFixtureContractTests.swift`
   - `apple/Packages/DsmNetwork/Tests/DsmNasAdministrationRepositoryTests.swift`
+  - `android/app/src/test/java/io/github/qwertyuiop1995/dsmnativeclient/data/DirectoryDeletionMutationTest.kt`
+  - `android/app/src/test/java/io/github/qwertyuiop1995/dsmnativeclient/data/NasSettingsAvailabilityTest.kt`
+- Android 自动化覆盖完整基线相等与漂移、权限拒绝、保留账号、固定 v1 和不支持版本零请求、
+  严格列表畸形回读、模糊提交只回读、同目标互斥以及失败列表与真实空列表的可用性区分。
+  第 53 批仓库汇总口径为 JVM 753 项、Android 双语资源完整性 1526 项；API 35 仪器测试
+  最终 XML 为 220 项，其中 214 项通过、6 项跳过、0 项失败。这些自动化结果不替代真实
+  NAS 验收。
 - 产品兼容矩阵条目：`contracts/private-api/compatibility.json` 的
   `dsm-account-directory`
 
@@ -101,5 +119,8 @@
 
 - 当前环境未在专用测试账号上完成创建、修改、删除、权限不足、网络中断和重复提交的
   行为验收。
-- Android、Windows 以及 iPhone、iPad 的账号管理调用链尚未迁移。
+- Android 创建和编辑、Windows 以及 iPhone、iPad 的账号管理调用链尚未迁移；Android 删除
+  仍待真实 DSM 与设备验收。
+- 第 53 批新增的 Android 严格基线、固定版本、取消、专项回读和持久反馈均只通过合成响应
+  与自动化测试验证，尚未在真实 NAS 上执行删除行为验收。
 - DSM 升级后的方法参数、权限和错误码变化尚未验证。

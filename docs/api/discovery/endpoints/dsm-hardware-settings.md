@@ -36,7 +36,8 @@
 | Hibernation `get` / `set` | `eunit_deep_sleep`、`enable_log`、`sata_deep_sleep`、`ignore_netbios_broadcast`、`auto_poweroff_enable` | `boolean` | 按返回字段 | 外接设备、硬盘与网络唤醒节能设置 | 合成布尔值 |
 | UPS `get` / `set` | `enable`、`mode`、`delay_time`、`ups_set_safemode_until_lowbatt`、`shutdown_device`、`net_server_ip`、`snmp_server_ip` | 多类型 | 按模式 | UPS 连接方式与安全关机设置 | `SLAVE`、`120`、`<synthetic-ups-server>` |
 
-客户端只提交当前读取结果中实际变化且可修改的字段。蜂鸣器音量故障字段必须沿用设备
+客户端只提交当前读取结果中实际变化且可修改的字段。UPS 地址字段明确存在但为空时保留
+为可信空值，字段缺失才表示未知；未知原始值不得直接写入新值。蜂鸣器音量故障字段必须沿用设备
 返回的 `volume_or_cache_crash` 或 `volume_crash`，不得同时猜测提交。LED 亮度必须先
 落在 `get_static_data` 返回范围内，再依次调用设置与更新方法。
 
@@ -76,7 +77,7 @@
 ## 客户端与测试
 
 - Apple Adapter：`DsmNasAdministrationRepository`。
-- Android Adapter：复用领域结果类型，调用链尚未迁移。
+- Android Adapter：`DsmRepository`、`AppViewModel` 与 `NasHardwareSettingsScreen`；六组设置使用原始/目标双基线、固定 v1 能力与字段可信预检、共享 NAS 设置原子门闩、逐步取消检查、整体回读、持久结果和专项刷新，部分成功与未知结果不得清除后重放。
 - Windows Adapter：复用领域结果类型，调用链尚未迁移。
 - Schema：复用 `MutationResult` 与请求 Fixture Schema。
 - 脱敏 Fixture：
@@ -86,8 +87,7 @@
   - `contracts/request-fixtures/hardware/set-beep/synthetic-settings/request.json`
   - `contracts/request-fixtures/hardware/set-hibernation/synthetic-settings/request.json`
   - `contracts/request-fixtures/hardware/set-ups/synthetic-settings/request.json`
-- 自动化测试：覆盖六段确认成功、中途超时后的部分成功、提交断网且回读失败、重复提交
-  和提交后取消。
+- Apple 自动化测试覆盖六段确认成功、中途超时后的部分成功、提交断网且回读失败、重复提交和提交后取消；Android 本批 9 项正式 Repository 测试覆盖六组请求/版本、完整多步骤计数、部分成功、在途取消、UPS 缺字段零写入和可信空地址写入，8 项状态策略和 6 项界面策略覆盖草稿规范化、刷新门禁与结果关闭策略；API 35 安全/硬件专项设备测试覆盖确认、持久反馈、五态、48dp 整行交互和深色 2× 字体。
 - 产品兼容矩阵条目：`NAS 设置`、`统一写操作结果 MR0/MR1/MR2`。
 
 ## 安全与副作用
@@ -96,7 +96,7 @@
 - 可能产生的副作用：改变来电启动、设备灯光、散热噪声、提示音、休眠唤醒和安全关机
   行为；错误设置可能影响可用性或硬件温度。
 - 所需权限：由 DSM 返回的能力和当前会话权限决定。
-- 重复提交保护：Repository 和 macOS 模型均阻止并发硬件设置保存。
+- 重复提交保护：Repository 和 macOS/Android 模型均阻止并发硬件设置保存。
 - 写后结果校验：按六个稳定逻辑子操作整体回读并计数；部分成功与未知结果不得重放。
 - 临时数据清理：不生成 HAR、响应转储、真实网络地址或含设备信息的 Fixture。
 
@@ -105,4 +105,4 @@
 - 当前环境未在专用测试目标完成断电恢复、亮度、风扇、提示音、休眠、UPS、权限不足、
   中途断网及物理设备副作用验收。
 - LED `update` 生效时序、不同机型风扇模式、蜂鸣器字段和 UPS 模式差异尚未跨设备验证。
-- Android、Windows 以及 iPhone、iPad 调用链尚未迁移。
+- Windows 以及 iPhone、iPad 调用链尚未迁移；Android 自动化与 API 35 模拟器门禁已通过，仍待真实设备、真实 DSM 和硬件矩阵验收。

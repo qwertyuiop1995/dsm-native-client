@@ -609,6 +609,17 @@ force_complete=false
 
 `force_complete` 只适用于删除场景且会改变任务结果，必须由用户明确触发。
 
+官方指南中的 `Task.edit` 只公开 `id` 与 `destination`，用于修改任务目标目录；
+`Task_File.priority` 虽然可在列表和详情中读取，但官方写方法没有文件 ID 或优先级参数。
+客户端不得把任务级 `priority`、目标目录修改或内部 `DownloadStation2` 参数冒充文件优先级编辑。
+
+#### RSS 站点与条目
+
+`SYNO.DownloadStation.RSS.Site` v1 只公开 `list` 与 `refresh`，
+`SYNO.DownloadStation.RSS.Feed` v1 只公开 `list`。Android 可对预检仍存在的单个站点调用
+`refresh`，同一站点刷新中防重复，明确成功后重新读取站点与条目；提交断线只报告结果未确认，
+不会自动重放。官方指南未公开 RSS 站点新增、修改、删除或下载过滤器写方法，相关入口保持关闭。
+
 ### 6.2 项目使用的 `DownloadStation2` - 内部接口
 
 项目 `dev` 分支主要调用以下内部接口：
@@ -638,11 +649,11 @@ force_complete=false
 | `SYNO.Virtualization.API.Network` | `list` | 网络列表 |
 | `SYNO.Virtualization.API.Storage` | `list` | 存储列表 |
 | `SYNO.Virtualization.API.Host` | `list` | 主机列表 |
-| `SYNO.Virtualization.API.Guest` | `list`, `get`, `create`, `delete` | 虚拟机生命周期 |
+| `SYNO.Virtualization.API.Guest` | `list`, `get`, `set`, `create`, `delete` | 虚拟机生命周期与常规设置 |
 | `SYNO.Virtualization.API.Guest.Action` | `poweron`, `poweroff`, `shutdown` | 电源控制 |
 | `SYNO.Virtualization.API.Guest.Image` | `list`, `create`, `delete` | 镜像管理 |
 
-创建、删除、镜像导入等操作通常返回任务 ID，应通过 `Task.Info.get` 轮询。`poweroff` 相当于强制断电，必须与正常 `shutdown` 在 UI 中清楚区分。
+创建、镜像导入等明确标记为非阻塞的操作返回任务 ID，应通过 `Task.Info.get` 轮询；公开 `Guest.delete` 与 `Guest.Image.delete` v1 返回空成功响应，不得虚构任务轮询。公开 `Guest.set` v1 支持按虚拟机 ID 或名称修改名称、描述、vCPU、内存和自动启动；创建接口的未连接网卡按官方指南使用空 `network_id` 表示。`poweroff` 相当于强制断电，必须与正常 `shutdown` 在 UI 中清楚区分。
 
 ### 7.2 项目使用的 VMM 内部接口
 

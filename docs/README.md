@@ -16,6 +16,7 @@
 
 ## 专项开发计划
 
+- [Android 原生客户端完善、进度记录与跨电脑交接计划](development/ANDROID_CLIENT_COMPLETION_PLAN_ZH.md)
 - [桌面端 NAS 云盘映射与按需缓存开发计划](development/NATIVE_DSM_DESKTOP_CLOUD_DRIVE_DEVELOPMENT_PLAN_ZH.md)
 - [请求契约与写操作结果模型实施计划](development/REQUEST_CONTRACT_AND_MUTATION_RESULT_PLAN_ZH.md)
 - [照片管理开发计划](development/NATIVE_DSM_PHOTOS_DEVELOPMENT_PLAN_ZH.md)

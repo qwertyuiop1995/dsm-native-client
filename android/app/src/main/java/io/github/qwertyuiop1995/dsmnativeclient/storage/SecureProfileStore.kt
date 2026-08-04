@@ -6,6 +6,7 @@ import androidx.security.crypto.MasterKey
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -50,6 +51,8 @@ class SecureProfileStore(
             .remove(sessionKey(profileId))
             .remove(passwordKey(profileId))
             .remove(autoLoginKey(profileId))
+            .remove(recentDirectoriesKey(profileId))
+            .remove(workspaceUiStateKey(profileId))
             .apply()
         if (lastProfileId() == profileId) {
             preferences.edit().remove(KEY_LAST_PROFILE_ID).apply()
@@ -101,6 +104,33 @@ class SecureProfileStore(
         }.apply()
     }
 
+    fun recentDirectories(profileId: String): List<String> =
+        preferences.getString(recentDirectoriesKey(profileId), null)?.let { value ->
+            runCatching {
+                json.decodeFromString(ListSerializer(String.serializer()), value)
+            }.getOrDefault(emptyList())
+        }.orEmpty()
+
+    fun recordRecentDirectory(profileId: String, path: String) {
+        if (!path.startsWith('/') || path.split('/').contains("#recycle")) return
+        val recent = updateRecentDirectories(recentDirectories(profileId), path)
+        preferences.edit().putString(
+            recentDirectoriesKey(profileId),
+            json.encodeToString(ListSerializer(String.serializer()), recent),
+        ).apply()
+    }
+
+    fun workspaceUiState(profileId: String): PersistedWorkspaceUiState? =
+        preferences.getString(workspaceUiStateKey(profileId), null)?.let { value ->
+            runCatching { json.decodeFromString<PersistedWorkspaceUiState>(value) }.getOrNull()
+        }
+
+    fun saveWorkspaceUiState(profileId: String, state: PersistedWorkspaceUiState) {
+        preferences.edit()
+            .putString(workspaceUiStateKey(profileId), json.encodeToString(state))
+            .apply()
+    }
+
     fun clearAll() {
         preferences.edit().clear().apply()
     }
@@ -108,9 +138,31 @@ class SecureProfileStore(
     private fun sessionKey(profileId: String) = "session_$profileId"
     private fun passwordKey(profileId: String) = "password_$profileId"
     private fun autoLoginKey(profileId: String) = "auto_login_$profileId"
+    private fun recentDirectoriesKey(profileId: String) = "recent_directories_$profileId"
+    private fun workspaceUiStateKey(profileId: String) = "workspace_ui_state_$profileId"
 
     private companion object {
         const val KEY_PROFILES = "profiles"
         const val KEY_LAST_PROFILE_ID = "last_profile_id"
+        const val MAX_RECENT_DIRECTORIES = 20
     }
+}
+
+@kotlinx.serialization.Serializable
+data class PersistedWorkspaceUiState(
+    val selectedModule: String = "FILES",
+    val filePath: String = "",
+    val filePathHistory: List<String> = emptyList(),
+    val fileSearchQuery: String = "",
+    val fileActiveSearchQuery: String? = null,
+    val fileSortOption: String = "NAME",
+    val fileSortAscending: Boolean = true,
+    val fileTypeFilter: String = "ALL",
+    val fileViewMode: String = "LIST",
+    val chatPinnedConversationIds: List<String> = emptyList(),
+)
+
+internal fun updateRecentDirectories(current: List<String>, path: String): List<String> {
+    if (!path.startsWith('/') || path.split('/').contains("#recycle")) return current
+    return (listOf(path) + current.filterNot { it == path }).take(20)
 }

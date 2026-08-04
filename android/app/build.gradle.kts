@@ -93,6 +93,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview:1.6.8")
     implementation("androidx.compose.foundation:foundation:1.6.8")
     implementation("androidx.compose.material3:material3:1.2.1")
+    // 与现有 Compose 版本一致，用于官方下拉刷新组件；该构件此前已由依赖树引入运行时。
+    implementation("androidx.compose.material:material:1.6.8")
     implementation("androidx.compose.material:material-icons-extended:1.6.8")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")

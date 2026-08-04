@@ -77,12 +77,14 @@
 
 - Apple Adapter：`DsmNasAdministrationRepository`。
 - macOS：性能概览页保留原生破坏性确认，提交期间显示进度并禁用重复操作。
-- Android、Windows、iPhone 与 iPad：复用领域结果类型，电源动作调用链尚未迁移。
+- Android：`DsmRepository`、`AppViewModel` 与 `NasHardwareSettingsScreen` 已接入预检、全局互斥、不可回读结果、独立二次确认和未知结果不重放；模糊提交以持久核对卡保留，界面与 ViewModel 均拒绝直接清除，必须重新连接并检查 NAS 后才能再次操作。
+- Windows、iPhone 与 iPad：复用领域结果类型，电源动作调用链尚未迁移。
 - 合成 Fixture（`readbackPolicy=unavailable`、`retryPolicy=never`）：
   - `contracts/request-fixtures/system-power/shutdown/synthetic-nas/request.json`
   - `contracts/request-fixtures/system-power/reboot/synthetic-nas/request.json`
 - 自动化测试覆盖接受结果、能力缺失、预检权限不足、提交后权限拒绝、会话失效、提交
-  超时、提交前/提交后取消、Repository 全局防重复、模型防重复和 macOS 用户反馈。
+  超时、提交前/提交后取消、Repository 全局防重复、模型防重复、Android 危险结果关闭门禁、
+  无可用关闭操作的持久提示和 macOS 用户反馈。
 
 ## 安全与副作用
 
@@ -98,4 +100,4 @@
   关机与重启行为尚未验证。
 - 请求被接受到连接中断、完全关机、重新上线和服务恢复的时间没有权威状态字段。
 - 断电恢复、UPS、安全模式和虚拟机运行状态对电源动作的影响尚未实机验收。
-- Android、Windows、iPhone 与 iPad 调用链尚未迁移。
+- Windows、iPhone 与 iPad 调用链尚未迁移；Android 仍待设备与专用 NAS 验收。

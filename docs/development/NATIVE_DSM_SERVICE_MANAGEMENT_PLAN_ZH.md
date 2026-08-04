@@ -18,7 +18,7 @@
 6. 容器主列表固定按当前已验证契约提交 `offset=0`、`limit=-1`、`type=all`；映像、网络、项目和活动记录属于附属读取，单项不可用不得遮蔽已成功读取的容器。
 7. VMM 主列表优先读取官方 `SYNO.Virtualization.API.Guest`；只有官方读取明确不兼容且内部 Guest 能力同时存在时，才允许只读降级。主列表成功后，主机、存储、网络、映像、保护和日志单项失败不阻断页面；日志 `list` 必须携带网页端要求的筛选、日期和排序参数。各端必须区分“确实为空”和“读取不可用”，登录失效、证书变化与取消仍必须立即上报。
 8. 镜像仓库使用已验证的内部契约：`SYNO.Docker.Registry.search` 提交 `offset=0`、`limit=50`、`page_size=50` 和 `q`，`tags` 使用 `repo`；下载由 `SYNO.Docker.Image.pull_start` 提交 `repository` 与 `tag`。三端不得退回未验证的 `pull` 方法。
-9. VMM 创建和修改按官方网页客户端已验证的内部 `SYNO.Virtualization.Guest.create/set` 契约实现；控制台使用套件 noVNC 页面与 `synovirtualization/ws/{guest_id}` 通道。会话 Cookie 只注入非持久 WebView，不写入 URL、日志或磁盘。
+9. VMM 基础创建和常规修改优先使用 Synology 官方 VMM API Guide 公开的 `SYNO.Virtualization.API.Guest` v1，并配合公开 Task、Storage、Network 与 Guest Image v1；内部 `SYNO.Virtualization.Guest.create/set` 只能作为经版本化验收的降级。控制台使用套件 noVNC 页面与 `synovirtualization/ws/{guest_id}` 通道。会话 Cookie 只注入非持久 WebView，不写入 URL、日志或磁盘。
 10. VMM 映像删除优先使用公开 `SYNO.Virtualization.API.Guest.Image.delete`；网络修改和删除没有公开写接口，只允许在内部 `SYNO.Virtualization.Network` 能力存在、当前 DSM/VMM 版本通过契约验收后开放，并保持确认、防重复提交和写后回读。
 11. Apple、Android 与 Windows 共用 `VirtualMachineManagerSnapshot` 的保护计划、计划策略、保留策略、日志和分区可用性语义；Android/Windows 实现界面时不得把读取失败呈现为空数据。
 10. 下载任务文件使用官方 `SYNO.DownloadStation.Task.create` multipart 契约，文件是正文的最后一个字段；基础设置使用官方 `Info.getconfig/setserverconfig`，计划使用 `Schedule.getconfig/setconfig`，保存后必须回读核验。
@@ -63,6 +63,7 @@
 - BT 搜索模块、类别、搜索结果和直接下载。
 - RSS 站点、条目、下载过滤器。
 - 已完成官方基础设置：默认位置、eMule、自动解压、BT/HTTP/FTP/NZB/eMule 限速与计划；继续补齐套件内部的高级 BT、监听目录、NZB 服务器、RSS 与通知设置。
+- Android 已完成官方任务文件、Tracker、Peer 详情、RSS 站点/条目浏览、RSS 单站点手动刷新和 BT 实际搜索；搜索仅使用已启用模块并清理临时服务端任务，RSS 条目和搜索结果可经可写目录选择后直接创建任务。RSS 刷新具备目标预检、同站点防重复、写后回读和未确认结果；官方指南未公开 RSS 完整编辑或文件优先级写参数，相关能力与高级设置保持关闭并等待版本化契约和真实 NAS 验收。
 
 ### M3：Container Manager 完整功能
 
@@ -74,6 +75,7 @@
 
 ### M4：VMM 完整功能
 
+- Android 已使用官方公开 v1 契约完成分步创建与常规设置修改，并覆盖提交前检查、防重复、任务轮询/清理和最终回读；独立 noVNC 控制台仍因 Android 侧稳定契约未验证而关闭。
 - 扩展编辑向导：虚拟盘扩容/增删和多网络接口管理。
 - 克隆、迁移、导入导出。
 - 映像创建、上传、编辑与删除。

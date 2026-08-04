@@ -175,7 +175,8 @@ contracts/request-fixtures/
 - 已覆盖 DDNS 服务商测试、记录新建、立即更新和删除四类独立请求；用户名与密码仅验证
   参数存在和传输位置，Fixture 不保存凭据值。
 - 已覆盖 NAS 正常关机与重启两类无业务参数请求；两者固定禁止重试且不伪造写后回读。
-- 当前共四十八份请求快照；系统更新、共享权限与更多写操作仍待后续批次覆盖。
+- 当前共 71 份请求 Fixture；另有 1 份结果示例、3 组响应 Fixture 和 103 份 contracts
+  JSON 通过校验。系统更新、共享权限与更多写操作仍待后续批次覆盖。
 
 ### RC2：Android 与 Windows 对齐
 
@@ -194,6 +195,9 @@ contracts/request-fixtures/
   编译器，不能把静态检查写成 Windows 测试通过。
 - 下一批继续把套件卸载、容器/VMM 映像与网络、网络和防火墙请求扩展到 Android/
   Windows；平台没有生产写入口的能力只建立契约消费测试，不为对齐而新增未经验证入口。
+- Android 收藏新增和 File Station 上传已对照公共合成 Fixture 验证 API、方法、版本、
+  路径、表单或 multipart 参数、SID、SynoToken 位置和回读策略；其余代表性操作与
+  Windows 继续迁移。
 
 ### MR0：结果类型与序列化
 
@@ -206,14 +210,15 @@ contracts/request-fixtures/
 
 ### MR1：低影响试点
 
-状态：Apple 收藏新增试点为 `UNIT_TESTED`。
+状态：Apple 与 Android 收藏新增试点为 `UNIT_TESTED`。
 
 - 已选择公开 File Station 收藏新增作为低影响试点，并通过收藏列表确定回读。
 - 已贯通 `FileRepository`、`DsmFileRepository` 和 macOS `WorkspaceModel`；旧
   `addFavorite` 方法继续保留。
 - 已覆盖确认成功、明确拒绝、提交未确认、回读失败、回读不一致和提交前取消。
 - 只有 `confirmedSuccess` 才更新本地收藏；未确认状态提示用户先刷新，不自动重放。
-- Android 与 Windows 调用链尚未迁移。
+- Android 已接入提交、收藏列表回读、同路径防重复、未确认禁止自动重放和分级用户提示；
+  Windows 调用链尚未迁移。
 
 ### MR2：高风险操作迁移
 
@@ -269,6 +274,22 @@ contracts/request-fixtures/
   中途断网、部分生效、回读失败和提交后取消分别给出部分成功或结果未确认，均不自动
   重放。macOS 会提示用户换用可用地址重新连接并核对两项设置，路由器自动配置已增加
   完全合成的请求 Fixture 与故障注入测试。
+- Android 第 55 批已贯通远程访问正式 Repository、AppViewModel 和 Compose 界面：
+  Repository 固定 QuickConnect v3 与 Upnp v1，只接受严格 Boolean，单项失败以 `null`
+  独立降级；内部写入口只在完整匹配已记录 DSM build/Update 时开放。保存仅提交实际
+  变化字段，可信中继连接禁止关闭中继；取消、断线和歧义失败均不重放，按实际变化字段
+  专项回读并保留八类结果、三计数、刷新/放弃门槛和可恢复草稿。专项覆盖 36 项 JVM 与
+  12 项 Compose 测试；第 55 批未执行真实 NAS 或路由器写操作，合成测试与既有登录链路
+  证据均不提升 `observed / degraded` 兼容等级。
+- Android 第 56 批已贯通 Download Station 暂停、继续、仅移除任务及移除任务并删除文件
+  的正式 Repository、AppViewModel 和 Compose 界面。写入口只接受完整稳定任务基线，
+  严格分页读取拒绝畸形、重复、总数漂移与截断；同目标跨动作原子防重复，提交后取消、
+  断线或结果不明时只专项回读且不重放。危险删除必须显式确认，旧字符串旁路已移除；
+  删除文件按任务移除和文件删除两个效果计数，任务消失只确认前一效果，不把公开 API
+  无法独立核对的文件副作用冒充成功。严格刷新证据绑定 Repository、NAS、稳定目标与
+  代次，并持久阻止危险结果在核对前清除、切换 NAS 或退出登录。专项 49 项 JVM 与
+  24 项 Compose、完整 857 项 JVM 和 API 35 全量 263 项均通过；本批未操作浏览器或
+  真实 NAS，未执行真实暂停、继续、任务移除或文件删除。
 - 文件服务设置已按 SMB、NFS、FTP/FTPS、SFTP、局域网发现和 Time Machine 六个逻辑
   子操作迁移。提交前计算全部差异，验证端口范围、活跃服务端口冲突和 SMB/Time Machine
   依赖，并一次性检查全部所需能力；Repository 使用全局重复提交保护，按稳定顺序提交

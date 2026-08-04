@@ -20,7 +20,9 @@ public sealed class DeleteRequestContractTests
 
         var request = api.Single(fixture.ApiName, fixture.Method);
         fixture.AssertRequest(request);
-        Assert.Equal("[\"<synthetic-path>\"]", request.Parameters["path"]);
+        var paths = JsonNode.Parse(request.Parameters["path"])!.AsArray();
+        var path = Assert.Single(paths);
+        Assert.Equal("<synthetic-path>", path!.GetValue<string>());
         Assert.Equal("true", request.Parameters["recursive"]);
         Assert.Equal("true", request.Parameters["accurate_progress"]);
     }
@@ -102,8 +104,8 @@ internal sealed class RecordingApiClient : IDsmApiClient
     private readonly List<RecordedApiRequest> _requests = [];
 
     public RecordedApiRequest Single(string apiName, string method) =>
-        Assert.Single(_requests.Where(item =>
-            item.Capability.Name == apiName && item.Method == method));
+        Assert.Single(_requests, item =>
+            item.Capability.Name == apiName && item.Method == method);
 
     public Task<JsonObject> CallAsync(
         NasProfile profile,

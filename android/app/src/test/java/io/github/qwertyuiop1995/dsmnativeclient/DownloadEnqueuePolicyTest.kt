@@ -76,4 +76,99 @@ class DownloadEnqueuePolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `恢复后台下载只对明确缺失的当前任务重新入队`() {
+        val record = PersistedDownload(
+            id = "task",
+            profileId = "profile",
+            sourcePath = "/synthetic/file.bin",
+            title = "file.bin",
+            destinationUri = "content://synthetic/file.bin",
+            isDirectory = false,
+            workId = "work-a",
+            backgroundCapable = true,
+        )
+
+        assertEquals(
+            RestoredBackgroundDownloadDecision.MONITOR,
+            restoredBackgroundDownloadDecision(
+                lookup = RestoredBackgroundWorkLookup.PRESENT,
+                current = record,
+                expectedRecordId = record.id,
+                expectedProfileId = record.profileId,
+                expectedWorkId = "work-a",
+            ),
+        )
+        assertEquals(
+            RestoredBackgroundDownloadDecision.REENQUEUE,
+            restoredBackgroundDownloadDecision(
+                lookup = RestoredBackgroundWorkLookup.MISSING,
+                current = record,
+                expectedRecordId = record.id,
+                expectedProfileId = record.profileId,
+                expectedWorkId = "work-a",
+            ),
+        )
+        assertEquals(
+            RestoredBackgroundDownloadDecision.MONITOR,
+            restoredBackgroundDownloadDecision(
+                lookup = RestoredBackgroundWorkLookup.QUERY_FAILED,
+                current = record,
+                expectedRecordId = record.id,
+                expectedProfileId = record.profileId,
+                expectedWorkId = "work-a",
+            ),
+        )
+        assertEquals(
+            RestoredBackgroundDownloadDecision.IGNORE,
+            restoredBackgroundDownloadDecision(
+                lookup = RestoredBackgroundWorkLookup.MISSING,
+                current = record.copy(workId = "work-b"),
+                expectedRecordId = record.id,
+                expectedProfileId = record.profileId,
+                expectedWorkId = "work-a",
+            ),
+        )
+        assertEquals(
+            RestoredBackgroundDownloadDecision.FINALIZE_CANCELLATION,
+            restoredBackgroundDownloadDecision(
+                lookup = RestoredBackgroundWorkLookup.MISSING,
+                current = record.copy(state = TransferState.CANCELLING),
+                expectedRecordId = record.id,
+                expectedProfileId = record.profileId,
+                expectedWorkId = "work-a",
+            ),
+        )
+        assertEquals(
+            RestoredBackgroundDownloadDecision.IGNORE,
+            restoredBackgroundDownloadDecision(
+                lookup = RestoredBackgroundWorkLookup.MISSING,
+                current = record.copy(state = TransferState.PAUSED),
+                expectedRecordId = record.id,
+                expectedProfileId = record.profileId,
+                expectedWorkId = "work-a",
+            ),
+        )
+    }
+
+    @Test
+    fun `后台入队边界拒绝迟到的所有权或状态`() {
+        val waiting = PersistedDownload(
+            id = "task",
+            profileId = "profile",
+            sourcePath = "/synthetic/file.bin",
+            title = "file.bin",
+            destinationUri = "content://synthetic/file.bin",
+            isDirectory = false,
+            workId = null,
+            backgroundCapable = true,
+        )
+
+        assertTrue(waiting.canReplaceBackgroundDownloadWorkId(waiting))
+        assertFalse(waiting.copy(workId = "new-work").canReplaceBackgroundDownloadWorkId(waiting))
+        assertFalse(
+            waiting.copy(state = TransferState.CANCELLING).canReplaceBackgroundDownloadWorkId(waiting),
+        )
+    }
 }

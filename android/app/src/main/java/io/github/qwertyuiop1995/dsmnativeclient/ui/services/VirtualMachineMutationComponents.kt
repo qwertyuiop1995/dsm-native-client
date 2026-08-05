@@ -8,8 +8,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -229,9 +232,12 @@ internal fun VirtualMachineLifecycleConfirmationDialog(
     onDismiss: () -> Boolean,
 ) {
     val command = target.command.orEmpty()
+    val forceShutdown = target.operation == VirtualMachineLifecycleOperation.CONTROL &&
+        command == "poweroff"
     val title = when (target.operation) {
         VirtualMachineLifecycleOperation.CONTROL -> when (command) {
             "poweron" -> stringResource(R.string.start_virtual_machine_title, resourceName)
+            "poweroff" -> stringResource(R.string.force_shutdown_virtual_machine_title, resourceName)
             else -> stringResource(R.string.shutdown_virtual_machine_title, resourceName)
         }
         VirtualMachineLifecycleOperation.DELETE_MACHINE,
@@ -244,6 +250,7 @@ internal fun VirtualMachineLifecycleConfirmationDialog(
     val message = when (target.operation) {
         VirtualMachineLifecycleOperation.CONTROL -> when (command) {
             "poweron" -> stringResource(R.string.start_virtual_machine_message)
+            "poweroff" -> stringResource(R.string.force_shutdown_virtual_machine_message)
             else -> stringResource(R.string.shutdown_virtual_machine_message)
         }
         VirtualMachineLifecycleOperation.DELETE_MACHINE ->
@@ -256,6 +263,7 @@ internal fun VirtualMachineLifecycleConfirmationDialog(
     val confirm = when (target.operation) {
         VirtualMachineLifecycleOperation.CONTROL -> when (command) {
             "poweron" -> stringResource(R.string.start)
+            "poweroff" -> stringResource(R.string.force_shutdown)
             else -> stringResource(R.string.normal_shutdown)
         }
         VirtualMachineLifecycleOperation.RENAME_NETWORK -> stringResource(R.string.save)
@@ -264,12 +272,32 @@ internal fun VirtualMachineLifecycleConfirmationDialog(
     AlertDialog(
         onDismissRequest = { onDismiss() },
         title = { Text(title) },
-        text = { Text(message) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(message)
+            }
+        },
         confirmButton = {
-            TextButton(
-                onClick = { onConfirm() },
-                modifier = Modifier.heightIn(min = 48.dp).semantics { role = Role.Button },
-            ) { Text(confirm) }
+            if (forceShutdown) {
+                Button(
+                    onClick = { onConfirm() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                    modifier = Modifier.heightIn(min = 48.dp).semantics { role = Role.Button },
+                ) { Text(confirm) }
+            } else {
+                TextButton(
+                    onClick = { onConfirm() },
+                    modifier = Modifier.heightIn(min = 48.dp).semantics { role = Role.Button },
+                ) { Text(confirm) }
+            }
         },
         dismissButton = {
             TextButton(

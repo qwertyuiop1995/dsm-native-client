@@ -62,6 +62,22 @@ class VirtualMachineMutationResultTest {
     }
 
     @Test
+    fun `强制关机必须在列表回读为停止后才确认成功`() = runBlocking {
+        val transport = VmmMutationInterceptor(
+            guestList("running"),
+            SUCCESS,
+            guestList("shutdown"),
+        )
+
+        val result = repository(transport, API_GUEST, API_GUEST_ACTION)
+            .controlVirtualMachineResult("guest-1", ResourceState.RUNNING, "poweroff")
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(listOf("list", "poweroff", "list"), transport.methods())
+        assertEquals("guest-1", transport.requests[1].formFields()["guest_id"])
+    }
+
+    @Test
     fun `删除虚拟机必须回读消失且发送稳定标识`() = runBlocking {
         val transport = VmmMutationInterceptor(
             guestList("stopped"),
@@ -176,6 +192,18 @@ class VirtualMachineMutationResultTest {
 
         val result = repository(transport, API_GUEST, API_GUEST_ACTION)
             .controlVirtualMachineResult("guest-1", ResourceState.RUNNING, "shutdown")
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
+        assertFalse(result.submitted)
+        assertEquals(listOf("list"), transport.methods())
+    }
+
+    @Test
+    fun `强制关机状态偏离用户所见基线时零写拒绝`() = runBlocking {
+        val transport = VmmMutationInterceptor(guestList("shutdown"))
+
+        val result = repository(transport, API_GUEST, API_GUEST_ACTION)
+            .controlVirtualMachineResult("guest-1", ResourceState.RUNNING, "poweroff")
 
         assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
         assertFalse(result.submitted)

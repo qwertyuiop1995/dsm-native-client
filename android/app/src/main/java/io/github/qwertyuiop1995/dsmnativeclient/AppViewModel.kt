@@ -19,6 +19,7 @@ import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkInfo
@@ -28,6 +29,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.data.DsmRepository
 import io.github.qwertyuiop1995.dsmnativeclient.data.CrossNasTransferCoordinator
 import io.github.qwertyuiop1995.dsmnativeclient.data.RepositoryCrossNasTransferEndpoint
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedDownload
+import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedPhotoBackupSource
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedServerSubmissionPhase
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedServerTransfer
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedUpload
@@ -353,6 +355,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var fileUploadPreflightBusyToken: FileUploadPreflightToken? = null
     private val foregroundDownloadExecutionIds = mutableMapOf<String, String>()
     private val transferWatchJobs = mutableMapOf<String, Job>()
+    private var photoBackupScanWatchJob: Job? = null
+    private var photoBackupScanWatchProfileId: String? = null
+    private var photoBackupScanWatchGeneration = 0L
+    private var photoBackupScanScheduleGeneration = 0L
     private val virtualMachineImageImportWatchJobs = mutableMapOf<String, Job>()
     private var pendingVirtualMachineLocalImageUri: Uri? = null
     private var pendingVirtualMachineLocalImageContentType: String? = null
@@ -584,6 +590,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val availability = repo.availability()
                 val restoredUi = restoredWorkspaceUi(profile.id, availability)
                 val backgroundTaskSnapshot = transferStore.fileBackgroundTaskSnapshot(profile.id)
+                val photoBackupSource = transferStore.photoBackupSource(profile.id)
                 _workspace.value = WorkspaceState(
                     profile = profile,
                     selectedModule = restoredUi.first,
@@ -620,7 +627,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     nasPerformance = NasPerformanceWorkspaceState(
                         supportsPerformance = repo.supportsPerformance(),
                     ),
-                    photoBackupSourceEnabled = transferStore.photoBackupSource(profile.id)?.enabled == true,
+                    photoBackupSourceEnabled = photoBackupSource?.let(::shouldScanPhotoBackupSource) == true,
+                    message = photoBackupSourceRestoreMessage(photoBackupSource),
                     chatPinnedConversationIds = restoredPinnedConversationIds(profile.id),
                     fileBackgroundTasks = backgroundTaskSnapshot?.toFileBackgroundTaskPage()
                         ?.let { Loadable.Ready(it) } ?: Loadable.Idle,
@@ -628,8 +636,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         backgroundTaskSnapshot?.observedAtEpochSeconds,
                 )
                 viewModelScope.launch { refreshFavorites(repo) }
-                if (transferStore.photoBackupSource(profile.id)?.enabled == true) {
-                    schedulePhotoBackupSource(profile.id)
+                when {
+                    photoBackupSource?.needsAttention == true ->
+                        cancelPhotoBackupSourceWork(profile.id)
+                    photoBackupSource?.let(::shouldScanPhotoBackupSource) == true &&
+                        !schedulePhotoBackupSource(photoBackupSource) -> {
+                        _workspace.update {
+                            it?.copy(
+                                message = getApplication<Application>().getString(
+                                    R.string.photo_backup_source_state_unavailable,
+                                ),
+                            )
+                        }
+                    }
                 }
                 restoreDownloads(profile.id)
                 load(restoredUi.first)
@@ -712,6 +731,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val availability = repo.availability()
                 val restoredUi = restoredWorkspaceUi(profile.id, availability)
                 val backgroundTaskSnapshot = transferStore.fileBackgroundTaskSnapshot(profile.id)
+                val photoBackupSource = transferStore.photoBackupSource(profile.id)
                 _workspace.value = WorkspaceState(
                     profile = profile,
                     selectedModule = restoredUi.first,
@@ -748,7 +768,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     nasPerformance = NasPerformanceWorkspaceState(
                         supportsPerformance = repo.supportsPerformance(),
                     ),
-                    photoBackupSourceEnabled = transferStore.photoBackupSource(profile.id)?.enabled == true,
+                    photoBackupSourceEnabled = photoBackupSource?.let(::shouldScanPhotoBackupSource) == true,
+                    message = photoBackupSourceRestoreMessage(photoBackupSource),
                     chatPinnedConversationIds = restoredPinnedConversationIds(profile.id),
                     fileBackgroundTasks = backgroundTaskSnapshot?.toFileBackgroundTaskPage()
                         ?.let { Loadable.Ready(it) } ?: Loadable.Idle,
@@ -756,8 +777,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         backgroundTaskSnapshot?.observedAtEpochSeconds,
                 )
                 viewModelScope.launch { refreshFavorites(repo) }
-                if (transferStore.photoBackupSource(profile.id)?.enabled == true) {
-                    schedulePhotoBackupSource(profile.id)
+                when {
+                    photoBackupSource?.needsAttention == true ->
+                        cancelPhotoBackupSourceWork(profile.id)
+                    photoBackupSource?.let(::shouldScanPhotoBackupSource) == true &&
+                        !schedulePhotoBackupSource(photoBackupSource) -> {
+                        _workspace.update {
+                            it?.copy(
+                                message = getApplication<Application>().getString(
+                                    R.string.photo_backup_source_state_unavailable,
+                                ),
+                            )
+                        }
+                    }
                 }
                 restoreDownloads(profile.id)
                 load(restoredUi.first)
@@ -817,7 +849,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             releasePersistedReadPermission(Uri.parse(treeUri))
         }
         transferStore.photoBackupSource(profile.id)?.let { source ->
-            workManager.cancelUniqueWork(PhotoBackupScanWorker.UNIQUE_WORK_PREFIX + profile.id)
+            cancelPhotoBackupSourceWork(profile.id)
             releasePersistedReadPermission(Uri.parse(source.treeUri))
         }
         transferStore.virtualMachineImageImports(profile.id).forEach { import ->
@@ -4921,30 +4953,43 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
-        val granted = runCatching {
-            getApplication<Application>().contentResolver.takePersistableUriPermission(
+        val resolver = getApplication<Application>().contentResolver
+        val hasPersistedReadGrant = resolver.persistedUriPermissions.any { permission ->
+            permission.uri == treeUri && permission.isReadPermission
+        }
+        val acquiredPersistedReadGrant = !hasPersistedReadGrant && runCatching {
+            resolver.takePersistableUriPermission(
                 treeUri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION,
             )
         }.isSuccess
-        if (!granted) {
+        if (!hasPersistedReadGrant && !acquiredPersistedReadGrant) {
             _workspace.update {
                 it?.copy(message = getApplication<Application>().getString(R.string.photo_backup_folder_permission_failed))
             }
             return
         }
         val previous = transferStore.photoBackupSource(state.profile.id)
-        val source = io.github.qwertyuiop1995.dsmnativeclient.data.PersistedPhotoBackupSource(
+        val source = PersistedPhotoBackupSource(
             profileId = state.profile.id,
             treeUri = treeUri.toString(),
             destinationPath = state.photoBrowser.folderPath,
         )
-        transferStore.upsertPhotoBackupSource(source)
+        if (!schedulePhotoBackupSource(source)) {
+            if (acquiredPersistedReadGrant) releasePersistedReadPermission(treeUri)
+            _workspace.update {
+                it?.copy(
+                    message = getApplication<Application>().getString(
+                        R.string.photo_backup_source_state_unavailable,
+                    ),
+                )
+            }
+            return
+        }
         previous?.treeUri?.takeIf { it != source.treeUri }?.let { oldTree ->
             val stillUsed = transferStore.uploads(state.profile.id).any { it.sourceTreeUri == oldTree }
             if (!stillUsed) releasePersistedReadPermission(Uri.parse(oldTree))
         }
-        schedulePhotoBackupSource(source.profileId)
         _workspace.update {
             it?.copy(
                 photoBackupSourceEnabled = true,
@@ -5062,8 +5107,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun disablePhotoBackupSource() {
         val state = _workspace.value ?: return
         val source = transferStore.photoBackupSource(state.profile.id) ?: return
-        transferStore.upsertPhotoBackupSource(source.copy(enabled = false, workId = null))
-        workManager.cancelUniqueWork(PhotoBackupScanWorker.UNIQUE_WORK_PREFIX + state.profile.id)
+        if (
+            runCatching {
+                transferStore.upsertPhotoBackupSource(source.copy(enabled = false, workId = null))
+            }.isFailure
+        ) {
+            _workspace.update {
+                it?.copy(
+                    message = getApplication<Application>().getString(
+                        R.string.photo_backup_source_state_unavailable,
+                    ),
+                )
+            }
+            return
+        }
+        cancelPhotoBackupSourceWork(state.profile.id)
         _workspace.update {
             it?.copy(
                 photoBackupSourceEnabled = false,
@@ -5127,6 +5185,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             savedSessionAvailable = savedSessionAvailable,
             persistableDestinationGrant = persistableGrantAvailable,
         )
+        val backgroundRequest = if (backgroundCapable) {
+            backgroundDownloadRequest(taskId, requireExactResume = false)
+        } else {
+            null
+        }
         val record = PersistedDownload(
             id = taskId,
             profileId = state.profile.id,
@@ -5136,11 +5199,40 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             isDirectory = item.isDirectory,
             expectedBytes = item.size.takeIf { !item.isDirectory && it > 0 },
             backgroundCapable = backgroundCapable,
+            workId = backgroundRequest?.id?.toString(),
         )
-        transferStore.upsert(record)
+        val persisted = if (backgroundCapable) {
+            runCatching { transferStore.upsertDownloadDurably(record) }.getOrDefault(false)
+        } else {
+            runCatching {
+                transferStore.upsert(record)
+                true
+            }.getOrDefault(false)
+        }
+        if (!persisted) {
+            if (acquiredPersistedWriteGrant) {
+                runCatching {
+                    resolver.releasePersistableUriPermission(
+                        destination,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                }
+            }
+            deleteIncompleteDownload(destination)
+            _workspace.update {
+                it?.copy(
+                    message = getApplication<Application>().getString(R.string.download_state_unavailable),
+                )
+            }
+            return DownloadEnqueueResult.REJECTED
+        }
         syncPersistedDownloads(state.profile.id)
         return if (backgroundCapable) {
-            enqueueBackgroundDownload(record)
+            enqueuePersistedBackgroundDownload(
+                record = record,
+                request = checkNotNull(backgroundRequest),
+                existingWorkPolicy = transferEnqueuePolicy(TransferEnqueueReason.INITIAL),
+            )
             DownloadEnqueueResult.BACKGROUND
         } else {
             enqueueForegroundDownload(repo, record, destination)
@@ -14773,9 +14865,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             exif?.getAttribute(ExifInterface.TAG_MAKE)?.trim()?.takeIf(String::isNotBlank),
             exif?.getAttribute(ExifInterface.TAG_MODEL)?.trim()?.takeIf(String::isNotBlank),
         ).distinct().joinToString(" ").takeIf(String::isNotBlank)
+        val (orientedWidth, orientedHeight) = imageDimensionsAfterExifOrientation(
+            width = bounds.outWidth,
+            height = bounds.outHeight,
+            orientation = exif?.getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL,
+            ) ?: ExifInterface.ORIENTATION_NORMAL,
+        )
         MediaDetails(
-            width = bounds.outWidth.takeIf { it > 0 },
-            height = bounds.outHeight.takeIf { it > 0 },
+            width = orientedWidth.takeIf { it > 0 },
+            height = orientedHeight.takeIf { it > 0 },
             capturedAtEpochMillis = capturedAt,
             camera = camera,
         )
@@ -14843,11 +14943,60 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         record: PersistedDownload,
         existingWorkPolicy: ExistingWorkPolicy = transferEnqueuePolicy(TransferEnqueueReason.INITIAL),
         requireExactResume: Boolean = false,
+    ): Boolean {
+        val request = backgroundDownloadRequest(record.id, requireExactResume)
+        val scheduled = runCatching {
+            transferStore.updateDownloadDurably(record.id) { current ->
+                current.takeIf { it.canReplaceBackgroundDownloadWorkId(record) }
+                    ?.copy(workId = request.id.toString())
+            }
+        }.getOrNull()
+        if (scheduled == null) {
+            markBackgroundDownloadStateUnavailable(record, request.id.toString())
+            return false
+        }
+        enqueuePersistedBackgroundDownload(scheduled, request, existingWorkPolicy)
+        return true
+    }
+
+    private fun markBackgroundDownloadStateUnavailable(
+        expected: PersistedDownload,
+        attemptedWorkId: String,
     ) {
-        val request = OneTimeWorkRequestBuilder<FileDownloadWorker>()
+        var markedFailed = false
+        val failed = transferStore.update(expected.id) { current ->
+            if (
+                current.canReplaceBackgroundDownloadWorkId(expected) ||
+                current.canReplaceBackgroundDownloadWorkId(expected.copy(workId = attemptedWorkId))
+            ) {
+                markedFailed = true
+                current.copy(
+                    state = TransferState.FAILED,
+                    workId = null,
+                    errorKind = DsmErrorKind.DOWNLOAD_FAILED.name,
+                )
+            } else {
+                current
+            }
+        }
+        if (markedFailed && failed != null) {
+            syncPersistedDownloads(failed.profileId)
+            _workspace.update { current ->
+                current?.takeIf { it.profile.id == failed.profileId }?.copy(
+                    message = getApplication<Application>().getString(R.string.download_state_unavailable),
+                ) ?: current
+            }
+        }
+    }
+
+    private fun backgroundDownloadRequest(
+        taskId: String,
+        requireExactResume: Boolean,
+    ): OneTimeWorkRequest =
+        OneTimeWorkRequestBuilder<FileDownloadWorker>()
             .setInputData(
                 workDataOf(
-                    FileDownloadWorker.KEY_TASK_ID to record.id,
+                    FileDownloadWorker.KEY_TASK_ID to taskId,
                     FileDownloadWorker.KEY_REQUIRE_EXACT_RESUME to requireExactResume,
                 ),
             )
@@ -14856,9 +15005,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build(),
             )
-            .addTag(FileDownloadWorker.UNIQUE_WORK_PREFIX + record.id)
+            .addTag(FileDownloadWorker.UNIQUE_WORK_PREFIX + taskId)
             .build()
-        transferStore.update(record.id) { it.copy(workId = request.id.toString()) }
+
+    private fun enqueuePersistedBackgroundDownload(
+        record: PersistedDownload,
+        request: OneTimeWorkRequest,
+        existingWorkPolicy: ExistingWorkPolicy,
+    ) {
         workManager.enqueueUniqueWork(
             FileDownloadWorker.UNIQUE_WORK_PREFIX + record.id,
             existingWorkPolicy,
@@ -14906,31 +15060,248 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         syncPersistedDownloads(record.profileId)
     }
 
-    private fun schedulePhotoBackupSource(profileId: String) {
+    private fun schedulePhotoBackupSource(source: PersistedPhotoBackupSource): Boolean {
+        if (!shouldScanPhotoBackupSource(source)) return true
+        val profileId = source.profileId
+        val periodicWorkName = PhotoBackupScanWorker.UNIQUE_WORK_PREFIX + profileId
         val input = workDataOf(PhotoBackupScanWorker.KEY_PROFILE_ID to profileId)
         val periodic = PeriodicWorkRequestBuilder<PhotoBackupScanWorker>(6, TimeUnit.HOURS)
             .setInputData(input)
             .setConstraints(photoBackupConstraints())
-            .addTag(PhotoBackupScanWorker.UNIQUE_WORK_PREFIX + profileId)
+            .addTag(periodicWorkName)
             .build()
-        transferStore.photoBackupSource(profileId)?.let { source ->
-            transferStore.upsertPhotoBackupSource(source.copy(workId = periodic.id.toString(), enabled = true))
-        }
-        workManager.enqueueUniquePeriodicWork(
-            PhotoBackupScanWorker.UNIQUE_WORK_PREFIX + profileId,
-            ExistingPeriodicWorkPolicy.UPDATE,
-            periodic,
-        )
         val initial = OneTimeWorkRequestBuilder<PhotoBackupScanWorker>()
             .setInputData(input)
             .setConstraints(photoBackupConstraints())
             .build()
-        workManager.enqueueUniqueWork(
+        if (
+            runCatching {
+                transferStore.upsertPhotoBackupSource(
+                    source.copy(
+                        workId = null,
+                        enabled = true,
+                        needsAttention = false,
+                    ),
+                )
+            }.isFailure
+        ) {
+            return false
+        }
+        cancelPhotoBackupScanObservation(profileId)
+        val scheduleGeneration = ++photoBackupScanScheduleGeneration
+        val periodicOperation = workManager.enqueueUniquePeriodicWork(
+            periodicWorkName,
+            ExistingPeriodicWorkPolicy.UPDATE,
+            periodic,
+        )
+        val initialOperation = workManager.enqueueUniqueWork(
             PhotoBackupScanWorker.UNIQUE_WORK_PREFIX + profileId + "-initial",
             ExistingWorkPolicy.REPLACE,
             initial,
         )
+        viewModelScope.launch {
+            val actualPeriodicWorkId = withContext(Dispatchers.IO) {
+                runCatching {
+                    periodicOperation.result.get()
+                    initialOperation.result.get()
+                    resolvedPhotoBackupPeriodicWorkId(
+                        workManager.getWorkInfosForUniqueWork(periodicWorkName)
+                            .get()
+                            .filterNot { it.state.isFinished }
+                            .map(WorkInfo::id),
+                    )
+                }.getOrNull()
+            }
+            if (!isCurrentPhotoBackupSourceSchedule(source, scheduleGeneration)) {
+                reconcilePhotoBackupSourceScheduleAttention(source)
+                return@launch
+            }
+            if (actualPeriodicWorkId == null) {
+                cancelPhotoBackupSourceWork(profileId)
+                _workspace.update { current ->
+                    current?.takeIf { it.profile.id == profileId }?.copy(
+                        message = getApplication<Application>().getString(
+                            R.string.photo_backup_source_state_unavailable,
+                        ),
+                    ) ?: current
+                }
+                return@launch
+            }
+            val current = transferStore.photoBackupSource(profileId)?.takeIf {
+                it.treeUri == source.treeUri &&
+                    it.destinationPath == source.destinationPath &&
+                    shouldScanPhotoBackupSource(it) &&
+                    it.workId == null
+            } ?: run {
+                reconcilePhotoBackupSourceScheduleAttention(source)
+                return@launch
+            }
+            val scheduledSource = current.copy(workId = actualPeriodicWorkId.toString())
+            if (runCatching { transferStore.upsertPhotoBackupSource(scheduledSource) }.isFailure) {
+                cancelPhotoBackupSourceWork(profileId)
+                _workspace.update { workspace ->
+                    workspace?.takeIf { it.profile.id == profileId }?.copy(
+                        message = getApplication<Application>().getString(
+                            R.string.photo_backup_source_state_unavailable,
+                        ),
+                    ) ?: workspace
+                }
+                return@launch
+            }
+            observePhotoBackupSourceScans(scheduledSource, actualPeriodicWorkId, initial.id)
+        }
+        return true
     }
+
+    private fun isCurrentPhotoBackupSourceSchedule(
+        expected: PersistedPhotoBackupSource,
+        generation: Long,
+    ): Boolean =
+        photoBackupScanScheduleGeneration == generation &&
+            transferStore.photoBackupSource(expected.profileId)?.let { current ->
+                current.treeUri == expected.treeUri &&
+                    current.destinationPath == expected.destinationPath &&
+                    shouldScanPhotoBackupSource(current) &&
+                    current.workId == null
+            } == true
+
+    private fun reconcilePhotoBackupSourceScheduleAttention(expected: PersistedPhotoBackupSource) {
+        if (
+            !isPhotoBackupSourceAttentionFor(
+                current = transferStore.photoBackupSource(expected.profileId),
+                expectedProfileId = expected.profileId,
+                expectedTreeUri = expected.treeUri,
+                expectedDestinationPath = expected.destinationPath,
+            )
+        ) {
+            return
+        }
+        cancelPhotoBackupSourceWork(expected.profileId)
+        _workspace.update { current ->
+            current?.takeIf { it.profile.id == expected.profileId }?.copy(
+                photoBackupSourceEnabled = false,
+                message = getApplication<Application>().getString(
+                    R.string.photo_backup_folder_too_large,
+                ),
+            ) ?: current
+        }
+    }
+
+    private fun observePhotoBackupSourceScans(
+        source: PersistedPhotoBackupSource,
+        periodicWorkId: UUID,
+        initialWorkId: UUID,
+    ) {
+        photoBackupScanWatchJob?.cancel()
+        val generation = ++photoBackupScanWatchGeneration
+        val profileId = source.profileId
+        photoBackupScanWatchProfileId = profileId
+        val job = viewModelScope.launch {
+            launch {
+                observePhotoBackupSourceScan(
+                    source = source,
+                    periodicWorkId = periodicWorkId.toString(),
+                    observedWorkId = periodicWorkId,
+                    generation = generation,
+                )
+            }
+            launch {
+                observePhotoBackupSourceScan(
+                    source = source,
+                    periodicWorkId = periodicWorkId.toString(),
+                    observedWorkId = initialWorkId,
+                    generation = generation,
+                )
+            }
+        }
+        photoBackupScanWatchJob = job
+        job.invokeOnCompletion {
+            if (photoBackupScanWatchGeneration == generation) {
+                photoBackupScanWatchJob = null
+                photoBackupScanWatchProfileId = null
+            }
+        }
+    }
+
+    private suspend fun observePhotoBackupSourceScan(
+        source: PersistedPhotoBackupSource,
+        periodicWorkId: String,
+        observedWorkId: UUID,
+        generation: Long,
+    ) {
+        workManager.getWorkInfoByIdFlow(observedWorkId).collectLatest { info ->
+            val workInfo = info ?: return@collectLatest
+            val decision = photoBackupScanFailureDecision(
+                observationIsCurrent = photoBackupScanWatchGeneration == generation &&
+                    photoBackupScanWatchProfileId == source.profileId,
+                workspaceProfileId = _workspace.value?.profile?.id,
+                currentSource = transferStore.photoBackupSource(source.profileId),
+                expectedProfileId = source.profileId,
+                expectedTreeUri = source.treeUri,
+                expectedDestinationPath = source.destinationPath,
+                expectedPeriodicWorkId = periodicWorkId,
+                expectedObservedWorkId = observedWorkId.toString(),
+                observedWorkId = workInfo.id.toString(),
+                workState = workInfo.state,
+                scanOutcome = workInfo.outputData.getString(PhotoBackupScanWorker.KEY_SCAN_OUTCOME),
+            )
+            when (decision) {
+                PhotoBackupScanFailureDecision.DISABLE_SOURCE -> {
+                    _workspace.update { current ->
+                        current?.takeIf { it.profile.id == source.profileId }?.copy(
+                            photoBackupSourceEnabled = false,
+                            message = getApplication<Application>().getString(
+                                R.string.photo_backup_folder_too_large,
+                            ),
+                        ) ?: current
+                    }
+                    cancelPhotoBackupSourceWork(source.profileId)
+                }
+
+                PhotoBackupScanFailureDecision.SHOW_SOURCE_STATE_UNAVAILABLE -> {
+                    _workspace.update { current ->
+                        current?.takeIf { it.profile.id == source.profileId }?.copy(
+                            message = getApplication<Application>().getString(
+                                R.string.photo_backup_source_state_unavailable,
+                            ),
+                        ) ?: current
+                    }
+                    cancelPhotoBackupScanObservation(source.profileId, generation)
+                }
+
+                PhotoBackupScanFailureDecision.IGNORE -> Unit
+            }
+            if (workInfo.state.isFinished) {
+                currentCoroutineContext()[Job]?.cancel()
+            }
+        }
+    }
+
+    private fun cancelPhotoBackupSourceWork(profileId: String) {
+        cancelPhotoBackupScanObservation(profileId)
+        workManager.cancelUniqueWork(PhotoBackupScanWorker.UNIQUE_WORK_PREFIX + profileId)
+        workManager.cancelUniqueWork(PhotoBackupScanWorker.UNIQUE_WORK_PREFIX + profileId + "-initial")
+    }
+
+    private fun cancelPhotoBackupScanObservation(profileId: String, generation: Long? = null) {
+        if (
+            photoBackupScanWatchProfileId != profileId ||
+            (generation != null && photoBackupScanWatchGeneration != generation)
+        ) {
+            return
+        }
+        photoBackupScanWatchGeneration += 1
+        photoBackupScanWatchJob?.cancel()
+        photoBackupScanWatchJob = null
+        photoBackupScanWatchProfileId = null
+    }
+
+    private fun photoBackupSourceRestoreMessage(source: PersistedPhotoBackupSource?): String? =
+        if (source?.needsAttention == true) {
+            getApplication<Application>().getString(R.string.photo_backup_folder_too_large)
+        } else {
+            null
+        }
 
     private fun enqueueForegroundDownload(
         repo: DsmRepository,
@@ -15097,7 +15468,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (record.state == TransferState.PAUSED) {
                 Unit
             } else if (workId != null && record.state !in TERMINAL_TRANSFER_STATES) {
-                monitorDownload(record.id, workId)
+                restorePersistedBackgroundDownload(profileId, record, workId)
             } else if (workId == null && record.state !in TERMINAL_TRANSFER_STATES) {
                 val destination = Uri.parse(record.destinationUri)
                 deleteIncompleteDownload(destination)
@@ -15159,6 +15530,77 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         syncPersistedDownloads(profileId)
+    }
+
+    private fun restorePersistedBackgroundDownload(
+        profileId: String,
+        record: PersistedDownload,
+        workId: UUID,
+    ) {
+        val expectedWorkId = workId.toString()
+        viewModelScope.launch {
+            val lookup = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (workManager.getWorkInfoById(workId).get() == null) {
+                        RestoredBackgroundWorkLookup.MISSING
+                    } else {
+                        RestoredBackgroundWorkLookup.PRESENT
+                    }
+                }.getOrDefault(RestoredBackgroundWorkLookup.QUERY_FAILED)
+            }
+            val current = transferStore.download(record.id)
+            when (
+                restoredBackgroundDownloadDecision(
+                    lookup = lookup,
+                    current = current,
+                    expectedRecordId = record.id,
+                    expectedProfileId = profileId,
+                    expectedWorkId = expectedWorkId,
+                )
+            ) {
+                RestoredBackgroundDownloadDecision.MONITOR -> monitorDownload(record.id, workId)
+                RestoredBackgroundDownloadDecision.REENQUEUE -> enqueueBackgroundDownload(
+                    record = checkNotNull(current),
+                    existingWorkPolicy = ExistingWorkPolicy.REPLACE,
+                )
+                RestoredBackgroundDownloadDecision.FINALIZE_CANCELLATION ->
+                    finalizeMissingBackgroundDownloadCancellation(
+                        record = checkNotNull(current),
+                        expectedWorkId = expectedWorkId,
+                    )
+                RestoredBackgroundDownloadDecision.IGNORE -> Unit
+            }
+        }
+    }
+
+    private fun finalizeMissingBackgroundDownloadCancellation(
+        record: PersistedDownload,
+        expectedWorkId: String,
+    ) {
+        var finalized = false
+        val cancelled = transferStore.update(record.id) { current ->
+            if (
+                current.id == record.id &&
+                current.profileId == record.profileId &&
+                current.workId == expectedWorkId &&
+                current.state == TransferState.CANCELLING
+            ) {
+                finalized = true
+                current.copy(
+                    state = TransferState.CANCELLED,
+                    workId = null,
+                    errorKind = null,
+                )
+            } else {
+                current
+            }
+        }
+        if (finalized && cancelled?.state == TransferState.CANCELLED) {
+            val destination = Uri.parse(cancelled.destinationUri)
+            deleteIncompleteDownload(destination)
+            releasePersistedDownloadPermission(destination)
+            syncPersistedDownloads(cancelled.profileId)
+        }
     }
 
     private fun resumePersistedServerTransfer(
@@ -15874,6 +16316,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 }
 
 
+/** EXIF 方向会交换横纵轴的四种情况；镜像不改变媒体详情中的尺寸。 */
+internal fun imageDimensionsAfterExifOrientation(
+    width: Int,
+    height: Int,
+    orientation: Int,
+): Pair<Int, Int> = when (orientation) {
+    ExifInterface.ORIENTATION_TRANSPOSE,
+    ExifInterface.ORIENTATION_ROTATE_90,
+    ExifInterface.ORIENTATION_TRANSVERSE,
+    ExifInterface.ORIENTATION_ROTATE_270 -> height to width
+
+    else -> width to height
+}
+
 internal fun WorkspaceState.persistedUiState() = PersistedWorkspaceUiState(
     selectedModule = selectedModule.name,
     filePath = fileBrowser.path,
@@ -16570,6 +17026,143 @@ internal enum class DownloadEnqueueResult {
     BACKGROUND,
     FOREGROUND,
     REJECTED,
+}
+
+/** 恢复时只在 WorkManager 明确没有旧任务时重放后台下载；查询异常沿用旧任务观察。 */
+internal enum class RestoredBackgroundWorkLookup {
+    PRESENT,
+    MISSING,
+    QUERY_FAILED,
+}
+
+internal enum class RestoredBackgroundDownloadDecision {
+    MONITOR,
+    REENQUEUE,
+    FINALIZE_CANCELLATION,
+    IGNORE,
+}
+
+internal fun restoredBackgroundDownloadDecision(
+    lookup: RestoredBackgroundWorkLookup,
+    current: PersistedDownload?,
+    expectedRecordId: String,
+    expectedProfileId: String,
+    expectedWorkId: String,
+): RestoredBackgroundDownloadDecision {
+    if (
+        current == null ||
+        current.id != expectedRecordId ||
+        current.profileId != expectedProfileId ||
+        current.workId != expectedWorkId ||
+        current.state == TransferState.PAUSED ||
+        current.state in TERMINAL_TRANSFER_STATES
+    ) {
+        return RestoredBackgroundDownloadDecision.IGNORE
+    }
+    return when (lookup) {
+        RestoredBackgroundWorkLookup.PRESENT,
+        RestoredBackgroundWorkLookup.QUERY_FAILED,
+        -> RestoredBackgroundDownloadDecision.MONITOR
+
+        RestoredBackgroundWorkLookup.MISSING -> when {
+            current.state == TransferState.CANCELLING ->
+                RestoredBackgroundDownloadDecision.FINALIZE_CANCELLATION
+            current.backgroundCapable -> RestoredBackgroundDownloadDecision.REENQUEUE
+            else -> RestoredBackgroundDownloadDecision.IGNORE
+        }
+    }
+}
+
+/**
+ * 入队回调只能替换仍属于同一下载执行的记录，避免恢复查询或用户操作后的迟到写入。
+ */
+internal fun PersistedDownload.canReplaceBackgroundDownloadWorkId(
+    expected: PersistedDownload,
+): Boolean =
+    id == expected.id &&
+        profileId == expected.profileId &&
+        workId == expected.workId &&
+        state == expected.state &&
+        backgroundCapable &&
+        state !in TERMINAL_TRANSFER_STATES &&
+        state !in setOf(TransferState.PAUSED, TransferState.CANCELLING)
+
+internal enum class PhotoBackupScanFailureDecision {
+    DISABLE_SOURCE,
+    SHOW_SOURCE_STATE_UNAVAILABLE,
+    IGNORE,
+}
+
+/** 唯一周期任务更新会保留既有 WorkSpec 时，使用查询到的活动 UUID 作为事实来源。 */
+internal fun resolvedPhotoBackupPeriodicWorkId(activeWorkIds: List<UUID>): UUID? =
+    activeWorkIds.singleOrNull()
+
+internal fun isPhotoBackupSourceAttentionFor(
+    current: PersistedPhotoBackupSource?,
+    expectedProfileId: String,
+    expectedTreeUri: String,
+    expectedDestinationPath: String,
+): Boolean =
+    current?.profileId == expectedProfileId &&
+        current.treeUri == expectedTreeUri &&
+        current.destinationPath == expectedDestinationPath &&
+        !current.enabled &&
+        current.needsAttention &&
+        current.workId == null
+
+/**
+ * 扫描失败只影响仍属于当前配置和当前 WorkManager 观察代次的来源。
+ * 截断已由 Worker 同步停用来源；来源状态写入失败时只提示，不能伪造停用结果。
+ */
+internal fun photoBackupScanFailureDecision(
+    observationIsCurrent: Boolean,
+    workspaceProfileId: String?,
+    currentSource: PersistedPhotoBackupSource?,
+    expectedProfileId: String,
+    expectedTreeUri: String,
+    expectedDestinationPath: String,
+    expectedPeriodicWorkId: String,
+    expectedObservedWorkId: String,
+    observedWorkId: String,
+    workState: WorkInfo.State,
+    scanOutcome: String?,
+): PhotoBackupScanFailureDecision {
+    if (
+        !observationIsCurrent ||
+        workspaceProfileId != expectedProfileId ||
+        currentSource == null ||
+        currentSource.profileId != expectedProfileId ||
+        currentSource.treeUri != expectedTreeUri ||
+        currentSource.destinationPath != expectedDestinationPath ||
+        observedWorkId != expectedObservedWorkId
+    ) {
+        return PhotoBackupScanFailureDecision.IGNORE
+    }
+    if (
+        isPhotoBackupSourceAttentionFor(
+            current = currentSource,
+            expectedProfileId = expectedProfileId,
+            expectedTreeUri = expectedTreeUri,
+            expectedDestinationPath = expectedDestinationPath,
+        )
+    ) {
+        return PhotoBackupScanFailureDecision.DISABLE_SOURCE
+    }
+    if (workState != WorkInfo.State.FAILED) return PhotoBackupScanFailureDecision.IGNORE
+    return when (scanOutcome) {
+        PhotoBackupScanWorker.SCAN_OUTCOME_TOO_MANY_DOCUMENTS ->
+            PhotoBackupScanFailureDecision.IGNORE
+
+        PhotoBackupScanWorker.SCAN_OUTCOME_SOURCE_STATE_NOT_PERSISTED -> if (
+            currentSource.workId == expectedPeriodicWorkId
+        ) {
+            PhotoBackupScanFailureDecision.SHOW_SOURCE_STATE_UNAVAILABLE
+        } else {
+            PhotoBackupScanFailureDecision.IGNORE
+        }
+
+        else -> PhotoBackupScanFailureDecision.IGNORE
+    }
 }
 
 internal fun shouldDeleteFailedForegroundDownload(

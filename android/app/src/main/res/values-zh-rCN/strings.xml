@@ -173,6 +173,9 @@
     <string name="photo_backup_folder_enabled">满足安全备份条件时，App 会检查此文件夹中的新照片。</string>
     <string name="photo_backup_folder_disabled">已停止发现新照片。已加入队列的备份仍会显示在传输中心。</string>
     <string name="photo_backup_folder_permission_failed">无法持续访问所选文件夹。请重新选择，并允许持续访问。</string>
+    <string name="photo_backup_folder_too_large">所选文件夹中的项目过多，无法安全扫描。没有照片加入队列。请选择更小的文件夹以继续自动备份。</string>
+    <string name="photo_backup_source_state_unavailable">无法保存自动备份设置，未更改任何内容。请重试。</string>
+    <string name="download_state_unavailable">无法保存此下载，未开始下载。请重新选择保存位置。</string>
     <string name="favorite_add_failed">无法将此文件夹添加到收藏。请刷新后重试。</string>
     <string name="favorite_add_unverified">NAS 可能已添加此收藏。请先刷新确认，不要立即重复操作。</string>
     <string name="favorite_add_permission_denied">你没有添加此收藏的权限，请使用有权访问的账号。</string>
@@ -879,6 +882,8 @@
     <string name="shutdown_virtual_machine_title">关闭“%1$s”？</string>
     <string name="shutdown_virtual_machine_message">此虚拟机中运行的服务将暂时不可用，虚拟机内尚未保存的内容可能会丢失。</string>
     <string name="force_shutdown">强制关机</string>
+    <string name="force_shutdown_virtual_machine_title">强制关闭“%1$s”？</string>
+    <string name="force_shutdown_virtual_machine_message">这会直接切断虚拟机电源。未保存的工作和正在写入的数据可能丢失或损坏。仅在正常关机无效时使用。</string>
     <string name="restart">重新启动</string>
     <string name="protection_plans">保护计划</string>
     <string name="schedule_policies">计划策略</string>

@@ -13,6 +13,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.ResourceState
 import io.github.qwertyuiop1995.dsmnativeclient.data.parseVirtualizationLogs
 import io.github.qwertyuiop1995.dsmnativeclient.network.int
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -42,7 +43,7 @@ internal class ContainerRepository(
                 version = 1,
             ),
             "containers", "container", "data", "list",
-        )
+        ).map { it.toContainerReadOnlyResource() }
         val unavailable = mutableSetOf<ContainerSection>()
         suspend fun supplementary(
             section: ContainerSection,
@@ -51,13 +52,17 @@ internal class ContainerRepository(
             parameters: Map<String, String> = emptyMap(),
             vararg roots: String,
         ): List<ManagedResource> {
-            if (!gateway.supports(apiName)) {
+            if (!gateway.supportsVersion(apiName, 1)) {
                 unavailable += section
                 return emptyList()
             }
             return runCatching {
-                gateway.strictResources(gateway.call(apiName, method, parameters), *roots)
-            }.getOrElse {
+                gateway.strictResources(
+                    gateway.call(apiName, method, parameters, version = 1),
+                    *roots,
+                ).map { it.toContainerReadOnlyResource() }
+            }.getOrElse { error ->
+                error.rethrowIfContainerBoundaryFailure()
                 unavailable += section
                 emptyList()
             }
@@ -80,9 +85,15 @@ internal class ContainerRepository(
             "list",
             roots = arrayOf("projects", "project", "data", "list"),
         )
-        val eventData = if (gateway.supports("SYNO.Docker.Log")) runCatching {
-            gateway.call("SYNO.Docker.Log", "list", mapOf("offset" to "0", "limit" to "200"))
-        }.getOrElse {
+        val eventData = if (gateway.supportsVersion("SYNO.Docker.Log", 1)) runCatching {
+            gateway.call(
+                "SYNO.Docker.Log",
+                "list",
+                mapOf("offset" to "0", "limit" to "200"),
+                version = 1,
+            )
+        }.getOrElse { error ->
+            error.rethrowIfContainerBoundaryFailure()
             unavailable += ContainerSection.EVENTS
             null
         } else {
@@ -302,6 +313,26 @@ internal class ContainerRepository(
             root = "networks",
             method = "remove",
         )
+    }
+}
+
+private fun ManagedResource.toContainerReadOnlyResource(): ManagedResource = ManagedResource(
+    id = id,
+    name = name,
+    detail = "",
+    state = state,
+)
+
+private fun Throwable.rethrowIfContainerBoundaryFailure() {
+    if (this is CancellationException) {
+        throw this
+    }
+    val failure = this as? DsmFailure ?: return
+    if (
+        failure.kind == DsmErrorKind.SESSION_EXPIRED ||
+        failure.kind == DsmErrorKind.AUTHENTICATION_FAILED
+    ) {
+        throw failure
     }
 }
 

@@ -174,6 +174,9 @@
     <string name="photo_backup_folder_enabled">This folder will be checked for new photos while safe backup conditions are met.</string>
     <string name="photo_backup_folder_disabled">New-photo discovery stopped. Already queued backups remain visible in Transfers.</string>
     <string name="photo_backup_folder_permission_failed">The selected folder could not be kept available. Choose it again and allow continued access.</string>
+    <string name="photo_backup_folder_too_large">The selected folder has too many items to scan safely. No photos were queued. Choose a smaller folder to resume automatic backup.</string>
+    <string name="photo_backup_source_state_unavailable">Couldn’t save the automatic backup setting. No change was made. Try again.</string>
+    <string name="download_state_unavailable">Couldn’t save this download. Nothing was started. Choose the destination again.</string>
     <string name="favorite_add_failed">Couldn’t add this folder to favorites. Refresh and try again.</string>
     <string name="favorite_add_unverified">The NAS may have added this favorite. Refresh before trying again.</string>
     <string name="favorite_add_permission_denied">You don’t have permission to add this favorite. Use an account with access.</string>
@@ -885,6 +888,8 @@
     <string name="shutdown_virtual_machine_title">Shut down %1$s?</string>
     <string name="shutdown_virtual_machine_message">Services running in this virtual machine will become unavailable. Unsaved work inside it may be lost.</string>
     <string name="force_shutdown">Force shut down</string>
+    <string name="force_shutdown_virtual_machine_title">Force shut down %1$s?</string>
+    <string name="force_shutdown_virtual_machine_message">This cuts power to the virtual machine. Unsaved work and data in progress may be lost or damaged. Use this only if a normal shutdown does not work.</string>
     <string name="restart">Restart</string>
     <string name="protection_plans">Protection plans</string>
     <string name="schedule_policies">Schedule policies</string>

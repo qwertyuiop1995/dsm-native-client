@@ -87,6 +87,14 @@ class TransferStore(
         save(next)
     }
 
+    /**
+     * WorkManager 入队前保存任务事实；只有确认写入成功后调用方才能提交后台任务。
+     * 普通状态和进度更新继续使用 [upsert]/[update] 的异步写入，避免阻塞主线程。
+     */
+    @Synchronized
+    fun upsertDownloadDurably(download: PersistedDownload): Boolean =
+        saveDurably(all().filterNot { it.id == download.id } + download)
+
     @Synchronized
     fun update(id: String, transform: (PersistedDownload) -> PersistedDownload): PersistedDownload? {
         var updated: PersistedDownload? = null
@@ -95,6 +103,26 @@ class TransferStore(
         }
         if (updated != null) save(next)
         return updated
+    }
+
+    /**
+     * 仅用于入队边界的受保护替换。transform 返回 null 时表示记录已经不属于当前操作，
+     * 不写入也不覆盖较新的状态。
+     */
+    @Synchronized
+    fun updateDownloadDurably(
+        id: String,
+        transform: (PersistedDownload) -> PersistedDownload?,
+    ): PersistedDownload? {
+        var updated: PersistedDownload? = null
+        val next = all().map { current ->
+            if (current.id != id) {
+                current
+            } else {
+                transform(current)?.also { updated = it } ?: current
+            }
+        }
+        return updated?.takeIf { saveDurably(next) }
     }
 
     @Synchronized
@@ -301,9 +329,20 @@ class TransferStore(
 
     private fun save(downloads: List<PersistedDownload>) {
         preferences.edit()
-            .putString(KEY_DOWNLOADS, json.encodeToString(ListSerializer(PersistedDownload.serializer()), downloads))
+            .putString(
+                KEY_DOWNLOADS,
+                json.encodeToString(ListSerializer(PersistedDownload.serializer()), downloads),
+            )
             .apply()
     }
+
+    private fun saveDurably(downloads: List<PersistedDownload>): Boolean =
+        preferences.edit()
+            .putString(
+                KEY_DOWNLOADS,
+                json.encodeToString(ListSerializer(PersistedDownload.serializer()), downloads),
+            )
+            .commit()
 
     private fun allUploads(): List<PersistedUpload> {
         val value = preferences.getString(KEY_UPLOADS, null) ?: return emptyList()
@@ -394,12 +433,14 @@ class TransferStore(
     }
 
     private fun saveBackupSources(sources: List<PersistedPhotoBackupSource>) {
-        preferences.edit()
-            .putString(
-                KEY_BACKUP_SOURCES,
-                json.encodeToString(ListSerializer(PersistedPhotoBackupSource.serializer()), sources),
-            )
-            .apply()
+        check(
+            preferences.edit()
+                .putString(
+                    KEY_BACKUP_SOURCES,
+                    json.encodeToString(ListSerializer(PersistedPhotoBackupSource.serializer()), sources),
+                )
+                .commit(),
+        ) { "transfer.photo_backup_source_not_persisted" }
     }
 
     private companion object {
@@ -756,6 +797,8 @@ data class PersistedPhotoBackupSource(
     val destinationPath: String,
     val workId: String? = null,
     val enabled: Boolean = true,
+    /** 扫描上限触发后暂停来源，要求用户选择更小的目录再继续。 */
+    val needsAttention: Boolean = false,
 )
 
 internal fun TransferState.hasIncompleteDownloadDestination(): Boolean = this !in setOf(

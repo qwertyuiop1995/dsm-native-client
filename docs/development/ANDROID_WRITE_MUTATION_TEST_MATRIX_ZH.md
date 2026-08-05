@@ -10,7 +10,7 @@
 - 当前在 `AppViewModel`、跨 NAS 协调器、照片备份 Worker、VMM 本地映像导入 Worker 和
   `DsmRepository` 五个已审文件中识别 77 个
   `*Result` 调用点、64 个唯一方法，其中包含固定关闭与只读恢复调用；全部已进入下方
-  机器可读清单。四个文件的内容指纹、调用数量或生产源码中的调用文件集合变化时，
+  机器可读清单。五个文件的内容指纹、调用数量或生产源码中的调用文件集合变化时，
   `check_android_write_test_matrix.py` 会要求重新人工复核，不用正则猜测结果数据流。
 - 所有已开放写入口均已形成闭环，包括文件操作、Download Station、Chat、NAS 设置、
   账号与群组、套件及 VMM；VMM 本地映像 Worker 复用已审的 `uploadResult` 与

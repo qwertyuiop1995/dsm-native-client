@@ -7,9 +7,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.qwertyuiop1995.dsmnativeclient.domain.ResourceState
 import io.github.qwertyuiop1995.dsmnativeclient.ui.services.VirtualMachineEmptyContent
+import io.github.qwertyuiop1995.dsmnativeclient.ui.services.virtualMachineLifecycleCommands
 import io.github.qwertyuiop1995.dsmnativeclient.ui.services.virtualMachineTabSupportsDeletion
 import io.github.qwertyuiop1995.dsmnativeclient.ui.theme.LanStashTheme
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -66,5 +69,22 @@ class VirtualMachinesScreenUiTest {
         assertFalse(virtualMachineTabSupportsDeletion(3))
         assertTrue(virtualMachineTabSupportsDeletion(0))
         assertTrue(virtualMachineTabSupportsDeletion(4))
+    }
+
+    @Test
+    fun 虚拟机电源操作只显示与当前状态匹配的命令() {
+        assertEquals(
+            setOf("poweron"),
+            virtualMachineLifecycleCommands(ResourceState.STOPPED),
+        )
+        assertEquals(
+            setOf("shutdown", "poweroff"),
+            virtualMachineLifecycleCommands(ResourceState.RUNNING),
+        )
+        ResourceState.entries
+            .filter { it != ResourceState.STOPPED && it != ResourceState.RUNNING }
+            .forEach { state ->
+                assertTrue("$state 不应显示虚拟机电源操作", virtualMachineLifecycleCommands(state).isEmpty())
+            }
     }
 }

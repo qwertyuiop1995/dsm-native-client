@@ -230,6 +230,23 @@ class ConfirmationFontScaleMatrixTest {
     }
 
     @Test
+    fun 虚拟机强制关机确认在两倍字体下保留风险和操作() {
+        val context = context()
+        setTwoX {
+            VirtualMachineLifecycleConfirmationDialog(
+                vmTarget(command = "poweroff"),
+                "Synthetic VM",
+                { true },
+                { true },
+            )
+        }
+        assertVisible(context.getString(R.string.force_shutdown_virtual_machine_title, "Synthetic VM"))
+        assertVisible(context.getString(R.string.force_shutdown_virtual_machine_message), scroll = true)
+        assertAction(context.getString(R.string.force_shutdown))
+        assertAction(context.getString(R.string.cancel))
+    }
+
+    @Test
     fun 文件上传覆盖确认通过真实文件页在两倍字体下可达() {
         val context = context()
         val model = AppViewModel(ApplicationProvider.getApplicationContext<Application>())
@@ -410,12 +427,12 @@ class ConfirmationFontScaleMatrixTest {
         supportsSmartTest = true,
     )
 
-    private fun vmTarget() = VirtualMachineLifecycleTarget(
+    private fun vmTarget(command: String = "shutdown") = VirtualMachineLifecycleTarget(
         profileId = "synthetic-profile",
         resourceId = "synthetic-vm",
         operation = VirtualMachineLifecycleOperation.CONTROL,
         baselineState = ResourceState.RUNNING,
-        command = "shutdown",
+        command = command,
     )
 
     private fun workspace() = WorkspaceState(

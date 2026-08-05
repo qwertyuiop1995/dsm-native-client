@@ -628,13 +628,16 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                         Text(stringResource(R.string.virtual_machine_action_in_progress))
                     } else {
                         if (tab == 0) {
-                            ActionRow(Icons.Outlined.PlayArrow, stringResource(R.string.start)) {
-                                if (model.requestVirtualMachineLifecycleConfirmation(
-                                        resource.id,
-                                        VirtualMachineLifecycleOperation.CONTROL,
-                                        "poweron",
-                                    )
-                                ) selected = null
+                            val lifecycleCommands = virtualMachineLifecycleCommands(resource.state)
+                            if ("poweron" in lifecycleCommands) {
+                                ActionRow(Icons.Outlined.PlayArrow, stringResource(R.string.start)) {
+                                    if (model.requestVirtualMachineLifecycleConfirmation(
+                                            resource.id,
+                                            VirtualMachineLifecycleOperation.CONTROL,
+                                            "poweron",
+                                        )
+                                    ) selected = null
+                                }
                             }
                             if (state.supportsOfficialVirtualMachineSettings) {
                                 ActionRow(
@@ -644,13 +647,29 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                                     if (model.openVirtualMachineSettingsEditor(resource.id)) selected = null
                                 }
                             }
-                            ActionRow(Icons.Outlined.Pause, stringResource(R.string.normal_shutdown)) {
-                                if (model.requestVirtualMachineLifecycleConfirmation(
-                                        resource.id,
-                                        VirtualMachineLifecycleOperation.CONTROL,
-                                        "shutdown",
-                                    )
-                                ) selected = null
+                            if ("shutdown" in lifecycleCommands) {
+                                ActionRow(Icons.Outlined.Pause, stringResource(R.string.normal_shutdown)) {
+                                    if (model.requestVirtualMachineLifecycleConfirmation(
+                                            resource.id,
+                                            VirtualMachineLifecycleOperation.CONTROL,
+                                            "shutdown",
+                                        )
+                                    ) selected = null
+                                }
+                            }
+                            if ("poweroff" in lifecycleCommands) {
+                                ActionRow(
+                                    Icons.Outlined.WarningAmber,
+                                    stringResource(R.string.force_shutdown),
+                                    destructive = true,
+                                ) {
+                                    if (model.requestVirtualMachineLifecycleConfirmation(
+                                            resource.id,
+                                            VirtualMachineLifecycleOperation.CONTROL,
+                                            "poweroff",
+                                        )
+                                    ) selected = null
+                                }
                             }
                         }
                         if (virtualMachineTabSupportsDeletion(tab)) {
@@ -922,6 +941,12 @@ internal fun VirtualMachineEmptyContent(
 }
 
 internal fun virtualMachineTabSupportsDeletion(tab: Int): Boolean = tab == 0 || tab == 4
+
+internal fun virtualMachineLifecycleCommands(state: ResourceState): Set<String> = when (state) {
+    ResourceState.STOPPED -> setOf("poweron")
+    ResourceState.RUNNING -> setOf("shutdown", "poweroff")
+    else -> emptySet()
+}
 
 private fun VirtualMachineOverview.resourceName(
     operation: VirtualMachineLifecycleOperation,

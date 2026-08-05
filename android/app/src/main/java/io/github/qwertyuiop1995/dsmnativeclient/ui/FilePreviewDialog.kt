@@ -3,7 +3,9 @@ package io.github.qwertyuiop1995.dsmnativeclient.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
+import android.media.ExifInterface
 import android.media.MediaDataSource
 import android.media.MediaPlayer
 import android.net.Uri
@@ -25,7 +27,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -115,11 +119,19 @@ internal fun FilePreviewDialog(
 ) {
     var showDetails by rememberSaveable(item.path) { mutableStateOf(false) }
     val previewContent: @Composable () -> Unit = {
+        val contentModifier = if (embedded) {
+            Modifier.fillMaxSize()
+        } else {
+            Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .imePadding()
+        }
         Surface(
             modifier = modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
         ) {
-            Column(Modifier.fillMaxSize()) {
+            Column(contentModifier) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -411,7 +423,7 @@ private fun ImagePreview(content: FilePreviewContent.Image, onRetry: () -> Unit)
     }
     val result by produceState<BitmapResult>(BitmapResult.Loading, content.localFile.path) {
         value = withContext(Dispatchers.Default) {
-            runCatching { decodeSampledBitmap(content.localFile, MAX_IMAGE_DIMENSION) }
+            runCatching { decodePreviewBitmap(content.localFile, MAX_IMAGE_DIMENSION) }
                 .fold(BitmapResult::Ready) { BitmapResult.Failed }
         }
     }
@@ -970,6 +982,50 @@ internal fun decodeSampledBitmap(file: File, maximumDimension: Int): Bitmap {
         file.path,
         BitmapFactory.Options().apply { inSampleSize = sampleSize },
     ) ?: error("Unable to decode preview")
+}
+
+internal data class PreviewExifOrientationTransform(
+    val rotationDegrees: Int,
+    val mirrorHorizontally: Boolean,
+) {
+    companion object {
+        val Identity = PreviewExifOrientationTransform(rotationDegrees = 0, mirrorHorizontally = false)
+    }
+}
+
+internal fun previewExifOrientationTransform(orientation: Int): PreviewExifOrientationTransform = when (orientation) {
+    ExifInterface.ORIENTATION_NORMAL -> PreviewExifOrientationTransform.Identity
+    ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> PreviewExifOrientationTransform(0, true)
+    ExifInterface.ORIENTATION_ROTATE_180 -> PreviewExifOrientationTransform(180, false)
+    ExifInterface.ORIENTATION_FLIP_VERTICAL -> PreviewExifOrientationTransform(180, true)
+    ExifInterface.ORIENTATION_TRANSPOSE -> PreviewExifOrientationTransform(90, true)
+    ExifInterface.ORIENTATION_ROTATE_90 -> PreviewExifOrientationTransform(90, false)
+    ExifInterface.ORIENTATION_TRANSVERSE -> PreviewExifOrientationTransform(270, true)
+    ExifInterface.ORIENTATION_ROTATE_270 -> PreviewExifOrientationTransform(270, false)
+    else -> PreviewExifOrientationTransform.Identity
+}
+
+internal fun decodePreviewBitmap(file: File, maximumDimension: Int): Bitmap {
+    val decoded = decodeSampledBitmap(file, maximumDimension)
+    val orientation = runCatching {
+        ExifInterface(file.path).getAttributeInt(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL,
+        )
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    val transformed = applyPreviewExifOrientation(decoded, orientation)
+    if (transformed !== decoded) decoded.recycle()
+    return transformed
+}
+
+internal fun applyPreviewExifOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+    val transform = previewExifOrientationTransform(orientation)
+    if (transform == PreviewExifOrientationTransform.Identity) return bitmap
+    val matrix = Matrix().apply {
+        if (transform.rotationDegrees != 0) setRotate(transform.rotationDegrees.toFloat())
+        if (transform.mirrorHorizontally) postScale(-1f, 1f)
+    }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
 }
 
 private fun renderPdfPage(file: File, requestedPage: Int): RenderedPdfPage {

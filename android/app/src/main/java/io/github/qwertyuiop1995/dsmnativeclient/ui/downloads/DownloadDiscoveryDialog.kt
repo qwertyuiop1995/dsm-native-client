@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -17,11 +18,13 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
@@ -36,20 +39,30 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.annotation.StringRes
 import io.github.qwertyuiop1995.dsmnativeclient.AppViewModel
+import io.github.qwertyuiop1995.dsmnativeclient.DownloadRssRefreshVerification
+import io.github.qwertyuiop1995.dsmnativeclient.DownloadRssRefreshWorkspaceState
 import io.github.qwertyuiop1995.dsmnativeclient.DownloadCreationSourceKind
 import io.github.qwertyuiop1995.dsmnativeclient.Loadable
 import io.github.qwertyuiop1995.dsmnativeclient.R
 import io.github.qwertyuiop1995.dsmnativeclient.WorkspaceState
+import io.github.qwertyuiop1995.dsmnativeclient.canDismissDownloadRssRefreshMutation
+import io.github.qwertyuiop1995.dsmnativeclient.downloadRssRefreshRequiresReadback
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchResult
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadRssFeed
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadRssSite
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationErrorCategory
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResult
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
+import io.github.qwertyuiop1995.dsmnativeclient.localization.localize
 import io.github.qwertyuiop1995.dsmnativeclient.ui.EmptyState
 import io.github.qwertyuiop1995.dsmnativeclient.ui.LoadableContent
 import io.github.qwertyuiop1995.dsmnativeclient.ui.formatBytes
@@ -57,6 +70,60 @@ import java.text.DateFormat
 import java.util.Date
 
 private enum class DiscoveryTab { RSS, BT_SEARCH }
+
+internal data class DownloadRssRefreshFeedbackPolicy(
+    @StringRes val title: Int,
+    @StringRes val message: Int,
+)
+
+internal fun downloadRssRefreshFeedbackPolicy(
+    result: MutationResult,
+): DownloadRssRefreshFeedbackPolicy = when (result.status) {
+    MutationResultStatus.CONFIRMED_SUCCESS -> DownloadRssRefreshFeedbackPolicy(
+        R.string.download_rss_refresh_confirmed_title,
+        R.string.download_rss_refresh_confirmed_message,
+    )
+    MutationResultStatus.PARTIAL_SUCCESS -> DownloadRssRefreshFeedbackPolicy(
+        R.string.download_rss_refresh_partial_title,
+        R.string.download_rss_refresh_partial_message,
+    )
+    MutationResultStatus.SUBMITTED_BUT_UNVERIFIED -> DownloadRssRefreshFeedbackPolicy(
+        R.string.download_rss_refresh_check_title,
+        R.string.download_rss_refresh_unverified_message,
+    )
+    MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION -> DownloadRssRefreshFeedbackPolicy(
+        R.string.download_rss_refresh_check_title,
+        R.string.download_rss_refresh_cancel_after_submission_message,
+    )
+    MutationResultStatus.PERMISSION_DENIED -> DownloadRssRefreshFeedbackPolicy(
+        R.string.download_rss_refresh_permission_title,
+        R.string.download_rss_refresh_permission_message,
+    )
+    MutationResultStatus.UNSUPPORTED -> DownloadRssRefreshFeedbackPolicy(
+        R.string.download_rss_refresh_unavailable_title,
+        R.string.download_rss_refresh_unsupported_message,
+    )
+    MutationResultStatus.CANCELLED_BEFORE_SUBMISSION -> DownloadRssRefreshFeedbackPolicy(
+        R.string.download_rss_refresh_cancelled_title,
+        R.string.download_rss_refresh_cancelled_message,
+    )
+    MutationResultStatus.CONFIRMED_FAILURE -> DownloadRssRefreshFeedbackPolicy(
+        if (result.errorCategory == MutationErrorCategory.CONFLICT) {
+            R.string.download_rss_refresh_conflict_title
+        } else R.string.download_rss_refresh_failed_title,
+        if (result.errorCategory == MutationErrorCategory.CONFLICT) {
+            R.string.download_rss_refresh_conflict_message
+        } else R.string.download_rss_refresh_failed_message,
+    )
+}
+
+@StringRes
+internal fun DownloadRssRefreshVerification.messageResource(): Int = when (this) {
+    DownloadRssRefreshVerification.MATCHES -> R.string.download_rss_refresh_verification_matches
+    DownloadRssRefreshVerification.DIFFERS -> R.string.download_rss_refresh_verification_differs
+    DownloadRssRefreshVerification.DISAPPEARED -> R.string.download_rss_refresh_verification_disappeared
+    DownloadRssRefreshVerification.UNAVAILABLE -> R.string.download_rss_refresh_verification_unavailable
+}
 
 @Composable
 internal fun DownloadDiscoveryDialog(
@@ -142,7 +209,10 @@ private fun DownloadRssContent(
         ) { sites -> DownloadRssSiteList(sites, model::selectDownloadRssSite) }
         return
     }
-    val refreshing = state.downloadRssRefreshInProgressSiteId == selected.id || selected.isUpdating
+    val refreshState = state.downloadRssRefreshState
+    val ownsRefreshResult = refreshState.target?.siteId == selected.id
+    val refreshing = ownsRefreshResult &&
+        (refreshState.mutationInProgress || refreshState.mutationRefreshInProgress) || selected.isUpdating
     Column {
         TextButton(onClick = model::loadDownloadRssSites) {
             Text(stringResource(R.string.download_rss_back_to_sites))
@@ -160,7 +230,8 @@ private fun DownloadRssContent(
             Spacer(Modifier.width(8.dp))
             TextButton(
                 onClick = model::refreshSelectedDownloadRssSite,
-                enabled = !refreshing,
+                enabled = !refreshing && !ownsRefreshResult,
+                modifier = Modifier.heightIn(min = 48.dp),
             ) {
                 if (refreshing) {
                     CircularProgressIndicator(Modifier.size(18.dp))
@@ -174,13 +245,11 @@ private fun DownloadRssContent(
                 )
             }
         }
-        state.downloadRssRefreshFeedback?.let { feedback ->
-            Text(
-                feedback,
-                modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .semantics { liveRegion = LiveRegionMode.Polite },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        if (refreshState.target?.siteId == selected.id) {
+            DownloadRssRefreshMutationFeedback(
+                state = refreshState,
+                onRecheck = model::recheckDownloadRssRefresh,
+                onDismiss = { model.dismissDownloadRssRefreshMutation() },
             )
         }
         LoadableContent(
@@ -194,6 +263,105 @@ private fun DownloadRssContent(
                 canCreateTask = canCreateTask,
                 onCreateTask = onCreateTask,
             )
+        }
+    }
+}
+
+@Composable
+internal fun DownloadRssRefreshMutationFeedback(
+    state: DownloadRssRefreshWorkspaceState,
+    onRecheck: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val result = state.mutationResult
+    val policy = result?.let(::downloadRssRefreshFeedbackPolicy)
+    val busy = state.mutationInProgress || state.mutationRefreshInProgress
+    val canDismiss = canDismissDownloadRssRefreshMutation(state)
+    val canRecheck = !busy && downloadRssRefreshRequiresReadback(state)
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+        ) {
+            if (busy) {
+                Text(
+                    stringResource(
+                        if (state.mutationInProgress) {
+                            R.string.download_rss_refresh_in_progress_title
+                        } else R.string.download_rss_refresh_checking_title,
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(
+                        if (state.mutationInProgress) {
+                            R.string.download_rss_refresh_in_progress_message
+                        } else R.string.download_rss_refresh_checking_message,
+                    ),
+                )
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            } else {
+                Column(Modifier.semantics { liveRegion = LiveRegionMode.Assertive }) {
+                    Text(
+                        when {
+                            state.mutationFailure != null -> stringResource(R.string.download_rss_refresh_failed_title)
+                            state.mutationRefreshFailure != null -> stringResource(R.string.download_rss_refresh_check_failed_title)
+                            else -> stringResource(checkNotNull(policy).title)
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    when {
+                        state.mutationFailure != null -> Text(state.mutationFailure.localize(context).combined)
+                        state.mutationRefreshFailure != null -> Text(
+                            state.mutationRefreshFailure.localize(context).combined,
+                        )
+                        policy != null -> Text(stringResource(policy.message))
+                    }
+                    result?.counts?.let { counts ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            stringResource(
+                                R.string.download_rss_refresh_counts,
+                                counts.succeeded,
+                                counts.failed,
+                                counts.unknown,
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    state.mutationVerification?.let { verification ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            stringResource(verification.messageResource()),
+                        )
+                    }
+                }
+            }
+            if (canRecheck || canDismiss) {
+                Spacer(Modifier.height(8.dp))
+                Column(Modifier.fillMaxWidth()) {
+                    if (canRecheck) {
+                        TextButton(
+                            onClick = onRecheck,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) { Text(stringResource(R.string.download_rss_refresh_recheck)) }
+                    }
+                    if (canRecheck && canDismiss) Spacer(Modifier.height(4.dp))
+                    if (canDismiss) {
+                        Button(
+                            onClick = onDismiss,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) { Text(stringResource(R.string.download_rss_refresh_close_checked)) }
+                    }
+                }
+            }
         }
     }
 }

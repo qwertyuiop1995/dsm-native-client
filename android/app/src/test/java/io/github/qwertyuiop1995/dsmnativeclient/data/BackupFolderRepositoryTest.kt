@@ -2,6 +2,7 @@ package io.github.qwertyuiop1995.dsmnativeclient.data
 
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ApiCapability
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmApiClient
 import kotlinx.coroutines.runBlocking
@@ -28,7 +29,10 @@ class BackupFolderRepositoryTest {
             """{"success":true,"data":{"files":[{"name":"旅行","path":"/photo/移动备份/旅行","isdir":true,"additional":{"perm":{"write":true}}}]}}""",
         )
 
-        repository(transport).ensureSubdirectory("/photo/移动备份", "/photo/移动备份/旅行")
+        val result = repository(transport).ensureSubdirectoryResult(
+            "/photo/移动备份",
+            "/photo/移动备份/旅行",
+        )
 
         assertEquals(
             listOf("list", "getinfo", "list", "create", "getinfo"),
@@ -36,6 +40,9 @@ class BackupFolderRepositoryTest {
         )
         assertEquals("/photo/移动备份", transport.requests[3].backupFields()["folder_path"])
         assertEquals("旅行", transport.requests[3].backupFields()["name"])
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(1, result.counts.succeeded)
+        assertTrue(result.submitted)
     }
 
     @Test
@@ -50,6 +57,97 @@ class BackupFolderRepositoryTest {
         assertTrue(transport.requests.isEmpty())
     }
 
+    @Test
+    fun `后续层级失败时保留已创建层级和部分成功语义`() = runBlocking {
+        val transport = BackupFolderInterceptor(
+            emptyListResponse,
+            infoResponse("移动备份", "/photo/移动备份"),
+            emptyListResponse,
+            successResponse,
+            infoResponse("旅行", "/photo/移动备份/旅行"),
+            emptyListResponse,
+            infoResponse("旅行", "/photo/移动备份/旅行"),
+            emptyListResponse,
+            successResponse,
+            emptyListResponse,
+            emptyListResponse,
+        )
+
+        val result = repository(transport).ensureSubdirectoryResult(
+            "/photo/移动备份",
+            "/photo/移动备份/旅行/夏天",
+        )
+
+        assertEquals(MutationResultStatus.PARTIAL_SUCCESS, result.status)
+        assertEquals(1, result.counts.succeeded)
+        assertEquals(1, result.counts.failed)
+        assertEquals(0, result.counts.unknown)
+        assertTrue(result.submitted)
+        assertTrue(result.requiresRefresh)
+        assertEquals(2, transport.requests.count { it.backupFields()["method"] == "create" })
+    }
+
+    @Test
+    fun `提交后无法读回时保留未知且不重放创建`() = runBlocking {
+        val transport = BackupFolderInterceptor(
+            emptyListResponse,
+            infoResponse("移动备份", "/photo/移动备份"),
+            emptyListResponse,
+            successResponse,
+            "{",
+            "{",
+        )
+
+        val result = repository(transport).ensureSubdirectoryResult(
+            "/photo/移动备份",
+            "/photo/移动备份/旅行",
+        )
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertEquals(1, result.counts.unknown)
+        assertTrue(result.submitted)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, transport.requests.count { it.backupFields()["method"] == "create" })
+    }
+
+    @Test
+    fun `并发创建只有读回确认为目录后才算成功`() = runBlocking {
+        val transport = BackupFolderInterceptor(
+            emptyListResponse,
+            infoResponse("移动备份", "/photo/移动备份"),
+            listResponse("旅行", "/photo/移动备份/旅行"),
+            infoResponse("旅行", "/photo/移动备份/旅行"),
+        )
+
+        val result = repository(transport).ensureSubdirectoryResult(
+            "/photo/移动备份",
+            "/photo/移动备份/旅行",
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(1, result.counts.succeeded)
+        assertEquals(0, transport.requests.count { it.backupFields()["method"] == "create" })
+        assertEquals("getinfo", transport.requests.last().backupFields()["method"])
+    }
+
+    @Test
+    fun `取消发生在提交前后时返回不同状态`() {
+        val repository = repository(BackupFolderInterceptor())
+        val beforeResult = repository.backupFolderEnsureCancellationResult(0, false, 0)
+        assertEquals(MutationResultStatus.CANCELLED_BEFORE_SUBMISSION, beforeResult.status)
+        assertTrue(!beforeResult.submitted)
+
+        val afterResult = repository.backupFolderEnsureCancellationResult(1, true, 1)
+        assertEquals(
+            MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+            afterResult.status,
+        )
+        assertTrue(afterResult.submitted)
+        assertTrue(afterResult.requiresRefresh)
+        assertEquals(1, afterResult.counts.succeeded)
+        assertEquals(1, afterResult.counts.unknown)
+    }
+
     private fun repository(interceptor: Interceptor) = DsmRepository(
         NasProfile("test", "Test", "https://nas.example.invalid", "tester"),
         DsmSession("test", "test-session", "test-token"),
@@ -59,6 +157,17 @@ class BackupFolderRepositoryTest {
             ApiCapability("SYNO.FileStation.CreateFolder", "entry.cgi", 1, 2),
         ).associateBy(ApiCapability::name),
     )
+
+    private companion object {
+        const val emptyListResponse = """{"success":true,"data":{"offset":0,"total":0,"files":[]}}"""
+        const val successResponse = """{"success":true,"data":{}}"""
+
+        fun infoResponse(name: String, path: String) =
+            """{"success":true,"data":{"files":[{"name":"$name","path":"$path","isdir":true,"additional":{"perm":{"write":true}}}]}}"""
+
+        fun listResponse(name: String, path: String) =
+            """{"success":true,"data":{"offset":0,"total":1,"files":[{"name":"$name","path":"$path","isdir":true,"additional":{"perm":{"write":true}}}]}}"""
+    }
 }
 
 private class BackupFolderInterceptor(vararg responses: String) : Interceptor {

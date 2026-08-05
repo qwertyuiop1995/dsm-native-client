@@ -84,13 +84,14 @@ class DownloadDiscoveryDialogTest {
     fun RSS刷新中禁用重复操作并显示即时反馈() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val model = AppViewModel(ApplicationProvider.getApplicationContext<Application>())
-        val feedback = context.getString(R.string.download_rss_refresh_requested)
         rule.setContent {
             LanStashTheme {
                 DownloadDiscoveryDialog(
                     state = populatedState().copy(
-                        downloadRssRefreshInProgressSiteId = "site-1",
-                        downloadRssRefreshFeedback = feedback,
+                        downloadRssRefreshState = DownloadRssRefreshWorkspaceState(
+                            target = DownloadRssRefreshTarget("test", "site-1"),
+                            mutationInProgress = true,
+                        ),
                     ),
                     model = model,
                     canCreateTask = true,
@@ -102,7 +103,8 @@ class DownloadDiscoveryDialogTest {
 
         rule.onNodeWithText(context.getString(R.string.download_rss_updating))
             .assertIsDisplayed().assertIsNotEnabled()
-        rule.onNodeWithText(feedback).assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.download_rss_refresh_in_progress_message))
+            .assertIsDisplayed()
     }
 
     private fun populatedState() = baseState().copy(

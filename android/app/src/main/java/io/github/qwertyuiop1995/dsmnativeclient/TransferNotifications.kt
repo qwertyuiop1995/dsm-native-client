@@ -73,17 +73,30 @@ internal object TransferNotifications {
         taskId: String,
         succeeded: Boolean,
         direction: TransferDirection = TransferDirection.DOWNLOAD,
+    ) = completion(
+        context,
+        taskId,
+        if (succeeded) TransferCompletionOutcome.SUCCESS else TransferCompletionOutcome.FAILURE,
+        direction,
+    )
+
+    @SuppressLint("MissingPermission")
+    fun completion(
+        context: Context,
+        taskId: String,
+        outcome: TransferCompletionOutcome,
+        direction: TransferDirection = TransferDirection.DOWNLOAD,
     ) {
         ensureChannel(context)
         if (!canPostNotifications(context)) return
         val title = completionNotificationTitle(
             direction = direction,
-            succeeded = succeeded,
+            outcome = outcome,
             isPhotoBackup = isPhotoBackup(context, taskId, direction),
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(
-                if (succeeded) android.R.drawable.stat_sys_download_done
+                if (outcome == TransferCompletionOutcome.SUCCESS) android.R.drawable.stat_sys_download_done
                 else android.R.drawable.stat_notify_error,
             )
             .setContentTitle(context.getString(title))
@@ -145,6 +158,8 @@ internal data class ForegroundNotificationContent(
     val status: Int,
 )
 
+internal enum class TransferCompletionOutcome { SUCCESS, FAILURE, CANCELLED, NEEDS_REVIEW }
+
 internal fun foregroundNotificationContent(
     direction: TransferDirection,
     state: TransferState,
@@ -180,12 +195,31 @@ internal fun completionNotificationTitle(
     direction: TransferDirection,
     succeeded: Boolean,
     isPhotoBackup: Boolean,
+): Int = completionNotificationTitle(
+    direction,
+    if (succeeded) TransferCompletionOutcome.SUCCESS else TransferCompletionOutcome.FAILURE,
+    isPhotoBackup,
+)
+
+internal fun completionNotificationTitle(
+    direction: TransferDirection,
+    outcome: TransferCompletionOutcome,
+    isPhotoBackup: Boolean,
 ): Int = when {
-    direction == TransferDirection.DOWNLOAD && succeeded -> R.string.notification_download_completed
+    outcome == TransferCompletionOutcome.CANCELLED && isPhotoBackup ->
+        R.string.notification_backup_cancelled
+    outcome == TransferCompletionOutcome.CANCELLED -> R.string.notification_upload_cancelled
+    outcome == TransferCompletionOutcome.NEEDS_REVIEW && isPhotoBackup ->
+        R.string.notification_backup_needs_review
+    outcome == TransferCompletionOutcome.NEEDS_REVIEW ->
+        R.string.notification_upload_needs_review
+    direction == TransferDirection.DOWNLOAD && outcome == TransferCompletionOutcome.SUCCESS ->
+        R.string.notification_download_completed
     direction == TransferDirection.DOWNLOAD -> R.string.notification_download_failed
-    isPhotoBackup && succeeded -> R.string.notification_backup_completed
+    isPhotoBackup && outcome == TransferCompletionOutcome.SUCCESS ->
+        R.string.notification_backup_completed
     isPhotoBackup -> R.string.notification_backup_failed
-    succeeded -> R.string.notification_upload_completed
+    outcome == TransferCompletionOutcome.SUCCESS -> R.string.notification_upload_completed
     else -> R.string.notification_upload_failed
 }
 

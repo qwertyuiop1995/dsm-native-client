@@ -3,6 +3,10 @@ package io.github.qwertyuiop1995.dsmnativeclient.data
 import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationErrorCategory
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResult
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultCounts
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferState
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -94,7 +98,7 @@ class TransferStore(
         )
         saveUploads(
             allUploads().filterNot {
-                it.profileId == profileId && it.state in TERMINAL_STATES
+                it.profileId == profileId && it.canRemoveFinishedUpload()
             },
         )
     }
@@ -132,9 +136,11 @@ class TransferStore(
     }
 
     private fun saveUploads(uploads: List<PersistedUpload>) {
-        preferences.edit()
+        check(
+            preferences.edit()
             .putString(KEY_UPLOADS, json.encodeToString(ListSerializer(PersistedUpload.serializer()), uploads))
-            .apply()
+            .commit(),
+        ) { "transfer.upload_state_not_persisted" }
     }
 
     private fun allBackupSources(): List<PersistedPhotoBackupSource> {
@@ -206,6 +212,43 @@ data class PersistedUpload(
     val requiresRefresh: Boolean = false,
     val mirrorDirectories: Boolean = false,
     val startedAtEpochMillis: Long? = null,
+    val directoryMutationResult: PersistedMutationResult? = null,
+    val uploadMutationResult: PersistedMutationResult? = null,
+)
+
+/** 仅保留恢复与结果展示所需的稳定语义，不保存响应、路径、凭据或用户数据。 */
+@Serializable
+data class PersistedMutationResult(
+    val status: MutationResultStatus = MutationResultStatus.CONFIRMED_FAILURE,
+    val submitted: Boolean = false,
+    val requiresRefresh: Boolean = false,
+    val counts: MutationResultCounts = MutationResultCounts(0, 0, 0),
+    val errorCategory: MutationErrorCategory? = null,
+    val diagnosticTag: String? = null,
+    val writeSubmitted: Boolean = false,
+)
+
+internal fun MutationResult.toPersistedMutationResult(
+    writeSubmitted: Boolean = submitted,
+) = PersistedMutationResult(
+    status = status,
+    submitted = submitted,
+    requiresRefresh = requiresRefresh,
+    counts = counts,
+    errorCategory = errorCategory,
+    diagnosticTag = diagnosticTag,
+    writeSubmitted = writeSubmitted,
+)
+
+internal fun PersistedMutationResult.toMutationResult(operation: String) = MutationResult(
+    schemaVersion = 1,
+    status = status,
+    operation = operation,
+    submitted = submitted,
+    requiresRefresh = requiresRefresh,
+    counts = counts,
+    errorCategory = errorCategory,
+    diagnosticTag = diagnosticTag,
 )
 
 @Serializable
@@ -222,3 +265,7 @@ internal fun TransferState.hasIncompleteDownloadDestination(): Boolean = this !i
     TransferState.FAILED,
     TransferState.CANCELLED,
 )
+
+internal fun PersistedUpload.canRemoveFinishedUpload(): Boolean =
+    state in setOf(TransferState.SUCCEEDED, TransferState.FAILED, TransferState.CANCELLED) &&
+        !requiresRefresh

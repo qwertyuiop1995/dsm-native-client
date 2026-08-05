@@ -1,5 +1,6 @@
 package io.github.qwertyuiop1995.dsmnativeclient.ui.transfers
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -59,6 +60,8 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskPage
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskState
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskSummary
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationVerification
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResult
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferDirection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferState
 import io.github.qwertyuiop1995.dsmnativeclient.localization.localize
@@ -76,6 +79,44 @@ internal enum class TransferSourceFilter {
 internal enum class TransferPage { APP_TRANSFERS, FILE_TASKS }
 
 internal enum class FileBackgroundTaskFilter { ALL, ACTIVE, FINISHED }
+
+internal data class UploadMutationFeedbackPolicy(
+    @StringRes val stage: Int,
+    @StringRes val message: Int,
+    val result: MutationResult,
+)
+
+internal fun uploadMutationFeedbackPolicy(
+    task: io.github.qwertyuiop1995.dsmnativeclient.domain.TransferTask,
+): UploadMutationFeedbackPolicy? {
+    val lifecycle = task.uploadMutation ?: return null
+    val uploadResult = lifecycle.uploadResult
+    val result = uploadResult ?: lifecycle.directoryResult ?: return null
+    if (uploadResult == null && result.status == MutationResultStatus.CONFIRMED_SUCCESS &&
+        task.state == TransferState.FAILED
+    ) return null
+    val stage = if (uploadResult != null) {
+        R.string.transfer_mutation_upload_stage
+    } else {
+        R.string.transfer_mutation_folder_stage
+    }
+    val message = when (result.status) {
+        MutationResultStatus.CONFIRMED_SUCCESS -> if (uploadResult != null) {
+            R.string.transfer_mutation_upload_confirmed
+        } else {
+            R.string.transfer_mutation_folder_confirmed
+        }
+        MutationResultStatus.PARTIAL_SUCCESS -> R.string.service_action_partial
+        MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+        MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+        -> R.string.service_action_unverified
+        MutationResultStatus.PERMISSION_DENIED -> R.string.service_action_permission_denied
+        MutationResultStatus.UNSUPPORTED -> R.string.service_action_unsupported
+        MutationResultStatus.CANCELLED_BEFORE_SUBMISSION -> R.string.service_action_cancelled
+        MutationResultStatus.CONFIRMED_FAILURE -> R.string.service_action_failed
+    }
+    return UploadMutationFeedbackPolicy(stage, message, result)
+}
 
 internal fun TransferSourceFilter.matches(direction: TransferDirection): Boolean = when (this) {
     TransferSourceFilter.ALL -> true
@@ -522,9 +563,13 @@ internal fun TransferTaskDetails(
     nowEpochMillis: Long = System.currentTimeMillis(),
 ) {
     val fileServerMutation = task.fileServerMutation
+    val uploadMutationFeedback = uploadMutationFeedbackPolicy(task)
     val statusLiveRegion = if (
         task.errorMessage != null || task.requiresRefresh || fileServerMutation?.refreshFailure != null ||
-        fileServerMutation?.verification?.let { it != FileServerMutationVerification.MATCHES } == true
+        fileServerMutation?.verification?.let { it != FileServerMutationVerification.MATCHES } == true ||
+        uploadMutationFeedback?.result?.status?.let {
+            it != MutationResultStatus.CONFIRMED_SUCCESS
+        } == true
     ) {
         LiveRegionMode.Assertive
     } else {
@@ -616,6 +661,35 @@ internal fun TransferTaskDetails(
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
                 )
+            }
+            uploadMutationFeedback?.let { feedback ->
+                Text(
+                    stringResource(feedback.stage),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    stringResource(feedback.message),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (feedback.result.status == MutationResultStatus.CONFIRMED_SUCCESS) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+                feedback.result.counts.takeIf {
+                    it.succeeded > 0 || it.failed > 0 || it.unknown > 0
+                }?.let { counts ->
+                    Text(
+                        stringResource(
+                            R.string.transfer_mutation_counts,
+                            counts.succeeded,
+                            counts.failed,
+                            counts.unknown,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
             fileServerMutation?.refreshFailure?.let { failure ->
                 Text(

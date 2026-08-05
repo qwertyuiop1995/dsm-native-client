@@ -30,6 +30,9 @@ import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedUpload
 import io.github.qwertyuiop1995.dsmnativeclient.data.PhotoRepository
 import io.github.qwertyuiop1995.dsmnativeclient.data.TransferStore
 import io.github.qwertyuiop1995.dsmnativeclient.data.hasIncompleteDownloadDestination
+import io.github.qwertyuiop1995.dsmnativeclient.data.canRemoveFinishedUpload
+import io.github.qwertyuiop1995.dsmnativeclient.data.toMutationResult
+import io.github.qwertyuiop1995.dsmnativeclient.data.toPersistedMutationResult
 import io.github.qwertyuiop1995.dsmnativeclient.data.UploadSource
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ArchiveCompressionLevel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ArchiveFormat
@@ -105,6 +108,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.RecycleLocation
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferDirection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.UploadMutationLifecycle
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineOverview
 import io.github.qwertyuiop1995.dsmnativeclient.domain.WorkspaceRoute
 import io.github.qwertyuiop1995.dsmnativeclient.domain.WorkspaceRouteStack
@@ -884,6 +888,45 @@ data class DownloadSettingsWorkspaceState(
     val mutationGeneration: Long = 0L,
 )
 
+data class DownloadRssRefreshTarget(
+    val profileId: String,
+    val siteId: String,
+    val baselineLastUpdatedAtEpochSeconds: Long? = null,
+) {
+    init {
+        require(profileId.isNotBlank()) { "download_rss_refresh.invalid_profile" }
+        require(siteId.isNotBlank() && siteId == siteId.trim()) {
+            "download_rss_refresh.invalid_site"
+        }
+    }
+}
+
+enum class DownloadRssRefreshVerification {
+    MATCHES,
+    DIFFERS,
+    DISAPPEARED,
+    UNAVAILABLE,
+}
+
+data class DownloadRssRefreshWorkspaceState(
+    val target: DownloadRssRefreshTarget? = null,
+    val mutationInProgress: Boolean = false,
+    val mutationResult: MutationResult? = null,
+    val mutationFailure: DsmFailure? = null,
+    val mutationRefreshFailure: DsmFailure? = null,
+    val mutationRefreshInProgress: Boolean = false,
+    val mutationRefreshCompleted: Boolean = false,
+    val mutationVerification: DownloadRssRefreshVerification? = null,
+    val mutationGeneration: Long = 0L,
+)
+
+private data class DownloadRssRefreshClaim(
+    val repository: DsmRepository,
+    val profileId: String,
+    val target: DownloadRssRefreshTarget,
+    val generation: Long,
+)
+
 private data class DownloadSettingsMutationClaim(
     val repository: DsmRepository,
     val profileId: String,
@@ -1596,8 +1639,8 @@ data class WorkspaceState(
     val downloadRssSites: Loadable<List<DownloadRssSite>> = Loadable.Idle,
     val selectedDownloadRssSite: DownloadRssSite? = null,
     val downloadRssFeeds: Loadable<List<DownloadRssFeed>> = Loadable.Idle,
-    val downloadRssRefreshInProgressSiteId: String? = null,
-    val downloadRssRefreshFeedback: String? = null,
+    val downloadRssRefreshState: DownloadRssRefreshWorkspaceState =
+        DownloadRssRefreshWorkspaceState(),
     val downloadBtSearchResults: Loadable<List<DownloadBtSearchResult>> = Loadable.Idle,
     val downloadDestinationPicker: DownloadDestinationPickerState? = null,
     val downloadDestinationFolders: Loadable<FilePage> = Loadable.Idle,
@@ -2052,6 +2095,78 @@ internal fun cancelledDownloadSettingsResult(): MutationResult = MutationResult(
     counts = MutationResultCounts(succeeded = 0, failed = 0, unknown = 0),
     diagnosticTag = "download-station.settings.cancelled-before-submission",
 )
+
+internal fun downloadRssRefreshCallbackMatches(
+    repositoryMatches: Boolean,
+    profileMatches: Boolean,
+    selectedModule: Module,
+    selectedSiteId: String?,
+    stateTarget: DownloadRssRefreshTarget?,
+    callbackTarget: DownloadRssRefreshTarget,
+    stateGeneration: Long,
+    callbackGeneration: Long,
+    globalGeneration: Long,
+): Boolean = repositoryMatches && profileMatches && selectedModule == Module.DOWNLOADS &&
+    selectedSiteId == callbackTarget.siteId && stateTarget == callbackTarget &&
+    stateGeneration == callbackGeneration && globalGeneration == callbackGeneration
+
+internal fun cancelledDownloadRssRefreshResult(): MutationResult = MutationResult(
+    schemaVersion = 1,
+    status = MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+    operation = "downloadRssRefresh",
+    submitted = false,
+    requiresRefresh = false,
+    counts = MutationResultCounts(succeeded = 0, failed = 0, unknown = 0),
+    diagnosticTag = "download-station.rss-refresh.cancelled-before-submission",
+)
+
+internal fun downloadRssRefreshVerification(
+    target: DownloadRssRefreshTarget,
+    sites: List<DownloadRssSite>?,
+    feeds: List<DownloadRssFeed>?,
+): DownloadRssRefreshVerification {
+    if (sites == null) return DownloadRssRefreshVerification.UNAVAILABLE
+    val matches = sites.filter { it.id.trim() == target.siteId }
+    return when {
+        matches.isEmpty() -> DownloadRssRefreshVerification.DISAPPEARED
+        matches.size != 1 -> DownloadRssRefreshVerification.DIFFERS
+        feeds == null -> DownloadRssRefreshVerification.UNAVAILABLE
+        matches.single().isUpdating -> DownloadRssRefreshVerification.UNAVAILABLE
+        matches.single().lastUpdatedAtEpochSeconds?.let { observed ->
+            target.baselineLastUpdatedAtEpochSeconds?.let { observed > it } ?: true
+        } == true -> DownloadRssRefreshVerification.MATCHES
+        else -> DownloadRssRefreshVerification.DIFFERS
+    }
+}
+
+internal fun downloadRssRefreshRequiresReadback(
+    state: DownloadRssRefreshWorkspaceState,
+): Boolean = state.mutationFailure != null || state.mutationResult?.let { result ->
+    result.submitted || result.requiresRefresh || result.counts.unknown > 0 ||
+        result.status in setOf(
+            MutationResultStatus.PARTIAL_SUCCESS,
+            MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+            MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+        )
+} == true
+
+internal fun canDismissDownloadRssRefreshMutation(
+    state: DownloadRssRefreshWorkspaceState,
+): Boolean {
+    if (state.target == null || state.mutationInProgress || state.mutationRefreshInProgress) return false
+    if (!downloadRssRefreshRequiresReadback(state)) {
+        return state.mutationResult != null || state.mutationFailure != null
+    }
+    return state.mutationRefreshCompleted && state.mutationRefreshFailure == null &&
+        state.mutationVerification != null &&
+        state.mutationVerification != DownloadRssRefreshVerification.UNAVAILABLE
+}
+
+internal fun downloadRssRefreshBlocksWorkspaceExit(
+    state: DownloadRssRefreshWorkspaceState,
+): Boolean = state.mutationInProgress || state.mutationRefreshInProgress ||
+    state.target != null && downloadRssRefreshRequiresReadback(state) &&
+    !state.mutationRefreshCompleted
 
 internal fun virtualMachineMutationTarget(
     profileId: String,
@@ -3057,6 +3172,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadCreationMutationGeneration = AtomicLong(0)
     private val downloadControlMutationGeneration = AtomicLong(0)
     private val downloadSettingsMutationGeneration = AtomicLong(0)
+    private val downloadRssRefreshMutationGeneration = AtomicLong(0)
     private val virtualMachineMutationGeneration = AtomicLong(0)
     private val virtualMachineOverviewRequestGeneration = AtomicLong(0)
     private val chatMutationGeneration = AtomicLong(0)
@@ -3071,6 +3187,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val fileStationMutationLock = downloadMutationCoordinatorLock
     private val downloadControlMutationLock = downloadMutationCoordinatorLock
     private val downloadSettingsMutationLock = downloadMutationCoordinatorLock
+    private val downloadRssRefreshMutationLock = downloadMutationCoordinatorLock
     // VMM 创建、设置、生命周期写操作与工作区退出共用同步 claim 边界。
     private val virtualMachineMutationLock = downloadMutationCoordinatorLock
     private val diskTestStatusRequestGeneration = AtomicLong(0)
@@ -3482,7 +3599,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             state.selectedModule == Module.DOWNLOADS && module != Module.DOWNLOADS &&
             (downloadCreationBlocksWorkspaceExit(state.downloadCreationState) ||
                 downloadControlBlocksWorkspaceExit(state.downloadControlState) ||
-                downloadSettingsBlocksWorkspaceExit(state.downloadSettingsState))
+                downloadSettingsBlocksWorkspaceExit(state.downloadSettingsState) ||
+                downloadRssRefreshBlocksWorkspaceExit(state.downloadRssRefreshState))
         ) {
             _workspace.update {
                 it?.copy(
@@ -8108,7 +8226,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val download = transferStore.download(id)
         if (download?.state == TransferState.FAILED && !download.isDirectory) return true
         val upload = transferStore.upload(id) ?: return false
-        return !upload.backupMode && upload.state in setOf(
+        return upload.state in setOf(
             TransferState.FAILED,
             TransferState.CANCELLED,
         )
@@ -8160,6 +8278,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 completedBytes = it.expectedBytes,
                                 errorKind = null,
                                 requiresRefresh = false,
+                                uploadMutationResult = confirmedUploadReadbackResult()
+                                    .toPersistedMutationResult(writeSubmitted = false),
                             )
                         }
                         syncPersistedDownloads(upload.profileId)
@@ -8173,6 +8293,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     RetryUploadDecision.CONFLICT -> {
+                        transferStore.updateUpload(id) {
+                            it.copy(
+                                state = TransferState.FAILED,
+                                errorKind = DsmErrorKind.UPLOAD_FAILED.name,
+                                requiresRefresh = false,
+                                uploadMutationResult = uploadTargetConflictResult()
+                                    .toPersistedMutationResult(writeSubmitted = false),
+                            )
+                        }
+                        syncPersistedDownloads(upload.profileId)
                         _workspace.update {
                             it?.copy(
                                 isPerformingAction = false,
@@ -8190,6 +8320,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 errorKind = null,
                                 workId = null,
                                 requiresRefresh = false,
+                                directoryMutationResult = null,
+                                uploadMutationResult = null,
                             )
                         }
                         _workspace.update {
@@ -8231,13 +8363,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     releasePersistedDownloadPermission(destination)
                 }
             val uploads = transferStore.uploads(profileId)
-            uploads
-                .filter { it.state in TERMINAL_TRANSFER_STATES && it.ownsPersistedReadGrant }
+            val clearableUploads = uploads.filter(PersistedUpload::canRemoveFinishedUpload)
+            clearableUploads
+                .filter(PersistedUpload::ownsPersistedReadGrant)
                 .forEach { releasePersistedReadPermission(Uri.parse(it.sourceUri)) }
             val configuredTree = transferStore.photoBackupSource(profileId)?.treeUri
-            val activeTrees = uploads.filter { it.state !in TERMINAL_TRANSFER_STATES }
+            val activeTrees = uploads.filter {
+                it.state !in TERMINAL_TRANSFER_STATES || it.requiresRefresh
+            }
                 .mapNotNullTo(mutableSetOf(), PersistedUpload::sourceTreeUri)
-            uploads.filter { it.state in TERMINAL_TRANSFER_STATES }
+            clearableUploads
                 .mapNotNull(PersistedUpload::sourceTreeUri)
                 .filter { it != configuredTree && it !in activeTrees }
                 .distinct()
@@ -8251,7 +8386,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         TransferState.SUCCEEDED,
                         TransferState.FAILED,
                         TransferState.CANCELLED,
-                    ) || fileServerMutationBlocksWorkspaceExit(it.fileServerMutation) &&
+                    ) || it.direction == TransferDirection.UPLOAD && it.requiresRefresh ||
+                        fileServerMutationBlocksWorkspaceExit(it.fileServerMutation) &&
                         !fileServerMutationCanBeExplicitlyCleared(it.fileServerMutation)
                 },
             )
@@ -8350,7 +8486,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val settingsState = current.downloadSettingsState
         if (current.selectedModule != Module.DOWNLOADS || !current.supportsDownloadSettings ||
             current.isPerformingAction || current.downloadCreationState.target != null ||
-            current.downloadControlState.target != null || settingsState.editorVisible ||
+            current.downloadControlState.target != null || current.downloadRssRefreshState.target != null ||
+            settingsState.editorVisible ||
             settingsState.mutationInProgress || settingsState.mutationRefreshInProgress
         ) return@synchronized false
         val generation = downloadSettingsMutationGeneration.incrementAndGet()
@@ -8460,113 +8597,336 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadDownloadRssSites() {
-        val repo = repository ?: return
-        if (!repo.supportsDownloadRss()) return
-        downloadDiscoveryLoadJob?.cancel()
-        _workspace.update {
-            it?.copy(
+        val claim = synchronized(downloadRssRefreshMutationLock) {
+            val repo = repository ?: return
+            val current = _workspace.value ?: return
+            if (!repo.supportsDownloadRss() || current.selectedModule != Module.DOWNLOADS ||
+                current.downloadRssRefreshState.target != null
+            ) return
+            downloadDiscoveryLoadJob?.cancel()
+            _workspace.value = current.copy(
                 downloadRssSites = Loadable.Loading,
                 selectedDownloadRssSite = null,
                 downloadRssFeeds = Loadable.Idle,
-                downloadRssRefreshFeedback = null,
             )
+            repo to current.profile.id
         }
         downloadDiscoveryLoadJob = viewModelScope.launch {
-            runCatching { repo.listDownloadRssSites() }
+            runCatching { claim.first.listDownloadRssSites() }
                 .onSuccess { sites ->
-                    _workspace.update { it?.copy(downloadRssSites = Loadable.Ready(sites)) }
+                    synchronized(downloadRssRefreshMutationLock) {
+                        val current = _workspace.value ?: return@synchronized
+                        if (repository !== claim.first || current.profile.id != claim.second ||
+                            current.selectedModule != Module.DOWNLOADS ||
+                            current.downloadRssRefreshState.target != null
+                        ) return@synchronized
+                        _workspace.value = current.copy(downloadRssSites = Loadable.Ready(sites))
+                    }
                 }
                 .onFailure { error ->
                     if (error is CancellationException) return@onFailure
-                    _workspace.update {
-                        it?.copy(downloadRssSites = Loadable.Failed(error.asDsmFailure()))
+                    synchronized(downloadRssRefreshMutationLock) {
+                        val current = _workspace.value ?: return@synchronized
+                        if (repository !== claim.first || current.profile.id != claim.second ||
+                            current.selectedModule != Module.DOWNLOADS ||
+                            current.downloadRssRefreshState.target != null
+                        ) return@synchronized
+                        _workspace.value = current.copy(
+                            downloadRssSites = Loadable.Failed(error.asDsmFailure()),
+                        )
                     }
                 }
         }
     }
 
     fun selectDownloadRssSite(site: DownloadRssSite) {
-        val repo = repository ?: return
-        downloadDiscoveryLoadJob?.cancel()
-        _workspace.update {
-            it?.copy(
+        val claim = synchronized(downloadRssRefreshMutationLock) {
+            val repo = repository ?: return
+            val current = _workspace.value ?: return
+            if (current.selectedModule != Module.DOWNLOADS ||
+                current.downloadRssRefreshState.target != null
+            ) return
+            downloadDiscoveryLoadJob?.cancel()
+            _workspace.value = current.copy(
                 selectedDownloadRssSite = site,
                 downloadRssFeeds = Loadable.Loading,
-                downloadRssRefreshFeedback = null,
             )
+            Triple(repo, current.profile.id, site.id)
         }
         downloadDiscoveryLoadJob = viewModelScope.launch {
-            runCatching { repo.listDownloadRssFeeds(site.id) }
+            runCatching { claim.first.listDownloadRssFeeds(claim.third) }
                 .onSuccess { feeds ->
-                    _workspace.update { current ->
-                        current?.takeIf { it.selectedDownloadRssSite?.id == site.id }
-                            ?.copy(downloadRssFeeds = Loadable.Ready(feeds)) ?: current
+                    synchronized(downloadRssRefreshMutationLock) {
+                        val current = _workspace.value ?: return@synchronized
+                        if (repository !== claim.first || current.profile.id != claim.second ||
+                            current.selectedModule != Module.DOWNLOADS ||
+                            current.selectedDownloadRssSite?.id != claim.third ||
+                            current.downloadRssRefreshState.target != null
+                        ) return@synchronized
+                        _workspace.value = current.copy(downloadRssFeeds = Loadable.Ready(feeds))
                     }
                 }
                 .onFailure { error ->
                     if (error is CancellationException) return@onFailure
-                    _workspace.update { current ->
-                        current?.takeIf { it.selectedDownloadRssSite?.id == site.id }
-                            ?.copy(downloadRssFeeds = Loadable.Failed(error.asDsmFailure())) ?: current
+                    synchronized(downloadRssRefreshMutationLock) {
+                        val current = _workspace.value ?: return@synchronized
+                        if (repository !== claim.first || current.profile.id != claim.second ||
+                            current.selectedModule != Module.DOWNLOADS ||
+                            current.selectedDownloadRssSite?.id != claim.third ||
+                            current.downloadRssRefreshState.target != null
+                        ) return@synchronized
+                        _workspace.value = current.copy(
+                            downloadRssFeeds = Loadable.Failed(error.asDsmFailure()),
+                        )
                     }
                 }
         }
     }
 
     fun refreshSelectedDownloadRssSite() {
-        val repo = repository ?: return
-        val site = _workspace.value?.selectedDownloadRssSite ?: return
-        if (_workspace.value?.downloadRssRefreshInProgressSiteId != null) return
-        _workspace.update {
-            it?.copy(
-                downloadRssRefreshInProgressSiteId = site.id,
-                downloadRssRefreshFeedback = null,
+        val claim = synchronized(downloadRssRefreshMutationLock) {
+            val repo = repository ?: return@synchronized null
+            val current = _workspace.value ?: return@synchronized null
+            val siteId = current.selectedDownloadRssSite?.id?.trim()?.takeIf(String::isNotEmpty)
+                ?: return@synchronized null
+            if (current.selectedModule != Module.DOWNLOADS || !current.supportsDownloadRss ||
+                current.isPerformingAction || current.downloadRssRefreshState.target != null ||
+                current.downloadCreationState.target != null ||
+                current.downloadControlState.target != null ||
+                current.downloadSettingsState.editorVisible
+            ) return@synchronized null
+            downloadDiscoveryLoadJob?.cancel()
+            downloadDiscoveryLoadJob = null
+            val target = DownloadRssRefreshTarget(
+                profileId = current.profile.id,
+                siteId = siteId,
+                baselineLastUpdatedAtEpochSeconds = current.selectedDownloadRssSite
+                    ?.lastUpdatedAtEpochSeconds,
             )
-        }
+            val generation = downloadRssRefreshMutationGeneration.incrementAndGet()
+            _workspace.value = current.copy(
+                downloadRssRefreshState = DownloadRssRefreshWorkspaceState(
+                    target = target,
+                    mutationInProgress = true,
+                    mutationGeneration = generation,
+                ),
+            )
+            DownloadRssRefreshClaim(repo, current.profile.id, target, generation)
+        } ?: return
         viewModelScope.launch {
-            val result = runCatching { repo.refreshDownloadRssSiteResult(site.id) }
-                .getOrElse { error ->
-                    _workspace.update {
-                        it?.copy(
-                            downloadRssRefreshInProgressSiteId = null,
-                            downloadRssRefreshFeedback = error.asDsmFailure()
-                                .localize(getApplication<Application>()).combined,
-                        )
-                    }
-                    return@launch
-                }
-            val sites = runCatching { repo.listDownloadRssSites() }.getOrNull()
-            val refreshedSite = sites?.firstOrNull { it.id == site.id }
-            val feeds = if (result.submitted && refreshedSite != null) {
-                runCatching { repo.listDownloadRssFeeds(site.id) }
-                    .fold(
-                        onSuccess = { Loadable.Ready(it) },
-                        onFailure = { Loadable.Failed(it.asDsmFailure()) },
+            try {
+                val result = claim.repository.refreshDownloadRssSiteResult(claim.target.siteId)
+                if (!finishDownloadRssRefreshSubmission(claim, result)) return@launch
+                if (downloadRssRefreshRequiresReadback(
+                        DownloadRssRefreshWorkspaceState(
+                            target = claim.target,
+                            mutationResult = result,
+                        ),
                     )
+                ) {
+                    startDownloadRssRefreshReadback(claim)
+                }
+            } catch (error: CancellationException) {
+                finishDownloadRssRefreshSubmission(claim, cancelledDownloadRssRefreshResult())
+                throw error
+            } catch (error: Throwable) {
+                if (finishDownloadRssRefreshFailure(claim, error.asDsmFailure())) {
+                    startDownloadRssRefreshReadback(claim)
+                }
+            }
+        }
+    }
+
+    private fun finishDownloadRssRefreshSubmission(
+        claim: DownloadRssRefreshClaim,
+        result: MutationResult,
+    ): Boolean = synchronized(downloadRssRefreshMutationLock) {
+        val current = _workspace.value ?: return false
+        if (!downloadRssRefreshCallbackMatches(
+                repositoryMatches = repository === claim.repository,
+                profileMatches = current.profile.id == claim.profileId,
+                selectedModule = current.selectedModule,
+                selectedSiteId = current.selectedDownloadRssSite?.id,
+                stateTarget = current.downloadRssRefreshState.target,
+                callbackTarget = claim.target,
+                stateGeneration = current.downloadRssRefreshState.mutationGeneration,
+                callbackGeneration = claim.generation,
+                globalGeneration = downloadRssRefreshMutationGeneration.get(),
+            )
+        ) return false
+        _workspace.value = current.copy(
+            downloadRssRefreshState = current.downloadRssRefreshState.copy(
+                mutationInProgress = false,
+                mutationResult = result,
+                mutationFailure = null,
+            ),
+        )
+        true
+    }
+
+    private fun finishDownloadRssRefreshFailure(
+        claim: DownloadRssRefreshClaim,
+        failure: DsmFailure,
+    ): Boolean = synchronized(downloadRssRefreshMutationLock) {
+        val current = _workspace.value ?: return false
+        if (!downloadRssRefreshCallbackMatches(
+                repositoryMatches = repository === claim.repository,
+                profileMatches = current.profile.id == claim.profileId,
+                selectedModule = current.selectedModule,
+                selectedSiteId = current.selectedDownloadRssSite?.id,
+                stateTarget = current.downloadRssRefreshState.target,
+                callbackTarget = claim.target,
+                stateGeneration = current.downloadRssRefreshState.mutationGeneration,
+                callbackGeneration = claim.generation,
+                globalGeneration = downloadRssRefreshMutationGeneration.get(),
+            )
+        ) return false
+        _workspace.value = current.copy(
+            downloadRssRefreshState = current.downloadRssRefreshState.copy(
+                mutationInProgress = false,
+                mutationFailure = failure,
+            ),
+        )
+        true
+    }
+
+    fun recheckDownloadRssRefresh(): Boolean {
+        val claim = synchronized(downloadRssRefreshMutationLock) {
+            val repo = repository ?: return@synchronized null
+            val current = _workspace.value ?: return@synchronized null
+            val state = current.downloadRssRefreshState
+            val target = state.target ?: return@synchronized null
+            if (current.selectedModule != Module.DOWNLOADS ||
+                current.selectedDownloadRssSite?.id != target.siteId || state.mutationInProgress ||
+                state.mutationRefreshInProgress ||
+                state.mutationResult == null && state.mutationFailure == null
+            ) return@synchronized null
+            val generation = downloadRssRefreshMutationGeneration.incrementAndGet()
+            _workspace.value = current.copy(
+                downloadRssRefreshState = state.copy(
+                    mutationRefreshFailure = null,
+                    mutationRefreshInProgress = true,
+                    mutationRefreshCompleted = false,
+                    mutationVerification = null,
+                    mutationGeneration = generation,
+                ),
+            )
+            DownloadRssRefreshClaim(repo, current.profile.id, target, generation)
+        } ?: return false
+        viewModelScope.launch { performDownloadRssRefreshReadback(claim) }
+        return true
+    }
+
+    private fun startDownloadRssRefreshReadback(claim: DownloadRssRefreshClaim) {
+        val accepted = synchronized(downloadRssRefreshMutationLock) {
+            val current = _workspace.value ?: return
+            if (!downloadRssRefreshCallbackMatches(
+                    repositoryMatches = repository === claim.repository,
+                    profileMatches = current.profile.id == claim.profileId,
+                    selectedModule = current.selectedModule,
+                    selectedSiteId = current.selectedDownloadRssSite?.id,
+                    stateTarget = current.downloadRssRefreshState.target,
+                    callbackTarget = claim.target,
+                    stateGeneration = current.downloadRssRefreshState.mutationGeneration,
+                    callbackGeneration = claim.generation,
+                    globalGeneration = downloadRssRefreshMutationGeneration.get(),
+                )
+            ) return
+            _workspace.value = current.copy(
+                downloadRssRefreshState = current.downloadRssRefreshState.copy(
+                    mutationRefreshFailure = null,
+                    mutationRefreshInProgress = true,
+                    mutationRefreshCompleted = false,
+                    mutationVerification = null,
+                ),
+            )
+            true
+        }
+        if (accepted) viewModelScope.launch { performDownloadRssRefreshReadback(claim) }
+    }
+
+    private suspend fun performDownloadRssRefreshReadback(claim: DownloadRssRefreshClaim) {
+        try {
+            val sites = claim.repository.listDownloadRssSites()
+            val matchingSites = sites.filter { it.id.trim() == claim.target.siteId }
+            val feeds = if (matchingSites.size == 1) {
+                claim.repository.listDownloadRssFeeds(claim.target.siteId)
             } else {
                 null
             }
-            val feedback = getApplication<Application>().getString(
-                serviceMutationMessageResource(result, R.string.download_rss_refresh_requested),
-            )
-            _workspace.update { current ->
-                current?.copy(
-                    downloadRssSites = sites?.let { Loadable.Ready(it) } ?: current.downloadRssSites,
-                    selectedDownloadRssSite = if (current.selectedDownloadRssSite?.id == site.id) {
-                        refreshedSite ?: current.selectedDownloadRssSite
-                    } else {
-                        current.selectedDownloadRssSite
-                    },
-                    downloadRssFeeds = if (current.selectedDownloadRssSite?.id == site.id) {
-                        feeds ?: current.downloadRssFeeds
-                    } else {
-                        current.downloadRssFeeds
-                    },
-                    downloadRssRefreshInProgressSiteId = null,
-                    downloadRssRefreshFeedback = feedback,
+            val verification = downloadRssRefreshVerification(claim.target, sites, feeds)
+            synchronized(downloadRssRefreshMutationLock) {
+                val current = _workspace.value ?: return@synchronized
+                if (!downloadRssRefreshCallbackMatches(
+                        repositoryMatches = repository === claim.repository,
+                        profileMatches = current.profile.id == claim.profileId,
+                        selectedModule = current.selectedModule,
+                        selectedSiteId = current.selectedDownloadRssSite?.id,
+                        stateTarget = current.downloadRssRefreshState.target,
+                        callbackTarget = claim.target,
+                        stateGeneration = current.downloadRssRefreshState.mutationGeneration,
+                        callbackGeneration = claim.generation,
+                        globalGeneration = downloadRssRefreshMutationGeneration.get(),
+                    )
+                ) return@synchronized
+                _workspace.value = current.copy(
+                    downloadRssSites = Loadable.Ready(sites),
+                    selectedDownloadRssSite = matchingSites.singleOrNull()
+                        ?: current.selectedDownloadRssSite,
+                    downloadRssFeeds = feeds?.let { Loadable.Ready(it) } ?: current.downloadRssFeeds,
+                    downloadRssRefreshState = current.downloadRssRefreshState.copy(
+                        mutationRefreshFailure = null,
+                        mutationRefreshInProgress = false,
+                        mutationRefreshCompleted = true,
+                        mutationVerification = verification,
+                    ),
                 )
             }
+        } catch (error: CancellationException) {
+            finishDownloadRssRefreshReadbackFailure(claim, null)
+            throw error
+        } catch (error: Throwable) {
+            finishDownloadRssRefreshReadbackFailure(claim, error.asDsmFailure())
         }
+    }
+
+    private fun finishDownloadRssRefreshReadbackFailure(
+        claim: DownloadRssRefreshClaim,
+        failure: DsmFailure?,
+    ) {
+        synchronized(downloadRssRefreshMutationLock) {
+            val current = _workspace.value ?: return
+            if (!downloadRssRefreshCallbackMatches(
+                    repositoryMatches = repository === claim.repository,
+                    profileMatches = current.profile.id == claim.profileId,
+                    selectedModule = current.selectedModule,
+                    selectedSiteId = current.selectedDownloadRssSite?.id,
+                    stateTarget = current.downloadRssRefreshState.target,
+                    callbackTarget = claim.target,
+                    stateGeneration = current.downloadRssRefreshState.mutationGeneration,
+                    callbackGeneration = claim.generation,
+                    globalGeneration = downloadRssRefreshMutationGeneration.get(),
+                )
+            ) return
+            _workspace.value = current.copy(
+                downloadRssRefreshState = current.downloadRssRefreshState.copy(
+                    mutationRefreshFailure = failure,
+                    mutationRefreshInProgress = false,
+                    mutationRefreshCompleted = false,
+                    mutationVerification = DownloadRssRefreshVerification.UNAVAILABLE,
+                ),
+            )
+        }
+    }
+
+    fun dismissDownloadRssRefreshMutation(): Boolean = synchronized(downloadRssRefreshMutationLock) {
+        val current = _workspace.value ?: return false
+        if (!canDismissDownloadRssRefreshMutation(current.downloadRssRefreshState)) return false
+        downloadRssRefreshMutationGeneration.incrementAndGet()
+        _workspace.value = current.copy(
+            downloadRssRefreshState = DownloadRssRefreshWorkspaceState(),
+        )
+        true
     }
 
     fun searchDownloadBt(keyword: String) {
@@ -8590,20 +8950,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun closeDownloadDiscovery() {
-        downloadDiscoveryLoadJob?.cancel()
-        downloadDiscoveryLoadJob = null
-        downloadDiscoverySearchJob?.cancel()
-        downloadDiscoverySearchJob = null
-        _workspace.update {
-            it?.copy(
+    fun closeDownloadDiscovery(): Boolean {
+        synchronized(downloadRssRefreshMutationLock) {
+            val current = _workspace.value ?: return false
+            val refreshState = current.downloadRssRefreshState
+            if (refreshState.target != null && !canDismissDownloadRssRefreshMutation(refreshState)) {
+                _workspace.value = current.copy(
+                    message = getApplication<Application>()
+                        .getString(R.string.switch_nas_blocked_active_operation),
+                )
+                return false
+            }
+            downloadDiscoveryLoadJob?.cancel()
+            downloadDiscoveryLoadJob = null
+            downloadDiscoverySearchJob?.cancel()
+            downloadDiscoverySearchJob = null
+            downloadRssRefreshMutationGeneration.incrementAndGet()
+            _workspace.value = current.copy(
                 downloadRssSites = Loadable.Idle,
                 selectedDownloadRssSite = null,
                 downloadRssFeeds = Loadable.Idle,
-                downloadRssRefreshInProgressSiteId = null,
-                downloadRssRefreshFeedback = null,
+                downloadRssRefreshState = DownloadRssRefreshWorkspaceState(),
                 downloadBtSearchResults = Loadable.Idle,
             )
+            return true
         }
     }
 
@@ -8620,7 +8990,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 current.isPerformingAction || state.mutationInProgress ||
                 state.mutationRefreshInProgress || state.mutationResult != null ||
                 state.mutationFailure != null || current.downloadCreationState.target != null ||
-                current.downloadControlState.target != null
+                current.downloadControlState.target != null ||
+                current.downloadRssRefreshState.target != null
             ) return@synchronized null
             val generation = downloadSettingsMutationGeneration.incrementAndGet()
             _workspace.value = current.copy(
@@ -8794,7 +9165,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val current = _workspace.value ?: return false
         if (
             current.selectedModule != Module.DOWNLOADS || current.downloadControlState.target != null ||
-            current.downloadSettingsState.editorVisible ||
+            current.downloadSettingsState.editorVisible || current.downloadRssRefreshState.target != null ||
             !canStartDownloadCreation(current.isPerformingAction, current.downloadCreationState)
         ) {
             return false
@@ -8844,7 +9215,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val current = _workspace.value ?: return false
         if (sourceKind !in setOf(DownloadCreationSourceKind.RSS, DownloadCreationSourceKind.BT_SEARCH) ||
             current.selectedModule != Module.DOWNLOADS || current.downloadControlState.target != null ||
-            current.downloadSettingsState.editorVisible ||
+            current.downloadSettingsState.editorVisible || current.downloadRssRefreshState.target != null ||
             !canStartDownloadCreation(current.isPerformingAction, current.downloadCreationState) ||
             current.downloadCreationState.editorVisible ||
             current.downloadCreationState.pendingDiscoveryUri != null
@@ -8942,7 +9313,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     current.downloadControlState,
                 ) || current.selectedModule != Module.DOWNLOADS ||
                 current.downloadCreationState.target != null ||
-                current.downloadSettingsState.editorVisible
+                current.downloadSettingsState.editorVisible || current.downloadRssRefreshState.target != null
             ) return false
             val target = downloadControlTarget(
                 current.profile.id,
@@ -9029,7 +9400,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val current = _workspace.value ?: return false
             if (repository !== repo || current.selectedModule != Module.DOWNLOADS ||
                 current.downloadCreationState.target != null ||
-                current.downloadSettingsState.editorVisible || !canStartDownloadControlMutation(
+                current.downloadSettingsState.editorVisible ||
+                current.downloadRssRefreshState.target != null || !canStartDownloadControlMutation(
                     current.isPerformingAction,
                     current.downloadControlState,
                 )
@@ -13377,6 +13749,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 downloadCreationBlocksWorkspaceExit(candidate.downloadCreationState) ||
                 downloadControlBlocksWorkspaceExit(candidate.downloadControlState) ||
                 downloadSettingsBlocksWorkspaceExit(candidate.downloadSettingsState) ||
+                downloadRssRefreshBlocksWorkspaceExit(candidate.downloadRssRefreshState) ||
                 virtualMachineMutationBlocksWorkspaceExit(candidate.virtualMachineMutationState) ||
                 !canSafelySwitchNas(
                     downloads = downloads,
@@ -13401,6 +13774,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             downloadCreationMutationGeneration.incrementAndGet()
             downloadControlMutationGeneration.incrementAndGet()
             downloadSettingsMutationGeneration.incrementAndGet()
+            downloadRssRefreshMutationGeneration.incrementAndGet()
             virtualMachineMutationGeneration.incrementAndGet()
             virtualMachineOverviewRequestGeneration.incrementAndGet()
             chatMutationGeneration.incrementAndGet()
@@ -13493,6 +13867,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 downloadCreationBlocksWorkspaceExit(candidate.downloadCreationState) ||
                 downloadControlBlocksWorkspaceExit(candidate.downloadControlState) ||
                 downloadSettingsBlocksWorkspaceExit(candidate.downloadSettingsState) ||
+                downloadRssRefreshBlocksWorkspaceExit(candidate.downloadRssRefreshState) ||
                 virtualMachineMutationBlocksWorkspaceExit(candidate.virtualMachineMutationState) ||
                 chatMutationBlocksWorkspaceExit(candidate.chatMutationState)
             ) {
@@ -13510,6 +13885,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             downloadCreationMutationGeneration.incrementAndGet()
             downloadControlMutationGeneration.incrementAndGet()
             downloadSettingsMutationGeneration.incrementAndGet()
+            downloadRssRefreshMutationGeneration.incrementAndGet()
             virtualMachineMutationGeneration.incrementAndGet()
             virtualMachineOverviewRequestGeneration.incrementAndGet()
             chatMutationGeneration.incrementAndGet()
@@ -13555,10 +13931,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     runCatching { workManager.cancelWorkById(UUID.fromString(value)) }
                 }
                 transferStore.updateUpload(upload.id) {
-                    it.copy(
-                        state = TransferState.CANCELLED,
-                        requiresRefresh = !it.backupMode && it.completedBytes > 0,
-                    )
+                    it.cancelUploadForLogout()
                 }
             }
         clearPreviewCaches()
@@ -15795,6 +16168,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun uploadTransferTask(upload: PersistedUpload): TransferTask {
         val application = getApplication<Application>()
+        val uploadMutation = UploadMutationLifecycle(
+            directoryResult = upload.directoryMutationResult?.toMutationResult("backupFolderEnsure"),
+            uploadResult = upload.uploadMutationResult?.toMutationResult("fileUpload"),
+        ).takeIf { it.directoryResult != null || it.uploadResult != null }
+        val hasTerminalMutationFeedback = upload.uploadMutationResult != null ||
+            upload.directoryMutationResult?.status?.let {
+                it != MutationResultStatus.CONFIRMED_SUCCESS
+            } == true
         val detail = when (upload.state) {
             TransferState.WAITING -> application.getString(
                 if (upload.backupMode) R.string.transfer_waiting_to_backup else R.string.transfer_waiting,
@@ -15818,7 +16199,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (upload.backupMode) R.string.transfer_waiting_to_backup else R.string.transfer_waiting,
             )
         }
-        val errorMessage = if (upload.requiresRefresh && upload.state == TransferState.FAILED) {
+        val errorMessage = if (hasTerminalMutationFeedback) {
+            null
+        } else if (upload.requiresRefresh && upload.state == TransferState.FAILED) {
             application.getString(R.string.upload_unverified)
         } else upload.errorKind?.let { name ->
             val kind = runCatching { DsmErrorKind.valueOf(name) }.getOrDefault(DsmErrorKind.UPLOAD_FAILED)
@@ -15835,6 +16218,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             errorMessage = errorMessage,
             requiresRefresh = upload.requiresRefresh,
             startedAtEpochMillis = upload.startedAtEpochMillis,
+            uploadMutation = uploadMutation,
         )
     }
 
@@ -17032,7 +17416,7 @@ internal fun PersistedUpload.applyUploadWorkObservation(
     return when (workState) {
         WorkInfo.State.ENQUEUED,
         WorkInfo.State.BLOCKED,
-        -> copy(state = TransferState.WAITING)
+        -> if (state == TransferState.RUNNING) this else copy(state = TransferState.WAITING)
         WorkInfo.State.RUNNING -> copy(
             state = TransferState.RUNNING,
             completedBytes = maxOf(completedBytes, observedCompletedBytes),
@@ -17047,8 +17431,29 @@ internal fun PersistedUpload.applyUploadWorkObservation(
             state = TransferState.FAILED,
             errorKind = observedErrorKind ?: errorKind ?: DsmErrorKind.UPLOAD_FAILED.name,
         )
-        WorkInfo.State.CANCELLED -> cancelUploadExecution(executionId)
+        WorkInfo.State.CANCELLED -> if (state == TransferState.WAITING) {
+            copy(state = TransferState.CANCELLED, errorKind = null)
+        } else {
+            copy(
+                state = TransferState.FAILED,
+                errorKind = DsmErrorKind.CHANGE_NOT_CONFIRMED.name,
+                requiresRefresh = true,
+            )
+        }
     }
+}
+
+internal fun PersistedUpload.cancelUploadForLogout(): PersistedUpload {
+    if (state in TERMINAL_TRANSFER_STATES) return this
+    val mayHaveReachedNas = state in setOf(TransferState.RUNNING, TransferState.CANCELLING) ||
+        completedBytes > 0 ||
+        directoryMutationResult?.requiresRefresh == true ||
+        uploadMutationResult?.requiresRefresh == true
+    return copy(
+        state = TransferState.CANCELLED,
+        errorKind = if (mayHaveReachedNas) DsmErrorKind.CHANGE_NOT_CONFIRMED.name else null,
+        requiresRefresh = mayHaveReachedNas,
+    )
 }
 
 internal fun PersistedDownload.applyDownloadWorkObservation(
@@ -17277,6 +17682,16 @@ internal fun appendPerformanceSample(
 }
 
 internal enum class RetryUploadDecision { ALREADY_COMPLETE, CONFLICT, REQUEUE }
+
+internal fun confirmedUploadReadbackResult(): MutationResult = MutationResult(
+    schemaVersion = 1,
+    status = MutationResultStatus.CONFIRMED_SUCCESS,
+    operation = "fileUpload",
+    submitted = true,
+    requiresRefresh = false,
+    counts = MutationResultCounts(1, 0, 0),
+    diagnosticTag = "file-station.upload.confirmed-by-explicit-retry-readback",
+)
 
 internal fun retryUploadDecision(
     existing: FileItem?,

@@ -13,6 +13,25 @@ from typing import Any
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_ROOT = REPOSITORY_ROOT / "contracts/fixtures-redacted"
+PRIVATE_API_COMPATIBILITY_PATH = (
+    REPOSITORY_ROOT / "contracts/private-api/compatibility.json"
+)
+DISCOVERY_ENDPOINT_INDEX_REF = "docs/api/discovery/endpoints/INDEX.md"
+
+# 这些既有条目在汇总索引中已有独立小节，但尚未迁移为独立稳定记录。
+# 显式列举可防止新条目继续借用汇总索引；迁移完成后应逐项删除豁免。
+LEGACY_SUMMARY_DOCUMENT_REF_EXCEPTIONS = frozenset(
+    {
+        "quickconnect-relay-control",
+        "file-station-remote-mount",
+        "dsm-system-observability",
+        "dsm-storage-hardware",
+        "dsm-administration",
+        "chat-internal",
+        "chat-realtime",
+        "photos-internal-candidate",
+    }
+)
 
 FIXTURE_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 DSM_VERSION_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}$")
@@ -257,16 +276,83 @@ def validate_all(root: Path = FIXTURE_ROOT) -> list[Path]:
     return directories
 
 
+def resolve_repository_document(document_ref: str, repository_root: Path) -> Path:
+    root = repository_root.resolve()
+    document = (root / document_ref).resolve()
+    try:
+        document.relative_to(root)
+    except ValueError as error:
+        raise ValidationError(f"documentRef 越出仓库范围：{document_ref}") from error
+    if not document.is_file():
+        raise ValidationError(f"documentRef 指向的文件不存在：{document_ref}")
+    return document
+
+
+def validate_private_api_document_refs(
+    value: Any,
+    repository_root: Path = REPOSITORY_ROOT,
+) -> int:
+    if not isinstance(value, dict) or not isinstance(value.get("endpoints"), list):
+        raise ValidationError("私有 API 兼容索引必须包含 endpoints 数组")
+
+    validated = 0
+    for index, endpoint in enumerate(value["endpoints"]):
+        location = f"endpoints[{index}]"
+        if not isinstance(endpoint, dict):
+            raise ValidationError(f"{location} 必须是对象")
+        if endpoint.get("classification") != "internal":
+            continue
+
+        endpoint_id = require_string(endpoint.get("id"), f"{location}.id")
+        document_ref = require_string(
+            endpoint.get("documentRef"),
+            f"{location}.documentRef",
+        )
+        document = resolve_repository_document(document_ref, repository_root)
+        is_summary_index = Path(document_ref).name == "INDEX.md"
+
+        if is_summary_index:
+            if (
+                endpoint_id not in LEGACY_SUMMARY_DOCUMENT_REF_EXCEPTIONS
+                or document_ref != DISCOVERY_ENDPOINT_INDEX_REF
+            ):
+                raise ValidationError(
+                    f"{endpoint_id}: 内部端点不能只引用汇总 INDEX，必须建立独立稳定记录"
+                )
+            heading = f"### `{endpoint_id}`"
+            if heading not in document.read_text(encoding="utf-8"):
+                raise ValidationError(
+                    f"{endpoint_id}: 汇总 INDEX 豁免缺少同名事实小节"
+                )
+        elif f"`{endpoint_id}`" not in document.read_text(encoding="utf-8"):
+            raise ValidationError(
+                f"{endpoint_id}: 独立稳定记录未声明对应端点标识"
+            )
+        validated += 1
+    return validated
+
+
+def validate_private_api_compatibility(
+    path: Path = PRIVATE_API_COMPATIBILITY_PATH,
+    repository_root: Path = REPOSITORY_ROOT,
+) -> int:
+    return validate_private_api_document_refs(load_json(path), repository_root)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="校验仓库中的脱敏 DSM Fixture")
     parser.add_argument("--root", type=Path, default=FIXTURE_ROOT)
     arguments = parser.parse_args()
     try:
         directories = validate_all(arguments.root)
+        private_api_count = validate_private_api_compatibility()
     except ValidationError as error:
         print(error, file=sys.stderr)
         return 1
-    print(f"Fixture 校验通过：{len(directories)} 组")
+    print(
+        f"Fixture 校验通过：{len(directories)} 组；"
+        f"私有 API 文档引用校验通过：{private_api_count} 项"
+    )
     return 0
 
 

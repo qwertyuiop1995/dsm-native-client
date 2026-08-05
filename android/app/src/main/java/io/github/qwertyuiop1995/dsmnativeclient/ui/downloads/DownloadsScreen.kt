@@ -101,11 +101,12 @@ internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
         val settingsIdle = !settingsState.editorVisible && !settingsState.mutationInProgress &&
             !settingsState.mutationRefreshInProgress && settingsState.mutationResult == null &&
             settingsState.mutationFailure == null
+        val rssRefreshIdle = state.downloadRssRefreshState.target == null
         val downloadActionsEnabled = !state.isPerformingAction && downloadControl.target == null &&
-            downloadCreation.target == null && settingsIdle
+            downloadCreation.target == null && settingsIdle && rssRefreshIdle
         val creationActionsEnabled = downloadControl.target == null &&
             canStartDownloadCreation(state.isPerformingAction, downloadCreation) &&
-            downloadCreation.pendingDiscoveryUri == null && settingsIdle
+            downloadCreation.pendingDiscoveryUri == null && settingsIdle && rssRefreshIdle
         val settingsActionsEnabled = creationActionsEnabled
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -280,8 +281,7 @@ internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
                 }
             },
             onDismiss = {
-                model.closeDownloadDiscovery()
-                showDiscovery = false
+                if (model.closeDownloadDiscovery()) showDiscovery = false
             },
         )
     }

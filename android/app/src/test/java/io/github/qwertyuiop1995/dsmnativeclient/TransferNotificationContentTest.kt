@@ -79,4 +79,40 @@ class TransferNotificationContentTest {
             completionNotificationTitle(TransferDirection.DOWNLOAD, false, isPhotoBackup = true),
         )
     }
+
+    @Test
+    fun `取消与待核验通知不误报失败`() {
+        assertEquals(
+            R.string.notification_upload_cancelled,
+            completionNotificationTitle(
+                TransferDirection.UPLOAD,
+                TransferCompletionOutcome.CANCELLED,
+                isPhotoBackup = false,
+            ),
+        )
+        assertEquals(
+            R.string.notification_backup_cancelled,
+            completionNotificationTitle(
+                TransferDirection.UPLOAD,
+                TransferCompletionOutcome.CANCELLED,
+                isPhotoBackup = true,
+            ),
+        )
+        assertEquals(
+            R.string.notification_upload_needs_review,
+            completionNotificationTitle(
+                TransferDirection.UPLOAD,
+                TransferCompletionOutcome.NEEDS_REVIEW,
+                isPhotoBackup = false,
+            ),
+        )
+        assertEquals(
+            R.string.notification_backup_needs_review,
+            completionNotificationTitle(
+                TransferDirection.UPLOAD,
+                TransferCompletionOutcome.NEEDS_REVIEW,
+                isPhotoBackup = true,
+            ),
+        )
+    }
 }

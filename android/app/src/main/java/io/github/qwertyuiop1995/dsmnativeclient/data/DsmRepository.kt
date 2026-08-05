@@ -2337,31 +2337,197 @@ class DsmRepository(
     }
 
     suspend fun ensureSubdirectory(root: String, target: String) {
+        val result = ensureSubdirectoryResult(root, target)
+        require(result.diagnosticTag != "file-station.backup-folder.ensure.blocked-by-file") {
+            "A file blocks the backup folder"
+        }
+        requireConfirmedFileEntryMutation(result)
+    }
+
+    /**
+     * 逐级确认后台上传目录。每个层级最多提交一次创建请求；失败后的额外访问仅用于读回确认，
+     * 不会自动重放已经提交的创建请求。
+     */
+    suspend fun ensureSubdirectoryResult(root: String, target: String): MutationResult {
         require(root.startsWith('/') && target.startsWith('/'))
         require(target == root || target.startsWith(root.trimEnd('/') + "/")) {
             "Backup destination is outside its configured root"
         }
-        if (target == root) return
+        if (target == root) {
+            return backupFolderEnsureResult(
+                MutationResultStatus.CONFIRMED_SUCCESS,
+                submitted = true,
+                diagnosticTag = "file-station.backup-folder.ensure.already-satisfied",
+            )
+        }
         var current = root.trimEnd('/')
-        target.removePrefix(current).trim('/').split('/').forEach { component ->
+        var succeeded = 0
+        var submitted = false
+        for (component in target.removePrefix(current).trim('/').split('/')) {
             require(component.isNotBlank() && '/' !in component && '\\' !in component) {
                 "Invalid backup folder name"
             }
-            val next = join(current, component)
-            if (itemExists(next)) {
-                val info = fileInfo(next)
-                require(info?.isDirectory == true) { "A file blocks the backup folder" }
-            } else {
-                runCatching { createFolder(current, component) }.getOrElse { failure ->
-                    val concurrentFolder = runCatching {
-                        itemExists(next) && fileInfo(next)?.isDirectory == true
-                    }.getOrDefault(false)
-                    if (!concurrentFolder) throw failure
-                }
+            if (!currentCoroutineContext().isActive) {
+                return backupFolderEnsureCancellationResult(succeeded, submitted, 0)
             }
-            current = next
+            val next = join(current, component)
+            val existing = try {
+                if (itemExists(next)) fileInfo(next) else null
+            } catch (_: CancellationException) {
+                return backupFolderEnsureCancellationResult(succeeded, submitted, 0)
+            } catch (failure: DsmFailure) {
+                return backupFolderEnsureTerminalResult(
+                    succeeded = succeeded,
+                    submitted = submitted,
+                    failed = 1,
+                    unknown = 0,
+                    fallbackStatus = MutationResultStatus.CONFIRMED_FAILURE,
+                    requiresRefresh = false,
+                    errorCategory = fileMutationErrorCategory(failure),
+                    diagnosticTag = "file-station.backup-folder.ensure.preflight-failed",
+                )
+            }
+            if (existing != null) {
+                if (!existing.isDirectory) {
+                    return backupFolderEnsureTerminalResult(
+                        succeeded = succeeded,
+                        submitted = submitted,
+                        failed = 1,
+                        unknown = 0,
+                        fallbackStatus = MutationResultStatus.CONFIRMED_FAILURE,
+                        requiresRefresh = false,
+                        errorCategory = MutationErrorCategory.CONFLICT,
+                        diagnosticTag = "file-station.backup-folder.ensure.blocked-by-file",
+                    )
+                }
+                current = next
+                continue
+            }
+
+            val level = createFolderResult(current, component)
+            if (level.status == MutationResultStatus.CONFIRMED_SUCCESS) {
+                succeeded += level.counts.succeeded
+                submitted = submitted || level.submitted
+                current = next
+                continue
+            }
+            if (level.status == MutationResultStatus.CANCELLED_BEFORE_SUBMISSION) {
+                return backupFolderEnsureCancellationResult(succeeded, submitted, 0)
+            }
+            if (level.status == MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION) {
+                return backupFolderEnsureCancellationResult(
+                    succeeded,
+                    submitted || level.submitted,
+                    level.counts.unknown,
+                )
+            }
+
+            val confirmedDirectory = try {
+                fileInfo(next)?.isDirectory == true
+            } catch (_: CancellationException) {
+                return backupFolderEnsureCancellationResult(
+                    succeeded,
+                    submitted || level.submitted,
+                    1,
+                )
+            } catch (_: DsmFailure) {
+                false
+            }
+            if (confirmedDirectory) {
+                succeeded++
+                submitted = submitted || level.submitted
+                current = next
+                continue
+            }
+            return backupFolderEnsureTerminalResult(
+                succeeded = succeeded,
+                submitted = submitted || level.submitted,
+                failed = level.counts.failed,
+                unknown = level.counts.unknown,
+                fallbackStatus = level.status,
+                requiresRefresh = level.requiresRefresh,
+                errorCategory = level.errorCategory,
+                diagnosticTag = "file-station.backup-folder.ensure.${level.status.name.lowercase().replace('_', '-')}",
+            )
         }
+        return backupFolderEnsureResult(
+            MutationResultStatus.CONFIRMED_SUCCESS,
+            // MutationResult v1 的确认成功要求 submitted=true；诊断标签另外区分本次是否实际写入。
+            submitted = true,
+            succeeded = succeeded,
+            diagnosticTag = if (submitted) {
+                "file-station.backup-folder.ensure.confirmed-success"
+            } else {
+                "file-station.backup-folder.ensure.already-satisfied"
+            },
+        )
     }
+
+    internal fun backupFolderEnsureCancellationResult(
+        succeeded: Int,
+        submitted: Boolean,
+        unknown: Int,
+    ): MutationResult = if (submitted) {
+        backupFolderEnsureResult(
+            MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+            submitted = true,
+            requiresRefresh = true,
+            succeeded = succeeded,
+            unknown = unknown,
+            diagnosticTag = "file-station.backup-folder.ensure.cancelled-after-submission",
+        )
+    } else {
+        backupFolderEnsureResult(
+            MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+            submitted = false,
+            diagnosticTag = "file-station.backup-folder.ensure.cancelled-before-submission",
+        )
+    }
+
+    private fun backupFolderEnsureTerminalResult(
+        succeeded: Int,
+        submitted: Boolean,
+        failed: Int,
+        unknown: Int,
+        fallbackStatus: MutationResultStatus,
+        requiresRefresh: Boolean,
+        errorCategory: MutationErrorCategory?,
+        diagnosticTag: String,
+    ): MutationResult = backupFolderEnsureResult(
+        status = if (succeeded > 0) MutationResultStatus.PARTIAL_SUCCESS else fallbackStatus,
+        submitted = submitted || succeeded > 0,
+        requiresRefresh = requiresRefresh || succeeded > 0 || unknown > 0,
+        succeeded = succeeded,
+        failed = failed,
+        unknown = unknown,
+        errorCategory = errorCategory,
+        diagnosticTag = if (!submitted && succeeded > 0) {
+            "$diagnosticTag.readback-only"
+        } else {
+            diagnosticTag
+        },
+    )
+
+    private fun backupFolderEnsureResult(
+        status: MutationResultStatus,
+        submitted: Boolean,
+        requiresRefresh: Boolean = false,
+        succeeded: Int = 0,
+        failed: Int = 0,
+        unknown: Int = 0,
+        errorCategory: MutationErrorCategory? = null,
+        diagnosticTag: String,
+    ): MutationResult = MutationResult(
+        schemaVersion = 1,
+        status = status,
+        operation = "backupFolderEnsure",
+        submitted = submitted,
+        requiresRefresh = requiresRefresh,
+        counts = MutationResultCounts(succeeded, failed, unknown),
+        errorCategory = errorCategory,
+        localizationKey = "mutation.backup_folder_ensure.${status.name.lowercase()}",
+        diagnosticTag = diagnosticTag,
+    )
 
     internal suspend fun rename(path: String, newName: String) {
         requireConfirmedFileEntryMutation(renameResult(path, newName))

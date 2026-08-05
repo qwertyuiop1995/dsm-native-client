@@ -138,6 +138,7 @@
 
 ### `download-station2-fallback`
 
+- 稳定记录：[Download Station 2 内部降级接口](download-station2-fallback.md)。
 - 组件：`download-station`
 - API 与客户端范围：
   - `SYNO.DownloadStation2.Task` v1-v2。
@@ -149,6 +150,7 @@
 
 ### `vmm-internal`
 
+- 稳定记录：[Virtual Machine Manager 内部接口](vmm-internal.md)。
 - 组件：`virtual-machine-manager`
 - API 与客户端范围：
   - `SYNO.Virtualization.Guest`、`Guest.Image`、`Host`、`Repo`、`Network`、`GuestProtect.Plan` v1-v2。

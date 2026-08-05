@@ -44,6 +44,105 @@ class FixtureValidationTests(unittest.TestCase):
         directories = validator.validate_all()
         self.assertGreaterEqual(len(directories), 3)
 
+    def test_repository_private_api_document_refs_pass_validation(self) -> None:
+        self.assertGreater(validator.validate_private_api_compatibility(), 0)
+
+    def test_rejects_missing_private_api_document(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            value = {
+                "endpoints": [
+                    {
+                        "id": "new-internal-endpoint",
+                        "classification": "internal",
+                        "documentRef": "docs/api/discovery/endpoints/missing.md",
+                    }
+                ]
+            }
+            with self.assertRaisesRegex(validator.ValidationError, "文件不存在"):
+                validator.validate_private_api_document_refs(value, root)
+
+    def test_rejects_new_private_api_pointing_only_to_summary_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            index = root / validator.DISCOVERY_ENDPOINT_INDEX_REF
+            index.parent.mkdir(parents=True)
+            index.write_text("### `new-internal-endpoint`\n", encoding="utf-8")
+            value = {
+                "endpoints": [
+                    {
+                        "id": "new-internal-endpoint",
+                        "classification": "internal",
+                        "documentRef": validator.DISCOVERY_ENDPOINT_INDEX_REF,
+                    }
+                ]
+            }
+            with self.assertRaisesRegex(validator.ValidationError, "独立稳定记录"):
+                validator.validate_private_api_document_refs(value, root)
+
+    def test_summary_index_exception_requires_matching_fact_section(self) -> None:
+        endpoint_id = "quickconnect-relay-control"
+        self.assertIn(
+            endpoint_id,
+            validator.LEGACY_SUMMARY_DOCUMENT_REF_EXCEPTIONS,
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            index = root / validator.DISCOVERY_ENDPOINT_INDEX_REF
+            index.parent.mkdir(parents=True)
+            index.write_text("# 内部端点汇总\n", encoding="utf-8")
+            value = {
+                "endpoints": [
+                    {
+                        "id": endpoint_id,
+                        "classification": "internal",
+                        "documentRef": validator.DISCOVERY_ENDPOINT_INDEX_REF,
+                    }
+                ]
+            }
+            with self.assertRaisesRegex(validator.ValidationError, "同名事实小节"):
+                validator.validate_private_api_document_refs(value, root)
+
+    def test_rejects_standalone_document_without_matching_endpoint_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            document_ref = "docs/api/discovery/endpoints/standalone.md"
+            document = root / document_ref
+            document.parent.mkdir(parents=True)
+            document.write_text("# 独立记录\n", encoding="utf-8")
+            value = {
+                "endpoints": [
+                    {
+                        "id": "standalone-internal-endpoint",
+                        "classification": "internal",
+                        "documentRef": document_ref,
+                    }
+                ]
+            }
+            with self.assertRaisesRegex(validator.ValidationError, "对应端点标识"):
+                validator.validate_private_api_document_refs(value, root)
+
+    def test_accepts_standalone_document_with_matching_endpoint_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            document_ref = "docs/api/discovery/endpoints/standalone.md"
+            document = root / document_ref
+            document.parent.mkdir(parents=True)
+            document.write_text(
+                "| 端点或端点组标识 | `standalone-internal-endpoint` |\n",
+                encoding="utf-8",
+            )
+            value = {
+                "endpoints": [
+                    {
+                        "id": "standalone-internal-endpoint",
+                        "classification": "internal",
+                        "documentRef": document_ref,
+                    }
+                ]
+            }
+            self.assertEqual(validator.validate_private_api_document_refs(value, root), 1)
+
     def test_rejects_real_fixture_without_stable_lab_alias(self) -> None:
         metadata = copy.deepcopy(self.metadata)
         metadata["sourceKind"] = "real-redacted"

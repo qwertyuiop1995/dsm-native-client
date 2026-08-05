@@ -9,8 +9,13 @@ import io.github.qwertyuiop1995.dsmnativeclient.data.DsmRepository
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedUpload
 import io.github.qwertyuiop1995.dsmnativeclient.data.TransferStore
 import io.github.qwertyuiop1995.dsmnativeclient.data.UploadSource
+import io.github.qwertyuiop1995.dsmnativeclient.data.toPersistedMutationResult
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationErrorCategory
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResult
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultCounts
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferDirection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferState
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmApiClient
@@ -45,6 +50,19 @@ class PhotoBackupWorker(
                 TransferDirection.UPLOAD,
             ),
         )
+        if (initial.state == TransferState.RUNNING) {
+            val interrupted = transfers.updateUpload(taskId) { current ->
+                current.applyUploadMutationResult(
+                    executionId,
+                    interruptedUploadResult(),
+                    UploadMutationStage.UPLOAD,
+                )
+            }
+            notifyMutationCompletion(taskId, interrupted)
+            return Result.failure(
+                errorData(interrupted?.errorKind ?: DsmErrorKind.CHANGE_NOT_CONFIRMED.name),
+            )
+        }
         val running = transfers.updateUpload(taskId) { current ->
             if (!current.ownsUploadExecution(executionId) ||
                 current.state !in setOf(TransferState.WAITING, TransferState.RUNNING)
@@ -55,7 +73,10 @@ class PhotoBackupWorker(
                     state = TransferState.RUNNING,
                     completedBytes = 0,
                     errorKind = null,
+                    requiresRefresh = false,
                     startedAtEpochMillis = System.currentTimeMillis(),
+                    directoryMutationResult = null,
+                    uploadMutationResult = null,
                 )
             }
         }
@@ -64,10 +85,34 @@ class PhotoBackupWorker(
         ) {
             return Result.success(progressData(running?.completedBytes ?: 0, initial.expectedBytes))
         }
+        var uploadAttemptStarted = false
         return try {
             val repo = repository(initial)
             if (initial.backupMode || initial.mirrorDirectories) {
-                repo.ensureSubdirectory(initial.destinationRootPath, initial.destinationPath)
+                val directoryResult = repo.ensureSubdirectoryResult(
+                    initial.destinationRootPath,
+                    initial.destinationPath,
+                )
+                val prepared = transfers.updateUpload(taskId) { current ->
+                    current.applyUploadMutationResult(
+                        executionId,
+                        directoryResult,
+                        UploadMutationStage.DIRECTORY,
+                    )
+                }
+                if (directoryResult.status != MutationResultStatus.CONFIRMED_SUCCESS) {
+                    notifyMutationCompletion(taskId, prepared)
+                    return if (prepared?.state == TransferState.CANCELLED) {
+                        Result.success(progressData(prepared.completedBytes, initial.expectedBytes))
+                    } else {
+                        Result.failure(errorData(prepared?.errorKind ?: DsmErrorKind.UPLOAD_FAILED.name))
+                    }
+                }
+                if (prepared?.ownsUploadExecution(executionId) != true ||
+                    prepared.state != TransferState.RUNNING
+                ) {
+                    return Result.success(progressData(prepared?.completedBytes ?: 0, initial.expectedBytes))
+                }
             }
             val targetPath = initial.destinationPath.trimEnd('/') + "/" + initial.title
             val existing = if (repo.itemExists(targetPath)) repo.fileInfo(targetPath) else null
@@ -83,12 +128,19 @@ class PhotoBackupWorker(
                     }
                     return Result.success(progressData(initial.expectedBytes, initial.expectedBytes))
                 }
-                BackupTargetDecision.CONFLICT -> throw DsmFailure(
-                    null,
-                    "An item with the same name already exists",
-                    "Rename the local item or choose another backup folder.",
-                    kind = DsmErrorKind.CHANGE_NOT_CONFIRMED,
-                )
+                BackupTargetDecision.CONFLICT -> {
+                    val conflict = transfers.updateUpload(taskId) { current ->
+                        current.applyUploadMutationResult(
+                            executionId,
+                            uploadTargetConflictResult(),
+                            UploadMutationStage.UPLOAD,
+                        )
+                    }
+                    notifyMutationCompletion(taskId, conflict)
+                    return Result.failure(
+                        errorData(conflict?.errorKind ?: DsmErrorKind.CHANGE_NOT_CONFIRMED.name),
+                    )
+                }
                 BackupTargetDecision.UPLOAD -> Unit
             }
             val uri = Uri.parse(initial.sourceUri)
@@ -102,7 +154,12 @@ class PhotoBackupWorker(
                 },
             )
             var lastPublishedAt = 0L
-            repo.upload(source, initial.destinationPath, overwrite = initial.overwrite) { completed, total ->
+            uploadAttemptStarted = true
+            val uploadResult = repo.uploadResult(
+                source,
+                initial.destinationPath,
+                overwrite = initial.overwrite,
+            ) { completed, total ->
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastPublishedAt >= PROGRESS_INTERVAL_MILLIS || completed == total) {
                     lastPublishedAt = now
@@ -130,19 +187,22 @@ class PhotoBackupWorker(
                 }
             }
             val completed = transfers.updateUpload(taskId) { current ->
-                current.completeUploadExecution(executionId, skippedExisting = false)
-            }
-            if (completed?.ownsUploadExecution(executionId) == true &&
-                completed.state == TransferState.SUCCEEDED
-            ) {
-                TransferNotifications.completion(
-                    applicationContext,
-                    taskId,
-                    succeeded = true,
-                    direction = TransferDirection.UPLOAD,
+                current.applyUploadMutationResult(
+                    executionId,
+                    uploadResult,
+                    UploadMutationStage.UPLOAD,
                 )
             }
-            Result.success(progressData(initial.expectedBytes, initial.expectedBytes))
+            notifyMutationCompletion(taskId, completed)
+            when (completed?.state) {
+                TransferState.SUCCEEDED ->
+                    Result.success(progressData(initial.expectedBytes, initial.expectedBytes))
+                TransferState.CANCELLED ->
+                    Result.success(progressData(completed.completedBytes, initial.expectedBytes))
+                TransferState.FAILED ->
+                    Result.failure(errorData(completed.errorKind ?: DsmErrorKind.UPLOAD_FAILED.name))
+                else -> Result.success(progressData(completed?.completedBytes ?: 0, initial.expectedBytes))
+            }
         } catch (error: CancellationException) {
             transfers.updateUpload(taskId) { current ->
                 current.cancelUploadExecution(executionId)
@@ -159,7 +219,7 @@ class PhotoBackupWorker(
                     current.copy(
                         state = TransferState.FAILED,
                         errorKind = kind.name,
-                        requiresRefresh = !current.backupMode && (
+                        requiresRefresh = current.requiresRefresh || uploadAttemptStarted && (
                             current.completedBytes > 0 || kind in setOf(
                                 DsmErrorKind.CONNECTION_FAILED,
                                 DsmErrorKind.INVALID_RESPONSE,
@@ -173,15 +233,31 @@ class PhotoBackupWorker(
             if (failed?.ownsUploadExecution(executionId) == true &&
                 failed.state == TransferState.FAILED
             ) {
-                TransferNotifications.completion(
-                    applicationContext,
-                    taskId,
-                    succeeded = false,
-                    direction = TransferDirection.UPLOAD,
-                )
+                notifyMutationCompletion(taskId, failed)
             }
             Result.failure(Data.Builder().putString(KEY_ERROR_KIND, kind.name).build())
         }
+    }
+
+    private fun notifyMutationCompletion(taskId: String, upload: PersistedUpload?) {
+        val state = upload?.state ?: return
+        if (!upload.ownsUploadExecution(id.toString()) || state !in setOf(
+                TransferState.SUCCEEDED,
+                TransferState.FAILED,
+                TransferState.CANCELLED,
+            )
+        ) return
+        TransferNotifications.completion(
+            applicationContext,
+            taskId,
+            outcome = when {
+                state == TransferState.SUCCEEDED -> TransferCompletionOutcome.SUCCESS
+                upload.requiresRefresh -> TransferCompletionOutcome.NEEDS_REVIEW
+                state == TransferState.CANCELLED -> TransferCompletionOutcome.CANCELLED
+                else -> TransferCompletionOutcome.FAILURE
+            },
+            direction = TransferDirection.UPLOAD,
+        )
     }
 
     private suspend fun repository(upload: PersistedUpload): DsmRepository {
@@ -208,10 +284,36 @@ class PhotoBackupWorker(
             .putLong(KEY_COMPLETED_BYTES, completed)
             .putLong(KEY_TOTAL_BYTES, total)
             .build()
+
+        private fun errorData(kind: String): Data = Data.Builder()
+            .putString(KEY_ERROR_KIND, kind)
+            .build()
     }
 }
 
 internal enum class BackupTargetDecision { UPLOAD, SKIP_MATCHING, CONFLICT }
+
+internal fun interruptedUploadResult(): MutationResult = MutationResult(
+    schemaVersion = 1,
+    status = MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+    operation = "fileUpload",
+    submitted = true,
+    requiresRefresh = true,
+    counts = MutationResultCounts(0, 0, 1),
+    errorCategory = MutationErrorCategory.UNKNOWN,
+    diagnosticTag = "file-station.upload.worker-restarted-after-running",
+)
+
+internal fun uploadTargetConflictResult(): MutationResult = MutationResult(
+    schemaVersion = 1,
+    status = MutationResultStatus.CONFIRMED_FAILURE,
+    operation = "fileUpload",
+    submitted = false,
+    requiresRefresh = false,
+    counts = MutationResultCounts(0, 1, 0),
+    errorCategory = MutationErrorCategory.CONFLICT,
+    diagnosticTag = "file-station.upload.target-conflict",
+)
 
 internal fun backupTargetDecision(
     existing: io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem?,
@@ -241,7 +343,8 @@ internal fun PersistedUpload.cancelUploadExecution(executionId: String): Persist
         copy(
             state = TransferState.CANCELLED,
             errorKind = null,
-            requiresRefresh = !backupMode && completedBytes > 0,
+            requiresRefresh = requiresRefresh || directoryMutationResult?.requiresRefresh == true ||
+                uploadMutationResult?.requiresRefresh == true || !backupMode && completedBytes > 0,
         )
     } else {
         this
@@ -260,4 +363,68 @@ internal fun PersistedUpload.completeUploadExecution(
     )
 } else {
     this
+}
+
+internal enum class UploadMutationStage { DIRECTORY, UPLOAD }
+
+internal fun PersistedUpload.applyUploadMutationResult(
+    executionId: String,
+    result: MutationResult,
+    stage: UploadMutationStage,
+): PersistedUpload {
+    if (!ownsUploadExecution(executionId) || state !in setOf(
+            TransferState.RUNNING,
+            TransferState.CANCELLING,
+        )
+    ) return this
+    val persisted = result.toPersistedMutationResult(
+        writeSubmitted = when (stage) {
+            UploadMutationStage.DIRECTORY -> result.submitted &&
+                result.diagnosticTag != "file-station.backup-folder.ensure.already-satisfied" &&
+                result.diagnosticTag?.endsWith(".readback-only") != true
+            UploadMutationStage.UPLOAD -> result.submitted
+        },
+    )
+    val resultFields: PersistedUpload.() -> PersistedUpload = {
+        when (stage) {
+            UploadMutationStage.DIRECTORY -> copy(directoryMutationResult = persisted)
+            UploadMutationStage.UPLOAD -> copy(uploadMutationResult = persisted)
+        }
+    }
+    val withResult = resultFields()
+    if (result.status == MutationResultStatus.CONFIRMED_SUCCESS) {
+        return if (stage == UploadMutationStage.DIRECTORY) {
+            withResult
+        } else {
+            withResult.copy(
+                state = TransferState.SUCCEEDED,
+                completedBytes = expectedBytes,
+                errorKind = null,
+                skippedExisting = false,
+                requiresRefresh = false,
+            )
+        }
+    }
+    val cancelled = state == TransferState.CANCELLING || result.status in setOf(
+        MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+        MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+    )
+    val needsRefresh = result.requiresRefresh || result.counts.unknown > 0 ||
+        result.status in setOf(
+            MutationResultStatus.PARTIAL_SUCCESS,
+            MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+            MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+        )
+    return withResult.copy(
+        state = if (cancelled) TransferState.CANCELLED else TransferState.FAILED,
+        errorKind = if (cancelled && !needsRefresh) null else result.uploadErrorKind().name,
+        requiresRefresh = needsRefresh,
+    )
+}
+
+private fun MutationResult.uploadErrorKind(): DsmErrorKind = when {
+    errorCategory == MutationErrorCategory.PERMISSION -> DsmErrorKind.PERMISSION_DENIED
+    errorCategory == MutationErrorCategory.UNSUPPORTED -> DsmErrorKind.FEATURE_UNSUPPORTED
+    requiresRefresh || counts.unknown > 0 || submitted -> DsmErrorKind.CHANGE_NOT_CONFIRMED
+    else -> DsmErrorKind.UPLOAD_FAILED
 }

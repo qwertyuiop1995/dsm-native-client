@@ -1,7 +1,7 @@
 {
   "$schema": "../schemas/private-api-compatibility.schema.json",
   "schemaVersion": 1,
-  "updatedAt": "2026-08-03",
+  "updatedAt": "2026-08-05",
   "environments": [
     {
       "id": "lab-a-dsm-7-2-1-69057-u12-20260729",
@@ -672,7 +672,7 @@
         "POST"
       ],
       "fallback": "优先官方 SYNO.DownloadStation.*；内部家族缺失时关闭对应增强能力。",
-      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "documentRef": "docs/api/discovery/endpoints/download-station2-fallback.md",
       "verifications": [
         {
           "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
@@ -686,6 +686,7 @@
           },
           "verifiedAt": "2026-07-27",
           "evidenceRefs": [
+            "docs/api/discovery/endpoints/download-station2-fallback.md",
             "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
             "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
           ],
@@ -718,7 +719,7 @@
         "POST"
       ],
       "fallback": "优先公开 SYNO.Virtualization.API.* v1；内部读取失败时显示不可用，写能力保持关闭。",
-      "documentRef": "docs/api/discovery/endpoints/INDEX.md",
+      "documentRef": "docs/api/discovery/endpoints/vmm-internal.md",
       "verifications": [
         {
           "environmentId": "lab-a-dsm-7-2-1-69057-u12-20260729",
@@ -731,6 +732,7 @@
           },
           "verifiedAt": "2026-07-27",
           "evidenceRefs": [
+            "docs/api/discovery/endpoints/vmm-internal.md",
             "docs/api/DSM_WEB_API_REFERENCE_ZH.md",
             "docs/compatibility/DSM_COMPATIBILITY_MATRIX.md"
           ],

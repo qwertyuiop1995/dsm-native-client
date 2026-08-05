@@ -291,6 +291,11 @@ data class FileServerMutationLifecycle(
     val generation: Long = 0L,
 )
 
+data class UploadMutationLifecycle(
+    val directoryResult: MutationResult? = null,
+    val uploadResult: MutationResult? = null,
+)
+
 data class TransferTask(
     val id: String,
     val title: String,
@@ -303,6 +308,7 @@ data class TransferTask(
     val requiresRefresh: Boolean = false,
     val startedAtEpochMillis: Long? = null,
     val fileServerMutation: FileServerMutationLifecycle? = null,
+    val uploadMutation: UploadMutationLifecycle? = null,
 ) {
     val progress: Float?
         get() = totalBytes?.takeIf { it > 0 }?.let {

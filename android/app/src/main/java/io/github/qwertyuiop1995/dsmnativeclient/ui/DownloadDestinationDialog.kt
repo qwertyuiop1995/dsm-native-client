@@ -1,11 +1,13 @@
 package io.github.qwertyuiop1995.dsmnativeclient.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -51,6 +53,9 @@ internal fun DownloadDestinationDialog(
     model: AppViewModel,
     onSelected: (String) -> Unit,
     onDismiss: () -> Unit = model::cancelDownloadDestinationSelection,
+    @StringRes description: Int = R.string.download_destination_description,
+    selectionEnabled: Boolean = true,
+    @StringRes selectionUnavailableMessage: Int? = null,
 ) {
     val picker = state.downloadDestinationPicker ?: return
     val locationName = picker.location.path.substringAfterLast('/').ifBlank {
@@ -85,7 +90,7 @@ internal fun DownloadDestinationDialog(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            stringResource(R.string.download_destination_description),
+                            stringResource(description),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -196,19 +201,27 @@ internal fun DownloadDestinationDialog(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                if (picker.canSelectCurrent && !selectionEnabled && selectionUnavailableMessage != null) {
+                    Text(
+                        stringResource(selectionUnavailableMessage),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 HorizontalDivider()
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextButton(onClick = onDismiss) {
+                    TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
                         Text(stringResource(R.string.cancel))
                     }
                     Button(
                         onClick = { onSelected(picker.location.path) },
-                        enabled = picker.canSelectCurrent,
-                        modifier = Modifier.padding(start = 8.dp),
+                        enabled = picker.canSelectCurrent && selectionEnabled,
+                        modifier = Modifier.padding(start = 8.dp).heightIn(min = 48.dp),
                     ) {
                         Text(stringResource(R.string.use_this_folder))
                     }

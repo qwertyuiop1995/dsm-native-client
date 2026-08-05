@@ -27,6 +27,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultCounts
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ResourceState
 import io.github.qwertyuiop1995.dsmnativeclient.ui.downloads.DownloadControlMutationFeedbackCard
+import io.github.qwertyuiop1995.dsmnativeclient.ui.downloads.DownloadDestinationEditConfirmationDialog
 import io.github.qwertyuiop1995.dsmnativeclient.ui.downloads.DownloadDeletionConfirmationDialog
 import io.github.qwertyuiop1995.dsmnativeclient.ui.downloads.DownloadTaskActionsDialog
 import io.github.qwertyuiop1995.dsmnativeclient.ui.theme.LanStashTheme
@@ -102,6 +103,63 @@ class DownloadTaskManagementUiTest {
         ) } }
         rule.onNodeWithText(context.getString(R.string.resume)).performClick()
         rule.runOnIdle { check(resumes == 1) }
+    }
+
+    @Test fun 官方能力存在时保存位置动作可见且准确回调() {
+        var edits = 0
+        rule.setContent { LanStashTheme { DownloadTaskActionsDialog(
+            "Ubuntu ISO", ResourceState.RUNNING, true,
+            onDetails = {}, onPause = {}, onResume = {},
+            onRemove = {}, onRemoveWithFiles = {}, onDismiss = {},
+            canEditDestination = true,
+            onEditDestination = { edits += 1 },
+        ) } }
+
+        rule.onNodeWithText(context.getString(R.string.change_download_destination)).performClick()
+        rule.runOnIdle { check(edits == 1) }
+    }
+
+    @Test fun 保存位置确认显示当前新目录和影响说明() {
+        var confirmations = 0
+        rule.setContent { LanStashTheme { DownloadDestinationEditConfirmationDialog(
+            taskTitle = "Ubuntu ISO",
+            currentDestination = "/downloads",
+            newDestination = "/archive",
+            persistentRejection = false,
+            onConfirm = { confirmations += 1; true },
+            onDismiss = {},
+        ) } }
+
+        rule.onNodeWithText(context.getString(R.string.current_download_destination_summary, "/downloads"))
+            .assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.new_download_destination_summary, "/archive"))
+            .assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.change_download_destination_effect))
+            .assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.confirm_change_download_destination))
+            .performClick()
+        rule.runOnIdle { check(confirmations == 1) }
+    }
+
+    @Test fun 两倍字体窄屏仍可滚动并确认保存位置() {
+        rule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
+                Box(Modifier.width(220.dp).height(280.dp)) {
+                    DownloadDestinationEditConfirmationDialog(
+                        taskTitle = "Ubuntu ISO with a long synthetic title",
+                        currentDestination = "/downloads/current/path",
+                        newDestination = "/archive/new/path",
+                        persistentRejection = false,
+                        onConfirm = { true },
+                        onDismiss = {},
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithText(context.getString(R.string.confirm_change_download_destination))
+            .assertIsDisplayed().assertIsEnabled()
     }
 
     @Test fun 两种删除使用不同确认按钮和风险摘要() {

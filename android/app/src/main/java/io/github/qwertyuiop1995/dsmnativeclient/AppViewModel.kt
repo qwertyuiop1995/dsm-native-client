@@ -344,6 +344,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val fileBackgroundTaskRequestGeneration = AtomicLong(0)
     private val downloadCreationMutationGeneration = AtomicLong(0)
     private val downloadControlMutationGeneration = AtomicLong(0)
+    private val downloadDestinationEditMutationGeneration = AtomicLong(0)
     private val downloadSettingsMutationGeneration = AtomicLong(0)
     private val downloadRssRefreshMutationGeneration = AtomicLong(0)
     private val virtualMachineMutationGeneration = AtomicLong(0)
@@ -359,6 +360,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadCreationMutationLock = downloadMutationCoordinatorLock
     private val fileStationMutationLock = downloadMutationCoordinatorLock
     private val downloadControlMutationLock = downloadMutationCoordinatorLock
+    private val downloadDestinationEditMutationLock = downloadMutationCoordinatorLock
     private val downloadSettingsMutationLock = downloadMutationCoordinatorLock
     private val downloadRssRefreshMutationLock = downloadMutationCoordinatorLock
     // VMM 创建、设置、生命周期写操作与工作区退出共用同步 claim 边界。
@@ -542,6 +544,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     supportsRemoteLocations = repo.supportsRemoteLocations(),
                     supportsDownloadSettings = repo.supportsDownloadSettings(),
                     supportsDownloadSchedule = repo.supportsDownloadSchedule(),
+                    supportsDownloadTaskDestinationEditing =
+                        repo.supportsDownloadTaskDestinationEditing(),
                     supportsDownloadRss = repo.supportsDownloadRss(),
                     supportsDownloadBtSearch = repo.supportsDownloadBtSearch(),
                     supportsChatReminders = repo.supportsChatReminders(),
@@ -656,6 +660,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     supportsRemoteLocations = repo.supportsRemoteLocations(),
                     supportsDownloadSettings = repo.supportsDownloadSettings(),
                     supportsDownloadSchedule = repo.supportsDownloadSchedule(),
+                    supportsDownloadTaskDestinationEditing =
+                        repo.supportsDownloadTaskDestinationEditing(),
                     supportsDownloadRss = repo.supportsDownloadRss(),
                     supportsDownloadBtSearch = repo.supportsDownloadBtSearch(),
                     supportsChatReminders = repo.supportsChatReminders(),
@@ -782,6 +788,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             state.selectedModule == Module.DOWNLOADS && module != Module.DOWNLOADS &&
             (downloadCreationBlocksWorkspaceExit(state.downloadCreationState) ||
                 downloadControlBlocksWorkspaceExit(state.downloadControlState) ||
+                downloadDestinationEditBlocksWorkspaceExit(state.downloadDestinationEditState) ||
                 downloadSettingsBlocksWorkspaceExit(state.downloadSettingsState) ||
                 downloadRssRefreshBlocksWorkspaceExit(state.downloadRssRefreshState))
         ) {
@@ -965,13 +972,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         val current = _workspace.value ?: return@synchronized null
                         if (
                             !canLoadDownloadsNormally(current.downloadControlState) ||
-                            current.downloadCreationState.target != null
+                            current.downloadCreationState.target != null ||
+                            current.downloadDestinationEditState.target != null
                         ) {
                             refreshStructuredMutation =
                                 current.downloadControlState.mutationResult != null ||
                                 current.downloadControlState.mutationFailure != null ||
                                 current.downloadCreationState.mutationResult != null ||
-                                current.downloadCreationState.mutationFailure != null
+                                current.downloadCreationState.mutationFailure != null ||
+                                current.downloadDestinationEditState.mutationResult != null ||
+                                current.downloadDestinationEditState.mutationFailure != null
                             return@synchronized null
                         }
                         DownloadListRequestToken(
@@ -985,6 +995,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         if (refreshStructuredMutation) {
                             if (_workspace.value?.downloadCreationState?.target != null) {
                                 refreshDownloadCreationMutation()
+                            } else if (_workspace.value?.downloadDestinationEditState?.target != null) {
+                                refreshDownloadDestinationEditMutation()
                             } else {
                                 refreshDownloadControlMutation()
                             }
@@ -5808,6 +5820,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (current.selectedModule != Module.DOWNLOADS || !current.supportsDownloadSettings ||
             current.isPerformingAction || current.downloadCreationState.target != null ||
             current.downloadControlState.target != null || current.downloadRssRefreshState.target != null ||
+            current.downloadDestinationEditState != DownloadDestinationEditWorkspaceState() ||
             settingsState.editorVisible ||
             settingsState.mutationInProgress || settingsState.mutationRefreshInProgress
         ) return@synchronized false
@@ -6478,6 +6491,82 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             it?.copy(
                 downloadDestinationPicker = null,
                 downloadDestinationFolders = Loadable.Idle,
+                downloadDestinationEditState = if (
+                    it.downloadDestinationEditState.selectionTaskBaseline != null &&
+                    it.downloadDestinationEditState.target == null
+                ) {
+                    DownloadDestinationEditWorkspaceState()
+                } else {
+                    it.downloadDestinationEditState
+                },
+            )
+        }
+    }
+
+    fun beginDownloadTaskDestinationSelection(taskId: String): Boolean =
+        synchronized(downloadDestinationEditMutationLock) {
+            val repo = repository ?: return@synchronized false
+            val current = _workspace.value ?: return@synchronized false
+            if (!current.supportsDownloadTaskDestinationEditing ||
+                current.selectedModule != Module.DOWNLOADS || current.isPerformingAction ||
+                current.downloadCreationState.target != null || current.downloadControlState.target != null ||
+                current.downloadSettingsState.editorVisible || current.downloadRssRefreshState.target != null ||
+                current.downloadDestinationEditState != DownloadDestinationEditWorkspaceState()
+            ) return@synchronized false
+            val normalizedId = taskId.trim().takeIf(String::isNotEmpty) ?: return@synchronized false
+            val task = (current.downloads as? Loadable.Ready)?.value.orEmpty()
+                .mapNotNull(::canonicalDownloadTask)
+                .filter { it.id == normalizedId }
+                .singleOrNull() ?: return@synchronized false
+            val picker = DownloadDestinationPickerState()
+            _workspace.value = current.copy(
+                downloadDestinationPicker = picker,
+                downloadDestinationFolders = Loadable.Loading,
+                downloadDestinationEditState = DownloadDestinationEditWorkspaceState(
+                    selectionTaskBaseline = task,
+                ),
+            )
+            viewModelScope.launch { loadDownloadDestinationFolders(repo, picker) }
+            true
+        }
+
+    fun requestDownloadDestinationEdit(): Boolean = synchronized(downloadDestinationEditMutationLock) {
+        val current = _workspace.value ?: return@synchronized false
+        val state = current.downloadDestinationEditState
+        val task = state.selectionTaskBaseline ?: return@synchronized false
+        val destination = current.downloadDestinationPicker?.location?.baseline
+            ?: return@synchronized false
+        val target = downloadDestinationEditTarget(
+            current.profile.id,
+            current.downloads,
+            task.id,
+            destination,
+        ) ?: return@synchronized false
+        if (DownloadTaskMutationBaseline.from(target.taskBaseline) !=
+            DownloadTaskMutationBaseline.from(task)
+        ) return@synchronized false
+        val generation = downloadDestinationEditMutationGeneration.incrementAndGet()
+        downloadListRequestGeneration.incrementAndGet()
+        _workspace.value = current.copy(
+            downloadDestinationPicker = null,
+            downloadDestinationFolders = Loadable.Idle,
+            downloadDestinationEditState = DownloadDestinationEditWorkspaceState(
+                target = target.copy(taskBaseline = task),
+                confirmationRequested = true,
+                mutationGeneration = generation,
+            ),
+        )
+        true
+    }
+
+    fun cancelDownloadDestinationEdit() {
+        synchronized(downloadDestinationEditMutationLock) {
+            val current = _workspace.value ?: return
+            val state = current.downloadDestinationEditState
+            if (!state.confirmationRequested || state.mutationInProgress) return
+            downloadDestinationEditMutationGeneration.incrementAndGet()
+            _workspace.value = current.copy(
+                downloadDestinationEditState = DownloadDestinationEditWorkspaceState(),
             )
         }
     }
@@ -6487,6 +6576,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (
             current.selectedModule != Module.DOWNLOADS || current.downloadControlState.target != null ||
             current.downloadSettingsState.editorVisible || current.downloadRssRefreshState.target != null ||
+            current.downloadDestinationEditState != DownloadDestinationEditWorkspaceState() ||
             !canStartDownloadCreation(current.isPerformingAction, current.downloadCreationState)
         ) {
             return false
@@ -6537,6 +6627,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (sourceKind !in setOf(DownloadCreationSourceKind.RSS, DownloadCreationSourceKind.BT_SEARCH) ||
             current.selectedModule != Module.DOWNLOADS || current.downloadControlState.target != null ||
             current.downloadSettingsState.editorVisible || current.downloadRssRefreshState.target != null ||
+            current.downloadDestinationEditState != DownloadDestinationEditWorkspaceState() ||
             !canStartDownloadCreation(current.isPerformingAction, current.downloadCreationState) ||
             current.downloadCreationState.editorVisible ||
             current.downloadCreationState.pendingDiscoveryUri != null
@@ -6634,6 +6725,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     current.downloadControlState,
                 ) || current.selectedModule != Module.DOWNLOADS ||
                 current.downloadCreationState.target != null ||
+                current.downloadDestinationEditState != DownloadDestinationEditWorkspaceState() ||
                 current.downloadSettingsState.editorVisible || current.downloadRssRefreshState.target != null
             ) return false
             val target = downloadControlTarget(
@@ -6676,6 +6768,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 repository !== repo || current.isPerformingAction || !control.confirmationRequested ||
                 current.selectedModule != Module.DOWNLOADS || current.downloadCreationState.target != null ||
                 current.downloadSettingsState.editorVisible ||
+                current.downloadDestinationEditState != DownloadDestinationEditWorkspaceState() ||
                 control.mutationInProgress || requested == null || !requested.operation.isDeletion
             ) return false
             if (!downloadControlTargetIsCurrent(requested, current.profile.id, current.downloads)) {
@@ -6722,6 +6815,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (repository !== repo || current.selectedModule != Module.DOWNLOADS ||
                 current.downloadCreationState.target != null ||
                 current.downloadSettingsState.editorVisible ||
+                current.downloadDestinationEditState != DownloadDestinationEditWorkspaceState() ||
                 current.downloadRssRefreshState.target != null || !canStartDownloadControlMutation(
                     current.isPerformingAction,
                     current.downloadControlState,
@@ -6969,6 +7063,235 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _workspace.value = current.copy(downloadControlState = DownloadControlWorkspaceState())
         true
     }
+
+    fun confirmDownloadDestinationEdit(): Boolean {
+        val repo = repository ?: return false
+        lateinit var target: DownloadDestinationEditTarget
+        var generation = 0L
+        val profileId = synchronized(downloadDestinationEditMutationLock) {
+            val current = _workspace.value ?: return false
+            val state = current.downloadDestinationEditState
+            val requested = state.target
+            if (repository !== repo || current.isPerformingAction ||
+                current.selectedModule != Module.DOWNLOADS || !state.confirmationRequested ||
+                state.mutationInProgress || requested == null ||
+                current.downloadCreationState.target != null || current.downloadControlState.target != null ||
+                current.downloadSettingsState.editorVisible || current.downloadRssRefreshState.target != null
+            ) return false
+            if (!downloadDestinationEditTargetIsCurrent(requested, current.profile.id, current.downloads)) {
+                _workspace.value = current.copy(
+                    downloadDestinationEditState = state.copy(
+                        mutationFailure = downloadControlTargetChangedFailure(),
+                    ),
+                )
+                return false
+            }
+            target = requested
+            generation = downloadDestinationEditMutationGeneration.incrementAndGet()
+            downloadListRequestGeneration.incrementAndGet()
+            _workspace.value = current.copy(
+                isPerformingAction = true,
+                message = null,
+                downloadDestinationEditState = state.copy(
+                    confirmationRequested = false,
+                    mutationInProgress = true,
+                    mutationResult = null,
+                    mutationFailure = null,
+                    mutationRefreshFailure = null,
+                    mutationRefreshInProgress = false,
+                    mutationRefreshCompleted = false,
+                    mutationRefreshMatches = null,
+                    mutationGeneration = generation,
+                ),
+            )
+            current.profile.id
+        }
+        viewModelScope.launch {
+            val outcome = try {
+                Result.success(
+                repo.editDownloadDestinationResult(
+                    DownloadTaskMutationBaseline.from(target.taskBaseline),
+                    target.destinationBaseline,
+                ),
+                )
+            } catch (error: CancellationException) {
+                val accepted = finishDownloadDestinationEditCancellation(
+                    repo,
+                    profileId,
+                    target,
+                    generation,
+                )
+                if (accepted) refreshDownloadDestinationEditMutation()
+                throw error
+            } catch (error: Throwable) {
+                Result.failure(error)
+            }
+            val result = outcome.getOrNull()
+            val failure = outcome.exceptionOrNull()?.asDsmFailure()
+            val persistentResult = result
+            val accepted = synchronized(downloadDestinationEditMutationLock) {
+                val current = _workspace.value
+                if (current == null || !downloadDestinationEditCallbackMatches(
+                        repositoryMatches = repository === repo,
+                        profileMatches = current.profile.id == profileId,
+                        stateTarget = current.downloadDestinationEditState.target,
+                        callbackTarget = target,
+                        stateGeneration = current.downloadDestinationEditState.mutationGeneration,
+                        callbackGeneration = generation,
+                        globalGeneration = downloadDestinationEditMutationGeneration.get(),
+                    )
+                ) return@synchronized false
+                _workspace.value = current.copy(
+                    isPerformingAction = false,
+                    downloadDestinationEditState = current.downloadDestinationEditState.copy(
+                        mutationInProgress = false,
+                        mutationResult = persistentResult,
+                        mutationFailure = failure,
+                    ),
+                )
+                true
+            }
+            if (accepted && (failure != null || persistentResult?.let {
+                    it.submitted || it.requiresRefresh || it.counts.unknown > 0
+                } == true)
+            ) {
+                refreshDownloadDestinationEditMutation()
+            }
+        }
+        return true
+    }
+
+    private fun finishDownloadDestinationEditCancellation(
+        repo: DsmRepository,
+        profileId: String,
+        target: DownloadDestinationEditTarget,
+        generation: Long,
+    ): Boolean = synchronized(downloadDestinationEditMutationLock) {
+        val current = _workspace.value ?: return@synchronized false
+        val state = current.downloadDestinationEditState
+        if (!downloadDestinationEditCallbackMatches(
+                repositoryMatches = repository === repo,
+                profileMatches = current.profile.id == profileId,
+                stateTarget = state.target,
+                callbackTarget = target,
+                stateGeneration = state.mutationGeneration,
+                callbackGeneration = generation,
+                globalGeneration = downloadDestinationEditMutationGeneration.get(),
+            )
+        ) return@synchronized false
+        _workspace.value = current.copy(
+            isPerformingAction = false,
+            downloadDestinationEditState = state.copy(
+                mutationInProgress = false,
+                mutationResult = cancelledDownloadDestinationEditResult(),
+                mutationFailure = null,
+            ),
+        )
+        true
+    }
+
+    fun refreshDownloadDestinationEditMutation() {
+        val repo = repository ?: return
+        lateinit var target: DownloadDestinationEditTarget
+        var generation = 0L
+        val profileId = synchronized(downloadDestinationEditMutationLock) {
+            val current = _workspace.value ?: return
+            val state = current.downloadDestinationEditState
+            if (repository !== repo || current.isPerformingAction || state.target == null ||
+                state.confirmationRequested || state.mutationInProgress || state.mutationRefreshInProgress ||
+                state.mutationResult == null && state.mutationFailure == null
+            ) return
+            target = state.target
+            generation = downloadDestinationEditMutationGeneration.incrementAndGet()
+            downloadListRequestGeneration.incrementAndGet()
+            _workspace.value = current.copy(
+                isPerformingAction = true,
+                downloadDestinationEditState = state.copy(
+                    mutationRefreshFailure = null,
+                    mutationRefreshInProgress = true,
+                    mutationRefreshCompleted = false,
+                    mutationRefreshMatches = null,
+                    mutationGeneration = generation,
+                ),
+            )
+            current.profile.id
+        }
+        viewModelScope.launch {
+            val outcome = try {
+                Result.success(repo.activeDownloadTasksForMutation())
+            } catch (error: CancellationException) {
+                synchronized(downloadDestinationEditMutationLock) {
+                    val current = _workspace.value ?: return@synchronized
+                    val state = current.downloadDestinationEditState
+                    if (downloadDestinationEditCallbackMatches(
+                            repositoryMatches = repository === repo,
+                            profileMatches = current.profile.id == profileId,
+                            stateTarget = state.target,
+                            callbackTarget = target,
+                            stateGeneration = state.mutationGeneration,
+                            callbackGeneration = generation,
+                            globalGeneration = downloadDestinationEditMutationGeneration.get(),
+                        )
+                    ) {
+                        _workspace.value = current.copy(
+                            isPerformingAction = false,
+                            downloadDestinationEditState = state.copy(
+                                mutationRefreshInProgress = false,
+                                mutationRefreshCompleted = false,
+                                mutationRefreshMatches = null,
+                            ),
+                        )
+                    }
+                }
+                throw error
+            } catch (error: Throwable) {
+                Result.failure(error)
+            }
+            synchronized(downloadDestinationEditMutationLock) {
+                val current = _workspace.value ?: return@synchronized
+                val state = current.downloadDestinationEditState
+                if (!downloadDestinationEditCallbackMatches(
+                        repositoryMatches = repository === repo,
+                        profileMatches = current.profile.id == profileId,
+                        stateTarget = state.target,
+                        callbackTarget = target,
+                        stateGeneration = state.mutationGeneration,
+                        callbackGeneration = generation,
+                        globalGeneration = downloadDestinationEditMutationGeneration.get(),
+                    )
+                ) return@synchronized
+                val refreshed = outcome.getOrNull()
+                _workspace.value = current.withDownloads(
+                    refreshed?.let { Loadable.Ready(it) } ?: current.downloads,
+                ).copy(
+                    isPerformingAction = false,
+                    downloadDestinationEditState = state.copy(
+                        mutationRefreshFailure = outcome.exceptionOrNull()
+                            ?.takeUnless { it is CancellationException }
+                            ?.asDsmFailure(),
+                        mutationRefreshInProgress = false,
+                        mutationRefreshCompleted = refreshed != null,
+                        mutationRefreshMatches = refreshed?.let {
+                            downloadDestinationEditRefreshMatches(target, it)
+                        },
+                    ),
+                )
+            }
+        }
+    }
+
+    fun dismissDownloadDestinationEditMutation(): Boolean =
+        synchronized(downloadDestinationEditMutationLock) {
+            val current = _workspace.value ?: return@synchronized false
+            if (!canDismissDownloadDestinationEditMutation(current.downloadDestinationEditState)) {
+                return@synchronized false
+            }
+            downloadDestinationEditMutationGeneration.incrementAndGet()
+            _workspace.value = current.copy(
+                downloadDestinationEditState = DownloadDestinationEditWorkspaceState(),
+            )
+            true
+        }
 
     fun controlContainer(id: String, command: String) = containerMutation(
         success = R.string.container_state_updated,
@@ -11069,6 +11392,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 fileStationMutationBlocksWorkspaceExit(candidate.fileStationMutationState) ||
                 downloadCreationBlocksWorkspaceExit(candidate.downloadCreationState) ||
                 downloadControlBlocksWorkspaceExit(candidate.downloadControlState) ||
+                downloadDestinationEditBlocksWorkspaceExit(candidate.downloadDestinationEditState) ||
                 downloadSettingsBlocksWorkspaceExit(candidate.downloadSettingsState) ||
                 downloadRssRefreshBlocksWorkspaceExit(candidate.downloadRssRefreshState) ||
                 virtualMachineMutationBlocksWorkspaceExit(candidate.virtualMachineMutationState) ||
@@ -11094,6 +11418,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             invalidateFileBackgroundTaskRequests()
             downloadCreationMutationGeneration.incrementAndGet()
             downloadControlMutationGeneration.incrementAndGet()
+            downloadDestinationEditMutationGeneration.incrementAndGet()
             downloadSettingsMutationGeneration.incrementAndGet()
             downloadRssRefreshMutationGeneration.incrementAndGet()
             virtualMachineMutationGeneration.incrementAndGet()
@@ -11188,6 +11513,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 fileStationMutationBlocksWorkspaceExit(candidate.fileStationMutationState) ||
                 downloadCreationBlocksWorkspaceExit(candidate.downloadCreationState) ||
                 downloadControlBlocksWorkspaceExit(candidate.downloadControlState) ||
+                downloadDestinationEditBlocksWorkspaceExit(candidate.downloadDestinationEditState) ||
                 downloadSettingsBlocksWorkspaceExit(candidate.downloadSettingsState) ||
                 downloadRssRefreshBlocksWorkspaceExit(candidate.downloadRssRefreshState) ||
                 virtualMachineMutationBlocksWorkspaceExit(candidate.virtualMachineMutationState) ||
@@ -11206,6 +11532,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             invalidateFileBackgroundTaskRequests()
             downloadCreationMutationGeneration.incrementAndGet()
             downloadControlMutationGeneration.incrementAndGet()
+            downloadDestinationEditMutationGeneration.incrementAndGet()
             downloadSettingsMutationGeneration.incrementAndGet()
             downloadRssRefreshMutationGeneration.incrementAndGet()
             virtualMachineMutationGeneration.incrementAndGet()
@@ -12358,6 +12685,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 repository !== repo || current.profile.id != target.profileId ||
                 current.selectedModule != Module.DOWNLOADS || current.downloadControlState.target != null ||
                 current.downloadSettingsState.editorVisible ||
+                current.downloadDestinationEditState != DownloadDestinationEditWorkspaceState() ||
                 !canStartDownloadCreation(current.isPerformingAction, current.downloadCreationState)
             ) return false
             val nextGeneration = downloadCreationMutationGeneration.incrementAndGet()

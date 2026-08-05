@@ -72,6 +72,7 @@ data class WorkspaceState(
     val supportsRemoteLocations: Boolean = false,
     val supportsDownloadSettings: Boolean = false,
     val supportsDownloadSchedule: Boolean = false,
+    val supportsDownloadTaskDestinationEditing: Boolean = false,
     val supportsDownloadRss: Boolean = false,
     val supportsDownloadBtSearch: Boolean = false,
     val supportsChatReminders: Boolean = false,
@@ -82,6 +83,8 @@ data class WorkspaceState(
     val downloads: Loadable<List<DownloadTask>> = Loadable.Idle,
     val downloadCreationState: DownloadCreationWorkspaceState = DownloadCreationWorkspaceState(),
     val downloadControlState: DownloadControlWorkspaceState = DownloadControlWorkspaceState(),
+    val downloadDestinationEditState: DownloadDestinationEditWorkspaceState =
+        DownloadDestinationEditWorkspaceState(),
     val downloadDetailsTask: DownloadTask? = null,
     val downloadSettings: Loadable<DownloadSettings> = Loadable.Idle,
     val downloadSettingsState: DownloadSettingsWorkspaceState = DownloadSettingsWorkspaceState(),
@@ -339,7 +342,8 @@ internal fun WorkspaceState.matchesDownloadListRequest(
     token: DownloadListRequestToken,
     currentGeneration: Long,
 ): Boolean = token.generation == currentGeneration && profile.id == token.profileId &&
-    canLoadDownloadsNormally(downloadControlState) && downloadCreationState.target == null
+    canLoadDownloadsNormally(downloadControlState) && downloadCreationState.target == null &&
+    downloadDestinationEditState.target == null
 
 internal data class FileBrowserRequestToken(
     val generation: Long,

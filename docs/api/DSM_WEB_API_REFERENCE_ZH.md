@@ -612,6 +612,9 @@ force_complete=false
 官方指南中的 `Task.edit` 只公开 `id` 与 `destination`，用于修改任务目标目录；
 `Task_File.priority` 虽然可在列表和详情中读取，但官方写方法没有文件 ID 或优先级参数。
 客户端不得把任务级 `priority`、目标目录修改或内部 `DownloadStation2` 参数冒充文件优先级编辑。
+Android 正式入口固定使用 v1，并在写前分别复核用户所见任务基线和 File Station 可写目录基线；
+提交后以严格完整任务列表核对 `detail.destination`。断线、取消或响应不明确时只能回读，
+不得自动重放 `edit`。
 
 #### RSS 站点与条目
 
@@ -654,6 +657,11 @@ force_complete=false
 | `SYNO.Virtualization.API.Guest.Image` | `list`, `create`, `delete` | 镜像管理 |
 
 创建、镜像导入等明确标记为非阻塞的操作返回任务 ID，应通过 `Task.Info.get` 轮询；公开 `Guest.delete` 与 `Guest.Image.delete` v1 返回空成功响应，不得虚构任务轮询。公开 `Guest.set` v1 支持按虚拟机 ID 或名称修改名称、描述、vCPU、内存和自动启动；创建接口的未连接网卡按官方指南使用空 `network_id` 表示。`poweroff` 相当于强制断电，必须与正常 `shutdown` 在 UI 中清楚区分。
+
+Android 只读任务中心固定先调用 Task.Info v1 `list`，最多接受 100 个唯一任务 ID，再逐项
+调用 `get`；领域和界面只保留是否结束及可选进度，不保存或展示 NAS 任务 ID、内部状态、
+消息或日志正文，也不调用 `clear`。Guest v1 `list(additional=true)` 的 `vdisks`/`vnics`
+只映射公开的磁盘容量、控制器、空间回收以及网络名称和型号；MAC 与资源 ID 不进入界面。
 
 ### 7.2 项目使用的 VMM 内部接口
 

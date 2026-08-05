@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -183,6 +184,8 @@ internal fun DownloadTaskActionsDialog(
     onRemove: () -> Unit,
     onRemoveWithFiles: () -> Unit,
     onDismiss: () -> Unit,
+    canEditDestination: Boolean = false,
+    onEditDestination: () -> Unit = {},
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -220,6 +223,16 @@ internal fun DownloadTaskActionsDialog(
                         onResume,
                     )
                 }
+                if (canEditDestination) {
+                    DownloadTaskActionRow(
+                        Icons.Outlined.FolderOpen,
+                        stringResource(R.string.change_download_destination),
+                        taskTitle,
+                        enabled,
+                        false,
+                        onEditDestination,
+                    )
+                }
                 DownloadTaskActionRow(
                     Icons.Outlined.DeleteOutline,
                     stringResource(R.string.remove_task),
@@ -243,6 +256,57 @@ internal fun DownloadTaskActionsDialog(
                 onClick = onDismiss,
                 modifier = Modifier.heightIn(min = 48.dp).semantics { role = Role.Button },
             ) { Text(stringResource(R.string.close)) }
+        },
+    )
+}
+
+@Composable
+internal fun DownloadDestinationEditConfirmationDialog(
+    taskTitle: String,
+    currentDestination: String?,
+    newDestination: String,
+    persistentRejection: Boolean,
+    onConfirm: () -> Boolean,
+    onDismiss: () -> Unit,
+) {
+    var confirmationFailureVisible by remember(taskTitle, newDestination) { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.change_download_destination_title)) },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(stringResource(R.string.change_download_destination_message, taskTitle))
+                currentDestination?.takeIf(String::isNotBlank)?.let {
+                    Text(stringResource(R.string.current_download_destination_summary, it))
+                }
+                Text(stringResource(R.string.new_download_destination_summary, newDestination))
+                Text(
+                    stringResource(R.string.change_download_destination_effect),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (persistentRejection || confirmationFailureVisible) {
+                    Text(
+                        stringResource(R.string.change_download_destination_changed),
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { if (!onConfirm()) confirmationFailureVisible = true },
+                modifier = Modifier.heightIn(min = 48.dp).semantics { role = Role.Button },
+            ) { Text(stringResource(R.string.confirm_change_download_destination)) }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp).semantics { role = Role.Button },
+            ) { Text(stringResource(R.string.cancel)) }
         },
     )
 }

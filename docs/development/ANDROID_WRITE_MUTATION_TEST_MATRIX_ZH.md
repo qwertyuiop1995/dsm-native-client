@@ -7,14 +7,14 @@
 
 ## 结论
 
-- 当前在 `AppViewModel`、跨 NAS 协调器和照片备份 Worker 三个已审文件中识别 71 个
-  `*Result` 调用点、61 个唯一方法，其中包含固定关闭与只读恢复调用；全部已进入下方
-  机器可读清单。三个文件的内容指纹、调用数量或生产源码中的调用文件集合变化时，
+- 当前在 `AppViewModel`、跨 NAS 协调器、照片备份 Worker 和 `DsmRepository` 四个已审文件中识别 72 个
+  `*Result` 调用点、62 个唯一方法，其中包含固定关闭与只读恢复调用；全部已进入下方
+  机器可读清单。四个文件的内容指纹、调用数量或生产源码中的调用文件集合变化时，
   `check_android_write_test_matrix.py` 会要求重新人工复核，不用正则猜测结果数据流。
 - 所有已开放写入口均已形成闭环，包括文件操作、Download Station、Chat、NAS 设置、
   账号与群组、套件及 VMM；单目标原子操作按不适用记录 `partial=na`，不伪造部分成功。
 - 固定失败关闭并有零请求证据的入口是 5 项容器写入口和 2 项 VMM 内部网络写入口。
-- 61 个生产 `*Result` 方法的适用场景均有现存测试方法证据，矩阵门禁当前无
+- 62 个生产 `*Result` 方法的适用场景均有现存测试方法证据，矩阵门禁当前无
   `pending` 或 `gap`；A1“每项写操作测试”叶子目标已闭环。真实 NAS 权限、断线、
   取消和副作用仍按用户安排留待统一打包验收，不以自动化结果替代。
 
@@ -60,6 +60,7 @@
 <!-- WRITE-MUTATION methods=createDownloadResult;state=open;multi=no;pre=DownloadCreationResultTest.kt::非法链接和不支持能力均在提交前失败;success=DownloadCreationResultTest.kt::链接任务只在新任务回读后确认;disconnect=DownloadCreationResultTest.kt::链接提交断线后不把其他新任务归属;readback=DownloadCreationResultTest.kt::链接创建响应成功但回读失败;cancel=DownloadCreationResultTest.kt::链接创建提交后的取消;partial=na -->
 <!-- WRITE-MUTATION methods=createDownloadFromFileResult;state=open;multi=no;pre=DownloadCreationResultTest.kt::非法任务文件在上传前失败;success=DownloadCreationResultTest.kt::任务文件只在稳定任务回读后确认成功且只上传一次;disconnect=DownloadCreationResultTest.kt::任务文件提交断线只回读不猜测归属且不再次上传;readback=DownloadCreationResultTest.kt::任务文件上传成功但回读失败时保持未确认且不再次上传;cancel=DownloadCreationResultTest.kt::任务文件提交后的取消只要求核对且不再次上传;partial=na -->
 <!-- WRITE-MUTATION methods=controlDownloadsResult;state=open;multi=yes;pre=DownloadMutationResultTest.kt::稳定基线或适用状态漂移时写请求为零;success=DownloadMutationResultTest.kt::暂停和继续按最终状态逐项确认;disconnect=DownloadMutationResultTest.kt::提交断线后在不可取消回读确认最终状态;readback=DownloadMutationResultTest.kt::提交断线且严格回读失败;cancel=DownloadMutationResultTest.kt::提交阶段取消仍执行不可取消严格回读;partial=DownloadMutationResultTest.kt::批量暂停只把已确认项计成功 -->
+<!-- WRITE-MUTATION methods=editDownloadDestinationResult;state=open;multi=no;pre=DownloadMutationResultTest.kt::目标目录或任务基线漂移时保存位置写请求为零;success=DownloadMutationResultTest.kt::修改保存位置仅发送一次官方v1写请求并按回读确认;disconnect=DownloadMutationResultTest.kt::写请求连接失败但回读已生效时不重放并确认成功;readback=DownloadMutationResultTest.kt::修改保存位置写后回读失败保持未确认且不重放;cancel=DownloadMutationResultTest.kt::修改保存位置提交阶段取消只回读且不重放;partial=na -->
 <!-- WRITE-MUTATION methods=saveDownloadSettingsResult;state=open;multi=yes;pre=DownloadSettingsRepositoryTest.kt::计划预读失败时保持未提交;success=DownloadSettingsRepositoryTest.kt::保存两组件后严格回读;disconnect=DownloadSettingsRepositoryTest.kt::计划提交失败但基础设置已确认;readback=DownloadSettingsRepositoryTest.kt::计划回读失败保留unknown;cancel=DownloadSettingsRepositoryTest.kt::第二阶段取消只回读;partial=DownloadSettingsRepositoryTest.kt::计划提交失败但基础设置已确认时返回部分成功 -->
 <!-- WRITE-MUTATION methods=refreshDownloadRssSiteResult;state=open;multi=no;pre=DownloadDiscoveryRepositoryTest.kt::RSS 目标已变化时不提交刷新;success=DownloadDiscoveryRepositoryTest.kt::RSS 刷新固定使用公开 v1 且写前写后回读目标;disconnect=DownloadDiscoveryRepositoryTest.kt::RSS 刷新提交时断线标记未确认且不自动重放;readback=DownloadDiscoveryRepositoryTest.kt::RSS 刷新提交成功但回读失败时保持未确认且不重放;cancel=DownloadDiscoveryRepositoryTest.kt::RSS 刷新提交后的取消只要求刷新且不重放;partial=na -->
 

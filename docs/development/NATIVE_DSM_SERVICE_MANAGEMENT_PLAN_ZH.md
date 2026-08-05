@@ -64,6 +64,7 @@
 - RSS 站点、条目、下载过滤器。
 - 已完成官方基础设置：默认位置、eMule、自动解压、BT/HTTP/FTP/NZB/eMule 限速与计划；继续补齐套件内部的高级 BT、监听目录、NZB 服务器、RSS 与通知设置。
 - Android 已完成官方任务文件、Tracker、Peer 详情、RSS 站点/条目浏览、RSS 单站点手动刷新和 BT 实际搜索；搜索仅使用已启用模块并清理临时服务端任务，RSS 条目和搜索结果可经可写目录选择后直接创建任务。RSS 刷新具备目标预检、同站点防重复、写后回读和未确认结果；官方指南未公开 RSS 完整编辑或文件优先级写参数，相关能力与高级设置保持关闭并等待版本化契约和真实 NAS 验收。
+- Android 已按官方 `SYNO.DownloadStation.Task.edit` v1 接入单任务保存位置修改：选择可写目录、明确提示可能移动已有文件，写前复核任务与目录完整基线，提交后严格回读，断线和取消不自动重放；该能力不复用 `DownloadStation2`。
 
 ### M3：Container Manager 完整功能
 
@@ -80,7 +81,8 @@
 - 克隆、迁移、导入导出。
 - 映像创建、上传、编辑与删除。
 - 快照、保护计划、恢复与保留策略。
-- 异步任务中心、许可证与 High Availability 状态。
+- Android 已使用官方 Guest v1 `additional=true` 只读展示磁盘与网卡配置，并使用 Task.Info v1 提供最多 100 项、不含任务 ID/内部状态的只读任务中心；`clear` 保持关闭。
+- 许可证与 High Availability 状态。
 
 ## 6. 验收
 

@@ -100,7 +100,14 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.StorageFileCategory
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineOverview
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineCreation
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineDisk
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineDiskController
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineHardware
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineNetworkInterface
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineNetworkModel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSettings
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTask
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTaskCenterState
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmApiClient
 import io.github.qwertyuiop1995.dsmnativeclient.network.isTrustedQuickConnectRelayHost
 import io.github.qwertyuiop1995.dsmnativeclient.network.ChatRealtimeClient
@@ -1203,7 +1210,7 @@ class DsmRepository(
                 )
             } catch (failure: DsmFailure) {
                 return favoriteSubmissionFailure(failure, "favoriteRemove")
-            } catch (_: Throwable) {
+            } catch (_: DsmFailure) {
                 return favoriteResult(
                     operation = "favoriteRemove",
                     status = MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
@@ -5572,6 +5579,11 @@ class DsmRepository(
     fun supportsDownloadSettings(): Boolean = supports("SYNO.DownloadStation.Info")
 
     fun supportsDownloadSchedule(): Boolean = supports("SYNO.DownloadStation.Schedule")
+
+    fun supportsDownloadTaskDestinationEditing(): Boolean =
+        supportsVersion("SYNO.DownloadStation.Task", 1) &&
+            supports("SYNO.FileStation.List")
+
     fun supportsChatReminders(): Boolean = supportsVersion(CHAT_POST_REMINDER_API, 1)
     fun supportsChatScheduledMessages(): Boolean = supportsVersion(CHAT_POST_SCHEDULE_API, 1)
     fun supportsChatPollCreation(): Boolean =
@@ -6226,6 +6238,242 @@ class DsmRepository(
         }
     }
 
+    /**
+     * 使用官方 Task.edit v1 修改单个任务的保存位置。目标目录和任务都在同一进程锁内
+     * 重新读取完整基线；提交取消或传输失败后只回读，不自动重放写请求。
+     */
+    suspend fun editDownloadDestinationResult(
+        baseline: DownloadTaskMutationBaseline,
+        destination: FileItem,
+    ): MutationResult {
+        val operation = "downloadEditDestination"
+        val taskId = baseline.id
+        val destinationPath = destination.path.trim()
+        if (!currentCoroutineContext().isActive) {
+            return downloadMutationResult(
+                operation,
+                MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+                submitted = false,
+                diagnosticTag = "download-station.edit-destination.cancelled-before-submission",
+            )
+        }
+        if (taskId.isBlank() || taskId != taskId.trim() || destinationPath.isBlank() ||
+            destinationPath != destination.path || !destination.isDirectory || !destination.canWrite ||
+            baseline.destination?.trim() == destinationPath
+        ) {
+            return downloadMutationResult(
+                operation,
+                MutationResultStatus.CONFIRMED_FAILURE,
+                submitted = false,
+                failed = 1,
+                errorCategory = MutationErrorCategory.VALIDATION,
+                diagnosticTag = "download-station.edit-destination.invalid-input",
+            )
+        }
+        if (!supportsDownloadTaskDestinationEditing()) {
+            return downloadMutationResult(
+                operation,
+                MutationResultStatus.UNSUPPORTED,
+                submitted = false,
+                failed = 1,
+                errorCategory = MutationErrorCategory.UNSUPPORTED,
+                diagnosticTag = "download-station.edit-destination.unsupported",
+            )
+        }
+        val claimed = try {
+            downloadMutationLock.withLock {
+                if (taskId in activeDownloadMutationIds) false else {
+                    activeDownloadMutationIds += taskId
+                    true
+                }
+            }
+        } catch (_: CancellationException) {
+            return downloadMutationResult(
+                operation,
+                MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+                submitted = false,
+                diagnosticTag = "download-station.edit-destination.cancelled-before-lock",
+            )
+        }
+        if (!claimed) {
+            return downloadMutationResult(
+                operation,
+                MutationResultStatus.CONFIRMED_FAILURE,
+                submitted = false,
+                failed = 1,
+                errorCategory = MutationErrorCategory.CONFLICT,
+                diagnosticTag = "download-station.edit-destination.duplicate-submission",
+            )
+        }
+        try {
+            val currentDestination: FileItem
+            val currentTask: DownloadTask
+            try {
+                currentDestination = fileInfo(destinationPath)
+                    ?: return downloadMutationResult(
+                        operation,
+                        MutationResultStatus.CONFIRMED_FAILURE,
+                        submitted = false,
+                        failed = 1,
+                        errorCategory = MutationErrorCategory.CONFLICT,
+                        diagnosticTag = "download-station.edit-destination.destination-missing",
+                    )
+                currentTask = strictDownloadTaskList().singleOrNull { it.id == taskId }
+                    ?: return downloadMutationResult(
+                        operation,
+                        MutationResultStatus.CONFIRMED_FAILURE,
+                        submitted = false,
+                        failed = 1,
+                        errorCategory = MutationErrorCategory.CONFLICT,
+                        diagnosticTag = "download-station.edit-destination.task-missing",
+                    )
+            } catch (_: CancellationException) {
+                return downloadMutationResult(
+                    operation,
+                    MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+                    submitted = false,
+                    diagnosticTag = "download-station.edit-destination.cancelled-during-preflight",
+                )
+            } catch (failure: DsmFailure) {
+                return downloadMutationResult(
+                    operation,
+                    MutationResultStatus.CONFIRMED_FAILURE,
+                    submitted = false,
+                    failed = 1,
+                    errorCategory = downloadMutationErrorCategory(failure),
+                    diagnosticTag = "download-station.edit-destination.preflight-failed",
+                )
+            }
+            if (!currentDestination.matchesMutationBaseline(destination) ||
+                DownloadTaskMutationBaseline.from(currentTask) != baseline
+            ) {
+                return downloadMutationResult(
+                    operation,
+                    MutationResultStatus.CONFIRMED_FAILURE,
+                    submitted = false,
+                    failed = 1,
+                    errorCategory = MutationErrorCategory.CONFLICT,
+                    diagnosticTag = "download-station.edit-destination.baseline-changed",
+                )
+            }
+            try {
+                currentCoroutineContext().ensureActive()
+            } catch (_: CancellationException) {
+                return downloadMutationResult(
+                    operation,
+                    MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+                    submitted = false,
+                    diagnosticTag = "download-station.edit-destination.cancelled-before-write",
+                )
+            }
+
+            var submissionFailure: DsmFailure? = null
+            var cancellationRequested = false
+            try {
+                call(
+                    "SYNO.DownloadStation.Task",
+                    "edit",
+                    mapOf("id" to taskId, "destination" to destinationPath),
+                    version = 1,
+                )
+            } catch (_: CancellationException) {
+                cancellationRequested = true
+            } catch (failure: DsmFailure) {
+                submissionFailure = failure
+            }
+
+            var readback: DownloadTask? = null
+            var readbackFailed = false
+            try {
+                readback = if (cancellationRequested || submissionFailure != null) {
+                    withContext(NonCancellable) {
+                        readbackDownloadDestination(taskId, destinationPath)
+                    }
+                } else {
+                    readbackDownloadDestination(taskId, destinationPath)
+                }
+            } catch (_: CancellationException) {
+                cancellationRequested = true
+                readback = withContext(NonCancellable) {
+                    runCatching { readbackDownloadDestination(taskId, destinationPath) }.getOrNull()
+                }
+                readbackFailed = readback == null
+            } catch (_: DsmFailure) {
+                readbackFailed = true
+            }
+            if (readback?.destination?.trim() == destinationPath) {
+                return downloadMutationResult(
+                    operation,
+                    MutationResultStatus.CONFIRMED_SUCCESS,
+                    submitted = true,
+                    succeeded = 1,
+                    diagnosticTag = "download-station.edit-destination.confirmed-success",
+                )
+            }
+            val unchanged = readback?.let(DownloadTaskMutationBaseline::from) == baseline
+            val failureCategory = submissionFailure?.let(::downloadMutationErrorCategory)
+            val explicitRejection = submissionFailure != null &&
+                submissionFailure.kind !in setOf(
+                    DsmErrorKind.CONNECTION_FAILED,
+                    DsmErrorKind.INVALID_RESPONSE,
+                    DsmErrorKind.UNKNOWN,
+                )
+            if (unchanged && explicitRejection && !cancellationRequested) {
+                val status = when (failureCategory) {
+                    MutationErrorCategory.PERMISSION,
+                    MutationErrorCategory.AUTHENTICATION,
+                    -> MutationResultStatus.PERMISSION_DENIED
+                    MutationErrorCategory.UNSUPPORTED -> MutationResultStatus.UNSUPPORTED
+                    else -> MutationResultStatus.CONFIRMED_FAILURE
+                }
+                return downloadMutationResult(
+                    operation,
+                    status,
+                    submitted = true,
+                    failed = 1,
+                    errorCategory = failureCategory,
+                    diagnosticTag = "download-station.edit-destination.confirmed-rejection",
+                )
+            }
+            return downloadMutationResult(
+                operation,
+                if (cancellationRequested) {
+                    MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION
+                } else {
+                    MutationResultStatus.SUBMITTED_BUT_UNVERIFIED
+                },
+                submitted = true,
+                requiresRefresh = true,
+                unknown = 1,
+                errorCategory = failureCategory,
+                diagnosticTag = if (readbackFailed) {
+                    "download-station.edit-destination.readback-failed"
+                } else {
+                    "download-station.edit-destination.readback-mismatch"
+                },
+            )
+        } finally {
+            withContext(NonCancellable) {
+                downloadMutationLock.withLock { activeDownloadMutationIds.remove(taskId) }
+            }
+        }
+    }
+
+    private suspend fun readbackDownloadDestination(
+        taskId: String,
+        destination: String,
+    ): DownloadTask? {
+        var task: DownloadTask? = null
+        for (attempt in 0 until DOWNLOAD_MUTATION_READBACK_ATTEMPTS) {
+            task = strictDownloadTaskList().singleOrNull { it.id == taskId }
+            if (task?.destination?.trim() == destination) break
+            if (attempt + 1 < DOWNLOAD_MUTATION_READBACK_ATTEMPTS) {
+                delay(DOWNLOAD_MUTATION_READBACK_INTERVAL_MILLIS)
+            }
+        }
+        return task
+    }
+
     private suspend fun readbackDownloadMutation(
         ids: List<String>,
         action: DownloadTaskMutationAction,
@@ -6437,8 +6685,25 @@ class DsmRepository(
             "SYNO.Virtualization.API.Guest.Image",
             "SYNO.Virtualization.Guest.Image",
         )
-        val machines = resourceList(guestApi, listOf("list"), "guests", "vms")
         val unavailable = mutableSetOf<VirtualMachineSection>()
+        val officialGuestRead = if (supportsVersion("SYNO.Virtualization.API.Guest", 1)) {
+            try {
+                officialVirtualMachineRead()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                unavailable += VirtualMachineSection.HARDWARE
+                null
+            }
+        } else {
+            unavailable += VirtualMachineSection.HARDWARE
+            null
+        }
+        if (officialGuestRead?.hardware == null) {
+            unavailable += VirtualMachineSection.HARDWARE
+        }
+        val machines = officialGuestRead?.machines
+            ?: resourceList(guestApi, listOf("list"), "guests", "vms")
         suspend fun optional(
             section: VirtualMachineSection,
             apiName: String?,
@@ -6505,6 +6770,10 @@ class DsmRepository(
             unavailable += VirtualMachineSection.LOGS
             emptyList()
         }
+        val taskCenter = virtualMachineTaskCenter()
+        if (taskCenter.state != VirtualMachineTaskCenterState.AVAILABLE) {
+            unavailable += VirtualMachineSection.TASKS
+        }
         return VirtualMachineOverview(
             machines = machines,
             hosts = hosts,
@@ -6515,6 +6784,9 @@ class DsmRepository(
             protectionSchedules = schedules,
             retentionPolicies = retentions,
             logs = logs,
+            machineHardware = officialGuestRead?.hardware.orEmpty(),
+            tasks = taskCenter.tasks,
+            taskCenterState = taskCenter.state,
             unavailableSections = unavailable,
         )
     }
@@ -6910,6 +7182,169 @@ class DsmRepository(
         "guests",
         "vms",
     )
+
+    private data class OfficialVirtualMachineRead(
+        val machines: List<ManagedResource>,
+        val hardware: List<VirtualMachineHardware>?,
+    )
+
+    /** 公开 Guest v1 的磁盘与网卡结构只在内存中保留，不读取或保存 MAC。 */
+    private suspend fun officialVirtualMachineRead(): OfficialVirtualMachineRead {
+        val data = call(
+            "SYNO.Virtualization.API.Guest",
+            "list",
+            mapOf("additional" to "true"),
+            version = 1,
+        )
+        val guests = data["guests"] as? JsonArray
+            ?: throw invalidVirtualizationResponse("guest-hardware-root")
+        val machineIds = mutableSetOf<String>()
+        guests.forEach { element ->
+            val guest = element as? JsonObject
+                ?: throw invalidVirtualizationResponse("guest-hardware-item")
+            val machineId = guest["guest_id"].strictStringValue()
+                ?.trim()?.takeIf(String::isNotEmpty)
+                ?: throw invalidVirtualizationResponse("guest-hardware-id")
+            if (!machineIds.add(machineId)) {
+                throw invalidVirtualizationResponse("guest-hardware-duplicate-id")
+            }
+        }
+        val hardware = try {
+            guests.map { element ->
+                val guest = element as JsonObject
+                val machineId = checkNotNull(guest["guest_id"].strictStringValue()).trim()
+                val disks = (guest["vdisks"] as? JsonArray)
+                    ?.map { diskElement -> officialVirtualMachineDisk(diskElement) }
+                    ?: throw invalidVirtualizationResponse("guest-hardware-disks")
+                if (disks.map(VirtualMachineDisk::id).distinct().size != disks.size) {
+                    throw invalidVirtualizationResponse("guest-hardware-duplicate-disk")
+                }
+                val networkInterfaces = (guest["vnics"] as? JsonArray)
+                    ?.map { networkElement -> officialVirtualMachineNetwork(networkElement) }
+                    ?: throw invalidVirtualizationResponse("guest-hardware-networks")
+                if (networkInterfaces.map(VirtualMachineNetworkInterface::id).distinct().size !=
+                    networkInterfaces.size
+                ) {
+                    throw invalidVirtualizationResponse("guest-hardware-duplicate-network")
+                }
+                VirtualMachineHardware(machineId, disks, networkInterfaces)
+            }
+        } catch (_: DsmFailure) {
+            null
+        }
+        return OfficialVirtualMachineRead(
+            machines = genericResources(data, "guests"),
+            hardware = hardware,
+        )
+    }
+
+    private fun officialVirtualMachineDisk(element: JsonElement): VirtualMachineDisk {
+        val disk = element as? JsonObject
+            ?: throw invalidVirtualizationResponse("guest-hardware-disk")
+        val id = disk["vdisk_id"].strictStringValue()?.trim()?.takeIf(String::isNotEmpty)
+            ?: throw invalidVirtualizationResponse("guest-hardware-disk-id")
+        val sizeMiB = disk["vdisk_size"].strictIntValue()?.takeIf { it >= 0 }
+            ?: throw invalidVirtualizationResponse("guest-hardware-disk-size")
+        val controller = when (disk["controller"].strictIntValue()) {
+            1 -> VirtualMachineDiskController.VIRTIO
+            2 -> VirtualMachineDiskController.IDE
+            3 -> VirtualMachineDiskController.SATA
+            else -> throw invalidVirtualizationResponse("guest-hardware-disk-controller")
+        }
+        val spaceReclamationEnabled = disk["unmap"].strictBooleanValue()
+            ?: throw invalidVirtualizationResponse("guest-hardware-disk-unmap")
+        return VirtualMachineDisk(id, sizeMiB, controller, spaceReclamationEnabled)
+    }
+
+    private fun officialVirtualMachineNetwork(element: JsonElement): VirtualMachineNetworkInterface {
+        val network = element as? JsonObject
+            ?: throw invalidVirtualizationResponse("guest-hardware-network")
+        val id = network["vnic_id"].strictStringValue()?.trim()?.takeIf(String::isNotEmpty)
+            ?: throw invalidVirtualizationResponse("guest-hardware-network-id")
+        val networkId = network["network_id"].strictStringValue()
+            ?: throw invalidVirtualizationResponse("guest-hardware-network-target")
+        val networkName = network["network_name"].strictStringValue()
+            ?: throw invalidVirtualizationResponse("guest-hardware-network-name")
+        val model = when (network["model"].strictIntValue()) {
+            1 -> VirtualMachineNetworkModel.VIRTIO
+            2 -> VirtualMachineNetworkModel.E1000
+            3 -> VirtualMachineNetworkModel.RTL8139
+            else -> throw invalidVirtualizationResponse("guest-hardware-network-model")
+        }
+        return VirtualMachineNetworkInterface(id, networkId, networkName, model)
+    }
+
+    private data class VirtualMachineTaskCenterRead(
+        val tasks: List<VirtualMachineTask>,
+        val state: VirtualMachineTaskCenterState,
+    )
+
+    private suspend fun virtualMachineTaskCenter(): VirtualMachineTaskCenterRead {
+        if (!supportsVersion("SYNO.Virtualization.API.Task.Info", 1)) {
+            return VirtualMachineTaskCenterRead(
+                emptyList(),
+                VirtualMachineTaskCenterState.CAPABILITY_UNAVAILABLE,
+            )
+        }
+        return try {
+            VirtualMachineTaskCenterRead(
+                tasks = readOfficialVirtualMachineTasks(),
+                state = VirtualMachineTaskCenterState.AVAILABLE,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: DsmFailure) {
+            VirtualMachineTaskCenterRead(
+                emptyList(),
+                if (failure.kind == DsmErrorKind.INVALID_RESPONSE) {
+                    VirtualMachineTaskCenterState.INVALID_RESPONSE
+                } else {
+                    VirtualMachineTaskCenterState.LOAD_FAILED
+                },
+            )
+        }
+    }
+
+    private suspend fun readOfficialVirtualMachineTasks(): List<VirtualMachineTask> {
+        val list = call(
+            "SYNO.Virtualization.API.Task.Info",
+            "list",
+            version = 1,
+        )
+        val ids = (list["task_ids"] as? JsonArray)
+            ?.map { element ->
+                element.strictStringValue()?.trim()?.takeIf(String::isNotEmpty)
+                    ?: throw invalidVirtualizationResponse("task-list-id")
+            }
+            ?: throw invalidVirtualizationResponse("task-list-root")
+        if (ids.size > MAX_VMM_TASK_CENTER_ITEMS || ids.distinct().size != ids.size) {
+            throw invalidVirtualizationResponse("task-list-bounds")
+        }
+        return ids.mapIndexed { index, taskId ->
+            val task = call(
+                "SYNO.Virtualization.API.Task.Info",
+                "get",
+                mapOf("task_id" to taskId),
+                version = 1,
+            )
+            val finished = task["finish"].strictBooleanValue()
+                ?: throw invalidVirtualizationResponse("task-finish")
+            val info = when (val value = task["task_info"]) {
+                null -> null
+                is JsonObject -> value
+                else -> throw invalidVirtualizationResponse("task-info")
+            }
+            val progress = info?.get("progress")?.let { value ->
+                value.strictIntValue()?.takeIf { it in 0..100 }
+                    ?: throw invalidVirtualizationResponse("task-progress")
+            }
+            VirtualMachineTask(
+                id = "task-${index + 1}",
+                isFinished = finished,
+                progressPercent = progress,
+            )
+        }
+    }
 
     private suspend fun findOfficialVirtualMachine(name: String): ManagedResource? {
         return officialVirtualMachines().singleOrNull {
@@ -15493,6 +15928,7 @@ class DsmRepository(
         const val MAX_DOWNLOAD_BT_SEARCH_POLLS = 60
         const val DOWNLOAD_BT_SEARCH_POLL_INTERVAL_MILLIS = 500L
         const val MAX_VMM_CREATION_POLLS = 120
+        const val MAX_VMM_TASK_CENTER_ITEMS = 100
         const val VMM_CREATION_READBACK_ATTEMPTS = 6
         const val VMM_CREATION_POLL_INTERVAL_MILLIS = 500L
         const val REGION_API = "SYNO.Core.Region.NTP"

@@ -6,6 +6,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadTaskMutationBasel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationErrorCategory
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
@@ -35,6 +36,155 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DownloadMutationResultTest {
+    @Test
+    fun `修改保存位置仅发送一次官方v1写请求并按回读确认`() = runTest {
+        val destination = directory("/volume1/downloads/new")
+        val transport = DownloadMutationInterceptor(
+            ok(fileInfo(destination)),
+            ok(taskList(task("task-1", "downloading", destination = "/volume1/downloads/old"))),
+            ok(),
+            ok(taskList(task("task-1", "downloading", destination = destination.path))),
+        )
+
+        val result = repository(transport).editDownloadDestinationResult(
+            baseline("task-1", ResourceState.RUNNING, destination = "/volume1/downloads/old"),
+            destination,
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(listOf("getinfo", "list", "edit", "list"), transport.methods())
+        assertEquals(1, transport.methods().count { it == "edit" })
+        RequestFixtureAssertions.assertRequest(
+            transport.requests[2],
+            "download-station/edit-destination/synthetic-task/request.json",
+        )
+    }
+
+    @Test
+    fun `目标目录或任务基线漂移时保存位置写请求为零`() = runTest {
+        val destination = directory("/volume1/downloads/new")
+        val directoryDrift = DownloadMutationInterceptor(
+            ok(fileInfo(destination.copy(owner = "changed"))),
+            ok(taskList(task("task-1", "downloading", destination = "/volume1/downloads/old"))),
+        )
+        val directoryResult = repository(directoryDrift).editDownloadDestinationResult(
+            baseline("task-1", ResourceState.RUNNING, destination = "/volume1/downloads/old"),
+            destination,
+        )
+        assertEquals(MutationErrorCategory.CONFLICT, directoryResult.errorCategory)
+        assertFalse(directoryResult.submitted)
+        assertEquals(listOf("getinfo", "list"), directoryDrift.methods())
+
+        val taskDrift = DownloadMutationInterceptor(
+            ok(fileInfo(destination)),
+            ok(taskList(task("task-1", "paused", destination = "/volume1/downloads/old"))),
+        )
+        val taskResult = repository(taskDrift).editDownloadDestinationResult(
+            baseline("task-1", ResourceState.RUNNING, destination = "/volume1/downloads/old"),
+            destination,
+        )
+        assertEquals(MutationErrorCategory.CONFLICT, taskResult.errorCategory)
+        assertFalse(taskResult.submitted)
+        assertEquals(listOf("getinfo", "list"), taskDrift.methods())
+    }
+
+    @Test
+    fun `写请求连接失败但回读已生效时不重放并确认成功`() = runTest {
+        val destination = directory("/volume1/downloads/new")
+        val transport = DownloadMutationInterceptor(
+            ok(fileInfo(destination)),
+            ok(taskList(task("task-1", "downloading", destination = "/volume1/downloads/old"))),
+            fail(IOException("synthetic disconnected after submit")),
+            ok(taskList(task("task-1", "downloading", destination = destination.path))),
+        )
+
+        val result = repository(transport).editDownloadDestinationResult(
+            baseline("task-1", ResourceState.RUNNING, destination = "/volume1/downloads/old"),
+            destination,
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(1, transport.methods().count { it == "edit" })
+    }
+
+    @Test
+    fun `修改保存位置写后回读失败保持未确认且不重放`() = runTest {
+        val destination = directory("/volume1/downloads/new")
+        val transport = DownloadMutationInterceptor(
+            ok(fileInfo(destination)),
+            ok(taskList(task("task-1", "downloading", destination = "/volume1/downloads/old"))),
+            ok(),
+            fail(IOException("synthetic readback failure")),
+        )
+
+        val result = repository(transport).editDownloadDestinationResult(
+            baseline("task-1", ResourceState.RUNNING, destination = "/volume1/downloads/old"),
+            destination,
+        )
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, transport.methods().count { it == "edit" })
+    }
+
+    @Test
+    fun `修改保存位置提交阶段取消只回读且不重放`() = runBlocking {
+        val destination = directory("/volume1/downloads/new")
+        val entered = CountDownLatch(1)
+        val transport = DownloadMutationInterceptor(
+            ok(fileInfo(destination)),
+            ok(taskList(task("task-1", "downloading", destination = "/volume1/downloads/old"))),
+            cancelWhenCallCancelled(entered),
+            ok(taskList(task("task-1", "downloading", destination = destination.path))),
+        )
+        val captured = AtomicReference<io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResult>()
+        val repo = repository(transport)
+
+        val cancelled = launch(Dispatchers.IO) {
+            captured.set(
+                repo.editDownloadDestinationResult(
+                    baseline("task-1", ResourceState.RUNNING, destination = "/volume1/downloads/old"),
+                    destination,
+                ),
+            )
+        }
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        cancelled.cancel()
+        cancelled.join()
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, checkNotNull(captured.get()).status)
+        assertEquals(1, transport.methods().count { it == "edit" })
+        assertEquals(listOf("getinfo", "list", "edit", "list"), transport.methods())
+    }
+
+    @Test
+    fun `只有DownloadStation2或目录未变化时不发送请求`() = runTest {
+        val destination = directory("/volume1/downloads/new")
+        val unsupported = repository(
+            DownloadMutationInterceptor(),
+            capabilities = mapOf(
+                "SYNO.DownloadStation2.Task" to ApiCapability(
+                    "SYNO.DownloadStation2.Task", "entry.cgi", 1, 2,
+                ),
+                "SYNO.FileStation.List" to ApiCapability(
+                    "SYNO.FileStation.List", "entry.cgi", 1, 2,
+                ),
+            ),
+        ).editDownloadDestinationResult(
+            baseline("task-1", ResourceState.RUNNING, destination = "/volume1/downloads/old"),
+            destination,
+        )
+        assertEquals(MutationResultStatus.UNSUPPORTED, unsupported.status)
+
+        val noOpTransport = DownloadMutationInterceptor()
+        val noOp = repository(noOpTransport).editDownloadDestinationResult(
+            baseline("task-1", ResourceState.RUNNING, destination = destination.path),
+            destination,
+        )
+        assertEquals(MutationErrorCategory.VALIDATION, noOp.errorCategory)
+        assertTrue(noOpTransport.requests.isEmpty())
+    }
+
     @Test
     fun `写后专项刷新只接受严格任务数组且可信空列表可用`() = runTest {
         val valid = repository(DownloadMutationInterceptor(ok(taskList())))
@@ -482,6 +632,12 @@ class DownloadMutationResultTest {
                 1,
                 3,
             ),
+            "SYNO.FileStation.List" to ApiCapability(
+                "SYNO.FileStation.List",
+                "entry.cgi",
+                1,
+                2,
+            ),
         ),
     ) = DsmRepository(
         NasProfile("test", "Test", "https://nas.example.invalid", "tester"),
@@ -494,13 +650,14 @@ class DownloadMutationResultTest {
         id: String,
         status: ResourceState,
         title: String = "Synthetic",
+        destination: String? = null,
     ) = DownloadTaskMutationBaseline(
         id = id,
         type = "http",
         title = title,
         status = status,
         size = 10,
-        destination = null,
+        destination = destination,
         createdAtEpochSeconds = null,
     )
 }
@@ -542,8 +699,27 @@ private fun taskList(vararg tasks: String): String = """{"tasks":[${tasks.joinTo
 private fun taskListWithTotal(total: Int, vararg tasks: String): String =
     """{"tasks":[${tasks.joinToString(",")}],"total":$total}"""
 
-private fun task(id: String, status: String, title: String = "Synthetic"): String =
-    """{"id":"$id","type":"http","title":"$title","status":"$status","size":10}"""
+private fun task(
+    id: String,
+    status: String,
+    title: String = "Synthetic",
+    destination: String? = null,
+): String {
+    val additional = destination?.let { ",\"additional\":{\"detail\":{\"destination\":\"$it\"}}" }.orEmpty()
+    return """{"id":"$id","type":"http","title":"$title","status":"$status","size":10$additional}"""
+}
+
+private fun directory(path: String) = FileItem(
+    path = path,
+    name = path.substringAfterLast('/'),
+    isDirectory = true,
+    owner = "tester",
+    canRead = true,
+    canWrite = true,
+)
+
+private fun fileInfo(item: FileItem): String =
+    """{"files":[{"name":"${item.name}","path":"${item.path}","isdir":true,"size":${item.size},"additional":{"owner":"${item.owner}","perm":{"read":${item.canRead},"write":${item.canWrite},"delete":${item.canDelete}}}}]}"""
 
 private class DownloadMutationInterceptor(vararg replies: DownloadReply) : Interceptor {
     private val pending = ArrayDeque(replies.toList())

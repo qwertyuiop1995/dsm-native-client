@@ -49,7 +49,54 @@ data class ContainerRegistryImage(
     val id: String get() = "$registry/$name"
 }
 
-enum class VirtualMachineSection { HOSTS, STORAGES, NETWORKS, IMAGES, PROTECTION, LOGS }
+enum class VirtualMachineSection {
+    HOSTS,
+    STORAGES,
+    NETWORKS,
+    IMAGES,
+    PROTECTION,
+    LOGS,
+    HARDWARE,
+    TASKS,
+}
+
+enum class VirtualMachineDiskController { VIRTIO, IDE, SATA }
+
+data class VirtualMachineDisk(
+    val id: String,
+    val sizeMiB: Int,
+    val controller: VirtualMachineDiskController,
+    val spaceReclamationEnabled: Boolean,
+)
+
+enum class VirtualMachineNetworkModel { VIRTIO, E1000, RTL8139 }
+
+data class VirtualMachineNetworkInterface(
+    val id: String,
+    val networkId: String,
+    val networkName: String,
+    val model: VirtualMachineNetworkModel,
+)
+
+data class VirtualMachineHardware(
+    val machineId: String,
+    val disks: List<VirtualMachineDisk>,
+    val networkInterfaces: List<VirtualMachineNetworkInterface>,
+)
+
+data class VirtualMachineTask(
+    /** 仅在本次读取结果中稳定的本地标识；不包含 NAS 返回的任务标识。 */
+    val id: String,
+    val isFinished: Boolean,
+    val progressPercent: Int?,
+)
+
+enum class VirtualMachineTaskCenterState {
+    AVAILABLE,
+    CAPABILITY_UNAVAILABLE,
+    INVALID_RESPONSE,
+    LOAD_FAILED,
+}
 
 data class VirtualMachineOverview(
     val machines: List<ManagedResource>,
@@ -61,6 +108,10 @@ data class VirtualMachineOverview(
     val protectionSchedules: List<ManagedResource>,
     val retentionPolicies: List<ManagedResource>,
     val logs: List<LogEntry>,
+    val machineHardware: List<VirtualMachineHardware> = emptyList(),
+    val tasks: List<VirtualMachineTask> = emptyList(),
+    val taskCenterState: VirtualMachineTaskCenterState =
+        VirtualMachineTaskCenterState.CAPABILITY_UNAVAILABLE,
     val unavailableSections: Set<VirtualMachineSection> = emptySet(),
 )
 

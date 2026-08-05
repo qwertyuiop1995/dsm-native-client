@@ -469,6 +469,7 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
         stringResource(R.string.images),
         stringResource(R.string.protection),
         stringResource(R.string.logs),
+        stringResource(R.string.virtual_machine_tasks),
     )
     Column(Modifier.fillMaxSize()) {
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
@@ -490,9 +491,10 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                 4 -> VirtualMachineSection.IMAGES
                 5 -> VirtualMachineSection.PROTECTION
                 6 -> VirtualMachineSection.LOGS
+                7 -> VirtualMachineSection.TASKS
                 else -> null
             } in overview.unavailableSections
-            if (unavailable) {
+            if (unavailable && tab != 7) {
                 ServiceSectionUnavailable { model.load(Module.VIRTUAL_MACHINES) }
                 return@LoadableContent
             }
@@ -501,6 +503,11 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                 6 -> LogList(
                     logs = overview.logs,
                     isAvailable = true,
+                    onRetry = { model.load(Module.VIRTUAL_MACHINES) },
+                )
+                7 -> VirtualMachineTaskCenterContent(
+                    tasks = overview.tasks,
+                    state = overview.taskCenterState,
                     onRetry = { model.load(Module.VIRTUAL_MACHINES) },
                 )
                 else -> {
@@ -546,7 +553,7 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
             onDismissRequest = { selected = null },
             title = { Text(resource.name) },
             text = {
-                Column {
+                val actions: @Composable () -> Unit = {
                     if (writeBlocked) {
                         Text(stringResource(R.string.virtual_machine_action_in_progress))
                     } else {
@@ -594,6 +601,21 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                             }
                         }
                     }
+                }
+                if (tab == 0) {
+                    val overview = (state.virtualMachines as? Loadable.Ready)?.value
+                    VirtualMachineReadOnlyDetailContent(
+                        stateLabel = resource.state.displayName(),
+                        hardware = overview?.machineHardware?.firstOrNull {
+                            it.machineId == resource.id
+                        },
+                        hardwareAvailable = overview != null &&
+                            VirtualMachineSection.HARDWARE !in overview.unavailableSections,
+                        onRetry = { model.load(Module.VIRTUAL_MACHINES) },
+                        actions = actions,
+                    )
+                } else {
+                    Column { actions() }
                 }
             },
             confirmButton = {

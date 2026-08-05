@@ -71,6 +71,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.WorkspaceState
 import io.github.qwertyuiop1995.dsmnativeclient.canStartDownloadCreation
 import io.github.qwertyuiop1995.dsmnativeclient.downloadCreationRequiresRefreshBeforeDismiss
 import io.github.qwertyuiop1995.dsmnativeclient.downloadControlRequiresRefreshBeforeDismiss
+import io.github.qwertyuiop1995.dsmnativeclient.downloadDestinationEditRequiresRefreshBeforeDismiss
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import io.github.qwertyuiop1995.dsmnativeclient.ui.AdaptiveLayoutPolicy
@@ -97,16 +98,21 @@ internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
         val expandedLayout = AdaptiveLayoutPolicy.usesDownloadListDetail(maxWidth.value)
         val downloadControl = state.downloadControlState
         val downloadCreation = state.downloadCreationState
+        val destinationEdit = state.downloadDestinationEditState
         val settingsState = state.downloadSettingsState
         val settingsIdle = !settingsState.editorVisible && !settingsState.mutationInProgress &&
             !settingsState.mutationRefreshInProgress && settingsState.mutationResult == null &&
             settingsState.mutationFailure == null
         val rssRefreshIdle = state.downloadRssRefreshState.target == null
+        val destinationEditIdle = destinationEdit.selectionTaskBaseline == null &&
+            destinationEdit.target == null && !destinationEdit.mutationInProgress &&
+            !destinationEdit.mutationRefreshInProgress
         val downloadActionsEnabled = !state.isPerformingAction && downloadControl.target == null &&
-            downloadCreation.target == null && settingsIdle && rssRefreshIdle
+            downloadCreation.target == null && settingsIdle && rssRefreshIdle && destinationEditIdle
         val creationActionsEnabled = downloadControl.target == null &&
             canStartDownloadCreation(state.isPerformingAction, downloadCreation) &&
             downloadCreation.pendingDiscoveryUri == null && settingsIdle && rssRefreshIdle
+            && destinationEditIdle
         val settingsActionsEnabled = creationActionsEnabled
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -167,6 +173,20 @@ internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
                         DownloadControlOperation.DELETE_TASK_AND_FILES,
                     onRefresh = model::refreshDownloadControlMutation,
                     onDismiss = { model.dismissDownloadControlMutation() },
+                )
+            }
+            if (destinationEdit.mutationResult != null || destinationEdit.mutationFailure != null) {
+                DownloadControlMutationFeedbackCard(
+                    result = destinationEdit.mutationResult,
+                    failure = destinationEdit.mutationFailure,
+                    refreshFailure = destinationEdit.mutationRefreshFailure,
+                    refreshInProgress = destinationEdit.mutationRefreshInProgress,
+                    refreshCompleted = destinationEdit.mutationRefreshCompleted,
+                    mustRefresh = downloadDestinationEditRequiresRefreshBeforeDismiss(destinationEdit),
+                    currentMatches = destinationEdit.mutationRefreshMatches,
+                    deleteFiles = false,
+                    onRefresh = model::refreshDownloadDestinationEditMutation,
+                    onDismiss = { model.dismissDownloadDestinationEditMutation() },
                 )
             }
             if (
@@ -322,12 +342,16 @@ internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
             taskTitle = task.title.ifBlank { stringResource(R.string.unnamed_download) },
             taskState = task.status,
             enabled = downloadActionsEnabled,
+            canEditDestination = state.supportsDownloadTaskDestinationEditing,
             onDetails = {
                 model.openDownloadTaskDetails(task)
                 selected = null
             },
             onPause = { if (model.requestDownloadPause(task.id)) selected = null },
             onResume = { if (model.requestDownloadResume(task.id)) selected = null },
+            onEditDestination = {
+                if (model.beginDownloadTaskDestinationSelection(task.id)) selected = null
+            },
             onRemove = { if (model.requestDownloadDeletion(task.id, false)) selected = null },
             onRemoveWithFiles = {
                 if (model.requestDownloadDeletion(task.id, true)) selected = null
@@ -352,6 +376,35 @@ internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
             onDismiss = model::cancelDownloadDeletion,
         )
     }
+    if (destinationEdit.selectionTaskBaseline != null && state.downloadDestinationPicker != null) {
+        val sameDestination = state.downloadDestinationPicker.location.path.trim() ==
+            destinationEdit.selectionTaskBaseline.destination?.trim()
+        DownloadDestinationDialog(
+            state = state,
+            model = model,
+            onSelected = { model.requestDownloadDestinationEdit() },
+            onDismiss = model::cancelDownloadDestinationSelection,
+            description = R.string.change_download_destination_picker_description,
+            selectionEnabled = !sameDestination,
+            selectionUnavailableMessage = if (sameDestination) {
+                R.string.change_download_destination_same_location
+            } else null,
+        )
+    }
+    destinationEdit.target
+        ?.takeIf { destinationEdit.confirmationRequested }
+        ?.let { target ->
+            DownloadDestinationEditConfirmationDialog(
+                taskTitle = target.taskBaseline.title.ifBlank {
+                    stringResource(R.string.unnamed_download)
+                },
+                currentDestination = target.taskBaseline.destination,
+                newDestination = target.destinationBaseline.path,
+                persistentRejection = destinationEdit.mutationFailure != null,
+                onConfirm = model::confirmDownloadDestinationEdit,
+                onDismiss = model::cancelDownloadDestinationEdit,
+            )
+        }
     }
 }
 

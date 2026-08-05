@@ -19,6 +19,7 @@ import java.security.MessageDigest
 data class DownloadDestinationLocation(
     val path: String,
     val canWrite: Boolean,
+    val baseline: FileItem? = null,
 )
 
 data class DownloadDestinationPickerState(
@@ -30,7 +31,7 @@ data class DownloadDestinationPickerState(
     fun enter(folder: FileItem): DownloadDestinationPickerState {
         require(folder.isDirectory)
         return copy(
-            location = DownloadDestinationLocation(folder.path, folder.canWrite),
+            location = DownloadDestinationLocation(folder.path, folder.canWrite, folder),
             history = history + location,
         )
     }
@@ -79,6 +80,38 @@ data class DownloadControlTarget(
 
 data class DownloadControlWorkspaceState(
     val target: DownloadControlTarget? = null,
+    val confirmationRequested: Boolean = false,
+    val mutationInProgress: Boolean = false,
+    val mutationResult: MutationResult? = null,
+    val mutationFailure: DsmFailure? = null,
+    val mutationRefreshFailure: DsmFailure? = null,
+    val mutationRefreshInProgress: Boolean = false,
+    val mutationRefreshCompleted: Boolean = false,
+    val mutationRefreshMatches: Boolean? = null,
+    val mutationGeneration: Long = 0L,
+)
+
+/** 修改任务保存位置只保留当前内存中的任务与目录基线，不进入 SavedState 或持久化存储。 */
+data class DownloadDestinationEditTarget(
+    val profileId: String,
+    val taskBaseline: DownloadTask,
+    val destinationBaseline: FileItem,
+) {
+    init {
+        require(profileId.isNotBlank()) { "download_destination_edit.invalid_profile" }
+        require(taskBaseline.id.isNotBlank() && taskBaseline.id == taskBaseline.id.trim()) {
+            "download_destination_edit.invalid_task"
+        }
+        require(
+            destinationBaseline.path.isNotBlank() && destinationBaseline.isDirectory &&
+                destinationBaseline.canWrite,
+        ) { "download_destination_edit.invalid_destination" }
+    }
+}
+
+data class DownloadDestinationEditWorkspaceState(
+    val selectionTaskBaseline: DownloadTask? = null,
+    val target: DownloadDestinationEditTarget? = null,
     val confirmationRequested: Boolean = false,
     val mutationInProgress: Boolean = false,
     val mutationResult: MutationResult? = null,
@@ -369,6 +402,94 @@ internal fun canDismissDownloadControlMutation(state: DownloadControlWorkspaceSt
     state.target != null && !state.confirmationRequested && !state.mutationInProgress &&
         !state.mutationRefreshInProgress &&
         (!downloadControlRequiresRefreshBeforeDismiss(state) || state.mutationRefreshCompleted)
+
+internal fun downloadDestinationEditTarget(
+    profileId: String,
+    downloads: Loadable<List<DownloadTask>>,
+    taskId: String,
+    destination: FileItem,
+): DownloadDestinationEditTarget? {
+    if (!destination.isDirectory || !destination.canWrite || destination.path.isBlank()) return null
+    val normalizedId = taskId.trim().takeIf(String::isNotEmpty) ?: return null
+    val task = (downloads as? Loadable.Ready)?.value.orEmpty()
+        .mapNotNull(::canonicalDownloadTask)
+        .filter { it.id == normalizedId }
+        .singleOrNull() ?: return null
+    if (task.destination?.trim() == destination.path.trim()) return null
+    return DownloadDestinationEditTarget(profileId, task, destination)
+}
+
+internal fun downloadDestinationEditTargetIsCurrent(
+    target: DownloadDestinationEditTarget,
+    profileId: String,
+    downloads: Loadable<List<DownloadTask>>,
+): Boolean {
+    if (target.profileId != profileId) return false
+    val current = (downloads as? Loadable.Ready)?.value.orEmpty()
+        .mapNotNull(::canonicalDownloadTask)
+        .filter { it.id == target.taskBaseline.id }
+        .singleOrNull() ?: return false
+    return DownloadTaskMutationBaseline.from(current) ==
+        DownloadTaskMutationBaseline.from(target.taskBaseline)
+}
+
+internal fun downloadDestinationEditRefreshMatches(
+    target: DownloadDestinationEditTarget,
+    refreshed: List<DownloadTask>,
+): Boolean = refreshed.mapNotNull(::canonicalDownloadTask)
+    .filter { it.id == target.taskBaseline.id }
+    .singleOrNull()?.destination?.trim() == target.destinationBaseline.path.trim()
+
+internal fun downloadDestinationEditCallbackMatches(
+    repositoryMatches: Boolean,
+    profileMatches: Boolean,
+    stateTarget: DownloadDestinationEditTarget?,
+    callbackTarget: DownloadDestinationEditTarget,
+    stateGeneration: Long,
+    callbackGeneration: Long,
+    globalGeneration: Long,
+): Boolean = repositoryMatches && profileMatches && stateTarget == callbackTarget &&
+    stateGeneration == callbackGeneration && globalGeneration == callbackGeneration
+
+internal fun cancelledDownloadDestinationEditResult(): MutationResult = MutationResult(
+    schemaVersion = 1,
+    status = MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+    operation = "downloadEditDestination",
+    submitted = true,
+    requiresRefresh = true,
+    counts = MutationResultCounts(succeeded = 0, failed = 0, unknown = 1),
+    errorCategory = MutationErrorCategory.UNKNOWN,
+    diagnosticTag = "download-station.edit-destination.cancelled-externally",
+)
+
+internal fun downloadDestinationEditRequiresRefreshBeforeDismiss(
+    state: DownloadDestinationEditWorkspaceState,
+): Boolean = state.mutationFailure != null || state.mutationResult?.let { result ->
+    result.requiresRefresh || result.counts.unknown > 0 ||
+        result.status in setOf(
+            MutationResultStatus.PARTIAL_SUCCESS,
+            MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+            MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+        )
+} == true
+
+internal fun downloadDestinationEditBlocksWorkspaceExit(
+    state: DownloadDestinationEditWorkspaceState,
+): Boolean {
+    if (state.selectionTaskBaseline != null || state.confirmationRequested ||
+        state.mutationInProgress || state.mutationRefreshInProgress
+    ) {
+        return true
+    }
+    return state.target != null && downloadDestinationEditRequiresRefreshBeforeDismiss(state) &&
+        !state.mutationRefreshCompleted
+}
+
+internal fun canDismissDownloadDestinationEditMutation(
+    state: DownloadDestinationEditWorkspaceState,
+): Boolean = state.target != null && !state.confirmationRequested && !state.mutationInProgress &&
+    !state.mutationRefreshInProgress &&
+    (!downloadDestinationEditRequiresRefreshBeforeDismiss(state) || state.mutationRefreshCompleted)
 
 internal fun canStartDownloadCreation(
     workspaceBusy: Boolean,

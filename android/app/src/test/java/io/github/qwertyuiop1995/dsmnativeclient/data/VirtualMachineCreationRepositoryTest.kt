@@ -5,10 +5,13 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineCreation
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineCreationDisk
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineCreationNetworkInterface
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSettings
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmApiClient
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -32,6 +35,160 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VirtualMachineCreationRepositoryTest {
+    @Test
+    fun `公开 VMM 创建发送多磁盘多网卡并核对可公开观察的硬件结果`() = runBlocking {
+        val transport = VirtualMachineCreationInterceptor(
+            guestList(),
+            storageList(),
+            networkList(),
+            imageList(),
+            """{"success":true,"data":{"task_id":"synthetic-task"}}""",
+            """{"success":true,"data":{"finish":true,"task_info":{"guest_id":"guest-1"}}}""",
+            """{"success":true,"data":{}}""",
+            guestDetails(cpu = 4, memory = 4096, autorun = 2, description = "Synthetic description"),
+            guestHardwareDetails(),
+            """{"success":true,"data":{}}""",
+        )
+
+        val result = repository(transport).createVirtualMachineResult(
+            configuration().copy(
+                additionalDisks = listOf(
+                    VirtualMachineCreationDisk(sizeGiB = 8),
+                    VirtualMachineCreationDisk(sizeGiB = 0, diskImageId = "image-1"),
+                ),
+                additionalNetworkInterfaces = listOf(
+                    VirtualMachineCreationNetworkInterface(null),
+                    VirtualMachineCreationNetworkInterface("network-1"),
+                ),
+            ),
+        )
+
+        assertEquals(MutationResultStatus.PARTIAL_SUCCESS, result.status)
+        assertEquals(1, result.counts.unknown)
+        assertTrue(result.requiresRefresh)
+        val create = transport.requests.single { it.vmmCreationFields()["method"] == "create" }
+            .vmmCreationFields()
+        val disks = Json.parseToJsonElement(checkNotNull(create["vdisks"])).jsonArray
+        assertEquals(3, disks.size)
+        assertEquals(32 * 1024, disks[0].jsonObject.getValue("vdisk_size").jsonPrimitive.content.toInt())
+        assertEquals(8 * 1024, disks[1].jsonObject.getValue("vdisk_size").jsonPrimitive.content.toInt())
+        assertEquals("image-1", disks[2].jsonObject.getValue("image_id").jsonPrimitive.content)
+        assertFalse(disks[2].jsonObject.containsKey("vdisk_size"))
+        val networks = Json.parseToJsonElement(checkNotNull(create["vnics"])).jsonArray
+        assertEquals(listOf("network-1", "", "network-1"), networks.map {
+            it.jsonObject.getValue("network_id").jsonPrimitive.content
+        })
+        RequestFixtureAssertions.assertRequest(
+            transport.requests.single { it.vmmCreationFields()["method"] == "create" },
+            "vmm/create-guest/synthetic-multi-hardware/request.json",
+        )
+        assertEquals(1, transport.requests.count { it.vmmCreationFields()["method"] == "create" })
+        assertFalse(transport.requests.any { it.vmmCreationFields()["method"] == "clear" })
+    }
+
+    @Test
+    fun `超过官方八磁盘上限时零请求拒绝`() = runBlocking {
+        val transport = VirtualMachineCreationInterceptor()
+
+        val result = repository(transport).createVirtualMachineResult(
+            configuration().copy(
+                additionalDisks = List(8) { VirtualMachineCreationDisk(sizeGiB = 8) },
+            ),
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
+        assertFalse(result.submitted)
+        assertTrue(transport.requests.isEmpty())
+    }
+
+    @Test
+    fun `全空附加磁盘与断开网卡可严格回读成功`() = runBlocking {
+        val transport = emptyMultiHardwareTransport(
+            hardware = emptyMultiHardwareDetails(),
+        )
+
+        val result = repository(transport).createVirtualMachineResult(emptyMultiConfiguration())
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals("clear", transport.requests.last().vmmCreationFields()["method"])
+    }
+
+    @Test
+    fun `多硬件回读断线保留未知结果且不清任务`() = runBlocking {
+        val transport = emptyMultiHardwareTransport(hardware = ERROR_RESPONSE)
+
+        val result = repository(transport).createVirtualMachineResult(emptyMultiConfiguration())
+
+        assertEquals(MutationResultStatus.PARTIAL_SUCCESS, result.status)
+        assertEquals(1, result.counts.unknown)
+        assertTrue(result.requiresRefresh)
+        assertFalse(transport.requests.any { it.vmmCreationFields()["method"] == "clear" })
+    }
+
+    @Test
+    fun `多硬件回读取消保留未知结果且不清任务`() = runBlocking {
+        val transport = emptyMultiHardwareTransport(hardware = CANCEL_RESPONSE)
+
+        val result = cancelledCreationResult(repository(transport), transport, emptyMultiConfiguration())
+
+        assertEquals(MutationResultStatus.PARTIAL_SUCCESS, result.status)
+        assertEquals(1, result.counts.unknown)
+        assertTrue(result.requiresRefresh)
+        assertFalse(transport.requests.any { it.vmmCreationFields()["method"] == "clear" })
+    }
+
+    @Test
+    fun `多硬件空盘容量错配不确认且不清任务`() = runBlocking {
+        val transport = emptyMultiHardwareTransport(
+            hardware = emptyMultiHardwareDetails(secondDiskMiB = 7 * 1024),
+        )
+
+        val result = repository(transport).createVirtualMachineResult(emptyMultiConfiguration())
+
+        assertEquals(MutationResultStatus.PARTIAL_SUCCESS, result.status)
+        assertEquals(1, result.counts.failed)
+        assertFalse(transport.requests.any { it.vmmCreationFields()["method"] == "clear" })
+    }
+
+    @Test
+    fun `多硬件NIC多重集错配不确认且不清任务`() = runBlocking {
+        val transport = emptyMultiHardwareTransport(
+            hardware = emptyMultiHardwareDetails(secondNetworkId = "unexpected-network"),
+        )
+
+        val result = repository(transport).createVirtualMachineResult(emptyMultiConfiguration())
+
+        assertEquals(MutationResultStatus.PARTIAL_SUCCESS, result.status)
+        assertEquals(1, result.counts.failed)
+        assertFalse(transport.requests.any { it.vmmCreationFields()["method"] == "clear" })
+    }
+
+    @Test
+    fun `创建后设置回读失败保留未知结果且不清理任务`() = runBlocking {
+        assertCreationReadbackFailure(ERROR_RESPONSE, "vmm.guest.create.readback-failed")
+    }
+
+    @Test
+    fun `创建后设置回读取消保留未知结果且不清理任务`() = runBlocking {
+        val transport = VirtualMachineCreationInterceptor(
+            guestList(),
+            storageList(),
+            networkList(),
+            """{"success":true,"data":{"task_id":"synthetic-task"}}""",
+            """{"success":true,"data":{"finish":true,"task_info":{"guest_id":"guest-1"}}}""",
+            """{"success":true,"data":{}}""",
+            CANCEL_RESPONSE,
+        )
+
+        val result = cancelledCreationResult(repository(transport), transport, configuration())
+
+        assertEquals(MutationResultStatus.PARTIAL_SUCCESS, result.status)
+        assertEquals(1, result.counts.unknown)
+        assertTrue(result.requiresRefresh)
+        assertEquals("vmm.guest.create.readback-cancelled", result.diagnosticTag)
+        assertFalse(transport.requests.any { it.vmmCreationFields()["method"] == "clear" })
+    }
+
     @Test
     fun `公开 VMM 创建轮询任务应用配置并完整回读`() = runBlocking {
         val transport = VirtualMachineCreationInterceptor(
@@ -592,7 +749,31 @@ class VirtualMachineCreationRepositoryTest {
 
         assertEquals(MutationResultStatus.PARTIAL_SUCCESS, result.status)
         assertEquals(1, result.counts.succeeded)
-        assertEquals(1, result.counts.failed)
+        assertEquals(1, result.counts.unknown)
+        assertTrue(result.requiresRefresh)
+        assertFalse(transport.requests.any { it.vmmCreationFields()["method"] == "clear" })
+    }
+
+    private suspend fun assertCreationReadbackFailure(response: String, diagnosticTag: String) {
+        val transport = VirtualMachineCreationInterceptor(
+            guestList(),
+            storageList(),
+            networkList(),
+            """{"success":true,"data":{"task_id":"synthetic-task"}}""",
+            """{"success":true,"data":{"finish":true,"task_info":{"guest_id":"guest-1"}}}""",
+            """{"success":true,"data":{}}""",
+            response,
+        )
+
+        val result = repository(transport).createVirtualMachineResult(configuration())
+
+        assertEquals(MutationResultStatus.PARTIAL_SUCCESS, result.status)
+        assertEquals(1, result.counts.succeeded)
+        assertEquals(1, result.counts.unknown)
+        assertTrue(result.requiresRefresh)
+        assertEquals(diagnosticTag, result.diagnosticTag)
+        assertEquals(1, transport.requests.count { it.vmmCreationFields()["method"] == "create" })
+        assertEquals(1, transport.requests.count { it.vmmCreationFields()["method"] == "set" })
         assertFalse(transport.requests.any { it.vmmCreationFields()["method"] == "clear" })
     }
 
@@ -611,6 +792,27 @@ class VirtualMachineCreationRepositoryTest {
         autoStart = true,
     )
 
+    private fun emptyMultiConfiguration() = configuration(networkId = null).copy(
+        additionalDisks = listOf(VirtualMachineCreationDisk(sizeGiB = 8)),
+        additionalNetworkInterfaces = listOf(VirtualMachineCreationNetworkInterface(null)),
+    )
+
+    private fun emptyMultiHardwareTransport(hardware: String) = VirtualMachineCreationInterceptor(
+        guestList(),
+        storageList(),
+        """{"success":true,"data":{"task_id":"synthetic-task"}}""",
+        """{"success":true,"data":{"finish":true,"task_info":{"guest_id":"guest-1"}}}""",
+        """{"success":true,"data":{}}""",
+        guestDetails(cpu = 4, memory = 4096, autorun = 2, description = "Synthetic description"),
+        hardware,
+        """{"success":true,"data":{}}""",
+    )
+
+    private fun emptyMultiHardwareDetails(
+        secondDiskMiB: Int = 8 * 1024,
+        secondNetworkId: String = "",
+    ) = """{"success":true,"data":{"guest_id":"guest-1","vdisks":[{"vdisk_id":"disk-1","vdisk_size":32768,"controller":1,"unmap":false},{"vdisk_id":"disk-2","vdisk_size":$secondDiskMiB,"controller":1,"unmap":false}],"vnics":[{"vnic_id":"nic-1","network_id":"","network_name":"","model":1},{"vnic_id":"nic-2","network_id":"$secondNetworkId","network_name":"","model":1}]}}"""
+
     private fun guestList(vararg guests: String) =
         """{"success":true,"data":{"guests":[${guests.joinToString(",")}]}}"""
 
@@ -619,6 +821,11 @@ class VirtualMachineCreationRepositoryTest {
 
     private fun networkList() =
         """{"success":true,"data":{"networks":[{"network_id":"network-1","network_name":"Synthetic network"}]}}"""
+
+    private fun imageList() =
+        """{"success":true,"data":{"images":[{"image_id":"image-1","image_name":"Synthetic disk","type":"disk"}]}}"""
+
+    private fun guestHardwareDetails() = """{"success":true,"data":{"guest_id":"guest-1","vdisks":[{"vdisk_id":"disk-1","vdisk_size":32768,"controller":1,"unmap":false},{"vdisk_id":"disk-2","vdisk_size":8192,"controller":1,"unmap":false},{"vdisk_id":"disk-3","vdisk_size":16384,"controller":1,"unmap":false}],"vnics":[{"vnic_id":"nic-1","network_id":"network-1","network_name":"Synthetic network","model":1},{"vnic_id":"nic-2","network_id":"","network_name":"","model":1},{"vnic_id":"nic-3","network_id":"network-1","network_name":"Synthetic network","model":1}]}}"""
 
     private fun guestDetails(
         name: String = "Synthetic VM",
@@ -639,6 +846,7 @@ private class VirtualMachineCreationInterceptor(vararg responses: String) : Inte
         val request = chain.request()
         requests += request
         val response = pending.removeFirstOrNull() ?: error("缺少合成 VMM 创建响应")
+        if (response == ERROR_RESPONSE) throw IOException("synthetic readback disconnect")
         if (response == CANCEL_RESPONSE) {
             cancellationRequestEntered.countDown()
             check(releaseCancellationRequest.await(5, TimeUnit.SECONDS)) { "合成取消请求未释放" }
@@ -657,6 +865,7 @@ private class VirtualMachineCreationInterceptor(vararg responses: String) : Inte
 }
 
 private const val CANCEL_RESPONSE = "__synthetic_cancellation__"
+private const val ERROR_RESPONSE = "__synthetic_error__"
 
 private fun Request.vmmCreationFields(): Map<String, String> {
     val form = body as? FormBody ?: return emptyMap()

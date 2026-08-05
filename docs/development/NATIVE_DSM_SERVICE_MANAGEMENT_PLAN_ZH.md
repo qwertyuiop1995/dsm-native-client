@@ -20,8 +20,9 @@
 8. 镜像仓库使用已验证的内部契约：`SYNO.Docker.Registry.search` 提交 `offset=0`、`limit=50`、`page_size=50` 和 `q`，`tags` 使用 `repo`；下载由 `SYNO.Docker.Image.pull_start` 提交 `repository` 与 `tag`。三端不得退回未验证的 `pull` 方法。
 9. VMM 基础创建和常规修改优先使用 Synology 官方 VMM API Guide 公开的 `SYNO.Virtualization.API.Guest` v1，并配合公开 Task、Storage、Network 与 Guest Image v1；内部 `SYNO.Virtualization.Guest.create/set` 只能作为经版本化验收的降级。控制台使用套件 noVNC 页面与 `synovirtualization/ws/{guest_id}` 通道。会话 Cookie 只注入非持久 WebView，不写入 URL、日志或磁盘。
 10. VMM 从 NAS 已有文件创建映像使用公开 `SYNO.Virtualization.API.Guest.Image.create` v1，固定提交 `auto_clean_task=false`、`storage_ids`、`type`、`ds_file_path` 与 `image_name`；提交前复核源文件、存储和名称占用基线，提交后只跟踪返回的稳定任务 ID，以 `Task.Info.get` 终态的 `image_id` 严格核对映像名称和类型，再调用 `Task.Info.clear`。断线与取消不得重放 `create`。映像删除优先使用公开 `Guest.Image.delete`；网络修改和删除没有公开写接口，只允许在内部 `SYNO.Virtualization.Network` 能力存在、当前 DSM/VMM 版本通过契约验收后开放，并保持确认、防重复提交和写后回读。
-11. Apple、Android 与 Windows 共用 `VirtualMachineManagerSnapshot` 的保护计划、计划策略、保留策略、日志和分区可用性语义；Android/Windows 实现界面时不得把读取失败呈现为空数据。
-10. 下载任务文件使用官方 `SYNO.DownloadStation.Task.create` multipart 契约，文件是正文的最后一个字段；基础设置使用官方 `Info.getconfig/setserverconfig`，计划使用 `Schedule.getconfig/setconfig`，保存后必须回读核验。
+11. Android 本机映像导入通过系统 `OpenDocument` 取得持久只读授权，先以 File Station 无覆盖上传到用户选择的暂存目录，再沿公开 `Guest.Image.create → Task.Info.get → 映像列表回读 → Task.Info.clear` 完成创建，最后仅按完整暂存文件基线删除临时文件。恢复记录保存在既有加密传输存储；同资料同映像名原子插入并领取，上传、创建或清理处于不明确提交边界时只读核对、不重放。持久结构为向后兼容新增；若回滚到不了解该记录的旧版本，应先让当前版本收敛或清理导入任务。
+12. Apple、Android 与 Windows 共用 `VirtualMachineManagerSnapshot` 的保护计划、计划策略、保留策略、日志和分区可用性语义；Android/Windows 实现界面时不得把读取失败呈现为空数据。
+13. 下载任务文件使用官方 `SYNO.DownloadStation.Task.create` multipart 契约，文件是正文的最后一个字段；基础设置使用官方 `Info.getconfig/setserverconfig`，计划使用 `Schedule.getconfig/setconfig`，保存后必须回读核验。
 
 ## 3. 写操作安全门槛
 
@@ -81,9 +82,11 @@
 - 扩展编辑向导：虚拟盘扩容/增删和多网络接口管理。
 - 克隆、迁移、导入导出。
 - Android 已使用官方 `Guest.Image.create` v1 完成“从 NAS 已有文件创建映像”：有界浏览 NAS 文件、源文件/存储/名称基线、单次提交、任务跟踪、稳定 `image_id` + 名称 + 类型严格回读和终态清理；任务 ID 保存在 Workspace，可跨 Activity 配置重建继续核对，断线和取消不重放。真实 NAS 的格式、权限与写入结果尚未验证；应用进程死亡或重启后的恢复未实现，需另行授权持久结构。
-- 映像上传、编辑、导出与其他来源创建仍未完成；公开映像删除已具备受保护入口，但仍需真实 NAS 验收。
+- 本机文件映像导入已实现；映像编辑、导出与其他未登记来源创建仍未完成。公开映像删除已具备受保护入口，但仍需真实 NAS 验收。
 - 快照、保护计划、恢复与保留策略。
-- Android 已使用官方 Guest v1 `additional=true` 只读展示磁盘与网卡配置，并使用 Task.Info v1 提供最多 100 项、不含真实任务 ID/内部状态的任务中心。用户可明确确认清理已结束任务：提交前重新核对全部任务的标识、结束状态与进度，只对未漂移基线中的已结束项逐一调用 `Task.Info.clear` v1，进行中任务不受影响；提交异常或取消后只回读一次且不重放。真实任务标识仅驻留当前 Workspace 内存和请求边界，不展示、记录或持久化。该子能力不代表高级硬件编辑、迁移、克隆或导入导出已完成。
+- Android 已使用官方 Guest v1 `additional=true` 只读展示磁盘与网卡配置，并使用 Task.Info v1 提供最多 100 项、不含真实任务 ID/内部状态的任务中心。用户可明确确认清理已结束任务：提交前重新读取任务目录，只对用户确认基线中身份仍一致且仍为已结束的目标逐一调用 `Task.Info.clear` v1；无关任务新增或进度变化不扩大清理范围，目标变为进行中时零写。提交异常或取消后只回读一次且不重放。真实任务标识仅驻留当前 Workspace 内存和请求边界，不展示、记录或持久化。该子能力不代表高级硬件编辑、迁移、克隆或完整导入导出已完成。
+- Android 创建请求支持总计最多 8 块磁盘、空白盘与映像盘混合、多网卡及空 `network_id` 表示的未连接网卡。空白硬件可按数量、容量和网络归属严格回读；公开 `Guest.get` 不返回磁盘源映像 ID，含映像盘时不能证明来源，因此结果保持需要刷新核对，不写成已确认成功。
+- Task.Info 增量刷新仅在任务页可见、VMM 可用且存在未结束任务时每 2 秒执行，仅刷新任务分区；离页、任务终结、Repository/NAS 或代次变化会停止，局部失败保留上次成功摘要。清理仍要求完整已结束基线，进行中目标及漂移目标零写。
 - 许可证与 High Availability 状态。
 
 ## 6. 验收

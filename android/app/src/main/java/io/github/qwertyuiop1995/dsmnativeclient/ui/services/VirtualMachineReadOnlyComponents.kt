@@ -21,6 +21,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,6 +41,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineHardware
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineNetworkModel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTaskCenterState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import java.text.NumberFormat
 
 internal const val VIRTUAL_MACHINE_DETAIL_SCROLL_TEST_TAG = "virtual_machine_detail_scroll"
@@ -183,6 +186,9 @@ internal fun VirtualMachineTaskCenterContent(
     onRetry: () -> Unit,
     cleanupEnabled: Boolean = true,
     onClearFinished: () -> Boolean = { false },
+    refreshing: Boolean = false,
+    refreshFailure: DsmFailure? = null,
+    onRetryPolling: () -> Boolean = { false },
 ) {
     when (state) {
         VirtualMachineTaskCenterState.AVAILABLE -> if (tasks.isEmpty()) {
@@ -194,6 +200,23 @@ internal fun VirtualMachineTaskCenterContent(
             )
         } else {
             Column(Modifier.fillMaxSize()) {
+                if (refreshing) {
+                    LinearProgressIndicator(
+                        Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+                if (refreshFailure != null) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                            .semantics { liveRegion = LiveRegionMode.Assertive },
+                    ) {
+                        Text(stringResource(R.string.virtual_machine_tasks_refresh_failed))
+                        TextButton(
+                            onClick = { onRetryPolling() },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) { Text(stringResource(R.string.retry)) }
+                    }
+                }
                 val finishedCount = tasks.count(VirtualMachineTask::isFinished)
                 if (finishedCount > 0) {
                     Row(

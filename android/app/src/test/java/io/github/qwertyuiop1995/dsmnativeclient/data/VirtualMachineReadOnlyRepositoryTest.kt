@@ -25,6 +25,34 @@ import org.junit.Test
 
 class VirtualMachineReadOnlyRepositoryTest {
     @Test
+    fun `独立任务刷新只发送 Task Info list 与 get`() = runBlocking {
+        val transport = VirtualMachineReadOnlyInterceptor(
+            taskList = """{"success":true,"data":{"task_ids":["private-task-a"]}}""",
+            taskDetails = ArrayDeque(
+                listOf(
+                    """{"success":true,"data":{"finish":false,"task_info":{"progress":60}}}""",
+                ),
+            ),
+        )
+
+        val tasks = repository(transport, API_GUEST, TASK_INFO).virtualMachineTasks()
+
+        assertEquals(1, tasks.size)
+        assertFalse(tasks.single().isFinished)
+        assertEquals(60, tasks.single().progressPercent)
+        assertEquals(listOf(TASK_INFO, TASK_INFO), transport.requests.map { it.fields()["api"] })
+        assertEquals(listOf("list", "get"), transport.requests.map { it.fields()["method"] })
+        RequestFixtureAssertions.assertRequest(
+            transport.requests[0],
+            "vmm/list-tasks/synthetic-tasks/request.json",
+        )
+        RequestFixtureAssertions.assertRequest(
+            transport.requests[1],
+            "vmm/get-task/synthetic-task/request.json",
+        )
+    }
+
+    @Test
     fun `官方 Guest v1 保留磁盘网卡且任务中心只发送 list 和 get`() = runBlocking {
         val transport = VirtualMachineReadOnlyInterceptor(
             taskList = """{"success":true,"data":{"task_ids":["private-task-a","private-task-b"]}}""",

@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineDisk
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineDiskController
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineHardware
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineNetworkInterface
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineNetworkModel
@@ -167,6 +168,32 @@ class VirtualMachineReadOnlyComponentsTest {
             .assertHeightIsAtLeast(48.dp)
             .performClick()
         rule.runOnIdle { check(refreshCount == 1) }
+    }
+
+    @Test
+    fun `轮询失败保留上次任务并提供48dp重试`() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        var retryCount = 0
+        rule.setContent {
+            LanStashTheme {
+                VirtualMachineTaskCenterContent(
+                    tasks = listOf(VirtualMachineTask("private-task", false, 40)),
+                    state = VirtualMachineTaskCenterState.AVAILABLE,
+                    onRetry = {},
+                    refreshFailure = DsmFailure(null, "Synthetic", "Retry"),
+                    onRetryPolling = { retryCount += 1; true },
+                )
+            }
+        }
+
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_task_number, 1))
+            .assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_tasks_refresh_failed))
+            .assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.retry))
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        rule.runOnIdle { check(retryCount == 1) }
     }
 
     @Test

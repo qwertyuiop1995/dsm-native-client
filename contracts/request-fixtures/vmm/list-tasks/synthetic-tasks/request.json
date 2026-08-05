@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "vmm.list-tasks.synthetic-tasks",
+  "module": "vmm",
+  "operation": "listTasks",
+  "api": {
+    "name": "SYNO.Virtualization.API.Task.Info",
+    "method": "list",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {"httpMethod": "POST", "requestFormat": "form"},
+  "parameters": [],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {"retryPolicy": "readOnlyAutomatic", "risk": "read", "readbackPolicy": "none"},
+  "source": {"kind": "synthetic", "evidence": "publicDocumentation"}
+}

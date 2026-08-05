@@ -680,6 +680,8 @@ Android 正式入口固定使用 v1，并在写前分别复核用户所见任务
 
 创建、镜像导入等明确标记为非阻塞的操作返回任务 ID，应通过 `Task.Info.get` 轮询；公开 `Guest.delete` 与 `Guest.Image.delete` v1 返回空成功响应，不得虚构任务轮询。公开 `Guest.set` v1 支持按虚拟机 ID 或名称修改名称、描述、vCPU、内存和自动启动；创建接口的未连接网卡按官方指南使用空 `network_id` 表示。`poweroff` 相当于强制断电，必须与正常 `shutdown` 在 UI 中清楚区分。
 
+Android `Guest.create` 支持总计最多 8 块磁盘，可混合空白盘和既有映像盘，并支持多网卡及空 `network_id` 的未连接网卡。空白盘回读可核对数量和容量；`Guest.get` 的公开返回不包含创建时使用的源映像 ID，因此含映像盘时不得仅凭磁盘数量或容量宣称创建已确认成功，应返回需要刷新核对的结果。
+
 从 NAS 已有文件创建映像使用官方 `SYNO.Virtualization.API.Guest.Image.create` v1，表单参数固定为
 `auto_clean_task=false`、JSON 字符串数组 `storage_ids`、官方类型值 `type`（`disk`、`vdsm` 或
 `iso`）、NAS 绝对路径 `ds_file_path` 和 `image_name`。Android 在提交前重新读取源文件完整变更基线、
@@ -695,8 +697,11 @@ Android 任务中心固定先调用 Task.Info v1 `list`，最多接受 100 个�
 记录或持久化，内部状态、消息和日志正文也不进入领域或界面。
 
 只有当列表中存在已结束任务时才显示清理入口。用户确认数量后，Android 重新执行
-`list` 和逐项 `get`；仅当全部任务的标识、结束状态和进度与用户所见基线一致时，
-才依次对基线中的已结束任务调用 `Task.Info.clear` v1，进行中任务始终不清理。
+`list` 和逐项 `get`；只对用户确认基线中身份仍一致且仍为已结束的目标调用
+`Task.Info.clear` v1。无关任务新增或进度变化不会扩大清理范围；目标变为进行中时零写。
+任务页可见、VMM 能力可用且存在未结束任务时，Android 每 2 秒仅刷新该 Task.Info 分区；离页、任务全部结束、Repository/NAS 或观察代次变化立即停止。增量读取失败保留上次成功摘要，不把局部故障升级成整个 VMM 页面错误。
+
+Android 本机映像导入先通过 File Station 将系统选择文件无覆盖上传到用户选定暂存目录，再调用公开 `Guest.Image.create`，随后只读跟踪 `Task.Info`、按稳定映像 ID/名称/类型回读、清理任务，最终按上传前后保存的完整文件基线删除临时文件。跨进程恢复记录保存在加密传输存储中；`UPLOAD_SUBMITTING`、缺少 task ID 的 `CREATE_SUBMITTING` 和已提交但未确认的任务清理均不得重放写请求。同资料同映像名的首次记录必须原子判重、插入并领取。
 每个 `clear` 只提交一次；提交异常或取消后只严格回读一次、不重放，任务从列表
 消失才计为确认清理，未消失目标保留待核对或部分结果。清理基线和结构化结果
 可跨 Activity 配置重建保留，但不提供进程死亡或设备重启后的任务标识恢复。

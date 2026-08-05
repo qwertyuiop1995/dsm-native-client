@@ -7,12 +7,15 @@
 
 ## 结论
 
-- 当前在 `AppViewModel`、跨 NAS 协调器、照片备份 Worker 和 `DsmRepository` 四个已审文件中识别 75 个
+- 当前在 `AppViewModel`、跨 NAS 协调器、照片备份 Worker、VMM 本地映像导入 Worker 和
+  `DsmRepository` 五个已审文件中识别 77 个
   `*Result` 调用点、64 个唯一方法，其中包含固定关闭与只读恢复调用；全部已进入下方
   机器可读清单。四个文件的内容指纹、调用数量或生产源码中的调用文件集合变化时，
   `check_android_write_test_matrix.py` 会要求重新人工复核，不用正则猜测结果数据流。
 - 所有已开放写入口均已形成闭环，包括文件操作、Download Station、Chat、NAS 设置、
-  账号与群组、套件及 VMM；单目标原子操作按不适用记录 `partial=na`，不伪造部分成功。
+  账号与群组、套件及 VMM；VMM 本地映像 Worker 复用已审的 `uploadResult` 与
+  `deleteResult`，并以独立恢复测试证明提交边界、严格回读和禁止重放；单目标原子操作
+  按不适用记录 `partial=na`，不伪造部分成功。
 - 固定失败关闭并有零请求证据的入口是 5 项容器写入口和 2 项 VMM 内部网络写入口。
 - 64 个生产 `*Result` 方法的适用场景均有现存测试方法证据，矩阵门禁当前无
   `pending` 或 `gap`；A1“每项写操作测试”叶子目标已闭环。真实 NAS 权限、断线、

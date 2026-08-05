@@ -1,5 +1,7 @@
 package io.github.qwertyuiop1995.dsmnativeclient.ui.services
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardActions
@@ -43,6 +45,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -61,11 +64,14 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qwertyuiop1995.dsmnativeclient.AppViewModel
 import io.github.qwertyuiop1995.dsmnativeclient.Loadable
 import io.github.qwertyuiop1995.dsmnativeclient.R
 import io.github.qwertyuiop1995.dsmnativeclient.VirtualMachineLifecycleOperation
+import io.github.qwertyuiop1995.dsmnativeclient.VirtualMachineLocalImageImportUiState
 import io.github.qwertyuiop1995.dsmnativeclient.WorkspaceState
+import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedVirtualMachineImageImportStage
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ContainerRegistryImage
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ContainerSection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ContainerSectionCount
@@ -458,6 +464,12 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var protectionTab by rememberSaveable { mutableIntStateOf(0) }
     var selected by remember { mutableStateOf<ManagedResource?>(null) }
+    var localImportsVisible by remember { mutableStateOf(false) }
+    val localImports by model.virtualMachineLocalImageImports.collectAsStateWithLifecycle()
+    val localFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
+        uri -> if (uri != null) model.selectVirtualMachineLocalImage(uri)
+    }
+    LaunchedEffect(state.profile.id) { model.refreshVirtualMachineLocalImageImports() }
     val mutation = state.virtualMachineMutationState
     val writeBlocked = state.isPerformingAction || mutation.creationEditorVisible ||
         mutation.imageImportEditorVisible || mutation.settingsEditorVisible ||
@@ -515,6 +527,9 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                     onRetry = { model.load(Module.VIRTUAL_MACHINES) },
                     cleanupEnabled = !writeBlocked,
                     onClearFinished = model::requestVirtualMachineTaskCleanupConfirmation,
+                    refreshing = mutation.taskPolling.refreshing,
+                    refreshFailure = mutation.taskPolling.failure,
+                    onRetryPolling = model::retryVirtualMachineTaskPolling,
                 )
                 else -> {
                     val resources = overview.forTab(tab)
@@ -543,16 +558,26 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                                     }
                                 }}
                                 tab == 4 && state.supportsOfficialVirtualMachineImageImport -> {{
-                                    FilledTonalButton(
-                                        onClick = { model.openVirtualMachineImageImportEditor() },
-                                        enabled = !writeBlocked && overview.storages.any {
-                                            it.isEligibleForVirtualMachineImageImport()
-                                        },
-                                        modifier = Modifier.heightIn(min = 48.dp),
-                                    ) {
-                                        Icon(Icons.Outlined.Add, contentDescription = null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(stringResource(R.string.virtual_machine_import_image))
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        FilledTonalButton(
+                                            onClick = { model.openVirtualMachineImageImportEditor() },
+                                            enabled = !writeBlocked && overview.storages.any {
+                                                it.isEligibleForVirtualMachineImageImport()
+                                            },
+                                            modifier = Modifier.heightIn(min = 48.dp),
+                                        ) {
+                                            Icon(Icons.Outlined.Add, contentDescription = null)
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(stringResource(R.string.virtual_machine_import_image))
+                                        }
+                                        if (localImports.isNotEmpty()) {
+                                            TextButton(
+                                                onClick = { localImportsVisible = true },
+                                                modifier = Modifier.heightIn(min = 48.dp),
+                                            ) {
+                                                Text(stringResource(R.string.virtual_machine_local_image_imports))
+                                            }
+                                        }
                                     }
                                 }}
                                 else -> null
@@ -677,6 +702,9 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                 onRetry = model::retryVirtualMachineImageImportBrowser,
                 onConfirm = model::confirmVirtualMachineImageImport,
                 onDismiss = model::closeVirtualMachineImageImportEditor,
+                onRequestLocalFile = { localFilePicker.launch(arrayOf("*/*")); true },
+                onSelectStagingDirectory = model::selectVirtualMachineImageImportStagingDirectory,
+                onConfirmLocal = model::confirmVirtualMachineLocalImageImport,
             )
         }
         if (
@@ -711,6 +739,116 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
             )
         }
     }
+    if (localImportsVisible) {
+        VirtualMachineLocalImageImportsDialog(
+            imports = localImports,
+            onRefresh = model::refreshVirtualMachineLocalImageImports,
+            onRetry = model::retryVirtualMachineLocalImageImport,
+            onRemove = model::removeVirtualMachineLocalImageImport,
+            onDismiss = { localImportsVisible = false },
+        )
+    }
+}
+
+@Composable
+private fun VirtualMachineLocalImageImportsDialog(
+    imports: List<VirtualMachineLocalImageImportUiState>,
+    onRefresh: () -> Boolean,
+    onRetry: (String) -> Boolean,
+    onRemove: (String) -> Boolean,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.virtual_machine_local_image_imports)) },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (imports.isEmpty()) item {
+                    Text(stringResource(R.string.virtual_machine_local_image_imports_empty))
+                }
+                items(imports, key = VirtualMachineLocalImageImportUiState::id) { item ->
+                    ListItem(
+                        headlineContent = { Text(item.imageName) },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(stringResource(item.stage.labelResource()))
+                                if (item.needsReview) {
+                                    Text(
+                                        stringResource(
+                                            R.string.virtual_machine_local_image_import_needs_review,
+                                        ),
+                                        modifier = Modifier.semantics {
+                                            liveRegion = LiveRegionMode.Polite
+                                        },
+                                    )
+                                }
+                            }
+                        },
+                        trailingContent = {
+                            when {
+                                item.canRetry -> TextButton(
+                                    onClick = { onRetry(item.id) },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                ) {
+                                    Text(
+                                        stringResource(
+                                            R.string.virtual_machine_local_image_import_retry,
+                                        ),
+                                    )
+                                }
+                                item.canRemove -> TextButton(
+                                    onClick = { onRemove(item.id) },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                ) {
+                                    Text(
+                                        stringResource(
+                                            R.string.virtual_machine_local_image_import_remove,
+                                        ),
+                                    )
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onRefresh() },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text(stringResource(R.string.virtual_machine_local_image_import_refresh)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.close))
+            }
+        },
+    )
+}
+
+private fun PersistedVirtualMachineImageImportStage.labelResource(): Int = when (this) {
+    PersistedVirtualMachineImageImportStage.PREPARING ->
+        R.string.virtual_machine_local_image_import_stage_preparing
+    PersistedVirtualMachineImageImportStage.UPLOAD_SUBMITTING ->
+        R.string.virtual_machine_local_image_import_stage_uploading
+    PersistedVirtualMachineImageImportStage.UPLOADED,
+    PersistedVirtualMachineImageImportStage.CREATE_SUBMITTING,
+    PersistedVirtualMachineImageImportStage.TASK_TRACKING,
+    PersistedVirtualMachineImageImportStage.IMAGE_READBACK,
+    PersistedVirtualMachineImageImportStage.TASK_CLEARING,
+    -> R.string.virtual_machine_local_image_import_stage_creating
+    PersistedVirtualMachineImageImportStage.TEMP_CLEANUP,
+    PersistedVirtualMachineImageImportStage.CLEANUP_PENDING,
+    -> R.string.virtual_machine_local_image_import_stage_cleaning
+    PersistedVirtualMachineImageImportStage.SUCCEEDED ->
+        R.string.virtual_machine_local_image_import_stage_succeeded
+    PersistedVirtualMachineImageImportStage.NEEDS_REVIEW,
+    PersistedVirtualMachineImageImportStage.FAILED,
+    PersistedVirtualMachineImageImportStage.CANCELLED,
+    -> R.string.virtual_machine_local_image_import_stage_failed
 }
 
 @Composable

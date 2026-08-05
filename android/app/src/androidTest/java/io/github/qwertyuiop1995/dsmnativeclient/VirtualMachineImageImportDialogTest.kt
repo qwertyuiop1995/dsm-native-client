@@ -10,6 +10,8 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
@@ -17,8 +19,10 @@ import androidx.compose.ui.test.hasProgressBarRangeInfo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
@@ -201,6 +205,136 @@ class VirtualMachineImageImportDialogTest {
         }
     }
 
+    @Test
+    fun 本地来源显示OVA与大小错误并在两TiB边界允许提交() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        var draft by mutableStateOf(
+            VirtualMachineImageImportDraftState(
+                imageName = "Local disk",
+                source = VirtualMachineImageImportSource.LOCAL,
+                storage = storage(),
+                localFile = VirtualMachineLocalImageSelection("machine.ova", 1L),
+                localStagingDirectory = stagingDirectory(),
+            ),
+        )
+        var submitted = false
+        rule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                LanStashTheme {
+                    dialog(
+                        draft = draft,
+                        onDraftChange = { draft = it; true },
+                        onConfirmLocal = { submitted = true; true },
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_local_image_ova_unsupported))
+            .performScrollTo()
+            .assertIsDisplayed()
+        rule.runOnIdle {
+            draft = draft.copy(
+                localFile = VirtualMachineLocalImageSelection(
+                    "machine.vhdx",
+                    2_199_023_255_553L,
+                ),
+            )
+        }
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_local_image_disk_too_large))
+            .performScrollTo()
+            .assertIsDisplayed()
+        rule.runOnIdle {
+            draft = draft.copy(
+                localFile = VirtualMachineLocalImageSelection(
+                    "machine.vhdx",
+                    2_199_023_255_552L,
+                ),
+            )
+        }
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_local_image_choose_another_file))
+            .performScrollTo()
+            .assertHeightIsAtLeast(48.dp)
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_local_image_cleanup_notice))
+            .performScrollTo()
+            .assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_local_image_import_confirm))
+            .assertIsEnabled()
+            .performClick()
+        rule.runOnIdle { check(submitted) }
+    }
+
+    @Test
+    fun 本地来源五状态可恢复且提交中锁定选择与返回() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        var fileRequests = 0
+        var directoryRequests = 0
+        var dismissed = false
+        val base = VirtualMachineImageImportDraftState(
+            imageName = "Local ISO",
+            source = VirtualMachineImageImportSource.LOCAL,
+            storage = storage(),
+        )
+        var draft by mutableStateOf(base)
+        var submitting by mutableStateOf(false)
+        rule.setContent {
+            LanStashTheme {
+                dialog(
+                    draft = draft,
+                    submitting = submitting,
+                    onRequestLocalFile = { fileRequests++; true },
+                    onSelectStagingDirectory = { directoryRequests++; true },
+                    onDismiss = { dismissed = true; true },
+                )
+            }
+        }
+
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_image_no_file))
+            .assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_local_image_choose_file))
+            .performScrollTo()
+            .performClick()
+        rule.runOnIdle {
+            check(fileRequests == 1)
+            draft = draft.copy(localFile = VirtualMachineLocalImageSelection("installer.iso", null))
+        }
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_local_image_size_unknown_error))
+            .performScrollTo()
+            .assertIsDisplayed()
+        rule.runOnIdle {
+            draft = draft.copy(
+                localFile = VirtualMachineLocalImageSelection("installer.iso", 4096L),
+                browserItems = Loadable.Ready(FilePage(listOf(stagingDirectory()), 0, 1)),
+            )
+        }
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_local_image_detected_type, context.getString(R.string.virtual_machine_image_type_iso)))
+            .performScrollTo()
+            .assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_local_image_no_staging_directory))
+            .performScrollTo()
+            .assertIsDisplayed()
+        rule.onNodeWithText(
+            context.getString(R.string.virtual_machine_local_image_use_staging_directory, "staging"),
+        )
+            .performScrollTo()
+            .performClick()
+        rule.runOnIdle {
+            check(directoryRequests == 1)
+            draft = draft.copy(localStagingDirectory = stagingDirectory())
+            submitting = true
+        }
+        rule.onNodeWithText(context.getString(R.string.virtual_machine_local_image_choose_another_file))
+            .performScrollTo()
+            .assertIsNotEnabled()
+        rule.onNodeWithText(
+            context.getString(R.string.virtual_machine_local_image_use_staging_directory, "staging"),
+        )
+            .performScrollTo()
+            .assertIsNotEnabled()
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        rule.runOnIdle { check(!dismissed) }
+    }
+
     @androidx.compose.runtime.Composable
     private fun dialog(
         draft: VirtualMachineImageImportDraftState,
@@ -210,19 +344,26 @@ class VirtualMachineImageImportDialogTest {
         onRetry: () -> Boolean = { true },
         onOpenFolder: (FileItem) -> Boolean = { true },
         onSelectFile: (FileItem) -> Boolean = { true },
+        onDraftChange: (VirtualMachineImageImportDraftState) -> Boolean = { true },
         onConfirm: () -> Boolean = { true },
+        onRequestLocalFile: () -> Boolean = { true },
+        onSelectStagingDirectory: (FileItem) -> Boolean = { true },
+        onConfirmLocal: (VirtualMachineLocalImageImportSubmission) -> Boolean = { true },
     ) {
         VirtualMachineImageImportDialog(
             draft = draft,
             storages = listOf(storage()),
             submitting = submitting,
-            onDraftChange = { true },
+            onDraftChange = onDraftChange,
             onOpenFolder = onOpenFolder,
             onBackFolder = onBack,
             onSelectFile = onSelectFile,
             onRetry = onRetry,
             onConfirm = onConfirm,
             onDismiss = onDismiss,
+            onRequestLocalFile = onRequestLocalFile,
+            onSelectStagingDirectory = onSelectStagingDirectory,
+            onConfirmLocal = onConfirmLocal,
         )
     }
 
@@ -244,5 +385,13 @@ class VirtualMachineImageImportDialogTest {
         detail = "online",
         state = ResourceState.RUNNING,
         metadata = mapOf("status" to "online"),
+    )
+
+    private fun stagingDirectory() = FileItem(
+        path = "/share/staging",
+        name = "staging",
+        isDirectory = true,
+        canRead = true,
+        canWrite = true,
     )
 }

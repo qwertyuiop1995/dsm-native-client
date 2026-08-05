@@ -55,6 +55,18 @@ class TransferStore(
     fun upload(id: String): PersistedUpload? = allUploads().firstOrNull { it.id == id }
 
     @Synchronized
+    fun virtualMachineImageImports(profileId: String): List<PersistedVirtualMachineImageImport> =
+        synchronized(VMM_IMPORT_LOCK) {
+            allVirtualMachineImageImports().filter { it.profileId == profileId }
+        }
+
+    @Synchronized
+    fun virtualMachineImageImport(id: String): PersistedVirtualMachineImageImport? =
+        synchronized(VMM_IMPORT_LOCK) {
+            allVirtualMachineImageImports().firstOrNull { it.id == id }
+        }
+
+    @Synchronized
     fun servers(profileId: String): List<PersistedServerTransfer> =
         allServers().filter { it.profileId == profileId }
 
@@ -98,6 +110,84 @@ class TransferStore(
         }
         if (updated != null) saveUploads(next)
         return updated
+    }
+
+    @Synchronized
+    fun upsertVirtualMachineImageImport(import: PersistedVirtualMachineImageImport) {
+        synchronized(VMM_IMPORT_LOCK) {
+            saveVirtualMachineImageImports(allVirtualMachineImageImports().upsert(import))
+        }
+    }
+
+    @Synchronized
+    fun updateVirtualMachineImageImport(
+        id: String,
+        transform: (PersistedVirtualMachineImageImport) -> PersistedVirtualMachineImageImport,
+    ): PersistedVirtualMachineImageImport? {
+        return synchronized(VMM_IMPORT_LOCK) {
+            val (imports, updated) = allVirtualMachineImageImports().updateById(id, transform)
+            if (updated != null) saveVirtualMachineImageImports(imports)
+            updated
+        }
+    }
+
+    /** 同一 NAS 资料和映像名称只允许一个非终态后台导入占有执行权。 */
+    @Synchronized
+    fun claimVirtualMachineImageImportWork(id: String, workId: String): Boolean {
+        return synchronized(VMM_IMPORT_LOCK) {
+            val imports = allVirtualMachineImageImports()
+            if (!imports.canClaimWork(id)) return@synchronized false
+            saveVirtualMachineImageImports(
+                imports.map { if (it.id == id) it.copy(workId = workId) else it },
+            )
+            true
+        }
+    }
+
+    /** 首次提交在同一临界区完成同名判重、插入和执行权领取。 */
+    @Synchronized
+    fun insertAndClaimVirtualMachineImageImport(
+        import: PersistedVirtualMachineImageImport,
+        workId: String,
+    ): Boolean = synchronized(VMM_IMPORT_LOCK) {
+        val current = allVirtualMachineImageImports()
+        val (imports, inserted) = current.insertAndClaimWork(import, workId)
+        if (!inserted) return@synchronized false
+        saveVirtualMachineImageImports(imports)
+        true
+    }
+
+    /** 仅撤销仍由同一 WorkManager 请求占有的领取，避免异常回滚覆盖后来执行者。 */
+    @Synchronized
+    fun releaseVirtualMachineImageImportWork(id: String, workId: String): Boolean =
+        synchronized(VMM_IMPORT_LOCK) {
+            val imports = allVirtualMachineImageImports()
+            val (releasedImports, released) = imports.releaseWorkClaim(id, workId)
+            if (!released) return@synchronized false
+            saveVirtualMachineImageImports(releasedImports)
+            released
+        }
+
+    /** 首次入队同步失败时，仅移除仍处于准备阶段且由该请求拥有的新记录。 */
+    @Synchronized
+    fun removeOwnedPreparingVirtualMachineImageImport(id: String, workId: String): Boolean =
+        synchronized(VMM_IMPORT_LOCK) {
+            val current = allVirtualMachineImageImports()
+            val (imports, removed) = current.removeOwnedPreparingImport(id, workId)
+            if (!removed) return@synchronized false
+            saveVirtualMachineImageImports(imports)
+            true
+        }
+
+    @Synchronized
+    fun removeVirtualMachineImageImport(id: String): Boolean {
+        return synchronized(VMM_IMPORT_LOCK) {
+            val current = allVirtualMachineImageImports()
+            val (imports, removed) = current.removeFinishedById(id)
+            if (!removed) return@synchronized false
+            saveVirtualMachineImageImports(imports)
+            true
+        }
     }
 
     @Synchronized
@@ -172,6 +262,13 @@ class TransferStore(
                 it.profileId == profileId && it.canRemoveFinishedServer()
             },
         )
+        synchronized(VMM_IMPORT_LOCK) {
+            saveVirtualMachineImageImports(
+                allVirtualMachineImageImports().filterNot {
+                    it.profileId == profileId && it.canRemoveFromHistory()
+                },
+            )
+        }
     }
 
     @Synchronized
@@ -184,6 +281,11 @@ class TransferStore(
         save(all().filterNot { it.profileId == profileId })
         saveUploads(allUploads().filterNot { it.profileId == profileId })
         saveServers(allServers().filterNot { it.profileId == profileId })
+        synchronized(VMM_IMPORT_LOCK) {
+            saveVirtualMachineImageImports(
+                allVirtualMachineImageImports().filterNot { it.profileId == profileId },
+            )
+        }
         saveBackupSources(allBackupSources().filterNot { it.profileId == profileId })
         saveFileBackgroundTaskSnapshots(
             allFileBackgroundTaskSnapshots().filterNot { it.profileId == profileId },
@@ -216,6 +318,30 @@ class TransferStore(
             .putString(KEY_UPLOADS, json.encodeToString(ListSerializer(PersistedUpload.serializer()), uploads))
             .commit(),
         ) { "transfer.upload_state_not_persisted" }
+    }
+
+    private fun allVirtualMachineImageImports(): List<PersistedVirtualMachineImageImport> {
+        val value = preferences.getString(KEY_VMM_IMAGE_IMPORTS, null) ?: return emptyList()
+        return runCatching {
+            json.decodeFromString(
+                ListSerializer(PersistedVirtualMachineImageImport.serializer()),
+                value,
+            )
+        }.getOrDefault(emptyList())
+    }
+
+    private fun saveVirtualMachineImageImports(imports: List<PersistedVirtualMachineImageImport>) {
+        check(
+            preferences.edit()
+                .putString(
+                    KEY_VMM_IMAGE_IMPORTS,
+                    json.encodeToString(
+                        ListSerializer(PersistedVirtualMachineImageImport.serializer()),
+                        imports,
+                    ),
+                )
+                .commit(),
+        ) { "transfer.vmm_image_import_state_not_persisted" }
     }
 
     private fun allBackupSources(): List<PersistedPhotoBackupSource> {
@@ -277,9 +403,11 @@ class TransferStore(
     }
 
     private companion object {
+        private val VMM_IMPORT_LOCK = Any()
         const val PREFERENCES_NAME = "lanstash_transfer_tasks"
         const val KEY_DOWNLOADS = "downloads"
         const val KEY_UPLOADS = "uploads"
+        const val KEY_VMM_IMAGE_IMPORTS = "vmm_image_imports"
         const val KEY_SERVERS = "servers"
         const val KEY_BACKUP_SOURCES = "photo_backup_sources"
         const val KEY_FILE_BACKGROUND_TASKS = "file_background_tasks"

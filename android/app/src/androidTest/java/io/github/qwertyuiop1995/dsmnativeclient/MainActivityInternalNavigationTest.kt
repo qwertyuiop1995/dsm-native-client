@@ -1,10 +1,12 @@
 package io.github.qwertyuiop1995.dsmnativeclient
 
 import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
+import io.github.qwertyuiop1995.dsmnativeclient.domain.ModuleAvailability
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBrowserState
@@ -56,7 +58,7 @@ class MainActivityInternalNavigationTest {
 
     @Test
     fun 重复或false输入不会制造额外待处理导航且消费后保持清空() {
-        val request = InternalRouteRequest.OpenTransfers
+        val request = InternalRouteRequest.OpenModule(Module.TRANSFERS)
         val pending = InternalNavigationState().receive(request)
 
         assertTrue(pending.pendingOpenTransfers)
@@ -108,7 +110,138 @@ class MainActivityInternalNavigationTest {
 
         assertEquals(null, empty.internalRouteRequest())
         assertEquals(null, falseIntent.internalRouteRequest())
-        assertEquals(InternalRouteRequest.OpenTransfers, trueIntent.internalRouteRequest())
+        assertEquals(
+            InternalRouteRequest.OpenModule(Module.TRANSFERS),
+            trueIntent.internalRouteRequest(),
+        )
+    }
+
+    @Test
+    fun 外部模块入口在Workspace就绪后单次打开且消费数据() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/virtual-machines"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.onActivity { activity -> workspace(activity).value = syntheticWorkspace() }
+            waitForSelectedModule(scenario, Module.VIRTUAL_MACHINES)
+            scenario.onActivity { activity -> assertEquals(null, activity.intent.data) }
+        }
+    }
+
+    @Test
+    fun Workspace未就绪时后到的外部入口替换旧目标并可跨Activity重建() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/photos"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                val supersededIntent = activity.intent
+                dispatchNewIntent(
+                    activity,
+                    Intent(Intent.ACTION_VIEW, Uri.parse("lanstash://open/settings")),
+                )
+                assertEquals(null, supersededIntent.data)
+                assertEquals("lanstash://open/settings", activity.intent.dataString)
+            }
+            scenario.recreate()
+            scenario.onActivity { activity -> workspace(activity).value = syntheticWorkspace() }
+            waitForSelectedModule(scenario, Module.SETTINGS)
+            waitForNavigationIntentConsumed(scenario)
+        }
+    }
+
+    @Test
+    fun 已消费的外部入口在Activity重建后不会重放旧目标() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/photos"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.onActivity { activity -> workspace(activity).value = syntheticWorkspace() }
+            waitForSelectedModule(scenario, Module.PHOTOS)
+            waitForNavigationIntentConsumed(scenario)
+            scenario.onActivity { activity ->
+                workspace(activity).value = workspace(activity).value!!.copy(
+                    selectedModule = Module.FILES,
+                )
+            }
+
+            scenario.recreate()
+
+            scenario.onActivity { activity ->
+                assertEquals(null, activity.intent.data)
+                assertEquals(Module.FILES, workspace(activity).value?.selectedModule)
+            }
+        }
+    }
+
+    @Test
+    fun 不可用模块外部入口沿用能力回退且不会反复消费() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/chat"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                workspace(activity).value = syntheticWorkspace().copy(
+                    availability = listOf(ModuleAvailability(Module.CHAT, isAvailable = false)),
+                )
+            }
+            waitForNavigationIntentConsumed(scenario)
+            scenario.onActivity { activity ->
+                assertEquals(Module.FILES, workspace(activity).value?.selectedModule)
+                assertEquals(null, activity.intent.data)
+            }
+        }
+    }
+
+    @Test
+    fun Manifest只向系统声明固定无载荷模块入口主机() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("lanstash://open/files")).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+            setPackage(context.packageName)
+        }
+        val resolved = context.packageManager.resolveActivity(intent, 0)
+
+        assertEquals(MainActivity::class.java.name, resolved?.activityInfo?.name)
+    }
+
+    @Test
+    fun 带载荷的外部入口会立即清除且不改变模块() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/photos?path=private"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                workspace(activity).value = syntheticWorkspace()
+                assertEquals(null, activity.intent.data)
+                assertEquals(Module.FILES, workspace(activity).value?.selectedModule)
+            }
+        }
     }
 
     @Test
@@ -303,6 +436,17 @@ class MainActivityInternalNavigationTest {
         scenario.onActivity { activity ->
             assertEquals(expected, workspace(activity).value?.selectedModule)
         }
+    }
+
+    private fun waitForNavigationIntentConsumed(scenario: ActivityScenario<MainActivity>) {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            var consumed = false
+            scenario.onActivity { activity -> consumed = activity.intent.data == null }
+            if (consumed) return
+            Thread.sleep(20)
+        }
+        scenario.onActivity { activity -> assertEquals(null, activity.intent.data) }
     }
 
     private fun assertPendingTransferIntent(activity: MainActivity) {

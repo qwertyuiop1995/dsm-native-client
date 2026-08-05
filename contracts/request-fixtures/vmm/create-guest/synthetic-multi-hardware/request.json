@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "vmm.create-guest.synthetic-multi-hardware",
+  "module": "vmm",
+  "operation": "createGuest",
+  "api": {
+    "name": "SYNO.Virtualization.API.Guest",
+    "method": "create",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {"name": "auto_clean_task", "valueType": "boolean", "encodedValue": "false"},
+    {"name": "storage_id", "valueType": "string", "encodedValue": "storage-1"},
+    {"name": "vnics", "valueType": "string", "encodedValue": "[{\"network_id\":\"network-1\"},{\"network_id\":\"\"},{\"network_id\":\"network-1\"}]"},
+    {"name": "vdisks", "valueType": "string", "encodedValue": "[{\"create_type\":0,\"vdisk_size\":32768},{\"create_type\":0,\"vdisk_size\":8192},{\"create_type\":1,\"image_id\":\"image-1\"}]"},
+    {"name": "guest_name", "valueType": "string", "encodedValue": "Synthetic VM"}
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": ["cookie", "form"],
+    "synoTokenLocations": ["header", "form"]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "standardWrite",
+    "readbackPolicy": "taskPoll"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "publicDocumentation"
+  }
+}

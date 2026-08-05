@@ -2,6 +2,7 @@ package io.github.qwertyuiop1995.dsmnativeclient
 
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ManagedResource
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationErrorCategory
@@ -10,9 +11,13 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultCounts
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ResourceState
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineOverview
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageType
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineLocalImageRejection
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineLocalImageValidation
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSettings
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTaskCenterState
+import java.lang.reflect.Modifier
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -510,10 +515,64 @@ class VirtualMachineMutationStatePolicyTest {
         assertEquals("Synthetic VM", creation.toCreationOrNull()?.name)
         assertEquals("Draft", creation.toCreationOrNull()?.description)
         assertEquals(null, creation.copy(cpu = "0").toCreationOrNull())
+        assertEquals(
+            0,
+            creation.copy(disk = "not-used", diskImageId = "image-1")
+                .toCreationOrNull()?.diskGiB,
+        )
+        assertEquals(
+            null,
+            creation.copy(
+                additionalDisks = List(8) { VirtualMachineCreationDiskDraftState() },
+            ).toCreationOrNull(),
+        )
 
         val settings = VirtualMachineSettingsDraftState(" VM ", " Note ", "4", "4096", false)
         assertEquals("VM", settings.toSettingsOrNull()?.name)
         assertEquals(null, settings.copy(memory = "bad").toSettingsOrNull())
+    }
+
+    @Test
+    fun `本地映像草稿不保存URI且严格校验格式大小存储与暂存目录`() {
+        val twoTiB = 2_199_023_255_552L
+        val local = VirtualMachineImageImportDraftState(
+            imageName = " Local disk ",
+            source = VirtualMachineImageImportSource.LOCAL,
+            storage = eligibleStorage(),
+            localFile = VirtualMachineLocalImageSelection("machine.vhdx", twoTiB),
+            localStagingDirectory = stagingDirectory(),
+        )
+
+        val submission = local.toLocalSubmissionOrNull()
+        assertEquals("Local disk", submission?.imageName)
+        assertEquals(VirtualMachineImageType.DISK, submission?.image?.imageType)
+        assertEquals(twoTiB, submission?.image?.originalSizeBytes)
+        assertEquals(null, local.toImportOrNull())
+        assertFalse(local.localFile.toString().contains("machine.vhdx"))
+        assertFalse(submission.toString().contains("/share/staging"))
+        assertEquals(
+            setOf("displayName", "sizeBytes"),
+            VirtualMachineLocalImageSelection::class.java.declaredFields
+                .filterNot { it.isSynthetic || Modifier.isStatic(it.modifiers) }
+                .map { it.name }
+                .toSet(),
+        )
+
+        val ova = local.copy(localFile = VirtualMachineLocalImageSelection("machine.ova", 1L))
+        assertEquals(
+            VirtualMachineLocalImageValidation.Rejected(
+                VirtualMachineLocalImageRejection.UNSUPPORTED_EXTENSION,
+            ),
+            ova.localValidation(),
+        )
+        assertEquals(null, ova.toLocalSubmissionOrNull())
+        assertEquals(
+            null,
+            local.copy(
+                localFile = VirtualMachineLocalImageSelection("machine.vhdx", twoTiB + 1L),
+            ).toLocalSubmissionOrNull(),
+        )
+        assertEquals(null, local.copy(localStagingDirectory = null).toLocalSubmissionOrNull())
     }
 
     @Test
@@ -777,6 +836,22 @@ class VirtualMachineMutationStatePolicyTest {
             "vram_size" to settings.memoryMiB.toString(),
             "autorun" to if (settings.autoStart) "2" else "0",
         ),
+    )
+
+    private fun eligibleStorage() = ManagedResource(
+        id = "storage-1",
+        name = "Synthetic storage",
+        detail = "online",
+        state = ResourceState.RUNNING,
+        metadata = mapOf("status" to "online"),
+    )
+
+    private fun stagingDirectory() = FileItem(
+        path = "/share/staging",
+        name = "staging",
+        isDirectory = true,
+        canRead = true,
+        canWrite = true,
     )
 
     private fun overview(vararg machines: ManagedResource) = VirtualMachineOverview(

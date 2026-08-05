@@ -110,6 +110,8 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageType
 import io.github.qwertyuiop1995.dsmnativeclient.domain.isEligibleForVirtualMachineImageImport
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineCreation
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineCreationDisk
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MAX_VIRTUAL_MACHINE_DISKS
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineDisk
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineDiskController
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineHardware
@@ -6939,11 +6941,121 @@ class DsmRepository(
     fun supportsOfficialVirtualMachineSettings(): Boolean =
         supportsVersion("SYNO.Virtualization.API.Guest", 1)
 
+    fun supportsOfficialVirtualMachineTasks(): Boolean =
+        supportsVersion("SYNO.Virtualization.API.Task.Info", 1)
+
+    /** 仅刷新公开 Task.Info 分区，不连带读取虚拟机、日志或其他附属资源。 */
+    suspend fun virtualMachineTasks(): List<VirtualMachineTask> {
+        if (!supportsOfficialVirtualMachineTasks()) throw DsmFailure(
+            null,
+            "Virtual machine tasks are unavailable",
+            "Refresh Virtual Machine Manager and try again.",
+            kind = DsmErrorKind.FEATURE_UNSUPPORTED,
+        )
+        return readOfficialVirtualMachineTaskRecords().map(VirtualMachineTaskRecord::task)
+    }
+
     fun supportsOfficialVirtualMachineImageImport(): Boolean =
         supportsVersion("SYNO.Virtualization.API.Guest.Image", 1) &&
             supportsVersion("SYNO.Virtualization.API.Task.Info", 1) &&
             supportsVersion("SYNO.Virtualization.API.Storage", 1) &&
             supportsVersion("SYNO.FileStation.List", 2)
+
+    internal data class VirtualMachineImageTaskReadback(
+        val finished: Boolean,
+        val imageId: String?,
+    )
+
+    internal enum class VirtualMachineImageMatch { MATCH, MISSING, DIFFERS }
+
+    /** 后台本地映像流程只调用一次；调用方必须在此前持久化 CREATE_SUBMITTING。 */
+    internal suspend fun startVirtualMachineImageImportTask(
+        source: FileItem,
+        imageName: String,
+        imageType: VirtualMachineImageType,
+        storageId: String,
+        storageName: String,
+        storageStatus: String,
+    ): String {
+        require(supportsOfficialVirtualMachineImageImport()) { "vmm.image.import.unsupported" }
+        val currentFile = fileInfo(source.path)
+        val currentStorages = strictVirtualizationResourceList(
+            "SYNO.Virtualization.API.Storage",
+            listOf("list"),
+            "storages",
+        )
+        val currentImages = strictVirtualizationResourceList(
+            "SYNO.Virtualization.API.Guest.Image",
+            listOf("list"),
+            "images",
+        )
+        if (currentFile?.matchesMutationBaseline(source) != true || currentStorages.none {
+                it.id == storageId && it.name == storageName &&
+                    it.metadata["status"] == storageStatus &&
+                    it.isEligibleForVirtualMachineImageImport()
+            } || currentImages.any { it.name.equals(imageName, ignoreCase = true) }
+        ) throw DsmFailure(
+            null,
+            "Virtual machine image import baseline changed",
+            "Review the source file, storage, and image name before trying again.",
+            kind = DsmErrorKind.CHANGE_NOT_CONFIRMED,
+        )
+        val started = call(
+            "SYNO.Virtualization.API.Guest.Image",
+            "create",
+            mapOf(
+                "auto_clean_task" to "false",
+                "storage_ids" to jsonStrings(listOf(storageId)),
+                "type" to imageType.apiValue,
+                "ds_file_path" to source.path,
+                "image_name" to imageName,
+            ),
+            version = 1,
+        )
+        return started["task_id"].strictStringValue()?.takeIf(String::isNotBlank)
+            ?: throw invalidVirtualizationResponse("image-import-task-id")
+    }
+
+    internal suspend fun readVirtualMachineImageImportTask(
+        taskId: String,
+    ): VirtualMachineImageTaskReadback = when (val task = readOfficialVmmImageImportTask(taskId)) {
+        VmmImageImportTaskState.Pending -> VirtualMachineImageTaskReadback(false, null)
+        VmmImageImportTaskState.FinishedWithoutImage -> VirtualMachineImageTaskReadback(true, null)
+        is VmmImageImportTaskState.Finished -> VirtualMachineImageTaskReadback(true, task.imageId)
+    }
+
+    internal suspend fun virtualMachineImageMatches(
+        imageId: String,
+        expectedName: String,
+        expectedType: VirtualMachineImageType,
+    ): VirtualMachineImageMatch {
+        val image = strictVirtualizationResourceList(
+            "SYNO.Virtualization.API.Guest.Image",
+            listOf("list"),
+            "images",
+        ).singleOrNull { it.id == imageId } ?: return VirtualMachineImageMatch.MISSING
+        return if (image.name == expectedName && image.metadata["type"] == expectedType.apiValue) {
+            VirtualMachineImageMatch.MATCH
+        } else {
+            VirtualMachineImageMatch.DIFFERS
+        }
+    }
+
+    internal suspend fun clearVirtualMachineImageImportTask(taskId: String) {
+        clearOfficialVmmTask(taskId)
+    }
+
+    internal suspend fun virtualMachineTaskExists(taskId: String): Boolean {
+        val list = call("SYNO.Virtualization.API.Task.Info", "list", version = 1)
+        val ids = (list["task_ids"] as? JsonArray)?.map { element ->
+            element.strictStringValue()?.trim()?.takeIf(String::isNotEmpty)
+                ?: throw invalidVirtualizationResponse("task-list-id")
+        } ?: throw invalidVirtualizationResponse("task-list-root")
+        if (ids.size > MAX_VMM_TASK_CENTER_ITEMS || ids.distinct().size != ids.size) {
+            throw invalidVirtualizationResponse("task-list-bounds")
+        }
+        return taskId in ids
+    }
 
     /**
      * 使用官方 Guest.Image.create v1 从 NAS 已有文件创建映像。提交后只跟踪本次返回的
@@ -7209,10 +7321,23 @@ class DsmRepository(
         val storageId = configuration.storageId.trim()
         val networkId = configuration.networkId?.trim().orEmpty()
         val imageId = configuration.diskImageId?.trim()?.takeIf(String::isNotEmpty)
+        val disks = listOf(
+            VirtualMachineCreationDisk(configuration.diskGiB, imageId),
+        ) + configuration.additionalDisks.map {
+            it.copy(diskImageId = it.diskImageId?.trim()?.takeIf(String::isNotEmpty))
+        }
+        val networkIds = listOf(networkId) + configuration.additionalNetworkInterfaces.map {
+            it.networkId?.trim().orEmpty()
+        }
         val valid = name.isNotEmpty() && name.length <= 64 && name.none(Char::isISOControl) &&
             description.length <= 1_024 && configuration.cpuCount in 1..64 &&
             configuration.memoryMiB in 128..1_048_576 &&
-            configuration.diskGiB in 1..1_048_576 && storageId.isNotEmpty()
+            disks.size in 1..MAX_VIRTUAL_MACHINE_DISKS && disks.all { disk ->
+                (disk.diskImageId != null || disk.sizeGiB in 1..1_048_576) &&
+                    disk.diskImageId?.let { id ->
+                        id.isNotBlank() && id == id.trim() && id.none(Char::isISOControl)
+                    } != false
+            } && networkIds.all { it.none(Char::isISOControl) } && storageId.isNotEmpty()
         if (!valid) return settingsMutationResult(
             operation = "virtualMachineCreate",
             status = MutationResultStatus.CONFIRMED_FAILURE,
@@ -7284,7 +7409,8 @@ class DsmRepository(
                     diagnosticTag = "vmm.guest.create.storage-changed",
                 )
             }
-            if (networkId.isNotEmpty()) {
+            val connectedNetworkIds = networkIds.filter(String::isNotEmpty).toSet()
+            if (connectedNetworkIds.isNotEmpty()) {
                 if (!supportsVersion("SYNO.Virtualization.API.Network", 1)) {
                     return settingsMutationResult(
                         operation = "virtualMachineCreate",
@@ -7307,7 +7433,7 @@ class DsmRepository(
                 } catch (error: Throwable) {
                     return vmmCreationFailure(error.asRepositoryFailure(), submitted = false, stage = "network-preflight")
                 }
-                if (networks.none { it.id == networkId }) {
+                if (!networks.map(ManagedResource::id).toSet().containsAll(connectedNetworkIds)) {
                     return settingsMutationResult(
                         operation = "virtualMachineCreate",
                         status = MutationResultStatus.CONFIRMED_FAILURE,
@@ -7319,7 +7445,8 @@ class DsmRepository(
                     )
                 }
             }
-            if (imageId != null) {
+            val diskImageIds = disks.mapNotNull { it.diskImageId }.toSet()
+            if (diskImageIds.isNotEmpty()) {
                 if (!supportsVersion("SYNO.Virtualization.API.Guest.Image", 1)) {
                     return settingsMutationResult(
                         operation = "virtualMachineCreate",
@@ -7342,7 +7469,9 @@ class DsmRepository(
                 } catch (error: Throwable) {
                     return vmmCreationFailure(error.asRepositoryFailure(), submitted = false, stage = "image-preflight")
                 }
-                if (images.none { it.id == imageId && it.metadata["type"] == "disk" }) {
+                val availableDiskImageIds = images.filter { it.metadata["type"] == "disk" }
+                    .map(ManagedResource::id).toSet()
+                if (!availableDiskImageIds.containsAll(diskImageIds)) {
                     return settingsMutationResult(
                         operation = "virtualMachineCreate",
                         status = MutationResultStatus.CONFIRMED_FAILURE,
@@ -7355,18 +7484,18 @@ class DsmRepository(
                 }
             }
 
-            val disk = if (imageId == null) {
-                JsonObject(
+            val requestDisks = disks.map { disk ->
+                disk.diskImageId?.let { sourceImageId ->
+                    JsonObject(
+                        mapOf(
+                            "create_type" to JsonPrimitive(1),
+                            "image_id" to JsonPrimitive(sourceImageId),
+                        ),
+                    )
+                } ?: JsonObject(
                     mapOf(
                         "create_type" to JsonPrimitive(0),
-                        "vdisk_size" to JsonPrimitive(configuration.diskGiB * 1_024L),
-                    ),
-                )
-            } else {
-                JsonObject(
-                    mapOf(
-                        "create_type" to JsonPrimitive(1),
-                        "image_id" to JsonPrimitive(imageId),
+                        "vdisk_size" to JsonPrimitive(disk.sizeGiB * 1_024L),
                     ),
                 )
             }
@@ -7378,10 +7507,10 @@ class DsmRepository(
                     mapOf(
                         "auto_clean_task" to "false",
                         "storage_id" to storageId,
-                        "vnics" to JsonArray(
-                            listOf(JsonObject(mapOf("network_id" to JsonPrimitive(networkId)))),
-                        ).toString(),
-                        "vdisks" to JsonArray(listOf(disk)).toString(),
+                        "vnics" to JsonArray(networkIds.map { requestedNetworkId ->
+                            JsonObject(mapOf("network_id" to JsonPrimitive(requestedNetworkId)))
+                        }).toString(),
+                        "vdisks" to JsonArray(requestDisks).toString(),
                         "guest_name" to name,
                     ),
                     version = 1,
@@ -7525,18 +7654,44 @@ class DsmRepository(
             } catch (error: Throwable) {
                 configurationFailure = error.asRepositoryFailure()
             }
-            val verified = runCatching {
-                withContext(NonCancellable) {
-                    readOfficialVirtualMachineSettings(guestId)
-                }
-            }.getOrNull() == VmmGuestSettingsSnapshot(
+            var readbackFailure: DsmFailure? = null
+            var readbackCancelled = false
+            val settingsSnapshot = try {
+                withContext(NonCancellable) { readOfficialVirtualMachineSettings(guestId) }
+            } catch (_: CancellationException) {
+                readbackCancelled = true
+                null
+            } catch (error: Throwable) {
+                readbackFailure = error.asRepositoryFailure()
+                null
+            }
+            val settingsVerified = settingsSnapshot == VmmGuestSettingsSnapshot(
                 name = name,
                 description = description,
                 cpuCount = configuration.cpuCount,
                 memoryMiB = configuration.memoryMiB,
                 autoStart = configuration.autoStart,
             )
-            return if (verified) {
+            val hardwareVerified = if (
+                configuration.additionalDisks.isEmpty() &&
+                configuration.additionalNetworkInterfaces.isEmpty()
+            ) {
+                true
+            } else {
+                val hardware = try {
+                    withContext(NonCancellable) { readOfficialVirtualMachineHardware(guestId) }
+                } catch (_: CancellationException) {
+                    readbackCancelled = true
+                    null
+                } catch (error: Throwable) {
+                    if (readbackFailure == null) readbackFailure = error.asRepositoryFailure()
+                    null
+                }
+                hardware?.matchesCreatedHardware(disks, networkIds) == true
+            }
+            if (!currentCoroutineContext().isActive) readbackCancelled = true
+            val hasImageBackedDisk = disks.any { it.diskImageId != null }
+            return if (settingsVerified && hardwareVerified && !hasImageBackedDisk) {
                 taskClearAllowed = true
                 settingsMutationResult(
                     operation = "virtualMachineCreate",
@@ -7547,7 +7702,8 @@ class DsmRepository(
                     diagnosticTag = "vmm.guest.create.confirmed",
                 )
             } else {
-                val ambiguous = configurationCancelled ||
+                val ambiguous = configurationCancelled || readbackCancelled ||
+                    readbackFailure != null || hasImageBackedDisk ||
                     configurationFailure?.isAmbiguousSettingsFailure() == true
                 settingsMutationResult(
                     operation = "virtualMachineCreate",
@@ -7558,9 +7714,15 @@ class DsmRepository(
                     failed = if (ambiguous) 0 else 1,
                     unknown = if (ambiguous) 1 else 0,
                     requiresRefresh = true,
-                    errorCategory = configurationFailure?.mutationErrorCategory()
+                    errorCategory = readbackFailure?.mutationErrorCategory()
+                        ?: configurationFailure?.mutationErrorCategory()
                         ?: MutationErrorCategory.CONFLICT,
-                    diagnosticTag = "vmm.guest.create.configuration-partial",
+                    diagnosticTag = when {
+                        hasImageBackedDisk -> "vmm.guest.create.image-source-unverified"
+                        readbackCancelled -> "vmm.guest.create.readback-cancelled"
+                        readbackFailure != null -> "vmm.guest.create.readback-failed"
+                        else -> "vmm.guest.create.configuration-partial"
+                    },
                 )
             }
         } finally {
@@ -7689,7 +7851,7 @@ class DsmRepository(
     )
 
     private suspend fun virtualMachineTaskCenter(): VirtualMachineTaskCenterRead {
-        if (!supportsVersion("SYNO.Virtualization.API.Task.Info", 1)) {
+        if (!supportsOfficialVirtualMachineTasks()) {
             return VirtualMachineTaskCenterRead(
                 emptyList(),
                 VirtualMachineTaskCenterState.CAPABILITY_UNAVAILABLE,
@@ -7789,7 +7951,7 @@ class DsmRepository(
             )
         }
         if (baseline.isEmpty() || targets.isEmpty() ||
-            baseline.map(VirtualMachineTask::taskToken).distinct().size != baseline.size
+            targets.map(VirtualMachineTask::taskToken).distinct().size != targets.size
         ) {
             return settingsMutationResult(
                 operation,
@@ -7841,7 +8003,7 @@ class DsmRepository(
                     diagnosticTag = "$diagnosticPrefix.preflight-failed",
                 )
             }
-            if (!virtualMachineTaskBaselineMatches(baseline, current)) {
+            if (!virtualMachineTaskCleanupTargetsMatch(targets, current)) {
                 return settingsMutationResult(
                     operation,
                     MutationResultStatus.CONFIRMED_FAILURE,
@@ -7968,17 +8130,15 @@ class DsmRepository(
         }
     }
 
-    private fun virtualMachineTaskBaselineMatches(
-        baseline: List<VirtualMachineTask>,
+    private fun virtualMachineTaskCleanupTargetsMatch(
+        targets: List<VirtualMachineTask>,
         current: List<VirtualMachineTaskRecord>,
     ): Boolean {
-        if (baseline.size != current.size) return false
         val currentByToken = current.associateBy(VirtualMachineTaskRecord::taskToken)
-        return currentByToken.size == current.size && baseline.all { expected ->
+        return currentByToken.size == current.size && targets.all { expected ->
             val actual = currentByToken[expected.taskToken] ?: return@all false
             expected.id == actual.task.id &&
-                expected.isFinished == actual.task.isFinished &&
-                expected.progressPercent == actual.task.progressPercent
+                actual.task.isFinished
         }
     }
 
@@ -8053,6 +8213,42 @@ class DsmRepository(
                 ?: throw invalidVirtualizationResponse("guest-settings-memory"),
             autoStart = autorun == 2,
         )
+    }
+
+    private suspend fun readOfficialVirtualMachineHardware(id: String): VirtualMachineHardware {
+        val guest = call(
+            "SYNO.Virtualization.API.Guest",
+            "get",
+            mapOf("guest_id" to id, "additional" to "true"),
+            version = 1,
+        )
+        val responseId = guest["guest_id"].strictStringValue()?.takeIf(String::isNotBlank)
+            ?: throw invalidVirtualizationResponse("guest-creation-hardware-id")
+        if (responseId != id) throw invalidVirtualizationResponse("guest-creation-hardware-id-mismatch")
+        val disks = (guest["vdisks"] as? JsonArray)?.map(::officialVirtualMachineDisk)
+            ?: throw invalidVirtualizationResponse("guest-creation-hardware-disks")
+        val networks = (guest["vnics"] as? JsonArray)?.map(::officialVirtualMachineNetwork)
+            ?: throw invalidVirtualizationResponse("guest-creation-hardware-networks")
+        if (disks.map(VirtualMachineDisk::id).distinct().size != disks.size ||
+            networks.map(VirtualMachineNetworkInterface::id).distinct().size != networks.size
+        ) throw invalidVirtualizationResponse("guest-creation-hardware-duplicates")
+        return VirtualMachineHardware(responseId, disks, networks)
+    }
+
+    private fun VirtualMachineHardware.matchesCreatedHardware(
+        requestedDisks: List<VirtualMachineCreationDisk>,
+        requestedNetworkIds: List<String>,
+    ): Boolean {
+        if (disks.size != requestedDisks.size || networkInterfaces.size != requestedNetworkIds.size) {
+            return false
+        }
+        val remainingSizes = disks.map(VirtualMachineDisk::sizeMiB).toMutableList()
+        val allEmptyDiskSizesMatched = requestedDisks.filter { it.diskImageId == null }.all { requested ->
+            remainingSizes.remove(requested.sizeGiB * 1_024)
+        }
+        return allEmptyDiskSizesMatched &&
+            networkInterfaces.map(VirtualMachineNetworkInterface::networkId).groupingBy { it }.eachCount() ==
+            requestedNetworkIds.groupingBy { it }.eachCount()
     }
 
     private sealed class VmmCreationTaskState {

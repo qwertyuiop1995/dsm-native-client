@@ -84,6 +84,20 @@ data class VirtualMachineHardware(
     val networkInterfaces: List<VirtualMachineNetworkInterface>,
 )
 
+/** Synology 官方 Virtual Machine Manager 规格：每台虚拟机最多 8 块虚拟磁盘。 */
+const val MAX_VIRTUAL_MACHINE_DISKS = 8
+
+/** 官方 Guest.create v1 的附加虚拟磁盘；控制器与空间回收没有公开写参数。 */
+data class VirtualMachineCreationDisk(
+    val sizeGiB: Int,
+    val diskImageId: String? = null,
+)
+
+/** 官方 Guest.create v1 的附加虚拟网卡；空标识表示创建后暂不连接网络。 */
+data class VirtualMachineCreationNetworkInterface(
+    val networkId: String? = null,
+)
+
 data class VirtualMachineTask(
     /** 由服务端任务标识单向摘要得到，只用于列表稳定键。 */
     val id: String,
@@ -135,6 +149,10 @@ data class VirtualMachineCreation(
     val networkId: String?,
     val diskImageId: String?,
     val autoStart: Boolean,
+    /** 保留原有主磁盘字段，附加项只扩展创建请求，兼容既有调用者与草稿。 */
+    val additionalDisks: List<VirtualMachineCreationDisk> = emptyList(),
+    /** 保留原有主网卡字段；每个附加项只发送官方公开的 network_id。 */
+    val additionalNetworkInterfaces: List<VirtualMachineCreationNetworkInterface> = emptyList(),
 )
 
 data class VirtualMachineSettings(

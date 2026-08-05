@@ -31,6 +31,9 @@ import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedDownload
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedServerSubmissionPhase
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedServerTransfer
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedUpload
+import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedVirtualMachineImageImport
+import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedVirtualMachineImageImportStage
+import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedVirtualMachineImageType
 import io.github.qwertyuiop1995.dsmnativeclient.data.PhotoRepository
 import io.github.qwertyuiop1995.dsmnativeclient.data.TransferStore
 import io.github.qwertyuiop1995.dsmnativeclient.data.hasIncompleteDownloadDestination
@@ -67,6 +70,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadDiscoveryTab
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchResult
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineCreation
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageImport
+import io.github.qwertyuiop1995.dsmnativeclient.domain.safeTemporaryFileSuffix
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageImportVerification
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.isEligibleForVirtualMachineImageImport
@@ -178,6 +182,15 @@ data class LoginState(
     val needsOtp: Boolean = false,
 )
 
+data class VirtualMachineLocalImageImportUiState(
+    val id: String,
+    val imageName: String,
+    val stage: PersistedVirtualMachineImageImportStage,
+    val canRetry: Boolean,
+    val needsReview: Boolean,
+    val canRemove: Boolean,
+)
+
 sealed interface Loadable<out T> {
     data object Idle : Loadable<Nothing>
     data object Loading : Loadable<Nothing>
@@ -191,6 +204,13 @@ internal enum class WorkspaceNavigationResult {
     REJECTED,
     DEFERRED,
 }
+
+internal fun shouldStopVirtualMachineTaskPollingAfterNavigation(
+    previousModule: Module,
+    nextModule: Module,
+    result: WorkspaceNavigationResult,
+): Boolean = previousModule == Module.VIRTUAL_MACHINES &&
+    nextModule != Module.VIRTUAL_MACHINES && result == WorkspaceNavigationResult.APPLIED
 
 private fun Loadable<FilePage>.withFavoritePaths(paths: Set<String>): Loadable<FilePage> =
     (this as? Loadable.Ready)?.let { ready ->
@@ -297,6 +317,13 @@ private data class VirtualMachineMutationClaim(
     val generation: Long,
 )
 
+private data class VirtualMachineLocalImagePreparation(
+    val profileId: String,
+    val uri: Uri,
+    val contentType: String?,
+    val displayName: String,
+)
+
 
 
 
@@ -326,6 +353,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var fileUploadPreflightBusyToken: FileUploadPreflightToken? = null
     private val foregroundDownloadExecutionIds = mutableMapOf<String, String>()
     private val transferWatchJobs = mutableMapOf<String, Job>()
+    private val virtualMachineImageImportWatchJobs = mutableMapOf<String, Job>()
+    private var pendingVirtualMachineLocalImageUri: Uri? = null
+    private var pendingVirtualMachineLocalImageContentType: String? = null
+    private val _virtualMachineLocalImageImports =
+        MutableStateFlow<List<VirtualMachineLocalImageImportUiState>>(emptyList())
+    val virtualMachineLocalImageImports: StateFlow<List<VirtualMachineLocalImageImportUiState>> =
+        _virtualMachineLocalImageImports.asStateFlow()
     private var previewJob: Job? = null
     private var pendingModuleAfterPreviewDiscard: Module? = null
     private var photoTimelineJob: Job? = null
@@ -344,6 +378,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var downloadBtCatalogJob: Job? = null
     private var downloadDiscoverySearchJob: Job? = null
     private var downloadActivityJob: Job? = null
+    private var virtualMachineTaskPollingJob: Job? = null
     private val fileBrowserRequestGeneration = AtomicLong(0)
     private val fileStationMutationGeneration = AtomicLong(0)
     private val fileServerMutationGeneration = AtomicLong(0)
@@ -359,6 +394,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadActivityGeneration = AtomicLong(0)
     private val virtualMachineMutationGeneration = AtomicLong(0)
     private val virtualMachineOverviewRequestGeneration = AtomicLong(0)
+    private val virtualMachineTaskPollingGeneration = AtomicLong(0)
     private val virtualMachineImageBrowserGeneration = AtomicLong(0)
     private val chatMutationGeneration = AtomicLong(0)
     private val chatMutationGenerations = ConcurrentHashMap<String, Long>()
@@ -763,6 +799,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             workManager.cancelUniqueWork(PhotoBackupScanWorker.UNIQUE_WORK_PREFIX + profile.id)
             releasePersistedReadPermission(Uri.parse(source.treeUri))
         }
+        transferStore.virtualMachineImageImports(profile.id).forEach { import ->
+            import.workId?.let { value ->
+                runCatching { workManager.cancelWorkById(UUID.fromString(value)) }
+            }
+            if (import.ownsPersistedReadGrant) {
+                releaseVirtualMachineLocalImageGrant(Uri.parse(import.sourceUri))
+            }
+            virtualMachineImageImportWatchJobs.remove(import.id)?.cancel()
+        }
+        if (_workspace.value?.profile?.id == profile.id) {
+            releasePendingVirtualMachineLocalImageGrant()
+        }
         transferStore.removeProfile(profile.id)
         store.removeProfile(profile.id)
         val profiles = store.profiles()
@@ -924,12 +972,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (module != Module.NAS_SETTINGS) {
             stopNasPerformanceSampling(resetPause = true)
         }
-        load(module)
-        if (state.selectedModule == module) {
+        val navigationResult = if (state.selectedModule == module) {
             WorkspaceNavigationResult.ALREADY_SELECTED
         } else {
             WorkspaceNavigationResult.APPLIED
         }
+        if (shouldStopVirtualMachineTaskPollingAfterNavigation(
+                state.selectedModule,
+                module,
+                navigationResult,
+            )
+        ) {
+            stopVirtualMachineTaskPolling()
+        }
+        load(module)
+        navigationResult
     }
 
     /** 依据当前领域状态派生的强类型栈返回一级，不复制路径或会话标识。 */
@@ -1074,6 +1131,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     capture(
                         block = { repo.virtualMachineOverview() },
                         update = { value ->
+                            var acceptedOverview: VirtualMachineOverview? = null
                             _workspace.update { current ->
                                 current?.takeIf {
                                     virtualMachineOverviewCallbackMatches(
@@ -1083,7 +1141,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                         token = token,
                                         globalGeneration = virtualMachineOverviewRequestGeneration.get(),
                                     )
-                                }?.copy(virtualMachines = value) ?: current
+                                }?.copy(
+                                    virtualMachines = value,
+                                    virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                                        taskPolling = VirtualMachineTaskPollingState(),
+                                    ),
+                                )?.also { accepted ->
+                                    acceptedOverview = (accepted.virtualMachines as? Loadable.Ready)?.value
+                                } ?: current
+                            }
+                            val overview = acceptedOverview
+                            if (shouldPollVirtualMachineTasks(Module.VIRTUAL_MACHINES, overview)) {
+                                startVirtualMachineTaskPolling(repo, token.profileId)
+                            } else {
+                                stopVirtualMachineTaskPolling()
                             }
                         },
                     )
@@ -1182,6 +1253,94 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 Module.SETTINGS -> refreshRegenerableCacheUsage()
             }
+        }
+    }
+
+    fun retryVirtualMachineTaskPolling(): Boolean {
+        val repo = repository ?: return false
+        val current = _workspace.value ?: return false
+        val overview = (current.virtualMachines as? Loadable.Ready)?.value ?: return false
+        if (!shouldPollVirtualMachineTasks(current.selectedModule, overview)) return false
+        startVirtualMachineTaskPolling(repo, current.profile.id, immediate = true)
+        return true
+    }
+
+    private fun startVirtualMachineTaskPolling(
+        repo: DsmRepository,
+        profileId: String,
+        immediate: Boolean = false,
+    ) {
+        virtualMachineTaskPollingJob?.cancel()
+        val generation = virtualMachineTaskPollingGeneration.incrementAndGet()
+        virtualMachineTaskPollingJob = viewModelScope.launch {
+            try {
+                if (!immediate) delay(VMM_TASK_POLL_INTERVAL_MILLIS)
+                while (currentCoroutineContext().isActive) {
+                    val before = _workspace.value ?: return@launch
+                    val beforeOverview = (before.virtualMachines as? Loadable.Ready)?.value
+                        ?: return@launch
+                    if (repository !== repo || before.profile.id != profileId ||
+                        before.selectedModule != Module.VIRTUAL_MACHINES ||
+                        generation != virtualMachineTaskPollingGeneration.get() ||
+                        beforeOverview.tasks.none { !it.isFinished }
+                    ) return@launch
+                    _workspace.update { state ->
+                        state?.takeIf {
+                            repository === repo && it.profile.id == profileId &&
+                                it.selectedModule == Module.VIRTUAL_MACHINES &&
+                                generation == virtualMachineTaskPollingGeneration.get()
+                        }?.copy(
+                            virtualMachineMutationState = state.virtualMachineMutationState.copy(
+                                taskPolling = VirtualMachineTaskPollingState(refreshing = true),
+                            ),
+                        ) ?: state
+                    }
+                    val tasks = try {
+                        repo.virtualMachineTasks()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        _workspace.update { state ->
+                            state?.takeIf {
+                                repository === repo && it.profile.id == profileId &&
+                                    it.selectedModule == Module.VIRTUAL_MACHINES &&
+                                    generation == virtualMachineTaskPollingGeneration.get()
+                            }?.withVirtualMachineTaskPollingFailure(error.asDsmFailure()) ?: state
+                        }
+                        return@launch
+                    }
+                    var hasUnfinishedTasks = false
+                    _workspace.update { state ->
+                        val overview = (state?.virtualMachines as? Loadable.Ready)?.value
+                        state?.takeIf {
+                            overview != null && repository === repo && it.profile.id == profileId &&
+                                it.selectedModule == Module.VIRTUAL_MACHINES &&
+                                generation == virtualMachineTaskPollingGeneration.get()
+                        }?.withVirtualMachineTaskPollingResult(tasks)?.also {
+                            hasUnfinishedTasks = tasks.any { task -> !task.isFinished }
+                        } ?: state
+                    }
+                    if (!hasUnfinishedTasks) return@launch
+                    delay(VMM_TASK_POLL_INTERVAL_MILLIS)
+                }
+            } finally {
+                if (generation == virtualMachineTaskPollingGeneration.get()) {
+                    virtualMachineTaskPollingJob = null
+                }
+            }
+        }
+    }
+
+    private fun stopVirtualMachineTaskPolling() {
+        virtualMachineTaskPollingGeneration.incrementAndGet()
+        virtualMachineTaskPollingJob?.cancel()
+        virtualMachineTaskPollingJob = null
+        _workspace.update { state ->
+            state?.copy(
+                virtualMachineMutationState = state.virtualMachineMutationState.copy(
+                    taskPolling = VirtualMachineTaskPollingState(),
+                ),
+            )
         }
     }
 
@@ -7772,6 +7931,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             ),
         )
         viewModelScope.launch { loadVirtualMachineImageBrowser(repo, "", generation) }
+        syncVirtualMachineLocalImageImports(current.profile.id)
         true
     }
 
@@ -7786,11 +7946,104 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             draft.browserHistory != existing.browserHistory ||
             draft.browserItems != existing.browserItems
         ) return false
+        val next = if (existing.source == VirtualMachineImageImportSource.LOCAL &&
+            draft.source == VirtualMachineImageImportSource.NAS
+        ) {
+            releasePendingVirtualMachineLocalImageGrant()
+            draft.copy(localFile = null, localStagingDirectory = null)
+        } else draft
         _workspace.value = current.copy(
-            virtualMachineMutationState = state.copy(imageImportDraft = draft),
+            virtualMachineMutationState = state.copy(imageImportDraft = next),
         )
         true
     }
+
+    fun selectVirtualMachineLocalImage(uri: Uri): Boolean {
+        val resolver = getApplication<Application>().contentResolver
+        val metadata = runCatching {
+            resolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                val name = nameIndex.takeIf { it >= 0 }?.let(cursor::getString)
+                    ?: return@use null
+                val size = sizeIndex.takeIf { it >= 0 && !cursor.isNull(it) }
+                    ?.let(cursor::getLong)
+                VirtualMachineLocalImageSelection(name, size)
+            }
+        }.getOrNull() ?: return virtualMachineLocalImageSelectionFailed()
+        val contentType = runCatching { resolver.getType(uri) }.getOrNull()
+        val acquired = runCatching {
+            resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            resolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
+        }.getOrDefault(false)
+        if (!acquired) return virtualMachineLocalImageSelectionFailed()
+        val accepted = synchronized(virtualMachineMutationLock) {
+            val current = _workspace.value ?: return@synchronized false
+            val state = current.virtualMachineMutationState
+            val draft = state.imageImportDraft ?: return@synchronized false
+            if (!state.imageImportEditorVisible || draft.source != VirtualMachineImageImportSource.LOCAL ||
+                state.target != null || state.mutationInProgress || state.mutationRefreshInProgress
+            ) return@synchronized false
+            val previous = pendingVirtualMachineLocalImageUri
+            pendingVirtualMachineLocalImageUri = uri
+            pendingVirtualMachineLocalImageContentType = contentType
+            _workspace.value = current.copy(
+                virtualMachineMutationState = state.copy(
+                    imageImportDraft = draft.copy(
+                        localFile = metadata,
+                        imageName = draft.imageName.ifBlank {
+                            metadata.displayName.substringBeforeLast('.')
+                        },
+                    ),
+                ),
+                message = null,
+            )
+            if (previous != null && previous != uri) releaseVirtualMachineLocalImageGrant(previous)
+            true
+        }
+        if (!accepted) releaseVirtualMachineLocalImageGrant(uri)
+        return accepted
+    }
+
+    private fun virtualMachineLocalImageSelectionFailed(): Boolean {
+        _workspace.update { current ->
+            current?.takeIf {
+                it.virtualMachineMutationState.imageImportEditorVisible
+            }?.copy(
+                message = getApplication<Application>().getString(
+                    R.string.virtual_machine_local_image_selection_failed,
+                ),
+            ) ?: current
+        }
+        return false
+    }
+
+    fun selectVirtualMachineImageImportStagingDirectory(item: FileItem): Boolean =
+        synchronized(virtualMachineMutationLock) {
+            val current = _workspace.value ?: return false
+            val state = current.virtualMachineMutationState
+            val draft = state.imageImportDraft ?: return false
+            val page = (draft.browserItems as? Loadable.Ready)?.value ?: return false
+            val selected = page.items.singleOrNull { it == item } ?: return false
+            if (!state.imageImportEditorVisible ||
+                draft.source != VirtualMachineImageImportSource.LOCAL ||
+                !selected.isDirectory || !selected.canWrite || state.target != null ||
+                state.mutationInProgress || state.mutationRefreshInProgress
+            ) return false
+            _workspace.value = current.copy(
+                virtualMachineMutationState = state.copy(
+                    imageImportDraft = draft.copy(localStagingDirectory = selected),
+                ),
+            )
+            true
+        }
 
     fun enterVirtualMachineImageImportFolder(item: FileItem): Boolean =
         synchronized(virtualMachineMutationLock) {
@@ -7887,6 +8140,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             state.mutationRefreshInProgress
         ) return false
         virtualMachineImageBrowserGeneration.incrementAndGet()
+        releasePendingVirtualMachineLocalImageGrant()
         _workspace.value = current.copy(
             virtualMachineMutationState = state.copy(
                 imageImportEditorVisible = false,
@@ -7906,6 +8160,78 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             state.imageImportDraft?.toImportOrNull()
         } ?: return false
         return importVirtualMachineImage(desired)
+    }
+
+    fun confirmVirtualMachineLocalImageImport(
+        submission: VirtualMachineLocalImageImportSubmission,
+    ): Boolean {
+        val prepared = synchronized(virtualMachineMutationLock) {
+            val current = _workspace.value ?: return false
+            val state = current.virtualMachineMutationState
+            val expected = state.imageImportDraft?.toLocalSubmissionOrNull()
+            val uri = pendingVirtualMachineLocalImageUri
+            if (!state.imageImportEditorVisible || state.target != null ||
+                state.mutationInProgress || state.mutationRefreshInProgress ||
+                expected != submission || uri == null
+            ) return false
+            val displayName = state.imageImportDraft?.localFile?.displayName ?: return false
+            VirtualMachineLocalImagePreparation(
+                current.profile.id,
+                uri,
+                pendingVirtualMachineLocalImageContentType,
+                displayName,
+            )
+        }
+        val profileId = prepared.profileId
+        val recordId = UUID.randomUUID().toString()
+        val record = PersistedVirtualMachineImageImport(
+            id = recordId,
+            profileId = profileId,
+            sourceUri = prepared.uri.toString(),
+            sourceDisplayName = prepared.displayName,
+            expectedBytes = submission.image.originalSizeBytes,
+            stagingDirectoryPath = submission.stagingDirectory.path,
+            temporaryFileName = ".lanstash-vmm-$recordId${submission.image.safeTemporaryFileSuffix()}",
+            imageName = submission.imageName,
+            imageType = submission.image.imageType.toPersistedVirtualMachineImageType(),
+            storageId = submission.storage.id,
+            sourceContentType = prepared.contentType,
+            storageName = submission.storage.name,
+            storageStatus = submission.storage.metadata["status"].orEmpty(),
+        )
+        val workId = VirtualMachineImageImportWorker.enqueue(getApplication(), record)
+        if (workId == null) {
+            releaseVirtualMachineLocalImageGrant(prepared.uri)
+            synchronized(virtualMachineMutationLock) {
+                pendingVirtualMachineLocalImageUri = null
+                pendingVirtualMachineLocalImageContentType = null
+                _workspace.value = _workspace.value?.let { current ->
+                    current.copy(
+                        virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                            imageImportDraft = current.virtualMachineMutationState.imageImportDraft
+                                ?.copy(localFile = null),
+                        ),
+                    )
+                }
+            }
+            syncVirtualMachineLocalImageImports(profileId)
+            return false
+        }
+        synchronized(virtualMachineMutationLock) {
+            pendingVirtualMachineLocalImageUri = null
+            pendingVirtualMachineLocalImageContentType = null
+            _workspace.value = _workspace.value?.let { current ->
+                current.copy(
+                    virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                        imageImportEditorVisible = false,
+                        imageImportDraft = null,
+                    ),
+                )
+            }
+        }
+        syncVirtualMachineLocalImageImports(profileId)
+        monitorVirtualMachineImageImport(recordId, workId)
+        return true
     }
 
     fun openVirtualMachineSettingsEditor(id: String): Boolean = synchronized(virtualMachineMutationLock) {
@@ -8218,7 +8544,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 configuration.networkId?.trim().orEmpty(),
                 configuration.diskImageId?.trim().orEmpty(),
                 configuration.autoStart.toString(),
-            ),
+            ) + configuration.additionalDisks.flatMapIndexed { index, disk ->
+                listOf(
+                    "disk:$index",
+                    disk.sizeGiB.toString(),
+                    disk.diskImageId?.trim().orEmpty(),
+                )
+            } + configuration.additionalNetworkInterfaces.flatMapIndexed { index, network ->
+                listOf("network:$index", network.networkId?.trim().orEmpty())
+            },
         )
         return virtualMachineMutation(
             target,
@@ -11980,6 +12314,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             downloadRssRefreshMutationGeneration.incrementAndGet()
             virtualMachineMutationGeneration.incrementAndGet()
             virtualMachineOverviewRequestGeneration.incrementAndGet()
+            virtualMachineTaskPollingGeneration.incrementAndGet()
             chatMutationGeneration.incrementAndGet()
             chatAttachmentPreflightGeneration.incrementAndGet()
             chatMutationGenerations.clear()
@@ -11988,6 +12323,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _workspace.value = null
             candidate
         }
+        releasePendingVirtualMachineLocalImageGrant()
         store.saveWorkspaceUiState(state.profile.id, state.persistedUiState())
         chatPendingAttachmentUrisForRelease(state).forEach(::releasePersistedReadPermission)
         _login.update {
@@ -12014,6 +12350,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             transferJobs.clear()
             foregroundDownloadExecutionIds.clear()
             transferWatchJobs.clear()
+            virtualMachineImageImportWatchJobs.clear()
             photoTimelineJob = null
             storageAnalysisJob = null
             nasPerformanceVisible = false
@@ -12022,6 +12359,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             downloadBtCatalogJob = null
             downloadDiscoverySearchJob = null
             downloadActivityJob = null
+            virtualMachineTaskPollingJob = null
             chatRefreshJob = null
             chatRealtimeRefreshJob = null
             chatLocalReadMarkers = emptyMap()
@@ -12104,11 +12442,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _workspace.value = null
             candidate
         }
+        releasePendingVirtualMachineLocalImageGrant()
         chatPendingAttachmentUrisForRelease(state).forEach(::releasePersistedReadPermission)
         transferJobs.values.forEach(Job::cancel)
         transferJobs.clear()
         transferWatchJobs.values.forEach(Job::cancel)
         transferWatchJobs.clear()
+        virtualMachineImageImportWatchJobs.values.forEach(Job::cancel)
+        virtualMachineImageImportWatchJobs.clear()
         photoTimelineJob?.cancel()
         photoTimelineJob = null
         storageAnalysisJob?.cancel()
@@ -14595,6 +14936,81 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }?.also { syncPersistedDownloads(profileId) }
     }
 
+    fun refreshVirtualMachineLocalImageImports(): Boolean {
+        val profileId = _workspace.value?.profile?.id ?: return false
+        syncVirtualMachineLocalImageImports(profileId)
+        transferStore.virtualMachineImageImports(profileId).forEach { record ->
+            val workId = record.workId?.let { value ->
+                runCatching { UUID.fromString(value) }.getOrNull()
+            }
+            if (workId != null) monitorVirtualMachineImageImport(record.id, workId)
+        }
+        return true
+    }
+
+    fun retryVirtualMachineLocalImageImport(id: String): Boolean {
+        val profileId = _workspace.value?.profile?.id ?: return false
+        val record = transferStore.virtualMachineImageImport(id)?.takeIf {
+            it.profileId == profileId &&
+                it.stage == PersistedVirtualMachineImageImportStage.PREPARING &&
+                it.workId == null
+        } ?: return false
+        val workId = VirtualMachineImageImportWorker.enqueue(getApplication(), record.id) ?: return false
+        syncVirtualMachineLocalImageImports(profileId)
+        monitorVirtualMachineImageImport(record.id, workId)
+        return true
+    }
+
+    fun removeVirtualMachineLocalImageImport(id: String): Boolean {
+        val profileId = _workspace.value?.profile?.id ?: return false
+        val record = transferStore.virtualMachineImageImport(id)?.takeIf {
+            it.profileId == profileId && it.stage == PersistedVirtualMachineImageImportStage.SUCCEEDED
+        } ?: return false
+        if (!transferStore.removeVirtualMachineImageImport(record.id)) return false
+        virtualMachineImageImportWatchJobs.remove(record.id)?.cancel()
+        syncVirtualMachineLocalImageImports(profileId)
+        return true
+    }
+
+    private fun syncVirtualMachineLocalImageImports(profileId: String) {
+        if (_workspace.value?.profile?.id != profileId) return
+        _virtualMachineLocalImageImports.value = transferStore.virtualMachineImageImports(profileId)
+            .map(PersistedVirtualMachineImageImport::toVirtualMachineLocalImageImportUiState)
+    }
+
+    private fun monitorVirtualMachineImageImport(recordId: String, workId: UUID) {
+        virtualMachineImageImportWatchJobs.remove(recordId)?.cancel()
+        virtualMachineImageImportWatchJobs[recordId] = viewModelScope.launch {
+            workManager.getWorkInfoByIdFlow(workId).collectLatest { info ->
+                val profileId = transferStore.virtualMachineImageImport(recordId)?.profileId
+                    ?: return@collectLatest
+                syncVirtualMachineLocalImageImports(profileId)
+                if (info.state.isFinished) {
+                    virtualMachineImageImportWatchJobs.remove(
+                        recordId,
+                        currentCoroutineContext()[Job],
+                    )
+                    currentCoroutineContext()[Job]?.cancel()
+                }
+            }
+        }
+    }
+
+    private fun releasePendingVirtualMachineLocalImageGrant() {
+        pendingVirtualMachineLocalImageUri?.let(::releaseVirtualMachineLocalImageGrant)
+        pendingVirtualMachineLocalImageUri = null
+        pendingVirtualMachineLocalImageContentType = null
+    }
+
+    private fun releaseVirtualMachineLocalImageGrant(uri: Uri) {
+        runCatching {
+            getApplication<Application>().contentResolver.releasePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+    }
+
     private fun monitorUpload(taskId: String, workId: UUID) {
         transferWatchJobs.remove(taskId)?.cancel()
         transferWatchJobs[taskId] = viewModelScope.launch {
@@ -15123,6 +15539,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         runCatching { block() }
             .onSuccess { update(Loadable.Ready(it)) }
             .onFailure { update(Loadable.Failed(it.asDsmFailure())) }
+    }
+
+    override fun onCleared() {
+        releasePendingVirtualMachineLocalImageGrant()
+        super.onCleared()
     }
 }
 
@@ -16195,6 +16616,7 @@ internal fun inactiveThumbnailKeys(
 private const val CHAT_REFRESH_INTERVAL_MILLIS = 5_000L
 private const val CHAT_REALTIME_COALESCE_MILLIS = 250L
 private const val NAS_PERFORMANCE_SAMPLE_INTERVAL_MILLIS = 2_000L
+private const val VMM_TASK_POLL_INTERVAL_MILLIS = 2_000L
 internal const val MAX_NAS_PERFORMANCE_SAMPLES = 120
         private const val MAX_CHAT_MESSAGE_CHARACTERS = 10_000
         private const val MAX_CHAT_GROUP_TITLE_CHARACTERS = 100
@@ -16212,6 +16634,30 @@ private const val MAX_FILE_TREE_DOCUMENTS = 1_000
 private const val MAX_FILE_FAVORITES = 500
 private const val MAX_FILE_REMOTE_LOCATIONS = 200
 private const val MAX_THUMBNAIL_DISK_CACHE_BYTES = 128L * 1024L * 1024L
+
+private fun io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageType
+    .toPersistedVirtualMachineImageType(): PersistedVirtualMachineImageType = when (this) {
+    io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageType.DISK ->
+        PersistedVirtualMachineImageType.DISK
+    io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageType.VDSM ->
+        PersistedVirtualMachineImageType.VDSM
+    io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageType.ISO ->
+        PersistedVirtualMachineImageType.ISO
+}
+
+internal fun PersistedVirtualMachineImageImport.toVirtualMachineLocalImageImportUiState() =
+    VirtualMachineLocalImageImportUiState(
+        id = id,
+        imageName = imageName,
+        stage = stage,
+        canRetry = stage == PersistedVirtualMachineImageImportStage.PREPARING && workId == null,
+        needsReview = stage in setOf(
+            PersistedVirtualMachineImageImportStage.NEEDS_REVIEW,
+            PersistedVirtualMachineImageImportStage.CLEANUP_PENDING,
+        ),
+        canRemove = stage == PersistedVirtualMachineImageImportStage.SUCCEEDED &&
+            !requiresRefresh && temporaryFileBaseline == null,
+    )
 
 private class DuplicateUploadNamesException : IllegalArgumentException()
 

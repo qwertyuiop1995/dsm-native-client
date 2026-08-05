@@ -27,9 +27,14 @@ class MainActivity : AppCompatActivity() {
         internalNavigation = if (
             savedInstanceState?.getBoolean(STATE_PENDING_OPEN_TRANSFERS) == true
         ) {
-            InternalNavigationState().receive(InternalRouteRequest.OpenTransfers)
+            InternalNavigationState().receive(InternalRouteRequest.OpenModule(Module.TRANSFERS))
         } else {
-            InternalNavigationState()
+            savedInstanceState?.getString(STATE_PENDING_MODULE)
+                ?.let { value -> runCatching { Module.valueOf(value) }.getOrNull() }
+                ?.let { module ->
+                    InternalNavigationState().receive(InternalRouteRequest.OpenModule(module))
+                }
+                ?: InternalNavigationState()
         }
         enableEdgeToEdge()
         setContent {
@@ -45,6 +50,7 @@ class MainActivity : AppCompatActivity() {
             STATE_PENDING_OPEN_TRANSFERS,
             internalNavigation.pendingOpenTransfers,
         )
+        outState.putString(STATE_PENDING_MODULE, internalNavigation.pendingModule?.name)
         super.onSaveInstanceState(outState)
     }
 
@@ -56,22 +62,28 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleIntent(intent: Intent?) {
         val request = intent.internalRouteRequest()
+        if (request == null && intent?.action == Intent.ACTION_VIEW) {
+            intent.data = null
+        }
+        if (request != null && pendingNavigationIntent !== intent) {
+            clearNavigationPayload(pendingNavigationIntent)
+        }
         internalNavigation = internalNavigation.receive(request)
         if (request != null) {
             pendingNavigationIntent = intent
         }
-        if (internalNavigation.pendingRequest == null || internalNavigationJob?.isActive == true) return
+        val pending = internalNavigation.pendingRequest ?: return
+        internalNavigationJob?.cancel()
         val job = lifecycleScope.launch {
-            model.workspace.filterNotNull().first()
-            val pending = internalNavigation.pendingRequest ?: return@launch
-            val result = when (pending) {
-                InternalRouteRequest.OpenTransfers ->
-                    model.navigateTo(WorkspaceRoute.ModuleRoot(Module.TRANSFERS))
+            model.workspace.filterNotNull().first {
+                if (internalNavigation.pendingRequest != pending) return@first true
+                model.navigateTo(WorkspaceRoute.ModuleRoot(pending.module)) !=
+                    WorkspaceNavigationResult.DEFERRED
             }
-            if (result != WorkspaceNavigationResult.DEFERRED) {
+            if (internalNavigation.pendingRequest == pending) {
                 internalNavigation = internalNavigation.consume(pending)
-                pendingNavigationIntent?.removeExtra(TransferNotifications.EXTRA_OPEN_TRANSFERS)
-                this@MainActivity.intent.removeExtra(TransferNotifications.EXTRA_OPEN_TRANSFERS)
+                clearConsumedNavigationIntent(pendingNavigationIntent, pending)
+                clearConsumedNavigationIntent(this@MainActivity.intent, pending)
                 pendingNavigationIntent = null
             }
         }
@@ -81,20 +93,39 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun clearConsumedNavigationIntent(
+        intent: Intent?,
+        request: InternalRouteRequest,
+    ) {
+        if (intent.internalRouteRequest() != request) return
+        clearNavigationPayload(intent)
+    }
+
+    private fun clearNavigationPayload(intent: Intent?) {
+        intent?.removeExtra(TransferNotifications.EXTRA_OPEN_TRANSFERS)
+        if (intent?.action == Intent.ACTION_VIEW) intent.data = null
+    }
+
     private companion object {
         const val STATE_PENDING_OPEN_TRANSFERS = "pending_open_transfers"
+        const val STATE_PENDING_MODULE = "pending_module"
     }
 }
 
 internal sealed interface InternalRouteRequest {
-    data object OpenTransfers : InternalRouteRequest
+    val module: Module
+
+    data class OpenModule(override val module: Module) : InternalRouteRequest
 }
 
 internal data class InternalNavigationState(
     val pendingRequest: InternalRouteRequest? = null,
 ) {
     val pendingOpenTransfers: Boolean
-        get() = pendingRequest == InternalRouteRequest.OpenTransfers
+        get() = pendingModule == Module.TRANSFERS
+
+    val pendingModule: Module?
+        get() = pendingRequest?.module
 
     fun receive(request: InternalRouteRequest?): InternalNavigationState =
         if (request != null) copy(pendingRequest = request) else this
@@ -105,6 +136,8 @@ internal data class InternalNavigationState(
 
 internal fun Intent?.internalRouteRequest(): InternalRouteRequest? = when {
     this?.getBooleanExtra(TransferNotifications.EXTRA_OPEN_TRANSFERS, false) == true ->
-        InternalRouteRequest.OpenTransfers
+        InternalRouteRequest.OpenModule(Module.TRANSFERS)
+    this?.action == Intent.ACTION_VIEW ->
+        dataString.externalWorkspaceModule()?.let(InternalRouteRequest::OpenModule)
     else -> null
 }

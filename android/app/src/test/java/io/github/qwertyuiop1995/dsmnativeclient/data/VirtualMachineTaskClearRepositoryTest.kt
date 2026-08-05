@@ -122,6 +122,26 @@ class VirtualMachineTaskClearRepositoryTest {
     }
 
     @Test
+    fun `无关任务新增和目标进度变化不阻断已完成目标清理`() = runBlocking {
+        val transport = TaskClearInterceptor(
+            ArrayDeque(
+                listOf(
+                    roundAtProgress(20, "finished" to true),
+                    roundAtProgress(90, "unrelated" to false, "finished" to true),
+                    roundAtProgress(10, "unrelated" to false),
+                ),
+            ),
+        )
+        val repository = repository(transport)
+        val baseline = repository.virtualMachineOverview().tasks
+
+        val result = repository.clearFinishedVirtualMachineTasksResult(baseline)
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(listOf("finished"), transport.clearRequests().map { it.fields()["task_id"] })
+    }
+
+    @Test
     fun `清除提交异常后只回读一次且不重放`() = runBlocking {
         val transport = TaskClearInterceptor(
             rounds = ArrayDeque(
@@ -298,9 +318,14 @@ class VirtualMachineTaskClearRepositoryTest {
     }
 }
 
-private data class TaskRound(val tasks: List<Pair<String, Boolean>>)
+private data class TaskRound(
+    val tasks: List<Pair<String, Boolean>>,
+    val progress: Int = 100,
+)
 
 private fun round(vararg tasks: Pair<String, Boolean>) = TaskRound(tasks.toList())
+private fun roundAtProgress(progress: Int, vararg tasks: Pair<String, Boolean>) =
+    TaskRound(tasks.toList(), progress)
 
 private class TaskClearInterceptor(
     private val rounds: ArrayDeque<TaskRound>,
@@ -335,7 +360,7 @@ private class TaskClearInterceptor(
                 }
                 "get" -> synchronized(rounds) {
                     val task = checkNotNull(activeRound).tasks[detailIndex++]
-                    """{"success":true,"data":{"finish":${task.second},"task_info":{"progress":100}}}"""
+                    """{"success":true,"data":{"finish":${task.second},"task_info":{"progress":${checkNotNull(activeRound).progress}}}}"""
                 }
                 "clear" -> {
                     enteredClear?.countDown()

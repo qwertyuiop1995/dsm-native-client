@@ -72,6 +72,8 @@ data class VirtualMachineCreationDraftState(
     val storageId: String = "",
     val networkId: String? = null,
     val diskImageId: String? = null,
+    val additionalDisks: List<VirtualMachineCreationDiskDraftState> = emptyList(),
+    val additionalNetworkInterfaces: List<VirtualMachineCreationNetworkDraftState> = emptyList(),
 ) {
     fun toCreationOrNull(): VirtualMachineCreation? {
         val cleanName = name.trim()
@@ -79,21 +81,29 @@ data class VirtualMachineCreationDraftState(
         val cpuValue = cpu.toIntOrNull()
         val memoryValue = memory.toIntOrNull()
         val diskValue = disk.toIntOrNull()
+        val primaryImageId = diskImageId?.trim()?.takeIf(String::isNotEmpty)
+        val extraDisks = additionalDisks.map { it.toCreationDiskOrNull() ?: return null }
+        val extraNetworks = additionalNetworkInterfaces.map {
+            it.toCreationNetworkOrNull() ?: return null
+        }
         if (step !in 0..2 || cleanName.isEmpty() || cleanName.length > 64 ||
             cleanName.any(Char::isISOControl) || cleanDescription.length > 1_024 ||
             cpuValue !in 1..64 || memoryValue !in 128..1_048_576 ||
-            diskValue !in 1..1_048_576 || storageId.isBlank()
+            additionalDisks.size >= MAX_VIRTUAL_MACHINE_DISKS ||
+            (primaryImageId == null && diskValue !in 1..1_048_576) || storageId.isBlank()
         ) return null
         return VirtualMachineCreation(
             name = cleanName,
             description = cleanDescription,
             cpuCount = checkNotNull(cpuValue),
             memoryMiB = checkNotNull(memoryValue),
-            diskGiB = checkNotNull(diskValue),
+            diskGiB = if (primaryImageId == null) checkNotNull(diskValue) else 0,
             storageId = storageId.trim(),
             networkId = networkId?.trim()?.takeIf(String::isNotEmpty),
-            diskImageId = diskImageId?.trim()?.takeIf(String::isNotEmpty),
+            diskImageId = primaryImageId,
             autoStart = autoStart,
+            additionalDisks = extraDisks,
+            additionalNetworkInterfaces = extraNetworks,
         )
     }
 
@@ -109,7 +119,41 @@ data class VirtualMachineCreationDraftState(
             storageId = value.storageId,
             networkId = value.networkId,
             diskImageId = value.diskImageId,
+            additionalDisks = value.additionalDisks.map {
+                VirtualMachineCreationDiskDraftState(
+                    disk = it.sizeGiB.toString(),
+                    diskImageId = it.diskImageId,
+                )
+            },
+            additionalNetworkInterfaces = value.additionalNetworkInterfaces.map {
+                VirtualMachineCreationNetworkDraftState(it.networkId)
+            },
         )
+    }
+}
+
+data class VirtualMachineCreationDiskDraftState(
+    val disk: String = "10",
+    val diskImageId: String? = null,
+) {
+    fun toCreationDiskOrNull(): VirtualMachineCreationDisk? {
+        val imageId = diskImageId?.trim()?.takeIf(String::isNotEmpty)
+        val size = disk.toIntOrNull()
+        if (imageId == null && size !in 1..1_048_576) return null
+        return VirtualMachineCreationDisk(
+            sizeGiB = if (imageId == null) checkNotNull(size) else 0,
+            diskImageId = imageId,
+        )
+    }
+}
+
+data class VirtualMachineCreationNetworkDraftState(
+    val networkId: String? = null,
+) {
+    fun toCreationNetworkOrNull(): VirtualMachineCreationNetworkInterface? {
+        val normalized = networkId?.trim()
+        if (normalized != null && normalized.isEmpty()) return null
+        return VirtualMachineCreationNetworkInterface(normalized)
     }
 }
 
@@ -148,16 +192,45 @@ data class VirtualMachineSettingsDraftState(
     }
 }
 
+enum class VirtualMachineImageImportSource {
+    NAS,
+    LOCAL,
+}
+
+/** 本地文件选择器只把非敏感元数据交给表单；URI 由上层短期持有，不进入界面状态。 */
+data class VirtualMachineLocalImageSelection(
+    val displayName: String,
+    val sizeBytes: Long?,
+) {
+    override fun toString(): String =
+        "VirtualMachineLocalImageSelection(sizeKnown=${sizeBytes != null})"
+}
+
+/** 上层开始持久化上传流程所需的纯表单结果，不包含本地 URI。 */
+data class VirtualMachineLocalImageImportSubmission(
+    val imageName: String,
+    val image: ValidatedVirtualMachineLocalImage,
+    val storage: ManagedResource,
+    val stagingDirectory: FileItem,
+) {
+    override fun toString(): String =
+        "VirtualMachineLocalImageImportSubmission(imageType=${image.imageType})"
+}
+
 data class VirtualMachineImageImportDraftState(
     val imageName: String = "",
     val imageType: VirtualMachineImageType = VirtualMachineImageType.DISK,
+    val source: VirtualMachineImageImportSource = VirtualMachineImageImportSource.NAS,
     val storage: ManagedResource? = null,
     val sourceFile: FileItem? = null,
+    val localFile: VirtualMachineLocalImageSelection? = null,
+    val localStagingDirectory: FileItem? = null,
     val browserPath: String = "",
     val browserHistory: List<String> = emptyList(),
     val browserItems: Loadable<FilePage> = Loadable.Idle,
 ) {
     fun toImportOrNull(): VirtualMachineImageImport? {
+        if (source != VirtualMachineImageImportSource.NAS) return null
         val name = imageName.trim()
         val file = sourceFile ?: return null
         val targetStorage = storage ?: return null
@@ -166,6 +239,25 @@ data class VirtualMachineImageImportDraftState(
             !targetStorage.isEligibleForVirtualMachineImageImport()
         ) return null
         return VirtualMachineImageImport(name, imageType, file, targetStorage)
+    }
+
+    fun localValidation(): VirtualMachineLocalImageValidation? = localFile?.let {
+        validateVirtualMachineLocalImage(it.displayName, it.sizeBytes)
+    }
+
+    fun toLocalSubmissionOrNull(): VirtualMachineLocalImageImportSubmission? {
+        if (source != VirtualMachineImageImportSource.LOCAL) return null
+        val name = imageName.trim()
+        val targetStorage = storage ?: return null
+        val staging = localStagingDirectory ?: return null
+        val validated = (localValidation() as? VirtualMachineLocalImageValidation.Accepted)?.value
+            ?: return null
+        if (name.isEmpty() || name.any(Char::isISOControl) ||
+            !targetStorage.isEligibleForVirtualMachineImageImport() ||
+            staging.path.isBlank() || !staging.path.startsWith('/') ||
+            !staging.isDirectory || !staging.canWrite
+        ) return null
+        return VirtualMachineLocalImageImportSubmission(name, validated, targetStorage, staging)
     }
 }
 
@@ -205,6 +297,8 @@ data class VirtualMachineMutationWorkspaceState(
     val taskCleanupBaseline: List<VirtualMachineTask> = emptyList(),
     /** Repository 已完成回读的清理结果；只用于取消协程无法正常返回时交接证据。 */
     val taskCleanupResolvedResult: MutationResult? = null,
+    /** Task.Info 独立刷新保留上一次成功总览，不把局部失败升级为整页错误。 */
+    val taskPolling: VirtualMachineTaskPollingState = VirtualMachineTaskPollingState(),
     val target: VirtualMachineMutationTarget? = null,
     val mutationInProgress: Boolean = false,
     val mutationResult: MutationResult? = null,
@@ -215,6 +309,44 @@ data class VirtualMachineMutationWorkspaceState(
     val mutationVerification: VirtualMachineMutationVerification? = null,
     val mutationGeneration: Long = 0L,
 )
+
+data class VirtualMachineTaskPollingState(
+    val refreshing: Boolean = false,
+    val failure: DsmFailure? = null,
+)
+
+internal fun shouldPollVirtualMachineTasks(
+    selectedModule: Module,
+    overview: VirtualMachineOverview?,
+): Boolean = selectedModule == Module.VIRTUAL_MACHINES &&
+    overview?.taskCenterState == VirtualMachineTaskCenterState.AVAILABLE &&
+    overview.tasks.any { !it.isFinished }
+
+internal fun WorkspaceState.withVirtualMachineTaskPollingFailure(
+    failure: DsmFailure,
+): WorkspaceState = copy(
+    virtualMachineMutationState = virtualMachineMutationState.copy(
+        taskPolling = VirtualMachineTaskPollingState(failure = failure),
+    ),
+)
+
+internal fun WorkspaceState.withVirtualMachineTaskPollingResult(
+    tasks: List<VirtualMachineTask>,
+): WorkspaceState {
+    val overview = (virtualMachines as? Loadable.Ready)?.value ?: return this
+    return copy(
+        virtualMachines = Loadable.Ready(
+            overview.copy(
+                tasks = tasks,
+                taskCenterState = VirtualMachineTaskCenterState.AVAILABLE,
+                unavailableSections = overview.unavailableSections - VirtualMachineSection.TASKS,
+            ),
+        ),
+        virtualMachineMutationState = virtualMachineMutationState.copy(
+            taskPolling = VirtualMachineTaskPollingState(),
+        ),
+    )
+}
 
 
 

@@ -37,8 +37,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import io.github.qwertyuiop1995.dsmnativeclient.R
 import io.github.qwertyuiop1995.dsmnativeclient.VirtualMachineCreationDraftState
+import io.github.qwertyuiop1995.dsmnativeclient.VirtualMachineCreationDiskDraftState
+import io.github.qwertyuiop1995.dsmnativeclient.VirtualMachineCreationNetworkDraftState
 import io.github.qwertyuiop1995.dsmnativeclient.VirtualMachineSettingsDraftState
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ManagedResource
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MAX_VIRTUAL_MACHINE_DISKS
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineOverview
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSettings
 
@@ -59,10 +62,21 @@ internal fun VirtualMachineCreationDialog(
     val descriptionError = draft.description.length > 1_024
     val cpuError = cpuValue == null || cpuValue !in 1..64
     val memoryError = memoryValue == null || memoryValue !in 128..1_048_576
-    val diskError = diskValue == null || diskValue !in 1..1_048_576
+    val diskError = draft.diskImageId == null && (diskValue == null || diskValue !in 1..1_048_576)
+    val additionalDiskErrors = draft.additionalDisks.map {
+        it.diskImageId == null &&
+            (it.disk.toIntOrNull()?.let { value -> value !in 1..1_048_576 } ?: true)
+    }
     val nameValid = !nameError && !descriptionError
-    val resourcesValid = !cpuError && !memoryError && !diskError
-    val placementValid = draft.storageId.isNotEmpty()
+    val resourcesValid = !cpuError && !memoryError && !diskError &&
+        additionalDiskErrors.none { it }
+    val validNetworkIds = overview.networks.map(ManagedResource::id).toSet()
+    val validImageIds = diskImages.map(ManagedResource::id).toSet()
+    val placementValid = overview.storages.any { it.id == draft.storageId } &&
+        (listOf(draft.networkId) + draft.additionalNetworkInterfaces.map { it.networkId })
+            .filterNotNull().all { it in validNetworkIds } &&
+        (listOf(draft.diskImageId) + draft.additionalDisks.map { it.diskImageId })
+            .filterNotNull().all { it in validImageIds }
     val stepDescription = stringResource(R.string.virtual_machine_creation_step, draft.step + 1, 3)
 
     AlertDialog(
@@ -112,10 +126,13 @@ internal fun VirtualMachineCreationDialog(
                         cpu = draft.cpu,
                         memory = draft.memory,
                         disk = draft.disk,
+                        diskImageId = draft.diskImageId,
+                        additionalDisks = draft.additionalDisks,
                         enabled = !submitting,
                         cpuError = cpuError,
                         memoryError = memoryError,
                         diskError = diskError,
+                        additionalDiskErrors = additionalDiskErrors,
                         onCpuChange = {
                             onDraftChange(draft.copy(cpu = it.filter(Char::isDigit).take(2)))
                         },
@@ -124,6 +141,34 @@ internal fun VirtualMachineCreationDialog(
                         },
                         onDiskChange = {
                             onDraftChange(draft.copy(disk = it.filter(Char::isDigit).take(7)))
+                        },
+                        onAdditionalDiskChange = { index, value ->
+                            onDraftChange(
+                                draft.copy(
+                                    additionalDisks = draft.additionalDisks.mapIndexed { itemIndex, item ->
+                                        if (itemIndex == index) item.copy(
+                                            disk = value.filter(Char::isDigit).take(7),
+                                        ) else item
+                                    },
+                                ),
+                            )
+                        },
+                        onAddDisk = {
+                            if (draft.additionalDisks.size < MAX_VIRTUAL_MACHINE_DISKS - 1) onDraftChange(
+                                draft.copy(
+                                    additionalDisks = draft.additionalDisks +
+                                        VirtualMachineCreationDiskDraftState(),
+                                ),
+                            )
+                        },
+                        onRemoveDisk = { index ->
+                            onDraftChange(
+                                draft.copy(
+                                    additionalDisks = draft.additionalDisks.filterIndexed {
+                                            itemIndex, _ -> itemIndex != index
+                                    },
+                                ),
+                            )
                         },
                     )
                     else -> {
@@ -134,10 +179,54 @@ internal fun VirtualMachineCreationDialog(
                             storageId = draft.storageId,
                             networkId = draft.networkId,
                             imageId = draft.diskImageId,
+                            additionalDisks = draft.additionalDisks,
+                            additionalNetworkInterfaces = draft.additionalNetworkInterfaces,
                             enabled = !submitting,
                             onStorageChange = { onDraftChange(draft.copy(storageId = it)) },
                             onNetworkChange = { onDraftChange(draft.copy(networkId = it)) },
                             onImageChange = { onDraftChange(draft.copy(diskImageId = it)) },
+                            onAdditionalDiskImageChange = { index, imageId ->
+                                onDraftChange(
+                                    draft.copy(
+                                        additionalDisks = draft.additionalDisks.mapIndexed {
+                                                itemIndex, item ->
+                                            if (itemIndex == index) item.copy(diskImageId = imageId)
+                                            else item
+                                        },
+                                    ),
+                                )
+                            },
+                            onAdditionalNetworkChange = { index, networkId ->
+                                onDraftChange(
+                                    draft.copy(
+                                        additionalNetworkInterfaces =
+                                            draft.additionalNetworkInterfaces.mapIndexed {
+                                                    itemIndex, item ->
+                                                if (itemIndex == index) item.copy(networkId = networkId)
+                                                else item
+                                            },
+                                    ),
+                                )
+                            },
+                            onAddNetwork = {
+                                onDraftChange(
+                                    draft.copy(
+                                        additionalNetworkInterfaces =
+                                            draft.additionalNetworkInterfaces +
+                                                VirtualMachineCreationNetworkDraftState(),
+                                    ),
+                                )
+                            },
+                            onRemoveNetwork = { index ->
+                                onDraftChange(
+                                    draft.copy(
+                                        additionalNetworkInterfaces =
+                                            draft.additionalNetworkInterfaces.filterIndexed {
+                                                    itemIndex, _ -> itemIndex != index
+                                            },
+                                    ),
+                                )
+                            },
                         )
                         CreationReview(
                             overview = overview,
@@ -151,6 +240,8 @@ internal fun VirtualMachineCreationDialog(
                             storageId = draft.storageId,
                             networkId = draft.networkId,
                             imageId = draft.diskImageId,
+                            additionalDisks = draft.additionalDisks,
+                            additionalNetworkInterfaces = draft.additionalNetworkInterfaces,
                         )
                     }
                 }
@@ -266,13 +357,19 @@ private fun ResourcesStep(
     cpu: String,
     memory: String,
     disk: String,
+    diskImageId: String?,
+    additionalDisks: List<VirtualMachineCreationDiskDraftState>,
     enabled: Boolean,
     cpuError: Boolean,
     memoryError: Boolean,
     diskError: Boolean,
+    additionalDiskErrors: List<Boolean>,
     onCpuChange: (String) -> Unit,
     onMemoryChange: (String) -> Unit,
     onDiskChange: (String) -> Unit,
+    onAdditionalDiskChange: (Int, String) -> Unit,
+    onAddDisk: () -> Unit,
+    onRemoveDisk: (Int) -> Unit,
 ) {
     NumberField(
         cpu,
@@ -290,14 +387,43 @@ private fun ResourcesStep(
         memoryError,
         enabled,
     )
-    NumberField(
-        disk,
-        onDiskChange,
-        R.string.virtual_machine_disk_gib,
-        R.string.virtual_machine_disk_range,
-        diskError,
-        enabled,
-    )
+    if (diskImageId == null) {
+        NumberField(
+            disk,
+            onDiskChange,
+            R.string.virtual_machine_disk_gib,
+            R.string.virtual_machine_disk_range,
+            diskError,
+            enabled,
+        )
+    } else {
+        Text(stringResource(R.string.virtual_machine_image_original_capacity))
+    }
+    additionalDisks.forEachIndexed { index, diskDraft ->
+        PlacementHeading(R.string.virtual_machine_additional_disk_number, index + 2)
+        if (diskDraft.diskImageId == null) {
+            NumberField(
+                diskDraft.disk,
+                { onAdditionalDiskChange(index, it) },
+                R.string.virtual_machine_disk_gib,
+                R.string.virtual_machine_disk_range,
+                additionalDiskErrors.getOrElse(index) { true },
+                enabled,
+            )
+        } else {
+            Text(stringResource(R.string.virtual_machine_image_original_capacity))
+        }
+        TextButton(
+            onClick = { onRemoveDisk(index) },
+            enabled = enabled,
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) { Text(stringResource(R.string.virtual_machine_remove_disk_number, index + 2)) }
+    }
+    TextButton(
+        onClick = onAddDisk,
+        enabled = enabled && additionalDisks.size < MAX_VIRTUAL_MACHINE_DISKS - 1,
+        modifier = Modifier.heightIn(min = 48.dp),
+    ) { Text(stringResource(R.string.virtual_machine_add_disk)) }
 }
 
 @Composable
@@ -330,10 +456,16 @@ private fun PlacementStep(
     storageId: String,
     networkId: String?,
     imageId: String?,
+    additionalDisks: List<VirtualMachineCreationDiskDraftState>,
+    additionalNetworkInterfaces: List<VirtualMachineCreationNetworkDraftState>,
     enabled: Boolean,
     onStorageChange: (String) -> Unit,
     onNetworkChange: (String?) -> Unit,
     onImageChange: (String?) -> Unit,
+    onAdditionalDiskImageChange: (Int, String?) -> Unit,
+    onAdditionalNetworkChange: (Int, String?) -> Unit,
+    onAddNetwork: () -> Unit,
+    onRemoveNetwork: (Int) -> Unit,
 ) {
     PlacementHeading(R.string.virtual_machine_storage)
     Column(Modifier.selectableGroup()) {
@@ -363,6 +495,31 @@ private fun PlacementStep(
             }
         }
     }
+    additionalNetworkInterfaces.forEachIndexed { index, networkInterface ->
+        PlacementHeading(R.string.virtual_machine_additional_network_number, index + 2)
+        Column(Modifier.selectableGroup()) {
+            PlacementChoice(
+                stringResource(R.string.virtual_machine_disconnected_network),
+                networkInterface.networkId == null,
+                enabled,
+            ) { onAdditionalNetworkChange(index, null) }
+            networks.forEach { network ->
+                PlacementChoice(network.name, networkInterface.networkId == network.id, enabled) {
+                    onAdditionalNetworkChange(index, network.id)
+                }
+            }
+        }
+        TextButton(
+            onClick = { onRemoveNetwork(index) },
+            enabled = enabled,
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) { Text(stringResource(R.string.virtual_machine_remove_network_number, index + 2)) }
+    }
+    TextButton(
+        onClick = onAddNetwork,
+        enabled = enabled,
+        modifier = Modifier.heightIn(min = 48.dp),
+    ) { Text(stringResource(R.string.virtual_machine_add_network)) }
     PlacementHeading(R.string.virtual_machine_disk_source)
     Column(Modifier.selectableGroup()) {
         PlacementChoice(
@@ -374,11 +531,30 @@ private fun PlacementStep(
             PlacementChoice(image.name, imageId == image.id, enabled) { onImageChange(image.id) }
         }
     }
+    if (imageId != null) Text(stringResource(R.string.virtual_machine_image_original_capacity))
+    additionalDisks.forEachIndexed { index, disk ->
+        PlacementHeading(R.string.virtual_machine_additional_disk_source_number, index + 2)
+        Column(Modifier.selectableGroup()) {
+            PlacementChoice(
+                stringResource(R.string.virtual_machine_empty_disk),
+                disk.diskImageId == null,
+                enabled,
+            ) { onAdditionalDiskImageChange(index, null) }
+            diskImages.forEach { image ->
+                PlacementChoice(image.name, disk.diskImageId == image.id, enabled) {
+                    onAdditionalDiskImageChange(index, image.id)
+                }
+            }
+        }
+        if (disk.diskImageId != null) {
+            Text(stringResource(R.string.virtual_machine_image_original_capacity))
+        }
+    }
 }
 
 @Composable
-private fun PlacementHeading(@StringRes label: Int) {
-    Text(stringResource(label), modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+private fun PlacementHeading(@StringRes label: Int, vararg values: Any) {
+    Text(stringResource(label, *values), modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
 }
 
 @Composable
@@ -420,6 +596,8 @@ private fun CreationReview(
     storageId: String,
     networkId: String?,
     imageId: String?,
+    additionalDisks: List<VirtualMachineCreationDiskDraftState>,
+    additionalNetworkInterfaces: List<VirtualMachineCreationNetworkDraftState>,
 ) {
     val unavailable = stringResource(R.string.virtual_machine_selection_unavailable)
     HorizontalDivider(Modifier.padding(vertical = 12.dp))
@@ -437,10 +615,30 @@ private fun CreationReview(
         R.string.virtual_machine_memory_mib,
         stringResource(R.string.virtual_machine_memory_value, memory),
     )
-    ReviewItem(
-        R.string.virtual_machine_disk_gib,
-        stringResource(R.string.virtual_machine_disk_value, disk),
-    )
+    if (imageId == null) {
+        ReviewItem(
+            R.string.virtual_machine_disk_gib,
+            stringResource(R.string.virtual_machine_disk_value, disk),
+        )
+    }
+    additionalDisks.forEachIndexed { index, diskDraft ->
+        ReviewItem(
+            R.string.virtual_machine_disks,
+            if (diskDraft.diskImageId == null) {
+                stringResource(
+                    R.string.virtual_machine_additional_empty_disk_review,
+                    index + 2,
+                    diskDraft.disk,
+                )
+            } else {
+                stringResource(
+                    R.string.virtual_machine_additional_image_disk_review,
+                    index + 2,
+                    diskImages.firstOrNull { it.id == diskDraft.diskImageId }?.name ?: unavailable,
+                )
+            },
+        )
+    }
     ReviewItem(
         R.string.virtual_machine_storage,
         overview.storages.firstOrNull { it.id == storageId }?.name ?: unavailable,
@@ -453,12 +651,27 @@ private fun CreationReview(
             overview.networks.firstOrNull { it.id == networkId }?.name ?: unavailable
         },
     )
+    additionalNetworkInterfaces.forEachIndexed { index, networkInterface ->
+        ReviewItem(
+            R.string.virtual_machine_network_interfaces,
+            stringResource(
+                R.string.virtual_machine_additional_network_review,
+                index + 2,
+                networkInterface.networkId?.let { selectedId ->
+                    overview.networks.firstOrNull { it.id == selectedId }?.name
+                } ?: stringResource(R.string.virtual_machine_disconnected_network),
+            ),
+        )
+    }
     ReviewItem(
         R.string.virtual_machine_disk_source,
         if (imageId == null) {
             stringResource(R.string.virtual_machine_empty_disk)
         } else {
-            diskImages.firstOrNull { it.id == imageId }?.name ?: unavailable
+            stringResource(
+                R.string.virtual_machine_image_source_review,
+                diskImages.firstOrNull { it.id == imageId }?.name ?: unavailable,
+            )
         },
     )
     ReviewItem(

@@ -34,6 +34,45 @@ import org.junit.Test
 
 class VirtualMachineImageImportRepositoryTest {
     @Test
+    fun `后台分段helper只使用公开上传后导入所需端点`() = runBlocking {
+        val transport = ImageImportInterceptor(
+            fileInfo(), storageList(), imageList(), taskStarted(),
+            taskFinished(), imageList(image()),
+            """{"success":true,"data":{"task_ids":["task-1"]}}""",
+            emptySuccess(),
+        )
+        val repository = repository(transport)
+        val target = target()
+
+        val taskId = repository.startVirtualMachineImageImportTask(
+            target.sourceFile,
+            target.imageName,
+            target.imageType,
+            target.storage.id,
+            target.storage.name,
+            "online",
+        )
+        val task = repository.readVirtualMachineImageImportTask(taskId)
+        val matched = repository.virtualMachineImageMatches(
+            checkNotNull(task.imageId),
+            target.imageName,
+            target.imageType,
+        )
+        val exists = repository.virtualMachineTaskExists(taskId)
+        repository.clearVirtualMachineImageImportTask(taskId)
+
+        assertTrue(task.finished)
+        assertEquals(DsmRepository.VirtualMachineImageMatch.MATCH, matched)
+        assertTrue(exists)
+        assertEquals(
+            listOf("getinfo", "list", "list", "create", "get", "list", "list", "clear"),
+            transport.requests.map { it.fields()["method"] },
+        )
+        assertEquals(1, transport.requests.count { it.fields()["method"] == "create" })
+        assertEquals(1, transport.requests.count { it.fields()["method"] == "clear" })
+    }
+
+    @Test
     fun `官方映像创建只提交一次并以任务映像标识严格回读`() = runBlocking {
         val transport = ImageImportInterceptor(
             fileInfo(), storageList(), imageList(),

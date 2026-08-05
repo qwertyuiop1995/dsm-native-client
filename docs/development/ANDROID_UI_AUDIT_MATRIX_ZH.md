@@ -40,8 +40,22 @@ python3 -m unittest discover -s tools/codex/tests -p 'test_check_android_motion_
 - 此结论可由源码和轻量自动化复验；真实预测返回手势、触控采样、OEM 动画实现及
   感知体验继续保留为未验证，不得据此宣称实体机验收完成。
 
-## 后续矩阵
+## 页面状态与 2× 字体矩阵
 
-`48dp` 全页面触控、2× 字体和每页五态仍需按主页面、确认框与持久反馈卡逐项建立
-证据。本文件完成动效审计不代表这些独立目标已经完成，也不代表真实 TalkBack、
-平板/折叠屏、键盘鼠标或设备矩阵已经验收。
+- 页面五态已经按 29 个生产页面/弹窗文件闭环；三个页面矩阵测试在 API 35
+  `Medium_Phone_API_35` 共 56/56 通过。静态表单、已加载实体详情和没有筛选器的列表
+  只覆盖真实适用态，不制造虚假 loading/error/筛选空。
+- 严格按 `fontScale = 2f` 复核，不把 `Density(2f, 1f)` 的显示密度测试冒充大字体。
+  当前 21 个主页面/页根中 18 个已有生产 Composable 证据；缺口为
+  `TransfersScreen`、`NasPerformanceScreen` 和 NAS 日志页根。
+- 确认框按通用 `ConfirmDialog`、13 个专用确认组件以及文件上传覆盖确认、文本修改
+  丢弃确认统计；当前只有 `RemoteAccessConfirmationDialog` 有明确 2× 证据，其余保持
+  未完成。宿主 `Box` 的宽高不会约束独立 `Dialog` 窗口，因此只继承 `fontScale=2f`
+  的测试不得表述为已完成小屏对话框验收。
+- 持久反馈卡仍缺 `DownloadSettingsMutationFeedbackCard`、DDNS 反馈/失败卡、共享
+  `ManagementMutationFeedbackCard`、共享 `SettingsMutationFeedbackCard` 和
+  `PowerActionFeedbackCard` 的 2× 证据；既有 Chat、File Station、Download 创建/控制/RSS、
+  VMM、连接、区域、文件服务、终端、代理和 Ethernet 反馈卡已有局部证据。
+
+因此“全部主页面、确认框和持久反馈卡完成 2× 字体矩阵”继续保持未勾选；真实 TalkBack、
+平板/折叠屏、键盘鼠标、OEM 字体/显示缩放和实体机设备矩阵也继续保持未验证。

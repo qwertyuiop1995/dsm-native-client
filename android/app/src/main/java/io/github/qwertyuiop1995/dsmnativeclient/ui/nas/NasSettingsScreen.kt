@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -83,60 +84,62 @@ internal fun NasSettingsScreen(state: WorkspaceState, model: AppViewModel) {
         stringResource(R.string.security),
         stringResource(R.string.hardware_and_power),
     )
-    Column {
+    Column(Modifier.fillMaxSize()) {
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
             titles.forEachIndexed { index, title ->
                 Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
             }
         }
-        LoadableContent(
-            value = state.nasSettings,
-            emptyTitle = stringResource(R.string.temporarily_unavailable),
-            emptyMessage = stringResource(R.string.admin_permission_recovery),
-            onRetry = { model.load(Module.NAS_SETTINGS) },
-        ) { snapshot ->
-            NasSettingsTab(
-                state = state,
-                snapshot = snapshot,
-                tab = tab,
-                storageAnalysis = state.storageAnalysis,
-                storageAnalysisProgress = state.storageAnalysisProgress,
-                diskTestStatuses = state.diskTestStatuses,
-                performanceHistory = state.nasPerformanceHistory,
-                performanceIsLoading = state.nasPerformanceIsLoading,
-                performanceError = state.nasPerformanceError,
-                performanceIsPaused = state.nasPerformanceIsPaused,
-                systemUpdate = state.nasSystemUpdate,
-                fileServiceSettingsDraft = state.fileServiceSettingsDraft,
-                fileServiceMutationResult = state.fileServiceMutationResult,
-                fileServiceMutationFailure = state.fileServiceMutationFailure,
-                fileServiceMutationInProgress = state.fileServiceMutationInProgress,
-                fileServiceMutationRefreshCompleted = state.fileServiceMutationRefreshCompleted,
-                terminalSettingsDraft = state.terminalSettingsDraft,
-                terminalMutationResult = state.terminalMutationResult,
-                terminalMutationFailure = state.terminalMutationFailure,
-                terminalMutationInProgress = state.terminalMutationInProgress,
-                terminalMutationRefreshCompleted = state.terminalMutationRefreshCompleted,
-                proxySettingsDraft = state.proxySettingsDraft,
-                proxyMutationResult = state.proxyMutationResult,
-                proxyMutationFailure = state.proxyMutationFailure,
-                proxyMutationInProgress = state.proxyMutationInProgress,
-                proxyMutationRefreshCompleted = state.proxyMutationRefreshCompleted,
-                regionSettingsDraft = state.regionSettingsDraft,
-                regionMutationResult = state.regionMutationResult,
-                regionMutationFailure = state.regionMutationFailure,
-                regionMutationInProgress = state.regionMutationInProgress,
-                regionMutationRefreshCompleted = state.regionMutationRefreshCompleted,
-                connectionMutationTarget = state.connectionMutationTarget,
-                connectionMutationResult = state.connectionMutationResult,
-                connectionMutationFailure = state.connectionMutationFailure,
-                connectionMutationRefreshFailure = state.connectionMutationRefreshFailure,
-                connectionMutationInProgress = state.connectionMutationInProgress,
-                connectionMutationRefreshInProgress = state.connectionMutationRefreshInProgress,
-                connectionMutationRefreshCompleted = state.connectionMutationRefreshCompleted,
-                isPerformingAction = state.isPerformingAction,
-                model = model,
-            )
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            LoadableContent(
+                value = state.nasSettings,
+                emptyTitle = stringResource(R.string.temporarily_unavailable),
+                emptyMessage = stringResource(R.string.admin_permission_recovery),
+                onRetry = { model.load(Module.NAS_SETTINGS) },
+            ) { snapshot ->
+                NasSettingsTab(
+                    state = state,
+                    snapshot = snapshot,
+                    tab = tab,
+                    storageAnalysis = state.storageAnalysis,
+                    storageAnalysisProgress = state.storageAnalysisProgress,
+                    diskTestStatuses = state.diskTestStatuses,
+                    performanceHistory = state.nasPerformanceHistory,
+                    performanceIsLoading = state.nasPerformanceIsLoading,
+                    performanceError = state.nasPerformanceError,
+                    performanceIsPaused = state.nasPerformanceIsPaused,
+                    systemUpdate = state.nasSystemUpdate,
+                    fileServiceSettingsDraft = state.fileServiceSettingsDraft,
+                    fileServiceMutationResult = state.fileServiceMutationResult,
+                    fileServiceMutationFailure = state.fileServiceMutationFailure,
+                    fileServiceMutationInProgress = state.fileServiceMutationInProgress,
+                    fileServiceMutationRefreshCompleted = state.fileServiceMutationRefreshCompleted,
+                    terminalSettingsDraft = state.terminalSettingsDraft,
+                    terminalMutationResult = state.terminalMutationResult,
+                    terminalMutationFailure = state.terminalMutationFailure,
+                    terminalMutationInProgress = state.terminalMutationInProgress,
+                    terminalMutationRefreshCompleted = state.terminalMutationRefreshCompleted,
+                    proxySettingsDraft = state.proxySettingsDraft,
+                    proxyMutationResult = state.proxyMutationResult,
+                    proxyMutationFailure = state.proxyMutationFailure,
+                    proxyMutationInProgress = state.proxyMutationInProgress,
+                    proxyMutationRefreshCompleted = state.proxyMutationRefreshCompleted,
+                    regionSettingsDraft = state.regionSettingsDraft,
+                    regionMutationResult = state.regionMutationResult,
+                    regionMutationFailure = state.regionMutationFailure,
+                    regionMutationInProgress = state.regionMutationInProgress,
+                    regionMutationRefreshCompleted = state.regionMutationRefreshCompleted,
+                    connectionMutationTarget = state.connectionMutationTarget,
+                    connectionMutationResult = state.connectionMutationResult,
+                    connectionMutationFailure = state.connectionMutationFailure,
+                    connectionMutationRefreshFailure = state.connectionMutationRefreshFailure,
+                    connectionMutationInProgress = state.connectionMutationInProgress,
+                    connectionMutationRefreshInProgress = state.connectionMutationRefreshInProgress,
+                    connectionMutationRefreshCompleted = state.connectionMutationRefreshCompleted,
+                    isPerformingAction = state.isPerformingAction,
+                    model = model,
+                )
+            }
         }
     }
 }

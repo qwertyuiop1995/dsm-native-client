@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
@@ -74,60 +72,58 @@ internal fun EthernetAndDdnsList(
     val remoteAccessBaseline = state.remoteAccessSettingsBaseline
     val remoteAccessDraft = state.remoteAccessSettingsDraft
 
-    LazyColumn {
-        item {
-            RemoteAccessSettingsContent(
-                settings = snapshot.remoteAccessSettings,
-                settingsAvailable = snapshot.remoteAccessSettingsAvailable,
-                baseline = state.remoteAccessSettingsBaseline,
-                draft = state.remoteAccessSettingsDraft,
-                mutationInProgress = state.remoteAccessMutationInProgress,
-                mutationResult = state.remoteAccessMutationResult,
-                mutationFailure = state.remoteAccessMutationFailure,
-                refreshFailure = state.remoteAccessMutationRefreshFailure,
-                refreshInProgress = state.remoteAccessMutationRefreshInProgress,
-                refreshCompleted = state.remoteAccessMutationRefreshCompleted,
-                isPerformingAction = state.isPerformingAction,
-                onEdit = { model.requestRemoteAccessEditing(it) },
-                onRefresh = model::refreshRemoteAccessMutation,
-                onContinueEditing = { model.dismissRemoteAccessMutationResult(discardDraft = false) },
-                onDismissResult = { model.dismissRemoteAccessMutationResult(discardDraft = true) },
-                onRefreshSettings = {
-                    model.load(io.github.qwertyuiop1995.dsmnativeclient.domain.Module.NAS_SETTINGS)
-                },
-            )
-        }
-        item {
-            EthernetSettingsContent(
-                interfaces = snapshot.networkInterfaces,
-                interfacesAvailable = snapshot.networkInterfacesAvailable,
-                baseline = state.ethernetBaseline,
-                draft = state.ethernetSettingsDraft,
-                mutationResult = state.ethernetMutationResult,
-                mutationFailure = state.ethernetMutationFailure,
-                refreshFailure = state.ethernetMutationRefreshFailure,
-                mutationInProgress = state.ethernetMutationInProgress,
-                refreshInProgress = state.ethernetMutationRefreshInProgress,
-                refreshCompleted = state.ethernetMutationRefreshCompleted,
-                isPerformingAction = state.isPerformingAction,
-                currentTarget = currentTarget,
-                onEdit = { model.requestEthernetEditing(it.id) },
-                onRefresh = model::refreshEthernetMutation,
-                onContinueEditing = { model.dismissEthernetMutationResult(discardDraft = false) },
-                onDismissResult = { model.dismissEthernetMutationResult(discardDraft = true) },
-                onRefreshList = { model.load(io.github.qwertyuiop1995.dsmnativeclient.domain.Module.NAS_SETTINGS) },
-            )
-        }
-        item {
-            DdnsToolbar(
-                directory = ddnsDirectory,
-                directoryAvailable = snapshot.ddnsDirectoryAvailable,
-                enabled = ddnsUiEnabled && !state.ddnsEditorVisible,
-                onAdd = model::requestDdnsEditing,
-                onRefresh = { model.requestDdnsAddressRefresh() },
-            )
-        }
-        item {
+    DdnsManagementContent(
+        directory = ddnsDirectory,
+        directoryAvailable = snapshot.ddnsDirectoryAvailable,
+        enabled = ddnsUiEnabled && !state.ddnsEditorVisible,
+        leadingContent = {
+            item {
+                RemoteAccessSettingsContent(
+                    settings = snapshot.remoteAccessSettings,
+                    settingsAvailable = snapshot.remoteAccessSettingsAvailable,
+                    baseline = state.remoteAccessSettingsBaseline,
+                    draft = state.remoteAccessSettingsDraft,
+                    mutationInProgress = state.remoteAccessMutationInProgress,
+                    mutationResult = state.remoteAccessMutationResult,
+                    mutationFailure = state.remoteAccessMutationFailure,
+                    refreshFailure = state.remoteAccessMutationRefreshFailure,
+                    refreshInProgress = state.remoteAccessMutationRefreshInProgress,
+                    refreshCompleted = state.remoteAccessMutationRefreshCompleted,
+                    isPerformingAction = state.isPerformingAction,
+                    onEdit = { model.requestRemoteAccessEditing(it) },
+                    onRefresh = model::refreshRemoteAccessMutation,
+                    onContinueEditing = { model.dismissRemoteAccessMutationResult(discardDraft = false) },
+                    onDismissResult = { model.dismissRemoteAccessMutationResult(discardDraft = true) },
+                    onRefreshSettings = {
+                        model.load(io.github.qwertyuiop1995.dsmnativeclient.domain.Module.NAS_SETTINGS)
+                    },
+                )
+            }
+            item {
+                EthernetSettingsContent(
+                    interfaces = snapshot.networkInterfaces,
+                    interfacesAvailable = snapshot.networkInterfacesAvailable,
+                    baseline = state.ethernetBaseline,
+                    draft = state.ethernetSettingsDraft,
+                    mutationResult = state.ethernetMutationResult,
+                    mutationFailure = state.ethernetMutationFailure,
+                    refreshFailure = state.ethernetMutationRefreshFailure,
+                    mutationInProgress = state.ethernetMutationInProgress,
+                    refreshInProgress = state.ethernetMutationRefreshInProgress,
+                    refreshCompleted = state.ethernetMutationRefreshCompleted,
+                    isPerformingAction = state.isPerformingAction,
+                    currentTarget = currentTarget,
+                    onEdit = { model.requestEthernetEditing(it.id) },
+                    onRefresh = model::refreshEthernetMutation,
+                    onContinueEditing = { model.dismissEthernetMutationResult(discardDraft = false) },
+                    onDismissResult = { model.dismissEthernetMutationResult(discardDraft = true) },
+                    onRefreshList = {
+                        model.load(io.github.qwertyuiop1995.dsmnativeclient.domain.Module.NAS_SETTINGS)
+                    },
+                )
+            }
+        },
+        mutationStatusContent = {
             DdnsMutationStatusContent(
                 operation = state.ddnsMutationOperation,
                 draft = state.ddnsSettingsDraft,
@@ -146,24 +142,12 @@ internal fun EthernetAndDdnsList(
                 onContinueEditing = { model.dismissDdnsMutationResult(discardDraft = false) },
                 onDismiss = { model.dismissDdnsMutationResult(discardDraft = true) },
             )
-        }
-        if (!snapshot.ddnsDirectoryAvailable || ddnsDirectory?.records.isNullOrEmpty()) {
-            item {
-                DdnsEmptyState(
-                    directoryAvailable = snapshot.ddnsDirectoryAvailable,
-                    canAdd = ddnsDirectory?.providers?.isNotEmpty() == true,
-                )
-            }
-        }
-        items(ddnsDirectory?.records.orEmpty(), key = { "ddns:${it.providerId}" }) { record ->
-            DdnsRecordRow(
-                record = record,
-                enabled = ddnsUiEnabled && !state.ddnsEditorVisible,
-                onEdit = { model.requestDdnsEditing(record.toDraft()) },
-                onDelete = { model.requestDdnsDelete(record) },
-            )
-        }
-    }
+        },
+        onAdd = model::requestDdnsEditing,
+        onRefreshAddress = { model.requestDdnsAddressRefresh() },
+        onEdit = { model.requestDdnsEditing(it.toDraft()) },
+        onDelete = model::requestDdnsDelete,
+    )
 
     if (
         state.remoteAccessEditorVisible && remoteAccessBaseline != null && remoteAccessDraft != null

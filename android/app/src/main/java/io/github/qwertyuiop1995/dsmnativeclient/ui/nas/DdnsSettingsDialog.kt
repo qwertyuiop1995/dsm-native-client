@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
@@ -66,6 +69,49 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.NasDdnsDraft
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasDdnsProvider
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasDdnsRecord
 import io.github.qwertyuiop1995.dsmnativeclient.localization.localize
+
+@Composable
+internal fun DdnsManagementContent(
+    directory: NasDdnsDirectory?,
+    directoryAvailable: Boolean,
+    enabled: Boolean,
+    leadingContent: LazyListScope.() -> Unit = {},
+    mutationStatusContent: @Composable () -> Unit = {},
+    onAdd: (NasDdnsDraft) -> Unit,
+    onRefreshAddress: () -> Unit,
+    onEdit: (NasDdnsRecord) -> Unit,
+    onDelete: (NasDdnsRecord) -> Unit,
+) {
+    LazyColumn {
+        leadingContent()
+        item {
+            DdnsToolbar(
+                directory = directory,
+                directoryAvailable = directoryAvailable,
+                enabled = enabled,
+                onAdd = onAdd,
+                onRefresh = onRefreshAddress,
+            )
+        }
+        item { mutationStatusContent() }
+        if (!directoryAvailable || directory?.records.isNullOrEmpty()) {
+            item {
+                DdnsEmptyState(
+                    directoryAvailable = directoryAvailable,
+                    canAdd = directory?.providers?.isNotEmpty() == true,
+                )
+            }
+        }
+        items(directory?.records.orEmpty(), key = { "ddns:${it.providerId}" }) { record ->
+            DdnsRecordRow(
+                record = record,
+                enabled = enabled,
+                onEdit = { onEdit(record) },
+                onDelete = { onDelete(record) },
+            )
+        }
+    }
+}
 
 @Composable
 internal fun DdnsToolbar(

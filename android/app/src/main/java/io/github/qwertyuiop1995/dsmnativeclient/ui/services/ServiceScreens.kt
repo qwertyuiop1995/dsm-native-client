@@ -99,7 +99,7 @@ internal fun ContainersScreen(state: WorkspaceState, model: AppViewModel) {
         stringResource(R.string.projects),
         stringResource(R.string.events),
     )
-    Column {
+    Column(Modifier.fillMaxSize()) {
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
             titles.forEachIndexed { index, title ->
                 Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
@@ -115,58 +115,60 @@ internal fun ContainersScreen(state: WorkspaceState, model: AppViewModel) {
             },
         )
         HorizontalDivider()
-        LoadableContent(
-            value = state.containers,
-            emptyTitle = stringResource(R.string.no_items),
-            emptyMessage = stringResource(R.string.no_category_items),
-            onRetry = { model.load(Module.CONTAINERS) },
-        ) { overview ->
-            val unavailable = when (tab) {
-                2 -> ContainerSection.IMAGES
-                3 -> ContainerSection.NETWORKS
-                4 -> ContainerSection.PROJECTS
-                5 -> ContainerSection.EVENTS
-                else -> null
-            } in overview.unavailableSections
-            if (unavailable) {
-                ServiceSectionUnavailable { model.load(Module.CONTAINERS) }
-                return@LoadableContent
-            }
-            if (tab == 0) {
-                ContainerOverviewSummaryContent(overview)
-                return@LoadableContent
-            }
-            if (tab == 5) {
-                LogList(
-                    logs = overview.events,
-                    isAvailable = true,
-                    onRetry = { model.load(Module.CONTAINERS) },
-                )
-                return@LoadableContent
-            }
-            val resources = when (tab) {
-                1 -> overview.containers
-                2 -> overview.images
-                3 -> overview.networks
-                else -> overview.projects
-            }
-            ResourceList(
-                resources = resources.map { resource -> resource.copy(detail = "") },
-                emptyTitle = stringResource(R.string.no_named_items, titles[tab]),
-                onSelect = { selected = it },
-                headerAction = when {
-                    tab == 2 && state.supportsContainerRegistry -> {
-                        {
-                            FilledTonalButton(onClick = model::showContainerRegistry) {
-                                Icon(Icons.Outlined.Search, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.search_images))
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            LoadableContent(
+                value = state.containers,
+                emptyTitle = stringResource(R.string.no_items),
+                emptyMessage = stringResource(R.string.no_category_items),
+                onRetry = { model.load(Module.CONTAINERS) },
+            ) { overview ->
+                val unavailable = when (tab) {
+                    2 -> ContainerSection.IMAGES
+                    3 -> ContainerSection.NETWORKS
+                    4 -> ContainerSection.PROJECTS
+                    5 -> ContainerSection.EVENTS
+                    else -> null
+                } in overview.unavailableSections
+                if (unavailable) {
+                    ServiceSectionUnavailable { model.load(Module.CONTAINERS) }
+                    return@LoadableContent
+                }
+                if (tab == 0) {
+                    ContainerOverviewSummaryContent(overview)
+                    return@LoadableContent
+                }
+                if (tab == 5) {
+                    LogList(
+                        logs = overview.events,
+                        isAvailable = true,
+                        onRetry = { model.load(Module.CONTAINERS) },
+                    )
+                    return@LoadableContent
+                }
+                val resources = when (tab) {
+                    1 -> overview.containers
+                    2 -> overview.images
+                    3 -> overview.networks
+                    else -> overview.projects
+                }
+                ResourceList(
+                    resources = resources.map { resource -> resource.copy(detail = "") },
+                    emptyTitle = stringResource(R.string.no_named_items, titles[tab]),
+                    onSelect = { selected = it },
+                    headerAction = when {
+                        tab == 2 && state.supportsContainerRegistry -> {
+                            {
+                                FilledTonalButton(onClick = model::showContainerRegistry) {
+                                    Icon(Icons.Outlined.Search, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.search_images))
+                                }
                             }
                         }
-                    }
-                    else -> null
-                },
-            )
+                        else -> null
+                    },
+                )
+            }
         }
     }
     selected?.let { resource ->
@@ -468,18 +470,19 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
         stringResource(R.string.protection),
         stringResource(R.string.logs),
     )
-    Column {
+    Column(Modifier.fillMaxSize()) {
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
             titles.forEachIndexed { index, title ->
                 Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
             }
         }
-        LoadableContent(
-            value = state.virtualMachines,
-            emptyTitle = stringResource(R.string.no_items),
-            emptyMessage = stringResource(R.string.no_category_items),
-            onRetry = { model.load(Module.VIRTUAL_MACHINES) },
-        ) { overview ->
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            LoadableContent(
+                value = state.virtualMachines,
+                emptyTitle = stringResource(R.string.no_items),
+                emptyMessage = stringResource(R.string.no_category_items),
+                onRetry = { model.load(Module.VIRTUAL_MACHINES) },
+            ) { overview ->
             val unavailable = when (tab) {
                 1 -> VirtualMachineSection.HOSTS
                 2 -> VirtualMachineSection.STORAGES
@@ -493,7 +496,7 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                 ServiceSectionUnavailable { model.load(Module.VIRTUAL_MACHINES) }
                 return@LoadableContent
             }
-            when (tab) {
+                when (tab) {
                 5 -> ProtectionContent(overview, protectionTab) { protectionTab = it }
                 6 -> LogList(
                     logs = overview.logs,
@@ -533,6 +536,7 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                             },
                         )
                     }
+                }
                 }
             }
         }

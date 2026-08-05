@@ -13,39 +13,39 @@
 
 | 文件 | 页面/弹窗 | 加载 | 空内容 | 筛选空 | 错误 | 正常 | 自动化 | 代码与测试依据 |
 |---|---|---|---|---|---|---|---|---|
-| `ChatScreen.kt` | 会话列表、消息详情及管理弹窗 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 局部 | `LoadableContent`；`ChatConversationDialogTest`、Chat 发送/管理测试，缺主会话四态直测 |
-| `DownloadDestinationDialog.kt` | 下载目的地目录选择 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 局部 | 目录 `Loadable` 分支；下载创建测试，缺四态直测 |
-| `DownloadSettingsDialog.kt` | 下载设置表单 | 不适用 | 不适用 | 不适用 | 不适用 | 覆盖 | 局部 | 数据由已加载 Workspace 草稿提供；`DownloadSettingsUiTest` 覆盖表单和写入反馈 |
-| `FileBrowserScreen.kt` | 文件列表与收藏/回收站 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 局部 | `PageUiState`；`FileFilteredEmptyStateTest`、`FileBrowserAdaptiveScreenTest`，缺四态页面直测 |
-| `FileCopyMoveDialog.kt` | 复制/移动目录选择 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 局部 | 目录 `Loadable` 分支；File Station 写入界面测试，缺四态直测 |
-| `FilePreviewDialog.kt` | 文件预览与文本加载 | 覆盖 | 不适用 | 不适用 | 覆盖 | 覆盖 | 局部 | 预览加载/失败/内容分支；`FilePreviewAdaptiveTest`，缺加载与失败直测闭环 |
-| `PhotoMoveDialog.kt` | 照片移动目录选择 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 局部 | 目录 `Loadable` 分支；照片写入测试，缺四态直测 |
-| `PhotosScreen.kt` | 文件夹、时间线与相册 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 局部 | 相册加载分支与 `PhotoFilteredEmpty`；`PhotoBrowserAdaptiveScreenTest`，缺五态直测 |
-| `downloads/DownloadDiscoveryDialog.kt` | RSS、BT 搜索与结果选择 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 局部 | 每次查询自身是源请求，不把无结果伪装成筛选空；`DownloadDiscoveryDialogTest` |
-| `downloads/DownloadTaskDetailsDialog.kt` | 下载任务详情/文件列表 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 局部 | 详情与文件 `Loadable` 分支；`DownloadTaskDetailsDialogTest`，缺全部适用态直测 |
-| `downloads/DownloadsScreen.kt` | 下载任务列表 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 局部 | 当前没有用户结果筛选器；`DownloadAdaptiveScreenTest` 与任务管理测试，缺列表四态直测 |
-| `login/LoginScreen.kt` | 登录、连接与证书确认 | 覆盖 | 不适用 | 不适用 | 覆盖 | 覆盖 | 局部 | 连接中/连接失败/表单分支；`LoginScreenTest`、连接反馈测试 |
-| `nas/DdnsSettingsDialog.kt` | DDNS 管理 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层加载/失败；`DdnsFeedbackCardTest` 覆盖写入反馈，缺空/内容直测 |
-| `nas/EthernetSettingsDialog.kt` | 网口与代理服务器管理 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层；`EthernetFeedbackCardTest`、`ProxyFeedbackCardTest` |
-| `nas/NasConnectionScreen.kt` | 活跃连接管理 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层；`ConnectionFeedbackCardTest`，缺空/内容直测 |
-| `nas/NasDirectoryManagementScreen.kt` | 账号与群组 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层；`DirectoryManagementUiTest`，缺空/内容直测 |
-| `nas/NasHardwareSettingsScreen.kt` | 硬件、电源与 UPS | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层并区分不可用；`SecurityHardwareSettingsUiTest` |
-| `nas/NasPackageManagementScreen.kt` | 套件管理 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层；`PackageManagementUiTest` 覆盖空/不可用/内容，外层加载错误由通用容器测试 |
+| `ChatScreen.kt` | 会话列表、消息详情及管理弹窗 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测加载、源空、失败和会话内容 |
+| `DownloadDestinationDialog.kt` | 下载目的地目录选择 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `DownloadLoginPageStateMatrixTest` 直测四个适用态 |
+| `DownloadSettingsDialog.kt` | 下载设置表单 | 不适用 | 不适用 | 不适用 | 不适用 | 覆盖 | 完整 | 已加载 Workspace 草稿是唯一适用态；`DownloadLoginPageStateMatrixTest` 直测生产表单 |
+| `FileBrowserScreen.kt` | 文件列表与收藏/回收站 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测五态 |
+| `FileCopyMoveDialog.kt` | 复制/移动目录选择 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测四个适用态 |
+| `FilePreviewDialog.kt` | 文件预览与文本加载 | 覆盖 | 不适用 | 不适用 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测加载、失败和文本内容 |
+| `PhotoMoveDialog.kt` | 照片移动目录选择 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测四个适用态 |
+| `PhotosScreen.kt` | 文件夹、时间线与相册 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测五态 |
+| `downloads/DownloadDiscoveryDialog.kt` | RSS、BT 搜索与结果选择 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | 每次查询自身是源请求；`DownloadLoginPageStateMatrixTest` 直测四个适用态 |
+| `downloads/DownloadTaskDetailsDialog.kt` | 下载任务详情/文件列表 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | 详情只在已有任务实体后打开；`DownloadLoginPageStateMatrixTest` 直测空文件与正常详情 |
+| `downloads/DownloadsScreen.kt` | 下载任务列表 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | 当前没有用户结果筛选器；`DownloadLoginPageStateMatrixTest` 直测四个适用态 |
+| `login/LoginScreen.kt` | 登录、连接与证书确认 | 覆盖 | 不适用 | 不适用 | 覆盖 | 覆盖 | 完整 | `DownloadLoginPageStateMatrixTest` 直测连接中、错误与正常表单 |
+| `nas/DdnsSettingsDialog.kt` | DDNS 管理 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | `NasServicePageStateMatrixTest` 通过生产复用的 `DdnsManagementContent` 直测不可用、空和内容 |
+| `nas/EthernetSettingsDialog.kt` | 网口与代理服务器管理 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | `NasServicePageStateMatrixTest` 直测不可用、空、内容和保存中 |
+| `nas/NasConnectionScreen.kt` | 活跃连接管理 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | `NasServicePageStateMatrixTest` 直测不可用、空、内容和进行中 |
+| `nas/NasDirectoryManagementScreen.kt` | 账号与群组 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | `NasServicePageStateMatrixTest` 直测不可用、空、内容和进行中 |
+| `nas/NasHardwareSettingsScreen.kt` | 硬件、电源与 UPS | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | `NasServicePageStateMatrixTest` 直测不可用、内容和保存中 |
+| `nas/NasPackageManagementScreen.kt` | 套件管理 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | `NasServicePageStateMatrixTest` 直测不可用、空、内容和进行中 |
 | `nas/NasPerformanceScreen.kt` | 性能采样 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `NasPerformanceScreenTest` 直接覆盖首次加载、无样本、失败、正常与重试 |
-| `nas/NasRegionSettingsScreen.kt` | 区域与时间设置 | 不适用 | 不适用 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层；`RegionFeedbackCardTest` 覆盖写入反馈 |
-| `nas/NasRemoteAccessSettingsScreen.kt` | 远程访问设置 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层并区分不可用；`RemoteAccessSettingsUiTest` |
-| `nas/NasSecuritySettingsScreen.kt` | 安全设置 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层并区分不可用；安全设置界面测试 |
-| `nas/NasServiceSettingsScreen.kt` | 文件服务、终端与代理设置 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层并区分不可用；File Service/Terminal/Proxy 反馈测试 |
-| `nas/NasSettingsScreen.kt` | NAS 设置外层与总览/日志 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 局部 | 外层 `LoadableContent` 覆盖四态；日志请求可用性独立保留，失败显示局部错误和重试，不再冒充源空；共用 `LogList` 区分源空和筛选空，`LogListStateUiTest` 覆盖日志五态分支，但 NAS 总览其他分区仍缺完整页面级直测 |
-| `nas/NasStorageScreen.kt` | 存储、内容分析与 SMART | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 局部 | `NasStorageScreenTest` 覆盖分析失败和空闲/运行/结果，但未覆盖整页所有适用态 |
-| `services/ServiceScreens.kt` | Container、Registry 与 VMM | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 局部 | `LoadableContent` 与 `unavailableSections` 覆盖主列表及日志局部错误；事件和 VMM 日志共用已区分源空、筛选空、错误与正常内容的 `LogList`，但各页面其他分区完整五态仍缺直测 |
-| `services/VirtualMachineCreationDialog.kt` | 虚拟机创建向导 | 不适用 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 局部 | 存储不可用/校验错误/正常步骤；`VirtualMachineCreationDialogTest`，不把表单提交状态当页面加载 |
-| `settings/SettingsScreen.kt` | 应用设置与语言 | 不适用 | 不适用 | 不适用 | 不适用 | 覆盖 | 局部 | 完全本地静态设置；设置与本地化测试，不适用远端数据五态 |
+| `nas/NasRegionSettingsScreen.kt` | 区域与时间设置 | 不适用 | 不适用 | 不适用 | 不适用 | 覆盖 | 完整 | 数据继承 NAS 设置外层；`NasServicePageStateMatrixTest` 直测不可用、内容和保存中 |
+| `nas/NasRemoteAccessSettingsScreen.kt` | 远程访问设置 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | `NasServicePageStateMatrixTest` 直测不可用、内容和保存中 |
+| `nas/NasSecuritySettingsScreen.kt` | 安全设置 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | `NasServicePageStateMatrixTest` 直测不可用、空、内容和保存中 |
+| `nas/NasServiceSettingsScreen.kt` | 文件服务、终端与代理设置 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | `NasServicePageStateMatrixTest` 直测无设置、内容和保存中 |
+| `nas/NasSettingsScreen.kt` | NAS 设置外层与总览/日志 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测外层加载/错误/内容及真实日志页签的源空、内容、筛选空 |
+| `nas/NasStorageScreen.kt` | 存储、内容分析与 SMART | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 与 `NasStorageScreenTest` 覆盖 SMART 空、分析加载/错误/结果及存储内容 |
+| `services/ServiceScreens.kt` | Container、Registry 与 VMM | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测三页主状态，并通过 Container Events/VMM Logs 真实页签覆盖筛选空 |
+| `services/VirtualMachineCreationDialog.kt` | 虚拟机创建向导 | 不适用 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测校验错误、无存储与正常复核步骤 |
+| `settings/SettingsScreen.kt` | 应用设置与语言 | 不适用 | 不适用 | 不适用 | 不适用 | 覆盖 | 完整 | 完全本地静态设置；`DownloadLoginPageStateMatrixTest` 直测生产设置页 |
 | `transfers/TransfersScreen.kt` | App 传输与 NAS 后台任务 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 完整 | `FileBackgroundTaskUiTest` 直接覆盖 NAS 五态，`TransferServerPresentationTest` 覆盖来源筛选空与正常任务 |
 
 ## 当前结论与后续闭环
 
 - 生产清单共 29 个页面/弹窗文件；共用 `LogList` 已区分“源日志为空”和“筛选后为空”，当前生产状态缺口为 0。
-- 27 个页面仍只有局部页面级自动化。通用 `PageUiStateTest`、`PageErrorAccessibilityTest` 能证明状态策略和错误语义，但不能替代把每个适用状态实际送入页面的 Compose 测试。
-- 因此 A8“每页五态”叶子目标必须保持未勾选。后续按高频主页面、NAS 子页、异步弹窗三组补齐页面级测试；无需给不适用的静态表单制造虚假 loading/error 分支。
+- 29 个页面/弹窗文件的全部适用状态均已有生产 Composable 页面级证据；静态表单和已加载实体详情没有被人为制造 loading/error。
+- API 35 `Medium_Phone_API_35` 聚焦运行 `PrimaryPageStateMatrixTest`、`DownloadLoginPageStateMatrixTest`、`NasServicePageStateMatrixTest` 共 56/56 通过。测试同时发现并修复 NAS、Container 与 VMM 日志内容区未占用剩余高度的裁切问题。
 - `tools/codex/check_android_page_state_matrix.py` 会扫描新增/删除的生产页面文件、矩阵状态词和计划勾选状态。矩阵仍有生产缺口或自动化未闭环时，若有人提前勾选 A8 叶子，门禁会失败。

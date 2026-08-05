@@ -432,6 +432,32 @@ class WorkspaceTypedNavigationTest {
     }
 
     @Test
+    fun 固定镜像库导航入口返回精确结果并复用既有返回栈() {
+        val model = model()
+        val workspace = workspace(model)
+
+        assertEquals(WorkspaceNavigationResult.DEFERRED, model.navigateToContainerRegistry())
+
+        workspace.value = syntheticWorkspace(selectedModule = Module.FILES).copy(
+            supportsContainerRegistry = false,
+        )
+        assertEquals(WorkspaceNavigationResult.REJECTED, model.navigateToContainerRegistry())
+        assertEquals(Module.FILES, workspace.value?.selectedModule)
+        assertFalse(workspace.value?.containerRegistryVisible == true)
+
+        workspace.value = workspace.value?.copy(supportsContainerRegistry = true)
+        assertEquals(WorkspaceNavigationResult.APPLIED, model.navigateToContainerRegistry())
+        assertEquals(Module.CONTAINERS, workspace.value?.selectedModule)
+        assertEquals(
+            WorkspaceRoute.ContainerRegistry,
+            workspace.value?.workspaceRouteStack()?.entries?.last(),
+        )
+        assertEquals(WorkspaceNavigationResult.ALREADY_SELECTED, model.navigateToContainerRegistry())
+        assertTrue(model.navigateUp())
+        assertFalse(workspace.value?.containerRegistryVisible == true)
+    }
+
+    @Test
     fun 容器镜像库编辑查询会清除旧结果和镜像选择并允许重新搜索() {
         val model = model()
         val workspace = workspace(model)

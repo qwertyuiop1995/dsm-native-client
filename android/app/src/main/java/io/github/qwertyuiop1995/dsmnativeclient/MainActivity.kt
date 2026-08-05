@@ -24,18 +24,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        internalNavigation = if (
-            savedInstanceState?.getBoolean(STATE_PENDING_OPEN_TRANSFERS) == true
-        ) {
-            InternalNavigationState().receive(InternalRouteRequest.OpenModule(Module.TRANSFERS))
-        } else {
-            savedInstanceState?.getString(STATE_PENDING_MODULE)
-                ?.let { value -> runCatching { Module.valueOf(value) }.getOrNull() }
-                ?.let { module ->
-                    InternalNavigationState().receive(InternalRouteRequest.OpenModule(module))
-                }
-                ?: InternalNavigationState()
-        }
+        internalNavigation = savedInstanceState?.pendingInternalRouteRequest()
+            ?.let { request -> InternalNavigationState().receive(request) }
+            ?: InternalNavigationState()
         enableEdgeToEdge()
         setContent {
             LanStashTheme {
@@ -46,11 +37,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putBoolean(
-            STATE_PENDING_OPEN_TRANSFERS,
-            internalNavigation.pendingOpenTransfers,
-        )
-        outState.putString(STATE_PENDING_MODULE, internalNavigation.pendingModule?.name)
+        outState.putString(STATE_PENDING_ROUTE, internalNavigation.pendingRequest?.name)
         super.onSaveInstanceState(outState)
     }
 
@@ -77,8 +64,7 @@ class MainActivity : AppCompatActivity() {
         val job = lifecycleScope.launch {
             model.workspace.filterNotNull().first {
                 if (internalNavigation.pendingRequest != pending) return@first true
-                model.navigateTo(WorkspaceRoute.ModuleRoot(pending.module)) !=
-                    WorkspaceNavigationResult.DEFERRED
+                navigatePendingRequest(pending) != WorkspaceNavigationResult.DEFERRED
             }
             if (internalNavigation.pendingRequest == pending) {
                 internalNavigation = internalNavigation.consume(pending)
@@ -91,6 +77,22 @@ class MainActivity : AppCompatActivity() {
         job.invokeOnCompletion {
             if (internalNavigationJob === job) internalNavigationJob = null
         }
+    }
+
+    private fun navigatePendingRequest(request: InternalRouteRequest): WorkspaceNavigationResult {
+        if (request == InternalRouteRequest.OPEN_CONTAINER_REGISTRY) {
+            return model.navigateToContainerRegistry()
+        }
+        val moduleResult = model.navigateTo(WorkspaceRoute.ModuleRoot(request.module))
+        if (moduleResult == WorkspaceNavigationResult.DEFERRED ||
+            moduleResult == WorkspaceNavigationResult.REJECTED
+        ) {
+            return moduleResult
+        }
+        if (request == InternalRouteRequest.OPEN_CONTAINERS) {
+            model.closeContainerRegistry()
+        }
+        return moduleResult
     }
 
     private fun clearConsumedNavigationIntent(
@@ -107,22 +109,58 @@ class MainActivity : AppCompatActivity() {
     }
 
     private companion object {
-        const val STATE_PENDING_OPEN_TRANSFERS = "pending_open_transfers"
-        const val STATE_PENDING_MODULE = "pending_module"
+        const val STATE_PENDING_ROUTE = "pending_route"
     }
 }
 
-internal sealed interface InternalRouteRequest {
-    val module: Module
+/** 兼容第 81 批 Activity 已保存但尚未消费的固定模块状态。 */
+internal fun Bundle.pendingInternalRouteRequest(): InternalRouteRequest? =
+    getString("pending_route")
+        ?.let { value -> runCatching { InternalRouteRequest.valueOf(value) }.getOrNull() }
+        ?: if (getBoolean("pending_open_transfers")) {
+            InternalRouteRequest.OPEN_TRANSFERS
+        } else {
+            getString("pending_module")
+                ?.let { value -> runCatching { Module.valueOf(value) }.getOrNull() }
+                ?.let(InternalRouteRequest::openModule)
+        }
 
-    data class OpenModule(override val module: Module) : InternalRouteRequest
+/** 只保存固定目标枚举，不能携带 URI、NAS、路径或业务对象标识。 */
+internal enum class InternalRouteRequest(
+    val module: Module,
+) {
+    OPEN_FILES(Module.FILES),
+    OPEN_PHOTOS(Module.PHOTOS),
+    OPEN_CHAT(Module.CHAT),
+    OPEN_DOWNLOADS(Module.DOWNLOADS),
+    OPEN_CONTAINERS(Module.CONTAINERS),
+    OPEN_VIRTUAL_MACHINES(Module.VIRTUAL_MACHINES),
+    OPEN_NAS_SETTINGS(Module.NAS_SETTINGS),
+    OPEN_TRANSFERS(Module.TRANSFERS),
+    OPEN_SETTINGS(Module.SETTINGS),
+    OPEN_CONTAINER_REGISTRY(Module.CONTAINERS),
+    ;
+
+    companion object {
+        fun openModule(module: Module): InternalRouteRequest = when (module) {
+            Module.FILES -> OPEN_FILES
+            Module.PHOTOS -> OPEN_PHOTOS
+            Module.CHAT -> OPEN_CHAT
+            Module.DOWNLOADS -> OPEN_DOWNLOADS
+            Module.CONTAINERS -> OPEN_CONTAINERS
+            Module.VIRTUAL_MACHINES -> OPEN_VIRTUAL_MACHINES
+            Module.NAS_SETTINGS -> OPEN_NAS_SETTINGS
+            Module.TRANSFERS -> OPEN_TRANSFERS
+            Module.SETTINGS -> OPEN_SETTINGS
+        }
+    }
 }
 
 internal data class InternalNavigationState(
     val pendingRequest: InternalRouteRequest? = null,
 ) {
     val pendingOpenTransfers: Boolean
-        get() = pendingModule == Module.TRANSFERS
+        get() = pendingRequest == InternalRouteRequest.OPEN_TRANSFERS
 
     val pendingModule: Module?
         get() = pendingRequest?.module
@@ -135,9 +173,13 @@ internal data class InternalNavigationState(
 }
 
 internal fun Intent?.internalRouteRequest(): InternalRouteRequest? = when {
-    this?.getBooleanExtra(TransferNotifications.EXTRA_OPEN_TRANSFERS, false) == true ->
-        InternalRouteRequest.OpenModule(Module.TRANSFERS)
     this?.action == Intent.ACTION_VIEW ->
-        dataString.externalWorkspaceModule()?.let(InternalRouteRequest::OpenModule)
+        when (val route = dataString.externalWorkspaceRoute()) {
+            is ExternalWorkspaceRoute.ModuleRoot -> InternalRouteRequest.openModule(route.module)
+            ExternalWorkspaceRoute.ContainerRegistry -> InternalRouteRequest.OPEN_CONTAINER_REGISTRY
+            null -> null
+        }
+    this?.getBooleanExtra(TransferNotifications.EXTRA_OPEN_TRANSFERS, false) == true ->
+        InternalRouteRequest.OPEN_TRANSFERS
     else -> null
 }

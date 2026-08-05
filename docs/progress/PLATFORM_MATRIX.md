@@ -16,7 +16,7 @@ Android 当前完成率、自动化快照、批次记录和真实验收缺口统
 
 | 能力 | macOS | iPhone | iPad | Android | Windows |
 | --- | --- | --- | --- | --- | --- |
-| 原生 UI | 已实现，待实机验收 | SwiftUI 导航栈已实现，待真机验收 | SwiftUI 分栏已实现，待真机验收 | Compose 已建立 Compact/Medium/Expanded 统一宽度策略：Compact 使用底部导航，Medium 使用独立 NavigationRail 并可打开完整抽屉，Expanded 使用常驻抽屉；三者不在同层混用。Chat、Files、Photos 和 Download Station 的现有列表—详情按实际可用内容宽度切换双栏，Files/Photos 与 Download 均覆盖运行时收窄回退。系统返回覆盖抽屉、文件/照片目录、文件多选、消息详情和下载详情；File Station 复制/移动、Photos 移动和 Download 目标目录三个模态目录选择器在子目录优先返回上级，根目录才关闭，VMM 创建向导优先返回上一步。生产 UI 交互继续执行 48dp 双向尺寸、语义角色和原生按压反馈门禁；局部 Compose 2× `fontScale` 与深色自动化通过，完整外部深链和全部深层返回栈仍未完成。真实平板/折叠屏/OEM 分屏、API 34+ 真机预测手势、TalkBack、显示缩放和触控精度按用户安排留待打包验收 | WinUI NavigationView 已实现，待 Windows 验收 |
+| 原生 UI | 已实现，待实机验收 | SwiftUI 导航栈已实现，待真机验收 | SwiftUI 分栏已实现，待真机验收 | Compose 已建立 Compact/Medium/Expanded 统一宽度策略：Compact 使用底部导航，Medium 使用独立 NavigationRail 并可打开完整抽屉，Expanded 使用常驻抽屉；三者不在同层混用。Chat、Files、Photos 和 Download Station 的现有列表—详情按实际可用内容宽度切换双栏，Files/Photos 与 Download 均覆盖运行时收窄回退。系统返回覆盖抽屉、文件/照片目录、文件多选、消息详情和下载详情；File Station 复制/移动、Photos 移动和 Download 目标目录三个模态目录选择器在子目录优先返回上级，根目录才关闭，VMM 创建向导优先返回上一步。生产 UI 交互继续执行 48dp 双向尺寸、语义角色和原生按压反馈门禁；局部 Compose 2× `fontScale` 与深色自动化通过。外部入口除九个模块根页外增加唯一无载荷 Container Registry 固定页，完整业务对象深链和全部深层返回栈仍未完成。真实平板/折叠屏/OEM 分屏、API 34+ 真机预测手势、TalkBack、显示缩放和触控精度按用户安排留待打包验收 | WinUI NavigationView 已实现，待 Windows 验收 |
 | 英语与简体中文 | 共享资源层、系统语言解析、App 内选择和本机持久化已实现 | 复用 Apple 共享资源层与语言选择 | 同 iPhone | `values` / `values-zh-rCN`、AppCompat 语言选择和本机持久化已实现 | `en-US` / `zh-CN` `.resw`、语言选择和本机持久化已实现 |
 | 不支持语言回退英语 | 已实现并有解析测试 | 已实现并有解析测试 | 已实现并有解析测试 | 已实现并有解析测试 | 已实现并有解析测试 |
 | 本地化质量门禁 | 双语键、格式参数、资源引用和可见文案硬编码由仓库检查统一验证 | 同 macOS | 同 macOS | 同一仓库检查，并由 Android 构建验证资源 | 同一仓库检查；完整 XAML 编译由 Windows CI 验证 |
@@ -51,7 +51,7 @@ Android 当前完成率、自动化快照、批次记录和真实验收缺口统
 | 应用存储管理 | 已实现占用统计和可再生缓存清理，受保护数据不清理 | 计划 | 计划 | 已显示缩略图/临时预览占用并可清理 128 MiB 磁盘 LRU；登录资料、传输记录和已保存文件不参与清理 | 计划 |
 | 桌面只读云盘位置 | 已接入 Replicated File Provider、整个 NAS/目录映射、按需读取、文件/目录离线保留、递归空间预检、分项缓存、LRU、按映射启用且不含密码的共享会话和 macOS 15+ 外部缓存卷；临时签名包会明确停用 Finder 云盘，待正式签名与真实 Finder/NAS 验收 | 不适用 | 不适用 | 不适用 | 已接入 Cloud Files 注册、分页占位、分段读取与取消、文件/目录离线保留、递归空间预检、分项缓存、LRU、NTFS 缓存卷、名称兼容、健康恢复和开机启动；38 项测试及核心独立编译通过，待 Windows x64/arm64 完整构建与资源管理器/NAS 验收 |
 | 关闭窗口后后台运行 | 关闭最后窗口不退出，点击 Dock 图标可重新显示，Debug 构建通过 | 不适用 | 不适用 | 不适用 | 关闭窗口隐藏并驻留通知区域，支持打开和显式退出；待 Windows 编译与交互验收 |
-| 页面导航状态 | 已实现跨文件浏览器、传输中心等模块返回时保留目录与历史 | 计划 | 计划 | App 内模块和受控的 Files/Photos 文件夹、Chat 会话详情、Download Station 任务详情及 Container Registry 只读弹窗已使用只含模块和层级的强类型内部路由与有界返回栈；下载详情按当前任务列表对账，Registry 查询和镜像信息不进入路由，离开模块不复活，迟到结果按 Repository、NAS 身份和代次拒绝。通知目标与安全领域状态可跨 Activity 重建恢复；外部深链、全部深层页面、完整返回栈、真实进程死亡和真机预测返回待完成 | 计划 |
+| 页面导航状态 | 已实现跨文件浏览器、传输中心等模块返回时保留目录与历史 | 计划 | 计划 | App 内模块和受控的 Files/Photos 文件夹、Chat 会话详情、Download Station 任务详情及 Container Registry 只读弹窗已使用只含模块和层级的强类型内部路由与有界返回栈；下载详情按当前任务列表对账，Registry 查询和镜像信息不进入路由，离开模块不复活，迟到结果按 Repository、NAS 身份和代次拒绝。通知目标、安全领域状态及固定 Container Registry 外部目标可跨 Activity 重建恢复；外部待处理状态只保存枚举，成功或拒绝后清除 URI。任意业务对象深链、全部深层页面、完整返回栈、真实进程死亡和真机预测返回待完成 | 计划 |
 | QuickConnect ID 直连解析 | 已实现并完成公开入口实机探测 | 已接入移动端登录和恢复链路，Release 模拟器验证通过 | 已接入移动端登录和恢复链路，Release 模拟器验证通过 | 已实现并完成 Android 真机能力发现 | 已实现并完成 .NET 实机能力发现；待 Windows 设备验收 |
 | Cookie + `_sid` 会话兼容 | 已实现，待完整登录复测 | 复用 Apple 共享实现 | 复用 Apple 共享实现 | 已实现，待完整登录复测 | 已实现，待完整登录复测 |
 | QuickConnect 中继隧道 | 已实现并完成能力发现实机验证 | 已接入移动端登录和恢复链路 | 已接入移动端登录和恢复链路 | 已实现安全域名限制、身份核对和能力发现实机验证 | 已实现安全域名限制、身份核对和能力发现实机验证；待 Windows 设备验收 |

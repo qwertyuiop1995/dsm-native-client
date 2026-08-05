@@ -58,7 +58,7 @@ class MainActivityInternalNavigationTest {
 
     @Test
     fun 重复或false输入不会制造额外待处理导航且消费后保持清空() {
-        val request = InternalRouteRequest.OpenModule(Module.TRANSFERS)
+        val request = InternalRouteRequest.OPEN_TRANSFERS
         val pending = InternalNavigationState().receive(request)
 
         assertTrue(pending.pendingOpenTransfers)
@@ -111,9 +111,176 @@ class MainActivityInternalNavigationTest {
         assertEquals(null, empty.internalRouteRequest())
         assertEquals(null, falseIntent.internalRouteRequest())
         assertEquals(
-            InternalRouteRequest.OpenModule(Module.TRANSFERS),
+            InternalRouteRequest.OPEN_TRANSFERS,
             trueIntent.internalRouteRequest(),
         )
+    }
+
+    @Test
+    fun 外部View不能用内部通知Extra绕过URI白名单() {
+        val invalid = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/files?path=/private"),
+        ).putExtra(TransferNotifications.EXTRA_OPEN_TRANSFERS, true)
+        val valid = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/containers/registry"),
+        ).putExtra(TransferNotifications.EXTRA_OPEN_TRANSFERS, true)
+
+        assertEquals(null, invalid.internalRouteRequest())
+        assertEquals(InternalRouteRequest.OPEN_CONTAINER_REGISTRY, valid.internalRouteRequest())
+    }
+
+    @Test
+    fun 第81批保存的模块枚举和传输布尔值仍可恢复() {
+        val moduleState = android.os.Bundle().apply {
+            putString("pending_module", Module.PHOTOS.name)
+        }
+        val transferState = android.os.Bundle().apply {
+            putBoolean("pending_open_transfers", true)
+            putString("pending_module", Module.PHOTOS.name)
+        }
+
+        assertEquals(InternalRouteRequest.OPEN_PHOTOS, moduleState.pendingInternalRouteRequest())
+        assertEquals(InternalRouteRequest.OPEN_TRANSFERS, transferState.pendingInternalRouteRequest())
+    }
+
+    @Test
+    fun 固定镜像库入口在Workspace就绪后打开无载荷末级路由并消费数据() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/containers/registry"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                workspace(activity).value = syntheticWorkspace().copy(
+                    supportsContainerRegistry = true,
+                )
+            }
+
+            waitForSelectedModule(scenario, Module.CONTAINERS)
+            waitForContainerRegistry(scenario, visible = true)
+            scenario.onActivity { activity -> assertEquals(null, activity.intent.data) }
+        }
+    }
+
+    @Test
+    fun 固定镜像库入口在Workspace未就绪时跨Activity重建后保持枚举目标() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/containers/registry"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                workspace(activity).value = syntheticWorkspace().copy(
+                    supportsContainerRegistry = true,
+                )
+            }
+
+            waitForSelectedModule(scenario, Module.CONTAINERS)
+            waitForContainerRegistry(scenario, visible = true)
+            waitForNavigationIntentConsumed(scenario)
+        }
+    }
+
+    @Test
+    fun Workspace未就绪时最新固定或模块入口替换旧镜像库目标() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/containers/registry"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                val supersededIntent = activity.intent
+                dispatchNewIntent(
+                    activity,
+                    Intent(Intent.ACTION_VIEW, Uri.parse("lanstash://open/settings")),
+                )
+                assertEquals(null, supersededIntent.data)
+            }
+            scenario.onActivity { activity -> workspace(activity).value = syntheticWorkspace() }
+
+            waitForSelectedModule(scenario, Module.SETTINGS)
+            waitForNavigationIntentConsumed(scenario)
+            scenario.onActivity { activity ->
+                assertFalse(workspace(activity).value?.containerRegistryVisible == true)
+            }
+        }
+    }
+
+    @Test
+    fun 不可用容器模块或缺少镜像库能力的固定入口确定拒绝并清除数据() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        fun intent() = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/containers/registry"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(intent()).use { scenario ->
+            scenario.onActivity { activity ->
+                workspace(activity).value = syntheticWorkspace().copy(
+                    availability = listOf(ModuleAvailability(Module.CONTAINERS, isAvailable = false)),
+                )
+            }
+            waitForNavigationIntentConsumed(scenario)
+            scenario.onActivity { activity ->
+                assertEquals(Module.FILES, workspace(activity).value?.selectedModule)
+                assertFalse(workspace(activity).value?.containerRegistryVisible == true)
+            }
+        }
+
+        ActivityScenario.launch<MainActivity>(intent()).use { scenario ->
+            scenario.onActivity { activity -> workspace(activity).value = syntheticWorkspace() }
+            waitForNavigationIntentConsumed(scenario)
+            scenario.onActivity { activity ->
+                assertEquals(Module.FILES, workspace(activity).value?.selectedModule)
+                assertFalse(workspace(activity).value?.containerRegistryVisible == true)
+                assertTrue(workspace(activity).value?.message?.isNotBlank() == true)
+            }
+        }
+    }
+
+    @Test
+    fun 同模块根入口会关闭先前打开的固定镜像库页() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/containers/registry"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                workspace(activity).value = syntheticWorkspace().copy(
+                    supportsContainerRegistry = true,
+                )
+            }
+            waitForContainerRegistry(scenario, visible = true)
+            scenario.onActivity { activity ->
+                dispatchNewIntent(
+                    activity,
+                    Intent(Intent.ACTION_VIEW, Uri.parse("lanstash://open/containers")),
+                )
+            }
+            waitForContainerRegistry(scenario, visible = false)
+            waitForNavigationIntentConsumed(scenario)
+        }
     }
 
     @Test
@@ -447,6 +614,24 @@ class MainActivityInternalNavigationTest {
             Thread.sleep(20)
         }
         scenario.onActivity { activity -> assertEquals(null, activity.intent.data) }
+    }
+
+    private fun waitForContainerRegistry(
+        scenario: ActivityScenario<MainActivity>,
+        visible: Boolean,
+    ) {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            var isVisible = false
+            scenario.onActivity { activity ->
+                isVisible = workspace(activity).value?.containerRegistryVisible == true
+            }
+            if (isVisible == visible) return
+            Thread.sleep(20)
+        }
+        scenario.onActivity { activity ->
+            assertEquals(visible, workspace(activity).value?.containerRegistryVisible == true)
+        }
     }
 
     private fun assertPendingTransferIntent(activity: MainActivity) {

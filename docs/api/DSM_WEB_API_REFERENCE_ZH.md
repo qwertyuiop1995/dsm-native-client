@@ -678,7 +678,7 @@ Android 正式入口固定使用 v1，并在写前分别复核用户所见任务
 | `SYNO.Virtualization.API.Guest.Action` | `poweron`, `poweroff`, `shutdown` | 电源控制 |
 | `SYNO.Virtualization.API.Guest.Image` | `list`, `create`, `delete` | 镜像管理 |
 
-创建、镜像导入等明确标记为非阻塞的操作返回任务 ID，应通过 `Task.Info.get` 轮询；公开 `Guest.delete` 与 `Guest.Image.delete` v1 返回空成功响应，不得虚构任务轮询。公开 `Guest.set` v1 支持按虚拟机 ID 或名称修改名称、描述、vCPU、内存和自动启动；创建接口的未连接网卡按官方指南使用空 `network_id` 表示。`poweroff` 相当于强制断电，必须与正常 `shutdown` 在 UI 中清楚区分。
+创建、镜像导入等明确标记为非阻塞的操作返回任务 ID，应通过 `Task.Info.get` 轮询；公开 `Guest.delete` 与 `Guest.Image.delete` v1 返回空成功响应，不得虚构任务轮询。两类删除都必须通过对应资源列表回读，`Guest.Image.delete` 请求 Fixture 的 `readbackPolicy` 固定为 `required`，不能标成 `taskPoll`。公开 `Guest.set` v1 支持按虚拟机 ID 或名称修改名称、描述、vCPU、内存和自动启动；创建接口的未连接网卡按官方指南使用空 `network_id` 表示。`poweroff` 相当于强制断电，必须与正常 `shutdown` 在 UI 中清楚区分。
 
 Android `Guest.create` 支持总计最多 8 块磁盘，可混合空白盘和既有映像盘，并支持多网卡及空 `network_id` 的未连接网卡。空白盘回读可核对数量和容量；`Guest.get` 的公开返回不包含创建时使用的源映像 ID，因此含映像盘时不得仅凭磁盘数量或容量宣称创建已确认成功，应返回需要刷新核对的结果。
 

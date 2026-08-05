@@ -7720,6 +7720,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         repo.deleteContainerNetworkResult(id)
     }
 
+    /** 外部固定页只在当前容器模块与既有能力门禁均满足时打开。 */
+    internal fun navigateToContainerRegistry(): WorkspaceNavigationResult {
+        val state = _workspace.value ?: return WorkspaceNavigationResult.DEFERRED
+        if (state.availability.firstOrNull { it.module == Module.CONTAINERS }?.isAvailable == false ||
+            !state.supportsContainerRegistry
+        ) {
+            _workspace.value = state.copy(
+                message = getApplication<Application>().getString(R.string.module_unavailable_generic),
+            )
+            return WorkspaceNavigationResult.REJECTED
+        }
+        val moduleResult = navigateTo(WorkspaceRoute.ModuleRoot(Module.CONTAINERS))
+        if (moduleResult == WorkspaceNavigationResult.DEFERRED ||
+            moduleResult == WorkspaceNavigationResult.REJECTED
+        ) return moduleResult
+        if (_workspace.value?.containerRegistryVisible == true) {
+            return WorkspaceNavigationResult.ALREADY_SELECTED
+        }
+        showContainerRegistry()
+        return if (_workspace.value?.containerRegistryVisible == true) {
+            WorkspaceNavigationResult.APPLIED
+        } else {
+            WorkspaceNavigationResult.REJECTED
+        }
+    }
+
     fun showContainerRegistry() {
         val state = _workspace.value ?: return
         if (state.selectedModule != Module.CONTAINERS || !state.supportsContainerRegistry) return

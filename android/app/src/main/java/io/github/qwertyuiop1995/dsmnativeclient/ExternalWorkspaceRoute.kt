@@ -4,23 +4,42 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import java.net.URI
 
 /**
- * 外部入口只允许打开固定模块根页面，不接受 NAS、路径、会话、任务、查询或凭据。
+ * 外部入口只允许打开固定模块根页面或白名单中的无载荷固定页面，
+ * 不接受 NAS、路径、会话、任务、查询或凭据。
  *
- * 公共形式固定为 `lanstash://open/<module>`；任何查询、片段、端口、用户信息、额外层级
+ * 公共形式固定为 `lanstash://open/<module>` 与
+ * `lanstash://open/containers/registry`；任何未白名单的路径、查询、片段、端口、用户信息
  * 或编码后的路径变体都会被拒绝，避免把业务载荷引入导航状态。
  */
-internal fun String?.externalWorkspaceModule(): Module? {
+internal sealed interface ExternalWorkspaceRoute {
+    val module: Module
+
+    data class ModuleRoot(override val module: Module) : ExternalWorkspaceRoute
+
+    data object ContainerRegistry : ExternalWorkspaceRoute {
+        override val module: Module = Module.CONTAINERS
+    }
+}
+
+internal fun String?.externalWorkspaceRoute(): ExternalWorkspaceRoute? {
     val uri = this?.let { runCatching { URI(it) }.getOrNull() } ?: return null
     if (uri.isOpaque || !uri.scheme.equals(EXTERNAL_ROUTE_SCHEME, ignoreCase = true) ||
         !uri.host.equals(EXTERNAL_ROUTE_HOST, ignoreCase = true) ||
         uri.rawAuthority?.equals(EXTERNAL_ROUTE_HOST, ignoreCase = true) != true ||
         uri.userInfo != null || uri.port != -1 || uri.rawQuery != null || uri.rawFragment != null
     ) return null
-    val slug = uri.rawPath?.removePrefix("/")
-        ?.takeIf { it.isNotEmpty() && '/' !in it && '%' !in it }
+    val rawPath = uri.rawPath ?: return null
+    if ('%' in rawPath) return null
+    if (rawPath == CONTAINER_REGISTRY_PATH) return ExternalWorkspaceRoute.ContainerRegistry
+    val slug = rawPath.removePrefix("/")
+        .takeIf { it.isNotEmpty() && '/' !in it && '%' !in it }
         ?: return null
-    return EXTERNAL_MODULES[slug]
+    return EXTERNAL_MODULES[slug]?.let(ExternalWorkspaceRoute::ModuleRoot)
 }
+
+/** 保持模块根页调用方的既有语义；固定子页面不会降级为模块根页。 */
+internal fun String?.externalWorkspaceModule(): Module? =
+    (externalWorkspaceRoute() as? ExternalWorkspaceRoute.ModuleRoot)?.module
 
 internal fun Module.externalWorkspaceSlug(): String = when (this) {
     Module.FILES -> "files"
@@ -36,6 +55,7 @@ internal fun Module.externalWorkspaceSlug(): String = when (this) {
 
 private const val EXTERNAL_ROUTE_SCHEME = "lanstash"
 private const val EXTERNAL_ROUTE_HOST = "open"
+private const val CONTAINER_REGISTRY_PATH = "/containers/registry"
 
 private val EXTERNAL_MODULES: Map<String, Module> =
     Module.entries.associateBy(Module::externalWorkspaceSlug)

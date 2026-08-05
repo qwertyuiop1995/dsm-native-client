@@ -11,12 +11,24 @@ class ExternalWorkspaceRouteTest {
         Module.entries.forEach { module ->
             val route = "lanstash://open/${module.externalWorkspaceSlug()}"
             assertEquals(module, route.externalWorkspaceModule())
+            assertEquals(
+                ExternalWorkspaceRoute.ModuleRoot(module),
+                route.externalWorkspaceRoute(),
+            )
         }
         assertEquals(Module.entries.size, Module.entries.map(Module::externalWorkspaceSlug).toSet().size)
     }
 
     @Test
-    fun `外部入口拒绝查询片段用户信息端口和额外路径`() {
+    fun `外部入口只允许无载荷的固定Container Registry页面`() {
+        val route = "lanstash://open/containers/registry"
+
+        assertEquals(ExternalWorkspaceRoute.ContainerRegistry, route.externalWorkspaceRoute())
+        assertNull(route.externalWorkspaceModule())
+    }
+
+    @Test
+    fun `外部入口拒绝查询片段用户信息端口编码和未白名单层级`() {
         listOf(
             "lanstash://open/files?path=/private",
             "lanstash://open/files#private",
@@ -25,7 +37,12 @@ class ExternalWorkspaceRouteTest {
             "lanstash://open/files/private",
             "lanstash://open/files/",
             "lanstash://open/%66iles",
-        ).forEach { route -> assertNull(route.externalWorkspaceModule()) }
+            "lanstash://open/containers/registry?image=private",
+            "lanstash://open/containers/registry#private",
+            "lanstash://open/containers/registry/object-id",
+            "lanstash://open/containers/registry/",
+            "lanstash://open/containers/%72egistry",
+        ).forEach { route -> assertNull(route.externalWorkspaceRoute()) }
     }
 
     @Test
@@ -38,6 +55,6 @@ class ExternalWorkspaceRouteTest {
             "lanstash://open/unknown",
             "lanstash:files",
             "not a uri",
-        ).forEach { route -> assertNull(route.externalWorkspaceModule()) }
+        ).forEach { route -> assertNull(route.externalWorkspaceRoute()) }
     }
 }

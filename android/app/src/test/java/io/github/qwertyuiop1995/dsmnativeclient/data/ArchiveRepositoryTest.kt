@@ -5,6 +5,8 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.ArchiveCompressionLevel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ArchiveFormat
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationExpectedOutput
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationOperation
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationErrorCategory
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
@@ -31,6 +33,58 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ArchiveRepositoryTest {
+    @Test
+    fun `恢复已提交压缩任务只读轮询且输出回读后确认成功`() = runBlocking {
+        val transport = ArchiveInterceptor(
+            success("""{"finished":true,"progress":1}"""),
+            fileInfoResponse(fileItem("/home/archive.zip", size = 123)),
+        )
+
+        val result = repository(transport).resumeArchiveMutationResult(
+            operation = FileServerMutationOperation.COMPRESS,
+            taskId = "compress-task",
+            expectedOutputs = listOf(
+                FileServerMutationExpectedOutput(
+                    path = "/home/archive.zip",
+                    isDirectory = false,
+                    requiresNonEmptyFile = true,
+                ),
+            ),
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(listOf("status", "getinfo"), transport.methods())
+        assertFalse(transport.methods().contains("start"))
+    }
+
+    @Test
+    fun `恢复任务即使状态完成也必须输出回读成功`() = runBlocking {
+        val transport = ArchiveInterceptor(
+            success("""{"finished":true}"""),
+            *Array(8) { listResponse() },
+        )
+
+        val result = repository(transport).resumeArchiveMutationResult(
+            operation = FileServerMutationOperation.EXTRACT,
+            taskId = "extract-task",
+            expectedOutputs = listOf(
+                FileServerMutationExpectedOutput(
+                    path = "/home/target/restored.txt",
+                    isDirectory = false,
+                ),
+            ),
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
+        assertTrue(result.submitted)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, result.counts.failed)
+        assertEquals("file-station.archive-extract.readback-mismatch", result.diagnosticTag)
+        assertEquals(1, transport.methods().count { it == "status" })
+        assertEquals(8, transport.methods().count { it == "getinfo" })
+        assertFalse(transport.methods().contains("start"))
+    }
+
     @Test
     fun `压缩使用公开任务接口且完成后复查目标`() = runBlocking {
         val transport = ArchiveInterceptor(
@@ -93,6 +147,100 @@ class ArchiveRepositoryTest {
         )
         assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
         assertEquals(1, transport.methods().count { it == "start" })
+    }
+
+    @Test
+    fun `压缩提交钩子失败时不发送启动请求`() = runBlocking {
+        val transport = ArchiveInterceptor(
+            directoryResponse("/home", canWrite = true),
+            listResponse(),
+        )
+
+        val failure = runCatching {
+            repository(transport).compressResult(
+                paths = listOf("/home/source.txt"),
+                destinationFilePath = "/home/archive.zip",
+                format = ArchiveFormat.ZIP,
+                level = ArchiveCompressionLevel.MODERATE,
+                onBeforeSubmit = { error("synthetic compression ownership failure") },
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertEquals(0, transport.methods().count { it == "start" })
+    }
+
+    @Test
+    fun `压缩启动成功后只回调一次任务标识且先于状态轮询`() = runBlocking {
+        val transport = ArchiveInterceptor(
+            directoryResponse("/home", canWrite = true),
+            listResponse(),
+            success("""{"taskid":"compress-task"}"""),
+            success("""{"finished":true}"""),
+            listResponse("""{"name":"archive.zip","path":"/home/archive.zip","isdir":false,"size":123}"""),
+        )
+        val callbacks = mutableListOf<Pair<String, List<String?>>>()
+
+        val result = repository(transport).compressResult(
+            paths = listOf("/home/source.txt"),
+            destinationFilePath = "/home/archive.zip",
+            format = ArchiveFormat.ZIP,
+            level = ArchiveCompressionLevel.MODERATE,
+            onTaskStarted = { taskId -> callbacks += taskId to transport.methods().toList() },
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(1, callbacks.size)
+        assertEquals("compress-task", callbacks.single().first)
+        assertEquals(1, callbacks.single().second.count { it == "start" })
+        assertFalse(callbacks.single().second.contains("status"))
+        assertTrue(transport.methods().indexOf("start") < transport.methods().indexOf("status"))
+    }
+
+    @Test
+    fun `解压提交钩子失败时不发送启动请求`() = runBlocking {
+        val transport = ArchiveInterceptor(
+            directoryResponse("/home/target", canWrite = true),
+            success("""{"items":[{"itemid":1,"name":"a.txt","path":"/a.txt","is_dir":false}]}"""),
+            listResponse(),
+        )
+
+        val failure = runCatching {
+            repository(transport).extractResult(
+                filePath = "/home/archive.zip",
+                destinationFolder = "/home/target",
+                onBeforeSubmit = { error("synthetic extraction ownership failure") },
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertEquals(0, transport.methods().count { it == "start" })
+    }
+
+    @Test
+    fun `解压启动成功后只回调一次任务标识且先于状态轮询`() = runBlocking {
+        val transport = ArchiveInterceptor(
+            directoryResponse("/home/target", canWrite = true),
+            success("""{"items":[{"itemid":1,"name":"a.txt","path":"/a.txt","is_dir":false}]}"""),
+            listResponse(),
+            success("""{"taskid":"extract-task"}"""),
+            success("""{"finished":true}"""),
+            listResponse("""{"name":"a.txt","path":"/home/target/a.txt","isdir":false}"""),
+        )
+        val callbacks = mutableListOf<Pair<String, List<String?>>>()
+
+        val result = repository(transport).extractResult(
+            filePath = "/home/archive.zip",
+            destinationFolder = "/home/target",
+            onTaskStarted = { taskId -> callbacks += taskId to transport.methods().toList() },
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(1, callbacks.size)
+        assertEquals("extract-task", callbacks.single().first)
+        assertEquals(1, callbacks.single().second.count { it == "start" })
+        assertFalse(callbacks.single().second.contains("status"))
+        assertTrue(transport.methods().indexOf("start") < transport.methods().indexOf("status"))
     }
 
     @Test

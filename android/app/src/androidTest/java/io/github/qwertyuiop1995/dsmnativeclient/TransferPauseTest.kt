@@ -117,6 +117,29 @@ class TransferPauseTest {
     }
 
     @Test
+    fun 只读恢复观察不显示会误导为停止NAS任务的取消操作() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        rule.setContent {
+            LanStashTheme {
+                TransferActions(
+                    state = TransferState.RUNNING,
+                    direction = TransferDirection.SERVER,
+                    canPause = false,
+                    canResume = false,
+                    canRetry = false,
+                    onPause = {},
+                    onResume = {},
+                    onCancel = {},
+                    onRetry = {},
+                    canCancelTask = false,
+                )
+            }
+        }
+
+        assertTextAbsent(context.getString(R.string.cancel))
+    }
+
+    @Test
     fun 上传失败仍显示从头重试() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         var retryCount = 0

@@ -34,6 +34,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationExpectedOutput
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationOperation
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskPage
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskState
@@ -3671,6 +3672,8 @@ class DsmRepository(
         level: ArchiveCompressionLevel,
         password: String? = null,
         onProgress: (Long, Long?) -> Unit = { _, _ -> },
+        onBeforeSubmit: () -> Unit = {},
+        onTaskStarted: (String) -> Unit = {},
     ): MutationResult = compressResultInternal(
         paths = paths,
         sourceBaselines = null,
@@ -3680,6 +3683,8 @@ class DsmRepository(
         level = level,
         password = password,
         onProgress = onProgress,
+        onBeforeSubmit = onBeforeSubmit,
+        onTaskStarted = onTaskStarted,
     )
 
     suspend fun compressResult(
@@ -3690,6 +3695,8 @@ class DsmRepository(
         level: ArchiveCompressionLevel,
         password: String? = null,
         onProgress: (Long, Long?) -> Unit = { _, _ -> },
+        onBeforeSubmit: () -> Unit = {},
+        onTaskStarted: (String) -> Unit = {},
     ): MutationResult = compressResultInternal(
         paths = sourceBaselines.map(FileItem::path),
         sourceBaselines = sourceBaselines,
@@ -3699,6 +3706,8 @@ class DsmRepository(
         level = level,
         password = password,
         onProgress = onProgress,
+        onBeforeSubmit = onBeforeSubmit,
+        onTaskStarted = onTaskStarted,
     )
 
     private suspend fun compressResultInternal(
@@ -3710,6 +3719,8 @@ class DsmRepository(
         level: ArchiveCompressionLevel,
         password: String?,
         onProgress: (Long, Long?) -> Unit,
+        onBeforeSubmit: () -> Unit,
+        onTaskStarted: (String) -> Unit,
     ): MutationResult {
         val normalizedPaths = paths.map(String::trim).filter(String::isNotEmpty).distinct()
         val target = destinationFilePath.trim()
@@ -3844,6 +3855,8 @@ class DsmRepository(
                     ArchiveExpectedOutput(target, isDirectory = false, requiresNonEmptyFile = true),
                 ),
                 onProgress = onProgress,
+                onBeforeSubmit = onBeforeSubmit,
+                onTaskStarted = onTaskStarted,
             ) {
                 call(
                     FILE_STATION_COMPRESS_API,
@@ -3916,6 +3929,8 @@ class DsmRepository(
         password: String? = null,
         codepage: String? = null,
         onProgress: (Long, Long?) -> Unit = { _, _ -> },
+        onBeforeSubmit: () -> Unit = {},
+        onTaskStarted: (String) -> Unit = {},
     ): MutationResult = extractResultInternal(
         filePath = filePath,
         destinationFolder = destinationFolder,
@@ -3925,6 +3940,8 @@ class DsmRepository(
         codepage = codepage,
         onProgress = onProgress,
         onExpectedOutputs = {},
+        onBeforeSubmit = onBeforeSubmit,
+        onTaskStarted = onTaskStarted,
     )
 
     suspend fun extractResult(
@@ -3934,6 +3951,8 @@ class DsmRepository(
         codepage: String? = null,
         onProgress: (Long, Long?) -> Unit = { _, _ -> },
         onExpectedOutputs: (List<FileServerMutationExpectedOutput>) -> Unit = {},
+        onBeforeSubmit: () -> Unit = {},
+        onTaskStarted: (String) -> Unit = {},
     ): MutationResult = extractResultInternal(
         filePath = sourceBaseline.path,
         destinationFolder = destinationBaseline.path,
@@ -3943,6 +3962,8 @@ class DsmRepository(
         codepage = codepage,
         onProgress = onProgress,
         onExpectedOutputs = onExpectedOutputs,
+        onBeforeSubmit = onBeforeSubmit,
+        onTaskStarted = onTaskStarted,
     )
 
     private suspend fun extractResultInternal(
@@ -3954,6 +3975,8 @@ class DsmRepository(
         codepage: String?,
         onProgress: (Long, Long?) -> Unit,
         onExpectedOutputs: (List<FileServerMutationExpectedOutput>) -> Unit,
+        onBeforeSubmit: () -> Unit,
+        onTaskStarted: (String) -> Unit,
     ): MutationResult {
         val sourcePath = filePath.trim()
         val destinationPath = destinationFolder.trim()
@@ -4108,6 +4131,8 @@ class DsmRepository(
                 apiName = FILE_STATION_EXTRACT_API,
                 expectedOutputs = expectedOutputs,
                 onProgress = onProgress,
+                onBeforeSubmit = onBeforeSubmit,
+                onTaskStarted = onTaskStarted,
             ) {
                 call(
                     FILE_STATION_EXTRACT_API,
@@ -4134,9 +4159,12 @@ class DsmRepository(
         apiName: String,
         expectedOutputs: List<ArchiveExpectedOutput>,
         onProgress: (Long, Long?) -> Unit,
+        onBeforeSubmit: () -> Unit,
+        onTaskStarted: (String) -> Unit,
         submit: suspend () -> JsonObject,
     ): MutationResult {
         val start = try {
+            onBeforeSubmit()
             submit()
         } catch (_: CancellationException) {
             val confirmed = withContext(NonCancellable) {
@@ -4217,6 +4245,7 @@ class DsmRepository(
                 )
             }
         }
+        onTaskStarted(taskId)
         try {
             repeat(MAX_FILE_TASK_POLLS) {
                 val status = call(apiName, "status", mapOf("taskid" to taskId))
@@ -4292,6 +4321,100 @@ class DsmRepository(
                     unknown = expectedOutputs.size,
                     errorCategory = archiveMutationErrorCategory(failure),
                     diagnosticTag = "file-station.$diagnosticOperation.status-unverified",
+                )
+            }
+        }
+    }
+
+    /**
+     * 进程重建后只观察已经提交的压缩/解压任务；不会再次发送 start，也不会在观察取消时
+     * 自动停止 NAS 任务。最终结果仍以目标回读为准，finished 本身不等同于成功。
+     */
+    suspend fun resumeArchiveMutationResult(
+        operation: FileServerMutationOperation,
+        taskId: String,
+        expectedOutputs: List<FileServerMutationExpectedOutput>,
+        onProgress: (Long, Long?) -> Unit = { _, _ -> },
+    ): MutationResult {
+        val stableTaskId = taskId.trim()
+        val outputs = expectedOutputs.map {
+            ArchiveExpectedOutput(it.path, it.isDirectory, it.requiresNonEmptyFile)
+        }
+        val operationName = when (operation) {
+            FileServerMutationOperation.COMPRESS -> "archiveCompress"
+            FileServerMutationOperation.EXTRACT -> "archiveExtract"
+        }
+        val diagnosticOperation = when (operation) {
+            FileServerMutationOperation.COMPRESS -> "archive-compress"
+            FileServerMutationOperation.EXTRACT -> "archive-extract"
+        }
+        val apiName = when (operation) {
+            FileServerMutationOperation.COMPRESS -> FILE_STATION_COMPRESS_API
+            FileServerMutationOperation.EXTRACT -> FILE_STATION_EXTRACT_API
+        }
+        if (stableTaskId.isBlank() || outputs.isEmpty()) {
+            return archiveMutationResult(
+                operation = operationName,
+                status = MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+                submitted = true,
+                requiresRefresh = true,
+                unknown = outputs.size.coerceAtLeast(1),
+                errorCategory = MutationErrorCategory.SERVER,
+                diagnosticTag = "file-station.$diagnosticOperation.restore-evidence-missing",
+            )
+        }
+        return try {
+            repeat(MAX_FILE_TASK_POLLS) {
+                val status = call(apiName, "status", mapOf("taskid" to stableTaskId))
+                val processed = status.long("processed_size") ?: status.long("processedSize")
+                val total = status.long("total") ?: status.long("total_size")
+                if (processed != null) {
+                    onProgress(processed, total)
+                } else {
+                    status["progress"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.let { raw ->
+                        onProgress(if (raw <= 1.0) (raw * 100).toLong() else raw.toLong(), 100)
+                    }
+                }
+                if (status.bool("finished") == true) {
+                    val confirmed = archiveReadbackCount(outputs, DOWNLOAD_MUTATION_READBACK_ATTEMPTS)
+                    return archiveResultFromReadback(
+                        operationName,
+                        diagnosticOperation,
+                        confirmed,
+                        outputs.size,
+                    )
+                }
+                delay(FILE_TASK_POLL_INTERVAL_MILLIS)
+            }
+            archiveMutationResult(
+                operation = operationName,
+                status = MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+                submitted = true,
+                requiresRefresh = true,
+                unknown = outputs.size,
+                errorCategory = MutationErrorCategory.SERVER,
+                diagnosticTag = "file-station.$diagnosticOperation.restore-task-timeout",
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (failure: DsmFailure) {
+            val confirmed = runCatching { archiveReadbackCount(outputs) }.getOrDefault(0)
+            if (confirmed > 0) {
+                archiveResultFromReadback(
+                    operationName,
+                    diagnosticOperation,
+                    confirmed,
+                    outputs.size,
+                )
+            } else {
+                archiveMutationResult(
+                    operation = operationName,
+                    status = MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+                    submitted = true,
+                    requiresRefresh = true,
+                    unknown = outputs.size,
+                    errorCategory = archiveMutationErrorCategory(failure),
+                    diagnosticTag = "file-station.$diagnosticOperation.restore-status-unverified",
                 )
             }
         }

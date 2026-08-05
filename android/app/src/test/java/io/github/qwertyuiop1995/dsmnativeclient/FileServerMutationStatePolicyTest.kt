@@ -53,6 +53,38 @@ class FileServerMutationStatePolicyTest {
     )
 
     @Test
+    fun `中断发生在提交前时确认为失败且无需刷新`() {
+        val result = interruptedServerMutationResult(
+            operation = FileServerMutationOperation.COMPRESS,
+            submitted = false,
+            expectedCount = 0,
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
+        assertEquals("archiveCompress", result.operation)
+        assertFalse(result.submitted)
+        assertFalse(result.requiresRefresh)
+        assertEquals(MutationResultCounts(0, 1, 0), result.counts)
+        assertEquals("archive.interrupted-before-submission", result.diagnosticTag)
+    }
+
+    @Test
+    fun `中断发生在提交后时保持未知且要求刷新核对`() {
+        val result = interruptedServerMutationResult(
+            operation = FileServerMutationOperation.EXTRACT,
+            submitted = true,
+            expectedCount = 2,
+        )
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertEquals("archiveExtract", result.operation)
+        assertTrue(result.submitted)
+        assertTrue(result.requiresRefresh)
+        assertEquals(MutationResultCounts(0, 0, 2), result.counts)
+        assertEquals("archive.interrupted-after-submission", result.diagnosticTag)
+    }
+
+    @Test
     fun `运行中未知结果和刷新失败均阻止退出`() {
         assertTrue(hasBlockingFileServerTransfer(listOf(task(
             state = TransferState.RUNNING,
@@ -85,6 +117,24 @@ class FileServerMutationStatePolicyTest {
                 generation = 4,
             ),
         ))))
+    }
+
+    @Test
+    fun `提交前明确失败无需刷新也不会留下清理后的内存门禁`() {
+        val result = interruptedServerMutationResult(
+            operation = FileServerMutationOperation.COMPRESS,
+            submitted = false,
+            expectedCount = 1,
+        )
+        val lifecycle = FileServerMutationLifecycle(
+            target = target,
+            result = result,
+            failure = failure(),
+            generation = 5,
+        )
+
+        assertFalse(fileServerMutationBlocksWorkspaceExit(lifecycle))
+        assertFalse(hasBlockingFileServerTransfer(listOf(task(TransferState.FAILED, lifecycle))))
     }
 
     @Test

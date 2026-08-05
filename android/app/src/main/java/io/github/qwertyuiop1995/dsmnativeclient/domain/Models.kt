@@ -309,6 +309,7 @@ data class TransferTask(
     val startedAtEpochMillis: Long? = null,
     val fileServerMutation: FileServerMutationLifecycle? = null,
     val uploadMutation: UploadMutationLifecycle? = null,
+    val canCancel: Boolean = true,
 ) {
     val progress: Float?
         get() = totalBytes?.takeIf { it > 0 }?.let {

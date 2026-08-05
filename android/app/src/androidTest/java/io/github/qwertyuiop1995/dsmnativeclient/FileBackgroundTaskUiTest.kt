@@ -16,6 +16,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -172,6 +173,97 @@ class FileBackgroundTaskUiTest {
             .assertHeightIsAtLeast(48.dp)
             .performClick()
         rule.runOnIdle { assertEquals(1, loads) }
+    }
+
+    @Test
+    fun 保存的快照明确标注且刷新期间禁用重复刷新() {
+        val context = context()
+        var refreshes = 0
+        var isRefreshing by mutableStateOf(true)
+        rule.setContent {
+            LanStashTheme {
+                FileBackgroundTasksContent(
+                    tasks = Loadable.Ready(
+                        page(
+                            listOf(
+                                task(
+                                    "private-active-id",
+                                    FileBackgroundTaskKind.COMPRESS,
+                                    FileBackgroundTaskState.ACTIVE,
+                                ),
+                            ),
+                        ),
+                    ),
+                    isLoadingMore = false,
+                    loadMoreFailure = null,
+                    snapshotObservedAtEpochSeconds = 1_700_000_000,
+                    isRefreshing = isRefreshing,
+                    refreshFailure = null,
+                    onRefresh = { refreshes += 1 },
+                    onRetry = {},
+                    onLoadMore = {},
+                )
+            }
+        }
+
+        rule.onNodeWithText(context.getString(R.string.file_background_tasks_snapshot_refreshing))
+            .assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.file_background_task_kind_compress))
+            .assertIsDisplayed()
+        rule.onNodeWithContentDescription(context.getString(R.string.refresh))
+            .assertIsNotEnabled()
+        rule.runOnIdle { assertEquals(0, refreshes) }
+
+        rule.runOnIdle { isRefreshing = false }
+        rule.onNodeWithText(context.getString(R.string.file_background_tasks_snapshot_saved))
+            .assertIsDisplayed()
+        rule.onNodeWithContentDescription(context.getString(R.string.refresh))
+            .assertHasClickAction()
+            .performClick()
+        rule.runOnIdle { assertEquals(1, refreshes) }
+    }
+
+    @Test
+    fun 保存的快照刷新失败时保留任务并说明恢复方式() {
+        val context = context()
+        val recovery = context.getString(R.string.try_again_later)
+        rule.setContent {
+            LanStashTheme {
+                FileBackgroundTasksContent(
+                    tasks = Loadable.Ready(
+                        page(
+                            listOf(
+                                task(
+                                    "private-finished-id",
+                                    FileBackgroundTaskKind.EXTRACT,
+                                    FileBackgroundTaskState.FINISHED,
+                                ),
+                            ),
+                        ),
+                    ),
+                    isLoadingMore = false,
+                    loadMoreFailure = null,
+                    snapshotObservedAtEpochSeconds = 1_700_000_000,
+                    refreshFailure = DsmFailure(null, "Synthetic failure", "Synthetic recovery"),
+                    onRefresh = {},
+                    onRetry = {},
+                    onLoadMore = {},
+                )
+            }
+        }
+
+        rule.onNodeWithText(context.getString(R.string.file_background_tasks_snapshot_refresh_failed))
+            .assertIsDisplayed()
+        rule.onNodeWithText(recovery).assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.file_background_task_kind_extract))
+            .assertIsDisplayed()
+        rule.onAllNodes(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.LiveRegion,
+                LiveRegionMode.Assertive,
+            ),
+            useUnmergedTree = true,
+        ).assertCountEquals(1)
     }
 
     @Test

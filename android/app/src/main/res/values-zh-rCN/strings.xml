@@ -1796,6 +1796,10 @@
     <string name="file_background_tasks_load_more">载入更多任务</string>
     <string name="file_background_tasks_loading_more">正在载入更多任务…</string>
     <string name="file_background_tasks_load_more_failed">未能载入更多任务</string>
+    <string name="file_background_tasks_snapshot_saved">当前显示保存的快照。请刷新以查看最新任务状态。</string>
+    <string name="file_background_tasks_snapshot_refreshing">正在检查更新，期间继续显示保存的快照…</string>
+    <string name="file_background_tasks_snapshot_refresh_failed">未能刷新保存的快照。</string>
+    <string name="server_transfer_state_unavailable">无法安全保存此任务，未向 NAS 发送任何请求。</string>
     <string name="remote_access">远程访问</string>
     <string name="remote_access_description">查看离开本地网络后，可通过哪些方式连接这台 NAS。</string>
     <string name="quickconnect_relay">QuickConnect 中继</string>

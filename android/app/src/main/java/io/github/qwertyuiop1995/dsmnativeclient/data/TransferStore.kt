@@ -3,6 +3,16 @@ package io.github.qwertyuiop1995.dsmnativeclient.data
 import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskKind
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskPage
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskSummary
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationExpectedOutput
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationOperation
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationTarget
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationVerification
+import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationErrorCategory
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResult
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultCounts
@@ -45,6 +55,17 @@ class TransferStore(
     fun upload(id: String): PersistedUpload? = allUploads().firstOrNull { it.id == id }
 
     @Synchronized
+    fun servers(profileId: String): List<PersistedServerTransfer> =
+        allServers().filter { it.profileId == profileId }
+
+    @Synchronized
+    fun server(id: String): PersistedServerTransfer? = allServers().firstOrNull { it.id == id }
+
+    @Synchronized
+    fun fileBackgroundTaskSnapshot(profileId: String): PersistedFileBackgroundTaskSnapshot? =
+        allFileBackgroundTaskSnapshots().firstOrNull { it.profileId == profileId }
+
+    @Synchronized
     fun photoBackupSource(profileId: String): PersistedPhotoBackupSource? =
         allBackupSources().firstOrNull { it.profileId == profileId }
 
@@ -80,6 +101,51 @@ class TransferStore(
     }
 
     @Synchronized
+    fun upsert(server: PersistedServerTransfer) {
+        saveServers(allServers().filterNot { it.id == server.id } + server)
+    }
+
+    @Synchronized
+    fun updateServer(
+        id: String,
+        transform: (PersistedServerTransfer) -> PersistedServerTransfer,
+    ): PersistedServerTransfer? {
+        var updated: PersistedServerTransfer? = null
+        val next = allServers().map { current ->
+            if (current.id == id) transform(current).also { updated = it } else current
+        }
+        if (updated != null) saveServers(next)
+        return updated
+    }
+
+    /** 只有已经安全收敛的终态任务可以从普通清理入口移除。 */
+    @Synchronized
+    fun removeServer(id: String): Boolean {
+        val current = allServers()
+        val target = current.firstOrNull { it.id == id } ?: return false
+        if (!target.canRemoveFinishedServer()) return false
+        saveServers(current.filterNot { it.id == id })
+        return true
+    }
+
+    /** 丢弃无法还原目标的损坏记录；正常任务始终带有完整目标基线。 */
+    @Synchronized
+    fun removeInvalidServer(id: String): Boolean {
+        val current = allServers()
+        val target = current.firstOrNull { it.id == id } ?: return false
+        if (target.toFileServerMutationTarget() != null) return false
+        saveServers(current.filterNot { it.id == id })
+        return true
+    }
+
+    @Synchronized
+    fun replaceFileBackgroundTaskSnapshot(snapshot: PersistedFileBackgroundTaskSnapshot) {
+        saveFileBackgroundTaskSnapshots(
+            allFileBackgroundTaskSnapshots().filterNot { it.profileId == snapshot.profileId } + snapshot,
+        )
+    }
+
+    @Synchronized
     fun upsertPhotoBackupSource(source: PersistedPhotoBackupSource) {
         saveBackupSources(allBackupSources().filterNot { it.profileId == source.profileId } + source)
     }
@@ -101,6 +167,11 @@ class TransferStore(
                 it.profileId == profileId && it.canRemoveFinishedUpload()
             },
         )
+        saveServers(
+            allServers().filterNot {
+                it.profileId == profileId && it.canRemoveFinishedServer()
+            },
+        )
     }
 
     @Synchronized
@@ -112,7 +183,11 @@ class TransferStore(
     fun removeProfile(profileId: String) {
         save(all().filterNot { it.profileId == profileId })
         saveUploads(allUploads().filterNot { it.profileId == profileId })
+        saveServers(allServers().filterNot { it.profileId == profileId })
         saveBackupSources(allBackupSources().filterNot { it.profileId == profileId })
+        saveFileBackgroundTaskSnapshots(
+            allFileBackgroundTaskSnapshots().filterNot { it.profileId == profileId },
+        )
     }
 
     private fun all(): List<PersistedDownload> {
@@ -150,6 +225,48 @@ class TransferStore(
         }.getOrDefault(emptyList())
     }
 
+    private fun allServers(): List<PersistedServerTransfer> {
+        val value = preferences.getString(KEY_SERVERS, null) ?: return emptyList()
+        return runCatching {
+            json.decodeFromString(ListSerializer(PersistedServerTransfer.serializer()), value)
+        }.getOrDefault(emptyList())
+    }
+
+    private fun saveServers(servers: List<PersistedServerTransfer>) {
+        check(
+            preferences.edit()
+                .putString(
+                    KEY_SERVERS,
+                    json.encodeToString(ListSerializer(PersistedServerTransfer.serializer()), servers),
+                )
+                .commit(),
+        ) { "transfer.server_state_not_persisted" }
+    }
+
+    private fun allFileBackgroundTaskSnapshots(): List<PersistedFileBackgroundTaskSnapshot> {
+        val value = preferences.getString(KEY_FILE_BACKGROUND_TASKS, null) ?: return emptyList()
+        return runCatching {
+            json.decodeFromString(
+                ListSerializer(PersistedFileBackgroundTaskSnapshot.serializer()),
+                value,
+            )
+        }.getOrDefault(emptyList())
+    }
+
+    private fun saveFileBackgroundTaskSnapshots(snapshots: List<PersistedFileBackgroundTaskSnapshot>) {
+        check(
+            preferences.edit()
+                .putString(
+                    KEY_FILE_BACKGROUND_TASKS,
+                    json.encodeToString(
+                        ListSerializer(PersistedFileBackgroundTaskSnapshot.serializer()),
+                        snapshots,
+                    ),
+                )
+                .commit(),
+        ) { "transfer.file_background_tasks_not_persisted" }
+    }
+
     private fun saveBackupSources(sources: List<PersistedPhotoBackupSource>) {
         preferences.edit()
             .putString(
@@ -163,7 +280,9 @@ class TransferStore(
         const val PREFERENCES_NAME = "lanstash_transfer_tasks"
         const val KEY_DOWNLOADS = "downloads"
         const val KEY_UPLOADS = "uploads"
+        const val KEY_SERVERS = "servers"
         const val KEY_BACKUP_SOURCES = "photo_backup_sources"
+        const val KEY_FILE_BACKGROUND_TASKS = "file_background_tasks"
         val TERMINAL_STATES = setOf(
             TransferState.SUCCEEDED,
             TransferState.FAILED,
@@ -216,6 +335,107 @@ data class PersistedUpload(
     val uploadMutationResult: PersistedMutationResult? = null,
 )
 
+/** NAS 写任务的请求边界；恢复后只有 `PREPARING` 能确认尚未提交。 */
+@Serializable
+enum class PersistedServerSubmissionPhase {
+    PREPARING,
+    SUBMITTING,
+    SUBMITTED,
+    TERMINAL,
+}
+
+@Serializable
+enum class PersistedServerOperation {
+    COMPRESS,
+    EXTRACT,
+}
+
+/** 恢复目标核对所需的文件基线；内容只保存在现有加密传输存储中。 */
+@Serializable
+data class PersistedServerFileBaseline(
+    val path: String,
+    val name: String,
+    val isDirectory: Boolean,
+    val size: Long = 0,
+    val modifiedAtEpochSeconds: Long? = null,
+    val owner: String? = null,
+    val canRead: Boolean = true,
+    val canWrite: Boolean = false,
+    val canDelete: Boolean = false,
+    val mountPointType: String? = null,
+)
+
+@Serializable
+data class PersistedServerExpectedOutput(
+    val path: String,
+    val isDirectory: Boolean,
+    val requiresNonEmptyFile: Boolean = false,
+)
+
+/**
+ * App 发起、由 NAS 执行的任务状态。opaque task ID 只用于恢复只读轮询，不包含会话或地址。
+ */
+@Serializable
+data class PersistedServerTransfer(
+    val id: String,
+    val profileId: String,
+    val title: String,
+    val operation: PersistedServerOperation,
+    val state: TransferState = TransferState.WAITING,
+    val submissionPhase: PersistedServerSubmissionPhase = PersistedServerSubmissionPhase.PREPARING,
+    val executionGeneration: Long = 0,
+    val readOnlyObservation: Boolean = false,
+    val nasTaskId: String? = null,
+    val completedUnits: Long = 0,
+    val totalUnits: Long? = null,
+    val startedAtEpochMillis: Long? = null,
+    val requiresRefresh: Boolean = false,
+    val errorKind: String? = null,
+    val sourceModule: String = Module.FILES.name,
+    val sourceBaselines: List<PersistedServerFileBaseline> = emptyList(),
+    val destinationFolderBaseline: PersistedServerFileBaseline? = null,
+    val expectedOutputs: List<PersistedServerExpectedOutput> = emptyList(),
+    val mutationResult: PersistedMutationResult? = null,
+    val refreshCompleted: Boolean = false,
+    val verification: String? = null,
+    val refreshFailureKind: String? = null,
+)
+
+/** 官方 BackgroundTask 的脱敏快照；不保存路径、参数、消息或响应正文。 */
+@Serializable
+data class PersistedFileBackgroundTaskSnapshot(
+    val profileId: String,
+    val observedAtEpochSeconds: Long,
+    val tasks: List<PersistedFileBackgroundTaskSummary> = emptyList(),
+)
+
+@Serializable
+data class PersistedFileBackgroundTaskSummary(
+    val id: String,
+    val kind: PersistedFileBackgroundTaskKind,
+    val state: PersistedFileBackgroundTaskState,
+    val progress: Double? = null,
+    val createdAtEpochSeconds: Long? = null,
+    val processedItemCount: Int? = null,
+    val totalItemCount: Int? = null,
+    val processedBytes: Long? = null,
+    val totalBytes: Long? = null,
+)
+
+@Serializable
+enum class PersistedFileBackgroundTaskKind {
+    COPY_OR_MOVE,
+    DELETE,
+    COMPRESS,
+    EXTRACT,
+}
+
+@Serializable
+enum class PersistedFileBackgroundTaskState {
+    ACTIVE,
+    FINISHED,
+}
+
 /** 仅保留恢复与结果展示所需的稳定语义，不保存响应、路径、凭据或用户数据。 */
 @Serializable
 data class PersistedMutationResult(
@@ -251,6 +471,156 @@ internal fun PersistedMutationResult.toMutationResult(operation: String) = Mutat
     diagnosticTag = diagnosticTag,
 )
 
+internal fun FileItem.toPersistedServerFileBaseline() = PersistedServerFileBaseline(
+    path = path,
+    name = name,
+    isDirectory = isDirectory,
+    size = size,
+    modifiedAtEpochSeconds = modifiedAtEpochSeconds,
+    owner = owner,
+    canRead = canRead,
+    canWrite = canWrite,
+    canDelete = canDelete,
+    mountPointType = mountPointType,
+)
+
+internal fun PersistedServerFileBaseline.toFileItem() = FileItem(
+    path = path,
+    name = name,
+    isDirectory = isDirectory,
+    size = size,
+    modifiedAtEpochSeconds = modifiedAtEpochSeconds,
+    owner = owner,
+    canRead = canRead,
+    canWrite = canWrite,
+    canDelete = canDelete,
+    mountPointType = mountPointType,
+)
+
+internal fun FileServerMutationExpectedOutput.toPersistedServerExpectedOutput() =
+    PersistedServerExpectedOutput(path, isDirectory, requiresNonEmptyFile)
+
+internal fun PersistedServerExpectedOutput.toFileServerMutationExpectedOutput() =
+    FileServerMutationExpectedOutput(path, isDirectory, requiresNonEmptyFile)
+
+internal fun FileServerMutationOperation.toPersistedServerOperation() = when (this) {
+    FileServerMutationOperation.COMPRESS -> PersistedServerOperation.COMPRESS
+    FileServerMutationOperation.EXTRACT -> PersistedServerOperation.EXTRACT
+}
+
+internal fun PersistedServerOperation.toFileServerMutationOperation() = when (this) {
+    PersistedServerOperation.COMPRESS -> FileServerMutationOperation.COMPRESS
+    PersistedServerOperation.EXTRACT -> FileServerMutationOperation.EXTRACT
+}
+
+internal fun FileServerMutationTarget.toPersistedServerTransfer(
+    id: String,
+    title: String,
+    state: TransferState = TransferState.WAITING,
+    submissionPhase: PersistedServerSubmissionPhase = PersistedServerSubmissionPhase.PREPARING,
+    startedAtEpochMillis: Long? = null,
+) = PersistedServerTransfer(
+    id = id,
+    profileId = profileId,
+    title = title,
+    operation = operation.toPersistedServerOperation(),
+    state = state,
+    submissionPhase = submissionPhase,
+    startedAtEpochMillis = startedAtEpochMillis,
+    sourceModule = module.name,
+    sourceBaselines = sourceBaselines.map(FileItem::toPersistedServerFileBaseline),
+    destinationFolderBaseline = destinationFolderBaseline.toPersistedServerFileBaseline(),
+    expectedOutputs = expectedOutputs.map(
+        FileServerMutationExpectedOutput::toPersistedServerExpectedOutput,
+    ),
+)
+
+internal fun PersistedServerTransfer.toFileServerMutationTarget(): FileServerMutationTarget? {
+    val destination = destinationFolderBaseline ?: return null
+    val module = runCatching { Module.valueOf(sourceModule) }.getOrNull() ?: return null
+    return FileServerMutationTarget(
+        profileId = profileId,
+        module = module,
+        operation = operation.toFileServerMutationOperation(),
+        sourceBaselines = sourceBaselines.map(PersistedServerFileBaseline::toFileItem),
+        destinationFolderBaseline = destination.toFileItem(),
+        expectedOutputs = expectedOutputs.map(
+            PersistedServerExpectedOutput::toFileServerMutationExpectedOutput,
+        ),
+    )
+}
+
+internal fun PersistedServerTransfer.toFileServerMutationVerification(): FileServerMutationVerification? =
+    verification?.let { value ->
+        runCatching { FileServerMutationVerification.valueOf(value) }.getOrNull()
+    }
+
+internal fun FileBackgroundTaskPage.toPersistedFileBackgroundTaskSnapshot(
+    profileId: String,
+    observedAtEpochSeconds: Long,
+) = PersistedFileBackgroundTaskSnapshot(
+    profileId = profileId,
+    observedAtEpochSeconds = observedAtEpochSeconds,
+    tasks = tasks.map(FileBackgroundTaskSummary::toPersistedFileBackgroundTaskSummary),
+)
+
+internal fun FileBackgroundTaskSummary.toPersistedFileBackgroundTaskSummary() =
+    PersistedFileBackgroundTaskSummary(
+        id = id,
+        kind = kind.toPersistedFileBackgroundTaskKind(),
+        state = state.toPersistedFileBackgroundTaskState(),
+        progress = progress,
+        createdAtEpochSeconds = createdAtEpochSeconds,
+        processedItemCount = processedItemCount,
+        totalItemCount = totalItemCount,
+        processedBytes = processedBytes,
+        totalBytes = totalBytes,
+    )
+
+internal fun PersistedFileBackgroundTaskSnapshot.toFileBackgroundTaskPage() = FileBackgroundTaskPage(
+    tasks = tasks.map { task ->
+        FileBackgroundTaskSummary(
+            id = task.id,
+            kind = task.kind.toFileBackgroundTaskKind(),
+            state = task.state.toFileBackgroundTaskState(),
+            progress = task.progress,
+            createdAtEpochSeconds = task.createdAtEpochSeconds,
+            processedItemCount = task.processedItemCount,
+            totalItemCount = task.totalItemCount,
+            processedBytes = task.processedBytes,
+            totalBytes = task.totalBytes,
+        )
+    },
+    offset = 0,
+    nextOffset = tasks.size,
+    total = tasks.size,
+    hasMore = false,
+)
+
+internal fun FileBackgroundTaskKind.toPersistedFileBackgroundTaskKind() = when (this) {
+    FileBackgroundTaskKind.COPY_OR_MOVE -> PersistedFileBackgroundTaskKind.COPY_OR_MOVE
+    FileBackgroundTaskKind.DELETE -> PersistedFileBackgroundTaskKind.DELETE
+    FileBackgroundTaskKind.COMPRESS -> PersistedFileBackgroundTaskKind.COMPRESS
+    FileBackgroundTaskKind.EXTRACT -> PersistedFileBackgroundTaskKind.EXTRACT
+}
+
+internal fun PersistedFileBackgroundTaskKind.toFileBackgroundTaskKind() = when (this) {
+    PersistedFileBackgroundTaskKind.COPY_OR_MOVE -> FileBackgroundTaskKind.COPY_OR_MOVE
+    PersistedFileBackgroundTaskKind.DELETE -> FileBackgroundTaskKind.DELETE
+    PersistedFileBackgroundTaskKind.COMPRESS -> FileBackgroundTaskKind.COMPRESS
+    PersistedFileBackgroundTaskKind.EXTRACT -> FileBackgroundTaskKind.EXTRACT
+}
+
+internal fun FileBackgroundTaskState.toPersistedFileBackgroundTaskState() = when (this) {
+    FileBackgroundTaskState.ACTIVE -> PersistedFileBackgroundTaskState.ACTIVE
+    FileBackgroundTaskState.FINISHED -> PersistedFileBackgroundTaskState.FINISHED
+}
+
+internal fun PersistedFileBackgroundTaskState.toFileBackgroundTaskState() = when (this) {
+    PersistedFileBackgroundTaskState.ACTIVE -> FileBackgroundTaskState.ACTIVE
+    PersistedFileBackgroundTaskState.FINISHED -> FileBackgroundTaskState.FINISHED
+}
+
 @Serializable
 data class PersistedPhotoBackupSource(
     val profileId: String,
@@ -269,3 +639,8 @@ internal fun TransferState.hasIncompleteDownloadDestination(): Boolean = this !i
 internal fun PersistedUpload.canRemoveFinishedUpload(): Boolean =
     state in setOf(TransferState.SUCCEEDED, TransferState.FAILED, TransferState.CANCELLED) &&
         !requiresRefresh
+
+internal fun PersistedServerTransfer.canRemoveFinishedServer(): Boolean =
+    state in setOf(TransferState.SUCCEEDED, TransferState.FAILED, TransferState.CANCELLED) &&
+        submissionPhase == PersistedServerSubmissionPhase.TERMINAL &&
+        !requiresRefresh && (mutationResult?.requiresRefresh != true || refreshCompleted)

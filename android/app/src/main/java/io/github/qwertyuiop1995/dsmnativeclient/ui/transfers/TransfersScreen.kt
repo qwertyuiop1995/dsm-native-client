@@ -147,6 +147,10 @@ internal fun TransfersScreen(state: WorkspaceState, model: AppViewModel) {
                 tasks = state.fileBackgroundTasks,
                 isLoadingMore = state.fileBackgroundTaskIsLoadingMore,
                 loadMoreFailure = state.fileBackgroundTasksLoadMoreFailure,
+                snapshotObservedAtEpochSeconds =
+                    state.fileBackgroundTaskSnapshotObservedAtEpochSeconds,
+                isRefreshing = state.fileBackgroundTaskRefreshInProgress,
+                refreshFailure = state.fileBackgroundTaskRefreshFailure,
                 onRefresh = model::refreshFileBackgroundTasks,
                 onRetry = model::refreshFileBackgroundTasks,
                 onLoadMore = model::loadMoreFileBackgroundTasks,
@@ -249,6 +253,9 @@ internal fun FileBackgroundTasksContent(
     tasks: Loadable<FileBackgroundTaskPage>,
     isLoadingMore: Boolean,
     loadMoreFailure: DsmFailure?,
+    snapshotObservedAtEpochSeconds: Long? = null,
+    isRefreshing: Boolean = false,
+    refreshFailure: DsmFailure? = null,
     onRefresh: () -> Unit,
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
@@ -265,9 +272,19 @@ internal fun FileBackgroundTasksContent(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            IconButton(onClick = onRefresh, modifier = Modifier.size(48.dp)) {
+            IconButton(
+                onClick = onRefresh,
+                enabled = !isRefreshing,
+                modifier = Modifier.size(48.dp),
+            ) {
                 Icon(Icons.Outlined.Refresh, stringResource(R.string.refresh))
             }
+        }
+        if (snapshotObservedAtEpochSeconds != null) {
+            FileBackgroundTaskSnapshotStatus(
+                isRefreshing = isRefreshing,
+                refreshFailure = refreshFailure,
+            )
         }
         LazyRow(
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
@@ -359,6 +376,67 @@ internal fun FileBackgroundTasksContent(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FileBackgroundTaskSnapshotStatus(
+    isRefreshing: Boolean,
+    refreshFailure: DsmFailure?,
+) {
+    val localizedFailure = refreshFailure?.localize(LocalContext.current)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .semantics {
+                liveRegion = if (refreshFailure != null) {
+                    LiveRegionMode.Assertive
+                } else {
+                    LiveRegionMode.Polite
+                }
+            },
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            when {
+                isRefreshing -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                refreshFailure != null -> Icon(
+                    Icons.Outlined.ErrorOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                )
+                else -> Icon(Icons.Outlined.Info, contentDescription = null)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    stringResource(
+                        when {
+                            isRefreshing -> R.string.file_background_tasks_snapshot_refreshing
+                            refreshFailure != null -> R.string.file_background_tasks_snapshot_refresh_failed
+                            else -> R.string.file_background_tasks_snapshot_saved
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (refreshFailure != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+                if (localizedFailure != null) {
+                    Text(
+                        localizedFailure.recovery,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -491,6 +569,7 @@ internal fun TransferTaskCard(
                     onResume = onResume,
                     onCancel = onCancel,
                     onRetry = onRetry,
+                    canCancelTask = task.canCancel,
                 )
             }
             Column(Modifier.fillMaxWidth()) {
@@ -765,6 +844,7 @@ internal fun TransferActions(
     onResume: () -> Unit,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
+    canCancelTask: Boolean = true,
 ) {
     when {
         state == TransferState.CANCELLING -> Text(
@@ -797,7 +877,8 @@ internal fun TransferActions(
             )
         }
 
-        state in setOf(TransferState.WAITING, TransferState.RUNNING, TransferState.PAUSED) -> {
+        canCancelTask &&
+            state in setOf(TransferState.WAITING, TransferState.RUNNING, TransferState.PAUSED) -> {
             TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(stringResource(R.string.cancel))
             }

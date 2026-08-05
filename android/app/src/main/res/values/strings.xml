@@ -1805,6 +1805,10 @@
     <string name="file_background_tasks_load_more">Load more tasks</string>
     <string name="file_background_tasks_loading_more">Loading more tasks…</string>
     <string name="file_background_tasks_load_more_failed">More tasks could not be loaded</string>
+    <string name="file_background_tasks_snapshot_saved">Showing a saved snapshot. Refresh to check the latest task status.</string>
+    <string name="file_background_tasks_snapshot_refreshing">Showing a saved snapshot while checking for updates…</string>
+    <string name="file_background_tasks_snapshot_refresh_failed">The saved snapshot could not be refreshed.</string>
+    <string name="server_transfer_state_unavailable">Couldn’t safely save this task. Nothing was sent.</string>
     <string name="remote_access">Remote access</string>
     <string name="remote_access_description">Review how this NAS can be reached when you are away from its local network.</string>
     <string name="quickconnect_relay">QuickConnect relay</string>

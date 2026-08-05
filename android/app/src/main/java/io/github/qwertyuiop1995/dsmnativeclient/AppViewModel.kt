@@ -26,13 +26,21 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import io.github.qwertyuiop1995.dsmnativeclient.data.DsmRepository
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedDownload
+import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedServerSubmissionPhase
+import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedServerTransfer
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedUpload
 import io.github.qwertyuiop1995.dsmnativeclient.data.PhotoRepository
 import io.github.qwertyuiop1995.dsmnativeclient.data.TransferStore
 import io.github.qwertyuiop1995.dsmnativeclient.data.hasIncompleteDownloadDestination
 import io.github.qwertyuiop1995.dsmnativeclient.data.canRemoveFinishedUpload
 import io.github.qwertyuiop1995.dsmnativeclient.data.toMutationResult
+import io.github.qwertyuiop1995.dsmnativeclient.data.toFileBackgroundTaskPage
+import io.github.qwertyuiop1995.dsmnativeclient.data.toFileServerMutationTarget
+import io.github.qwertyuiop1995.dsmnativeclient.data.toFileServerMutationVerification
+import io.github.qwertyuiop1995.dsmnativeclient.data.toPersistedFileBackgroundTaskSnapshot
 import io.github.qwertyuiop1995.dsmnativeclient.data.toPersistedMutationResult
+import io.github.qwertyuiop1995.dsmnativeclient.data.toPersistedServerExpectedOutput
+import io.github.qwertyuiop1995.dsmnativeclient.data.toPersistedServerTransfer
 import io.github.qwertyuiop1995.dsmnativeclient.data.UploadSource
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ArchiveCompressionLevel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ArchiveFormat
@@ -680,6 +688,36 @@ private data class FileServerTransferClaim(
 private data class FileServerMutationExecution(
     val result: MutationResult,
     val expectedOutputs: List<FileServerMutationExpectedOutput>,
+)
+
+internal fun interruptedServerMutationResult(
+    operation: FileServerMutationOperation,
+    submitted: Boolean,
+    expectedCount: Int,
+): MutationResult = MutationResult(
+    schemaVersion = 1,
+    status = if (submitted) {
+        MutationResultStatus.SUBMITTED_BUT_UNVERIFIED
+    } else {
+        MutationResultStatus.CONFIRMED_FAILURE
+    },
+    operation = when (operation) {
+        FileServerMutationOperation.COMPRESS -> "archiveCompress"
+        FileServerMutationOperation.EXTRACT -> "archiveExtract"
+    },
+    submitted = submitted,
+    requiresRefresh = submitted,
+    counts = if (submitted) {
+        MutationResultCounts(0, 0, expectedCount.coerceAtLeast(1))
+    } else {
+        MutationResultCounts(0, expectedCount.coerceAtLeast(1), 0)
+    },
+    errorCategory = MutationErrorCategory.UNKNOWN,
+    diagnosticTag = if (submitted) {
+        "archive.interrupted-after-submission"
+    } else {
+        "archive.interrupted-before-submission"
+    },
 )
 
 enum class PreviewOwner { FILES, PHOTOS }
@@ -1812,6 +1850,9 @@ data class WorkspaceState(
     val diskTestMutationGeneration: Long = 0L,
     val transfers: List<TransferTask> = emptyList(),
     val fileBackgroundTasks: Loadable<FileBackgroundTaskPage> = Loadable.Idle,
+    val fileBackgroundTaskSnapshotObservedAtEpochSeconds: Long? = null,
+    val fileBackgroundTaskRefreshInProgress: Boolean = false,
+    val fileBackgroundTaskRefreshFailure: DsmFailure? = null,
     val fileBackgroundTaskIsLoadingMore: Boolean = false,
     val fileBackgroundTasksLoadMoreFailure: DsmFailure? = null,
     val previewItem: FileItem? = null,
@@ -3353,6 +3394,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 val availability = repo.availability()
                 val restoredUi = restoredWorkspaceUi(profile.id, availability)
+                val backgroundTaskSnapshot = transferStore.fileBackgroundTaskSnapshot(profile.id)
                 _workspace.value = WorkspaceState(
                     profile = profile,
                     selectedModule = restoredUi.first,
@@ -3378,6 +3420,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     supportsOfficialVirtualMachineSettings = repo.supportsOfficialVirtualMachineSettings(),
                     photoBackupSourceEnabled = transferStore.photoBackupSource(profile.id)?.enabled == true,
                     chatPinnedConversationIds = restoredPinnedConversationIds(profile.id),
+                    fileBackgroundTasks = backgroundTaskSnapshot?.toFileBackgroundTaskPage()
+                        ?.let { Loadable.Ready(it) } ?: Loadable.Idle,
+                    fileBackgroundTaskSnapshotObservedAtEpochSeconds =
+                        backgroundTaskSnapshot?.observedAtEpochSeconds,
                 )
                 viewModelScope.launch { refreshFavorites(repo) }
                 if (transferStore.photoBackupSource(profile.id)?.enabled == true) {
@@ -3462,6 +3508,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _login.update { it.copy(isConnecting = false, connectionStatus = null) }
                 val availability = repo.availability()
                 val restoredUi = restoredWorkspaceUi(profile.id, availability)
+                val backgroundTaskSnapshot = transferStore.fileBackgroundTaskSnapshot(profile.id)
                 _workspace.value = WorkspaceState(
                     profile = profile,
                     selectedModule = restoredUi.first,
@@ -3487,6 +3534,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     supportsOfficialVirtualMachineSettings = repo.supportsOfficialVirtualMachineSettings(),
                     photoBackupSourceEnabled = transferStore.photoBackupSource(profile.id)?.enabled == true,
                     chatPinnedConversationIds = restoredPinnedConversationIds(profile.id),
+                    fileBackgroundTasks = backgroundTaskSnapshot?.toFileBackgroundTaskPage()
+                        ?.let { Loadable.Ready(it) } ?: Loadable.Idle,
+                    fileBackgroundTaskSnapshotObservedAtEpochSeconds =
+                        backgroundTaskSnapshot?.observedAtEpochSeconds,
                 )
                 viewModelScope.launch { refreshFavorites(repo) }
                 if (transferStore.photoBackupSource(profile.id)?.enabled == true) {
@@ -3955,7 +4006,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 Module.TRANSFERS -> {
-                    if (_workspace.value?.fileBackgroundTasks is Loadable.Idle) {
+                    if (_workspace.value?.let {
+                            it.fileBackgroundTasks is Loadable.Idle ||
+                                it.fileBackgroundTaskSnapshotObservedAtEpochSeconds != null
+                        } == true
+                    ) {
                         refreshFileBackgroundTasks()
                     }
                 }
@@ -3979,7 +4034,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 kind = FileBackgroundTaskRequestKind.REFRESH,
             ).also {
                 _workspace.value = current.copy(
-                    fileBackgroundTasks = Loadable.Loading,
+                    fileBackgroundTasks = if (
+                        current.fileBackgroundTaskSnapshotObservedAtEpochSeconds != null &&
+                        current.fileBackgroundTasks is Loadable.Ready
+                    ) current.fileBackgroundTasks else Loadable.Loading,
+                    fileBackgroundTaskRefreshInProgress = true,
+                    fileBackgroundTaskRefreshFailure = null,
                     fileBackgroundTaskIsLoadingMore = false,
                     fileBackgroundTasksLoadMoreFailure = null,
                 )
@@ -4041,12 +4101,31 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val page = outcome.getOrNull()
                 val failure = outcome.exceptionOrNull()?.asDsmFailure()
                 _workspace.value = when (token.kind) {
-                    FileBackgroundTaskRequestKind.REFRESH -> current.copy(
-                        fileBackgroundTasks = page?.let { Loadable.Ready(it) }
-                            ?: Loadable.Failed(checkNotNull(failure)),
-                        fileBackgroundTaskIsLoadingMore = false,
-                        fileBackgroundTasksLoadMoreFailure = null,
-                    )
+                    FileBackgroundTaskRequestKind.REFRESH -> {
+                        val snapshotFailure = page?.let {
+                            runCatching {
+                                transferStore.replaceFileBackgroundTaskSnapshot(
+                                    it.toPersistedFileBackgroundTaskSnapshot(
+                                        profileId = token.profileId,
+                                        observedAtEpochSeconds = System.currentTimeMillis() / 1_000,
+                                    ),
+                                )
+                            }.exceptionOrNull()?.asDsmFailure()
+                        }
+                        current.copy(
+                            fileBackgroundTasks = page?.let { Loadable.Ready(it) }
+                                ?: if (
+                                    current.fileBackgroundTaskSnapshotObservedAtEpochSeconds != null &&
+                                    current.fileBackgroundTasks is Loadable.Ready
+                                ) current.fileBackgroundTasks else Loadable.Failed(checkNotNull(failure)),
+                            fileBackgroundTaskSnapshotObservedAtEpochSeconds =
+                                if (page != null) null else current.fileBackgroundTaskSnapshotObservedAtEpochSeconds,
+                            fileBackgroundTaskRefreshInProgress = false,
+                            fileBackgroundTaskRefreshFailure = failure ?: snapshotFailure,
+                            fileBackgroundTaskIsLoadingMore = false,
+                            fileBackgroundTasksLoadMoreFailure = null,
+                        )
+                    }
                     FileBackgroundTaskRequestKind.LOAD_MORE -> {
                         val existing = (current.fileBackgroundTasks as? Loadable.Ready)?.value
                         val merged = if (existing != null && page != null) {
@@ -4054,12 +4133,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         } else {
                             null
                         }
+                        val snapshotFailure = merged?.let {
+                            runCatching {
+                                transferStore.replaceFileBackgroundTaskSnapshot(
+                                    it.toPersistedFileBackgroundTaskSnapshot(
+                                        profileId = token.profileId,
+                                        observedAtEpochSeconds = System.currentTimeMillis() / 1_000,
+                                    ),
+                                )
+                            }.exceptionOrNull()?.asDsmFailure()
+                        }
                         current.copy(
                             fileBackgroundTasks = merged?.let { Loadable.Ready(it) }
                                 ?: current.fileBackgroundTasks,
+                            fileBackgroundTaskSnapshotObservedAtEpochSeconds = null,
                             fileBackgroundTaskIsLoadingMore = false,
                             fileBackgroundTasksLoadMoreFailure = when {
                                 failure != null -> failure
+                                snapshotFailure != null -> snapshotFailure
                                 merged == null -> DsmFailure(
                                     null,
                                     "The NAS returned an unrecognized task page",
@@ -6136,7 +6227,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 ),
             ),
         )
-        enqueueServerTransfer(title, R.string.archive_creating, target) { repo, progress ->
+        enqueueServerTransfer(title, target) { repo, progress, beforeSubmit, taskStarted, _ ->
             val result = repo.compressResult(
                 sourceBaselines = items,
                 destinationBaseline = destinationBaseline,
@@ -6145,6 +6236,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 level = ArchiveCompressionLevel.MODERATE,
                 password = password,
                 onProgress = progress,
+                onBeforeSubmit = beforeSubmit,
+                onTaskStarted = taskStarted,
             )
             if ((result.submitted || result.requiresRefresh) && currentCoroutineContext().isActive) {
                 loadFileBrowser(repo)
@@ -6167,16 +6260,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
         enqueueServerTransfer(
             item.name,
-            R.string.archive_extracting,
             target,
-        ) { repo, progress ->
+        ) { repo, progress, beforeSubmit, taskStarted, expectedOutputsChanged ->
             var expectedOutputs = emptyList<FileServerMutationExpectedOutput>()
             val result = repo.extractResult(
                 sourceBaseline = item,
                 destinationBaseline = destinationBaseline,
                 password = password,
                 onProgress = progress,
-                onExpectedOutputs = { expectedOutputs = it },
+                onExpectedOutputs = {
+                    expectedOutputs = it
+                    expectedOutputsChanged(it)
+                },
+                onBeforeSubmit = beforeSubmit,
+                onTaskStarted = taskStarted,
             )
             if ((result.submitted || result.requiresRefresh) && currentCoroutineContext().isActive) {
                 loadFileBrowser(repo)
@@ -8114,6 +8211,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cancelTransfer(id: String) {
+        if (transferStore.server(id)?.readOnlyObservation == true) return
         val job = transferJobs[id]
         val persisted = transferStore.download(id)
         val upload = transferStore.upload(id)
@@ -8435,18 +8533,47 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val outcome = runCatching {
                 verifyFileServerMutation(claim.repository, claim.target)
             }
-            updateServerTransfer(claim, id) { task ->
-                val lifecycle = checkNotNull(task.fileServerMutation)
-                task.copy(
-                    requiresRefresh = outcome.isFailure,
-                    fileServerMutation = lifecycle.copy(
-                        refreshInProgress = false,
-                        refreshCompleted = outcome.isSuccess,
-                        refreshFailure = outcome.exceptionOrNull()?.asDsmFailure(),
-                        verification = outcome.getOrNull()
-                            ?: FileServerMutationVerification.UNAVAILABLE,
-                    ),
+            val persistenceFailure = runCatching {
+                updateServerTransfer(claim, id) { task ->
+                    val lifecycle = checkNotNull(task.fileServerMutation)
+                    task.copy(
+                        requiresRefresh = outcome.isFailure,
+                        fileServerMutation = lifecycle.copy(
+                            refreshInProgress = false,
+                            refreshCompleted = outcome.isSuccess,
+                            refreshFailure = outcome.exceptionOrNull()?.asDsmFailure(),
+                            verification = outcome.getOrNull()
+                                ?: FileServerMutationVerification.UNAVAILABLE,
+                        ),
+                    )
+                }
+            }.exceptionOrNull()
+            if (persistenceFailure != null) {
+                val failure = DsmFailure(
+                    null,
+                    "",
+                    "",
+                    kind = DsmErrorKind.CHANGE_NOT_CONFIRMED,
                 )
+                _workspace.update { current ->
+                    current?.takeIf {
+                        repository === claim.repository && it.profile.id == claim.profileId
+                    }?.copy(
+                        transfers = current.transfers.map { task ->
+                            if (fileServerMutationCallbackMatches(task, claim)) {
+                                task.copy(
+                                    requiresRefresh = true,
+                                    fileServerMutation = task.fileServerMutation?.copy(
+                                        refreshInProgress = false,
+                                        refreshCompleted = false,
+                                        refreshFailure = failure,
+                                        verification = FileServerMutationVerification.UNAVAILABLE,
+                                    ),
+                                )
+                            } else task
+                        },
+                    ) ?: current
+                }
             }
             val current = _workspace.value
             if (current?.selectedModule == Module.FILES &&
@@ -16092,7 +16219,147 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+        transferStore.servers(profileId).forEach { record ->
+            if (record.state in TERMINAL_TRANSFER_STATES) return@forEach
+            val target = record.toFileServerMutationTarget()
+            when {
+                target == null -> transferStore.removeInvalidServer(record.id)
+                record.submissionPhase == PersistedServerSubmissionPhase.PREPARING ->
+                    transferStore.updateServer(record.id) {
+                        val result = interruptedServerMutationResult(
+                            target.operation,
+                            submitted = false,
+                            expectedCount = target.expectedOutputs.size,
+                        )
+                        it.copy(
+                            state = TransferState.FAILED,
+                            submissionPhase = PersistedServerSubmissionPhase.TERMINAL,
+                            requiresRefresh = false,
+                            errorKind = null,
+                            mutationResult = result.toPersistedMutationResult(writeSubmitted = false),
+                        )
+                    }
+                record.submissionPhase == PersistedServerSubmissionPhase.SUBMITTED &&
+                    !record.nasTaskId.isNullOrBlank() && target.expectedOutputs.isNotEmpty() ->
+                    resumePersistedServerTransfer(profileId, record, target)
+                else -> transferStore.updateServer(record.id) {
+                    val result = interruptedServerMutationResult(
+                        target.operation,
+                        submitted = true,
+                        expectedCount = target.expectedOutputs.size,
+                    )
+                    it.copy(
+                        state = TransferState.FAILED,
+                        submissionPhase = PersistedServerSubmissionPhase.TERMINAL,
+                        requiresRefresh = true,
+                        errorKind = DsmErrorKind.CHANGE_NOT_CONFIRMED.name,
+                        mutationResult = result.toPersistedMutationResult(writeSubmitted = true),
+                    )
+                }
+            }
+        }
         syncPersistedDownloads(profileId)
+    }
+
+    private fun resumePersistedServerTransfer(
+        profileId: String,
+        record: PersistedServerTransfer,
+        target: FileServerMutationTarget,
+    ) {
+        val repo = repository ?: return
+        val taskId = record.nasTaskId ?: return
+        val generation = fileServerMutationGeneration.incrementAndGet()
+        transferStore.updateServer(record.id) {
+            it.copy(
+                executionGeneration = generation,
+                readOnlyObservation = true,
+                state = TransferState.RUNNING,
+            )
+        }
+        val job = viewModelScope.launch {
+            try {
+                val result = repo.resumeArchiveMutationResult(
+                    operation = target.operation,
+                    taskId = taskId,
+                    expectedOutputs = target.expectedOutputs,
+                ) { completed, total ->
+                    updatePersistedServerRecord(repo, profileId, record.id, generation) {
+                        it.copy(completedUnits = completed, totalUnits = total)
+                    }
+                }
+                updatePersistedServerRecord(repo, profileId, record.id, generation) {
+                    val completed = result.status == MutationResultStatus.CONFIRMED_SUCCESS
+                    val cancelled = result.status in setOf(
+                        MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+                        MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+                    )
+                    it.copy(
+                        state = when {
+                            completed -> TransferState.SUCCEEDED
+                            cancelled -> TransferState.CANCELLED
+                            else -> TransferState.FAILED
+                        },
+                        submissionPhase = PersistedServerSubmissionPhase.TERMINAL,
+                        requiresRefresh = result.requiresRefresh,
+                        errorKind = if (completed || cancelled) null else DsmErrorKind.CHANGE_NOT_CONFIRMED.name,
+                        mutationResult = result.toPersistedMutationResult(writeSubmitted = true),
+                    )
+                }
+            } catch (error: CancellationException) {
+                updatePersistedServerRecord(repo, profileId, record.id, generation) {
+                    val result = interruptedServerMutationResult(
+                        target.operation,
+                        submitted = true,
+                        expectedCount = target.expectedOutputs.size,
+                    )
+                    it.copy(
+                        state = TransferState.FAILED,
+                        submissionPhase = PersistedServerSubmissionPhase.TERMINAL,
+                        requiresRefresh = true,
+                        errorKind = DsmErrorKind.CHANGE_NOT_CONFIRMED.name,
+                        mutationResult = result.toPersistedMutationResult(writeSubmitted = true),
+                    )
+                }
+                throw error
+            } catch (error: Throwable) {
+                val failure = error.asDsmFailure()
+                updatePersistedServerRecord(repo, profileId, record.id, generation) {
+                    val result = interruptedServerMutationResult(
+                        target.operation,
+                        submitted = true,
+                        expectedCount = target.expectedOutputs.size,
+                    )
+                    it.copy(
+                        state = TransferState.FAILED,
+                        submissionPhase = PersistedServerSubmissionPhase.TERMINAL,
+                        requiresRefresh = true,
+                        errorKind = failure.kind.name,
+                        mutationResult = result.toPersistedMutationResult(writeSubmitted = true),
+                    )
+                }
+            }
+        }
+        transferJobs[record.id] = job
+        job.invokeOnCompletion { transferJobs.remove(record.id, job) }
+    }
+
+    private fun updatePersistedServerRecord(
+        repo: DsmRepository,
+        profileId: String,
+        taskId: String,
+        generation: Long,
+        transform: (PersistedServerTransfer) -> PersistedServerTransfer,
+    ): PersistedServerTransfer? {
+        if (repository !== repo) return null
+        val current = transferStore.server(taskId) ?: return null
+        if (current.profileId != profileId || current.executionGeneration != generation) return null
+        return transferStore.updateServer(taskId) { active ->
+            if (active.profileId == profileId && active.executionGeneration == generation) {
+                transform(active)
+            } else {
+                active
+            }
+        }?.also { syncPersistedDownloads(profileId) }
     }
 
     private fun monitorUpload(taskId: String, workId: UUID) {
@@ -16158,12 +16425,75 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun syncPersistedDownloads(profileId: String) {
         val downloads = transferStore.downloads(profileId).map(::downloadTransferTask)
         val uploads = transferStore.uploads(profileId).map(::uploadTransferTask)
-        val persistedIds = (downloads + uploads).mapTo(mutableSetOf(), TransferTask::id)
+        val servers = transferStore.servers(profileId)
+            .sortedByDescending(PersistedServerTransfer::startedAtEpochMillis)
+            .mapNotNull(::serverTransferTask)
+        val persistedIds = (downloads + uploads + servers).mapTo(mutableSetOf(), TransferTask::id)
         _workspace.update { current ->
             current?.takeIf { it.profile.id == profileId }?.copy(
-                transfers = uploads + downloads + current.transfers.filterNot { it.id in persistedIds },
+                transfers = servers + uploads + downloads +
+                    current.transfers.filterNot { it.id in persistedIds },
             ) ?: current
         }
+    }
+
+    private fun serverTransferTask(server: PersistedServerTransfer): TransferTask? {
+        val target = server.toFileServerMutationTarget() ?: return null
+        val application = getApplication<Application>()
+        val operationName = when (target.operation) {
+            FileServerMutationOperation.COMPRESS -> "archiveCompress"
+            FileServerMutationOperation.EXTRACT -> "archiveExtract"
+        }
+        val result = server.mutationResult?.toMutationResult(operationName)
+        val failure = server.errorKind?.let { value ->
+            val kind = runCatching { DsmErrorKind.valueOf(value) }.getOrDefault(DsmErrorKind.UNKNOWN)
+            DsmFailure(null, "", "", kind = kind)
+        }
+        val refreshFailure = server.refreshFailureKind?.let { value ->
+            val kind = runCatching { DsmErrorKind.valueOf(value) }.getOrDefault(DsmErrorKind.UNKNOWN)
+            DsmFailure(null, "", "", kind = kind)
+        }
+        val detail = when (server.state) {
+            TransferState.WAITING, TransferState.RUNNING -> application.getString(
+                if (target.operation == FileServerMutationOperation.COMPRESS) {
+                    R.string.archive_creating
+                } else {
+                    R.string.archive_extracting
+                },
+            )
+            TransferState.CANCELLING -> application.getString(R.string.transfer_cancelling)
+            TransferState.SUCCEEDED,
+            TransferState.FAILED,
+            TransferState.CANCELLED,
+            -> result?.let { application.getString(archiveMutationMessageResource(it)) }
+                ?: application.getString(
+                    if (server.requiresRefresh) R.string.transfer_refresh_before_retry
+                    else R.string.transfer_failed,
+                )
+            TransferState.PAUSED -> application.getString(R.string.transfer_waiting)
+        }
+        return TransferTask(
+            id = server.id,
+            title = server.title,
+            detail = detail,
+            direction = TransferDirection.SERVER,
+            state = server.state,
+            completedBytes = server.completedUnits,
+            totalBytes = server.totalUnits,
+            errorMessage = failure?.localize(application)?.combined,
+            requiresRefresh = server.requiresRefresh,
+            startedAtEpochMillis = server.startedAtEpochMillis,
+            fileServerMutation = FileServerMutationLifecycle(
+                target = target,
+                result = result,
+                failure = failure,
+                refreshCompleted = server.refreshCompleted,
+                refreshFailure = refreshFailure,
+                verification = server.toFileServerMutationVerification(),
+                generation = server.executionGeneration,
+            ),
+            canCancel = !server.readOnlyObservation,
+        )
     }
 
     private fun uploadTransferTask(upload: PersistedUpload): TransferTask {
@@ -16305,30 +16635,38 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun enqueueServerTransfer(
         title: String,
-        @StringRes runningMessage: Int,
         target: FileServerMutationTarget,
-        block: suspend (DsmRepository, (Long, Long?) -> Unit) -> FileServerMutationExecution,
+        block: suspend (
+            DsmRepository,
+            (Long, Long?) -> Unit,
+            () -> Unit,
+            (String) -> Unit,
+            (List<FileServerMutationExpectedOutput>) -> Unit,
+        ) -> FileServerMutationExecution,
     ) {
         val repo = repository ?: return
         val taskId = UUID.randomUUID().toString()
         val application = getApplication<Application>()
         val generation = fileServerMutationGeneration.incrementAndGet()
-        val task = TransferTask(
-            id = taskId,
-            title = title,
-            detail = application.getString(runningMessage),
-            direction = TransferDirection.SERVER,
-            state = TransferState.RUNNING,
-            startedAtEpochMillis = System.currentTimeMillis(),
-            fileServerMutation = FileServerMutationLifecycle(target = target, generation = generation),
-        )
+        val startedAt = System.currentTimeMillis()
         val claim = synchronized(fileStationMutationLock) {
             val current = _workspace.value ?: return
             if (repository !== repo || current.selectedModule != Module.FILES) return
-            _workspace.value = current.copy(
-                transfers = listOf(task) + current.transfers,
-                message = null,
-            )
+            val persisted = target.toPersistedServerTransfer(
+                id = taskId,
+                title = title,
+                state = TransferState.RUNNING,
+                submissionPhase = PersistedServerSubmissionPhase.PREPARING,
+                startedAtEpochMillis = startedAt,
+            ).copy(executionGeneration = generation)
+            if (runCatching { transferStore.upsert(persisted) }.isFailure) {
+                _workspace.value = current.copy(
+                    message = application.getString(R.string.server_transfer_state_unavailable),
+                )
+                return
+            }
+            _workspace.value = current.copy(message = null)
+            syncPersistedDownloads(current.profile.id)
             FileServerTransferClaim(
                 repo,
                 current.profile.id,
@@ -16340,11 +16678,36 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
-                val execution = block(repo) { completed, total ->
-                    updateServerTransfer(claim, taskId) {
-                        it.copy(completedBytes = completed, totalBytes = total)
-                    }
-                }
+                val execution = block(
+                    repo,
+                    { completed, total ->
+                        updateServerTransfer(claim, taskId) {
+                            it.copy(completedBytes = completed, totalBytes = total)
+                        }
+                    },
+                    {
+                        checkNotNull(updatePersistedServerRecord(repo, claim.profileId, taskId, generation) {
+                            it.copy(submissionPhase = PersistedServerSubmissionPhase.SUBMITTING)
+                        }) { "transfer.server_state_not_persisted" }
+                    },
+                    { nasTaskId ->
+                        checkNotNull(updatePersistedServerRecord(repo, claim.profileId, taskId, generation) {
+                            it.copy(
+                                submissionPhase = PersistedServerSubmissionPhase.SUBMITTED,
+                                nasTaskId = nasTaskId,
+                            )
+                        }) { "transfer.server_state_not_persisted" }
+                    },
+                    { outputs ->
+                        checkNotNull(updatePersistedServerRecord(repo, claim.profileId, taskId, generation) {
+                            it.copy(
+                                expectedOutputs = outputs.map(
+                                    FileServerMutationExpectedOutput::toPersistedServerExpectedOutput,
+                                ),
+                            )
+                        }) { "transfer.server_state_not_persisted" }
+                    },
+                )
                 val result = execution.result
                 val message = application.getString(archiveMutationMessageResource(result))
                 val completed = result.status == MutationResultStatus.CONFIRMED_SUCCESS
@@ -16374,12 +16737,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 updateServerTransferMessage(claim, message)
             } catch (error: CancellationException) {
-                val result = cancelledFileServerMutationResult(target.operation)
+                val submitted = transferStore.server(taskId)?.submissionPhase !=
+                    PersistedServerSubmissionPhase.PREPARING
+                val result = if (submitted) {
+                    cancelledFileServerMutationResult(target.operation)
+                } else {
+                    interruptedServerMutationResult(
+                        target.operation,
+                        submitted = false,
+                        expectedCount = target.expectedOutputs.size,
+                    ).copy(
+                        status = MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+                        counts = MutationResultCounts(0, 0, 0),
+                        diagnosticTag = "archive.cancelled-before-submission",
+                    )
+                }
                 updateServerTransfer(claim, taskId) {
                     it.copy(
                         state = TransferState.CANCELLED,
-                        detail = application.getString(R.string.transfer_cancelled_refresh),
-                        requiresRefresh = true,
+                        detail = application.getString(
+                            if (submitted) R.string.transfer_cancelled_refresh
+                            else R.string.transfer_cancelled,
+                        ),
+                        requiresRefresh = submitted,
                         fileServerMutation = it.fileServerMutation?.copy(result = result),
                     )
                 }
@@ -16387,13 +16767,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: Throwable) {
                 val failure = error.asDsmFailure()
                 val message = failure.localize(application).combined
+                val submitted = transferStore.server(taskId)?.submissionPhase !=
+                    PersistedServerSubmissionPhase.PREPARING
+                val result = interruptedServerMutationResult(
+                    target.operation,
+                    submitted = submitted,
+                    expectedCount = transferStore.server(taskId)?.expectedOutputs?.size
+                        ?: target.expectedOutputs.size,
+                )
                 updateServerTransfer(claim, taskId) {
                     it.copy(
                         state = TransferState.FAILED,
                         detail = application.getString(R.string.transfer_failed),
                         errorMessage = message,
-                        requiresRefresh = true,
-                        fileServerMutation = it.fileServerMutation?.copy(failure = failure),
+                        requiresRefresh = submitted,
+                        fileServerMutation = it.fileServerMutation?.copy(
+                            result = result,
+                            failure = failure,
+                        ),
                     )
                 }
             }
@@ -16408,16 +16799,36 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         taskId: String,
         transform: (TransferTask) -> TransferTask,
     ) {
-        _workspace.update { current ->
-            current?.takeIf {
-                repository === claim.repository && it.profile.id == claim.profileId
-            }?.copy(
-                transfers = current.transfers.map { task ->
-                    if (task.id == taskId && fileServerMutationCallbackMatches(task, claim)) {
-                        transform(task)
-                    } else task
+        val current = transferStore.server(taskId) ?: return
+        val projected = serverTransferTask(current) ?: return
+        if (!fileServerMutationCallbackMatches(projected, claim)) return
+        val transformed = transform(projected)
+        val lifecycle = transformed.fileServerMutation ?: return
+        updatePersistedServerRecord(
+            claim.repository,
+            claim.profileId,
+            taskId,
+            claim.generation,
+        ) { persisted ->
+            persisted.copy(
+                state = transformed.state,
+                submissionPhase = if (transformed.state in TERMINAL_TRANSFER_STATES) {
+                    PersistedServerSubmissionPhase.TERMINAL
+                } else {
+                    persisted.submissionPhase
                 },
-            ) ?: current
+                completedUnits = transformed.completedBytes,
+                totalUnits = transformed.totalBytes,
+                requiresRefresh = transformed.requiresRefresh,
+                errorKind = lifecycle.failure?.kind?.name,
+                expectedOutputs = lifecycle.target.expectedOutputs.map(
+                    FileServerMutationExpectedOutput::toPersistedServerExpectedOutput,
+                ),
+                mutationResult = lifecycle.result?.toPersistedMutationResult(),
+                refreshCompleted = lifecycle.refreshCompleted,
+                verification = lifecycle.verification?.name,
+                refreshFailureKind = lifecycle.refreshFailure?.kind?.name,
+            )
         }
     }
 
@@ -16437,7 +16848,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         claim: FileServerTransferClaim,
     ): Boolean {
         val lifecycle = task.fileServerMutation ?: return false
-        return task.id == claim.taskId && lifecycle.target == claim.target &&
+        return task.id == claim.taskId &&
+            lifecycle.target.copy(expectedOutputs = emptyList()) ==
+                claim.target.copy(expectedOutputs = emptyList()) &&
             lifecycle.generation == claim.generation
     }
 
@@ -17540,7 +17953,7 @@ internal fun fileServerMutationBlocksWorkspaceExit(
     lifecycle: FileServerMutationLifecycle?,
 ): Boolean = lifecycle?.let {
     it.refreshInProgress || it.refreshFailure != null ||
-        (it.failure != null && (!it.refreshCompleted ||
+        (it.failure != null && it.result?.submitted != false && (!it.refreshCompleted ||
             it.verification == FileServerMutationVerification.UNAVAILABLE)) ||
         (it.result?.requiresRefresh == true && (!it.refreshCompleted ||
             it.verification == FileServerMutationVerification.UNAVAILABLE))

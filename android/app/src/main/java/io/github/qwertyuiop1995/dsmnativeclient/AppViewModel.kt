@@ -25,6 +25,8 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import io.github.qwertyuiop1995.dsmnativeclient.data.DsmRepository
+import io.github.qwertyuiop1995.dsmnativeclient.data.CrossNasTransferCoordinator
+import io.github.qwertyuiop1995.dsmnativeclient.data.RepositoryCrossNasTransferEndpoint
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedDownload
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedServerSubmissionPhase
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedServerTransfer
@@ -221,6 +223,9 @@ data class FileCopyMoveLocation(
 data class FileCopyMoveState(
     val items: List<FileItem>,
     val operation: FileCopyMoveOperation,
+    val sourceProfileId: String = "",
+    val targetProfileId: String = sourceProfileId,
+    val targetProfiles: List<NasProfile> = emptyList(),
     val location: FileCopyMoveLocation = FileCopyMoveLocation("", canWrite = false),
     val history: List<FileCopyMoveLocation> = emptyList(),
     val destinationBaselines: Map<String, FileItem> = emptyMap(),
@@ -332,6 +337,7 @@ private data class FileStationMutationClaim(
     val profileId: String,
     val target: FileStationMutationTarget,
     val generation: Long,
+    val verifyOnRefresh: Boolean = true,
 )
 
 private enum class FileStationMutationRefresh {
@@ -3198,6 +3204,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var nasSwitchJob: Job? = null
     private var isSwitchingNas = false
     private val transferJobs = mutableMapOf<String, Job>()
+    private val crossNasRepositories = mutableMapOf<String, DsmRepository>()
+    private val crossNasTransferCoordinator = CrossNasTransferCoordinator()
     private var fileBackgroundTaskJob: Job? = null
     private val fileUploadPreflightJobs = mutableMapOf<String, Job>()
     private var fileUploadPreflightBusyToken: FileUploadPreflightToken? = null
@@ -6342,13 +6350,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val repo = repository ?: return
         val workspace = _workspace.value ?: return
         if (items.isEmpty()) return
-        if (!workspace.supportsCopyMove) {
+        val targetProfiles = (store.profiles() + workspace.profile)
+            .distinctBy(NasProfile::id)
+            .filter { it.id == workspace.profile.id || store.session(it.id) != null }
+        if (!workspace.supportsCopyMove && targetProfiles.size == 1) {
             _workspace.update {
                 it?.copy(message = getApplication<Application>().getString(R.string.file_copy_move_unavailable))
             }
             return
         }
-        val move = FileCopyMoveState(items = items, operation = operation)
+        val move = FileCopyMoveState(
+            items = items,
+            operation = operation,
+            sourceProfileId = workspace.profile.id,
+            targetProfileId = workspace.profile.id,
+            targetProfiles = targetProfiles,
+        )
         val target = FileStationMutationTarget(
             profileId = workspace.profile.id,
             module = Module.FILES,
@@ -6372,10 +6389,38 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { loadFileCopyMoveFolders(repo, move) }
     }
 
+    fun selectFileCopyMoveTarget(profileId: String) {
+        val current = _workspace.value ?: return
+        val operation = current.fileCopyMove ?: return
+        if (current.isPerformingAction || operation.targetProfiles.none { it.id == profileId }) return
+        val next = operation.copy(
+            targetProfileId = profileId,
+            location = FileCopyMoveLocation("", canWrite = false),
+            history = emptyList(),
+            destinationBaselines = emptyMap(),
+        )
+        _workspace.update { it?.copy(fileCopyMove = next, fileCopyMoveFolders = Loadable.Loading) }
+        viewModelScope.launch {
+            runCatching { resolveFileCopyMoveRepository(next) }
+                .onSuccess { loadFileCopyMoveFolders(it, next) }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _workspace.update { workspace ->
+                        workspace?.takeIf {
+                            it.fileCopyMove?.targetProfileId == profileId &&
+                                it.fileCopyMove.location.path.isBlank()
+                        }?.copy(
+                            fileCopyMoveFolders = Loadable.Failed(error.asDsmFailure()),
+                        ) ?: workspace
+                    }
+                }
+        }
+    }
+
     fun openFileCopyMoveFolder(folder: FileItem) {
         if (!folder.isDirectory) return
-        val repo = repository ?: return
         val current = _workspace.value?.fileCopyMove ?: return
+        val repo = fileCopyMoveRepository(current) ?: return
         val next = current.copy(
             location = FileCopyMoveLocation(folder.path, folder.canWrite),
             history = current.history + current.location,
@@ -6388,8 +6433,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun goBackFileCopyMoveFolder() {
-        val repo = repository ?: return
         val current = _workspace.value?.fileCopyMove ?: return
+        val repo = fileCopyMoveRepository(current) ?: return
         val previous = current.history.lastOrNull() ?: return
         val next = current.copy(
             location = previous,
@@ -6402,10 +6447,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun retryFileCopyMoveFolders() {
-        val repo = repository ?: return
         val move = _workspace.value?.fileCopyMove ?: return
         _workspace.update { it?.copy(fileCopyMoveFolders = Loadable.Loading) }
-        viewModelScope.launch { loadFileCopyMoveFolders(repo, move) }
+        viewModelScope.launch {
+            runCatching { resolveFileCopyMoveRepository(move) }
+                .onSuccess { loadFileCopyMoveFolders(it, move) }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _workspace.update { current ->
+                        current?.takeIf {
+                            it.fileCopyMove?.targetProfileId == move.targetProfileId &&
+                                it.fileCopyMove.location.path == move.location.path
+                        }?.copy(
+                            fileCopyMoveFolders = Loadable.Failed(error.asDsmFailure()),
+                        ) ?: current
+                    }
+                }
+        }
     }
 
     fun cancelFileCopyMove() {
@@ -6595,6 +6653,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             target,
             FileStationMutationRefresh.FILE_BROWSER,
             ::fileCopyMoveMessageResource,
+            verifyOnRefresh = operation.targetProfileId == operation.sourceProfileId,
             applyResult = { workspace, result ->
                 workspace.copy(
                     fileBrowser = if (result.submitted || result.counts.succeeded > 0) {
@@ -6608,9 +6667,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
             },
         ) { repo ->
-            when (operation.operation) {
-                FileCopyMoveOperation.COPY -> repo.copyResult(operation.items, destinationBaseline)
-                FileCopyMoveOperation.MOVE -> repo.moveResult(operation.items, destinationBaseline)
+            if (operation.targetProfileId == operation.sourceProfileId) {
+                when (operation.operation) {
+                    FileCopyMoveOperation.COPY -> repo.copyResult(operation.items, destinationBaseline)
+                    FileCopyMoveOperation.MOVE -> repo.moveResult(operation.items, destinationBaseline)
+                }
+            } else {
+                val targetRepository = checkNotNull(fileCopyMoveRepository(operation))
+                crossNasTransferCoordinator.transfer(
+                    source = RepositoryCrossNasTransferEndpoint(repo),
+                    target = RepositoryCrossNasTransferEndpoint(targetRepository),
+                    items = operation.items,
+                    destination = destinationBaseline,
+                    moveSource = operation.operation == FileCopyMoveOperation.MOVE,
+                )
             }
         }
     }
@@ -13923,6 +13993,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             chatAttachmentPreflightGeneration.incrementAndGet()
             chatMutationGenerations.clear()
             repository = null
+            crossNasRepositories.clear()
             _workspace.value = null
             candidate
         }
@@ -14034,6 +14105,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             chatAttachmentPreflightGeneration.incrementAndGet()
             chatMutationGenerations.clear()
             repository = null
+            crossNasRepositories.clear()
             _workspace.value = null
             candidate
         }
@@ -14688,6 +14760,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _workspace.update { current ->
                 current?.takeIf {
                     it.fileCopyMove?.items?.map(FileItem::path) == operation.items.map(FileItem::path) &&
+                        it.fileCopyMove.targetProfileId == operation.targetProfileId &&
                         it.fileCopyMove.location.path == operation.location.path
                 }?.copy(fileCopyMoveFolders = Loadable.Ready(page)) ?: current
             }
@@ -14695,9 +14768,41 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _workspace.update { current ->
                 current?.takeIf {
                     it.fileCopyMove?.items?.map(FileItem::path) == operation.items.map(FileItem::path) &&
+                        it.fileCopyMove.targetProfileId == operation.targetProfileId &&
                         it.fileCopyMove.location.path == operation.location.path
                 }?.copy(fileCopyMoveFolders = Loadable.Failed(error.asDsmFailure())) ?: current
             }
+        }
+    }
+
+    private fun fileCopyMoveRepository(operation: FileCopyMoveState): DsmRepository? =
+        if (operation.targetProfileId == operation.sourceProfileId) {
+            repository
+        } else {
+            crossNasRepositories[operation.targetProfileId]
+        }
+
+    private suspend fun resolveFileCopyMoveRepository(
+        operation: FileCopyMoveState,
+    ): DsmRepository {
+        fileCopyMoveRepository(operation)?.let { return it }
+        val profile = operation.targetProfiles.firstOrNull { it.id == operation.targetProfileId }
+            ?: throw DsmFailure(
+                null,
+                "The destination NAS is no longer available",
+                "Choose another NAS and try again.",
+                kind = DsmErrorKind.NO_SAVED_SESSION,
+            )
+        val session = store.session(profile.id) ?: throw DsmFailure(
+            null,
+            "The destination NAS needs you to sign in again",
+            "Connect to that NAS, then retry the transfer.",
+            true,
+            DsmErrorKind.NO_SAVED_SESSION,
+        )
+        val discovered = connectionResolver.discover(profile)
+        return DsmRepository(discovered.profile, session, api, discovered.capabilities).also {
+            crossNasRepositories[profile.id] = it
         }
     }
 
@@ -14825,6 +14930,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         messageResource: (MutationResult) -> Int,
         messageText: ((MutationResult) -> String)? = null,
         applyResult: (WorkspaceState, MutationResult) -> WorkspaceState = { current, _ -> current },
+        verifyOnRefresh: Boolean = true,
         block: suspend (DsmRepository) -> MutationResult,
     ): Boolean {
         val claim = synchronized(fileStationMutationLock) {
@@ -14874,7 +14980,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     mutationGeneration = generation,
                 ),
             )
-            FileStationMutationClaim(repo, current.profile.id, target, generation)
+            FileStationMutationClaim(
+                repo,
+                current.profile.id,
+                target,
+                generation,
+                verifyOnRefresh,
+            )
         } ?: return false
         viewModelScope.launch {
             try {
@@ -15014,7 +15126,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 FileStationMutationRefresh.TEXT_PREVIEW -> Unit
             }
-            if (claim.target.operation == FileStationMutationOperation.TEXT_SAVE) {
+            if (!claim.verifyOnRefresh) {
+                FileStationMutationVerification.MATCHES to null
+            } else if (claim.target.operation == FileStationMutationOperation.TEXT_SAVE) {
                 verifyTextPreviewSave(claim.repository, claim.target)
             } else {
                 verifyFileStationMutation(claim.repository, claim.target) to null

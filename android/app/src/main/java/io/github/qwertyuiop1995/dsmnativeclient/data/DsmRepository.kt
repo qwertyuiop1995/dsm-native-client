@@ -743,6 +743,12 @@ class DsmRepository(
 
     fun supportsCopyMove(): Boolean = supports(FILE_STATION_COPY_MOVE_API)
 
+    internal fun supportsCrossNasSource(moveSource: Boolean): Boolean =
+        supports(FILE_STATION_DOWNLOAD_API) && (!moveSource || supports(FILE_STATION_DELETE_API))
+
+    internal fun supportsCrossNasTarget(includesDirectory: Boolean): Boolean =
+        supportsUploads() && (!includesDirectory || supports(FILE_STATION_CREATE_FOLDER_API))
+
     fun supportsSharing(): Boolean = supports(FILE_STATION_SHARING_API)
 
     fun supportsCompression(): Boolean =

@@ -350,6 +350,42 @@ class DdnsMutationResultTest {
         assertConfirmed(repo.testDdnsResult(newDraft()))
     }
 
+    @Test
+    fun `DDNS 四个写入口在途取消都不重放写请求`() = runBlocking {
+        val testTransport = CancelOnceInterceptor(cancelMethod = "test")
+        val test = repository(testTransport).testDdnsResult(newDraft())
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, test.status)
+        assertTrue(test.submitted)
+        assertEquals(1, testTransport.methods().count { it == "test" })
+
+        val saveTransport = CancelOnceInterceptor(
+            cancelMethod = "create",
+            recordResponses = listOf(EMPTY_RECORDS, EMPTY_RECORDS),
+        )
+        val save = repository(saveTransport).saveDdnsResult(null, newDraft())
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, save.status)
+        assertTrue(save.submitted)
+        assertEquals(1, saveTransport.methods().count { it == "create" })
+
+        val deleteTransport = CancelOnceInterceptor(
+            cancelMethod = "delete",
+            recordResponses = listOf(SAVED_RECORDS, SAVED_RECORDS),
+        )
+        val delete = repository(deleteTransport).deleteDdnsResult(savedRecord())
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, delete.status)
+        assertTrue(delete.submitted)
+        assertEquals(1, deleteTransport.methods().count { it == "delete" })
+
+        val refreshTransport = CancelOnceInterceptor(
+            cancelMethod = "update_ip_address",
+            recordResponses = listOf(SAVED_RECORDS),
+        )
+        val refresh = repository(refreshTransport).refreshDdnsResult(setOf("Example"))
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, refresh.status)
+        assertTrue(refresh.submitted)
+        assertEquals(1, refreshTransport.methods().count { it == "update_ip_address" })
+    }
+
     private fun repository(
         interceptor: Interceptor,
         versionOverrides: Map<String, Int> = emptyMap(),
@@ -511,10 +547,16 @@ private class BlockingTestInterceptor(
     fun methods() = synchronized(requests) { requests.map { it.fields()["method"] } }
 }
 
-private class CancelOnceInterceptor(private val cancelMethod: String) : Interceptor {
+private class CancelOnceInterceptor(
+    private val cancelMethod: String,
+    recordResponses: List<String> = listOf(DdnsMutationResultTest.EMPTY_RECORDS),
+) : Interceptor {
     private var cancelled = false
+    private val records = ArrayDeque(recordResponses)
+    private val requests = mutableListOf<Request>()
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
+        requests += request
         val fields = request.fields()
         if (!cancelled && fields["method"] == cancelMethod) {
             cancelled = true
@@ -530,11 +572,13 @@ private class CancelOnceInterceptor(private val cancelMethod: String) : Intercep
             fields["method"] == "list" && fields["api"] == DdnsMutationResultTest.PROVIDER_API ->
                 DdnsMutationResultTest.PROVIDERS
             fields["method"] == "list" && fields["api"] == DdnsMutationResultTest.RECORD_API ->
-                DdnsMutationResultTest.EMPTY_RECORDS
+                records.removeFirstOrNull() ?: DdnsMutationResultTest.EMPTY_RECORDS
             else -> DdnsMutationResultTest.SUCCESS
         }
         return ddnsResponse(request, body)
     }
+
+    fun methods() = requests.map { it.fields()["method"] }
 }
 
 private class CancellationResponseBody : ResponseBody() {

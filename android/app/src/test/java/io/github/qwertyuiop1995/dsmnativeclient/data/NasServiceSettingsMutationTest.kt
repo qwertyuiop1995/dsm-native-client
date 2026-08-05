@@ -1180,6 +1180,43 @@ class NasServiceSettingsMutationTest {
     }
 
     @Test
+    fun `电源动作无安全回读且成功仅表示请求已接受`() = runBlocking {
+        val transport = SettingsInterceptor(json(SUCCESS), json(SUCCESS))
+
+        val result = repository(transport, SYSTEM to 3)
+            .performPowerActionResult(NasPowerAction.SHUTDOWN)
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertTrue(result.submitted)
+        assertFalse(result.requiresRefresh)
+        assertEquals(listOf("info", "shutdown"), transport.methods())
+    }
+
+    @Test
+    fun `电源请求在途取消保留已提交语义且不重放`() = runBlocking {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val transport = SettingsInterceptor(
+            json(SUCCESS), blockingJson(SUCCESS, entered, release),
+        )
+        var result: io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResult? = null
+        val job = launch(Dispatchers.Default) {
+            result = repository(transport, SYSTEM to 3)
+                .performPowerActionResult(NasPowerAction.REBOOT)
+        }
+
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        job.cancel()
+        release.countDown()
+        job.join()
+
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, result?.status)
+        assertTrue(result?.submitted == true)
+        assertTrue(result?.requiresRefresh == true)
+        assertEquals(1, transport.methods().count { it == "reboot" })
+    }
+
+    @Test
     fun `硬件六组设置按契约提交并整体回读`() = runBlocking {
         val transport = SettingsInterceptor(
             json(POWER_OFF), json(LED_LOW), json(LED_RANGE), json(FAN_QUIET), json(BEEP_OFF),
@@ -1230,6 +1267,57 @@ class NasServiceSettingsMutationTest {
         assertEquals(MutationResultStatus.PARTIAL_SUCCESS, result.status)
         assertEquals(1, result.counts.succeeded)
         assertEquals(2, transport.methods().count { it == "set" })
+    }
+
+    @Test
+    fun `硬件设置写入成功但回读失败保持未确认且不重放`() = runBlocking {
+        val transport = SettingsInterceptor(
+            json(POWER_OFF),
+            json(SUCCESS),
+            failure(IOException("synthetic hardware readback disconnect")),
+        )
+        val original = emptyHardware().copy(restartsAfterPowerFailure = false)
+
+        val result = repository(transport, POWER to 1).saveHardwareSettingsResult(
+            original,
+            original.copy(restartsAfterPowerFailure = true),
+        )
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertTrue(result.submitted)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, result.counts.unknown)
+        assertEquals(1, transport.methods().count { it == "set" })
+    }
+
+    @Test
+    fun `硬件设置写请求在途取消只回读且不重放`() = runBlocking {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val transport = SettingsInterceptor(
+            json(POWER_OFF),
+            blockingJson(SUCCESS, entered, release),
+            json(POWER_OFF),
+        )
+        val original = emptyHardware().copy(restartsAfterPowerFailure = false)
+        var result: io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResult? = null
+        val job = launch(Dispatchers.Default) {
+            result = repository(transport, POWER to 1).saveHardwareSettingsResult(
+                original,
+                original.copy(restartsAfterPowerFailure = true),
+            )
+        }
+
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        job.cancel()
+        release.countDown()
+        job.join()
+
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, result?.status)
+        assertTrue(result?.submitted == true)
+        assertTrue(result?.requiresRefresh == true)
+        assertEquals(1, result?.counts?.unknown)
+        assertEquals(1, transport.methods().count { it == "set" })
     }
 
     @Test

@@ -350,6 +350,64 @@ class DownloadCreationResultTest {
     }
 
     @Test
+    fun `任务文件只在稳定任务回读后确认成功且只上传一次`() = runBlocking {
+        val transport = ScriptedDownloadCreationInterceptor(
+            emptyTaskList(),
+            success("""{"taskid":"task-file-1"}"""),
+            taskList("task-file-1"),
+        )
+        val bytes = "d4:infod4:name4:testee".encodeToByteArray()
+
+        val result = repository(transport).createDownloadFromFileResult(
+            taskFileSource(bytes),
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(1, result.counts.succeeded)
+        assertFalse(result.requiresRefresh)
+        assertEquals(listOf("list", "create", "list"), transport.methods())
+        assertEquals(1, transport.requests.count { it.body is MultipartBody })
+    }
+
+    @Test
+    fun `任务文件上传成功但回读失败时保持未确认且不再次上传`() = runBlocking {
+        val transport = ScriptedDownloadCreationInterceptor(
+            emptyTaskList(),
+            success("""{"taskid":"task-file-1"}"""),
+            IOException("synthetic file task readback failure"),
+        )
+        val bytes = "d4:infod4:name4:testee".encodeToByteArray()
+
+        val result = repository(transport).createDownloadFromFileResult(
+            taskFileSource(bytes),
+        )
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertEquals(1, result.counts.unknown)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, transport.requests.count { it.body is MultipartBody })
+    }
+
+    @Test
+    fun `任务文件提交后的取消只要求核对且不再次上传`() = runBlocking {
+        val transport = BlockingDownloadCreationInterceptor(readbackTaskId = null)
+        val repo = repository(transport)
+        val bytes = "d4:infod4:name4:testee".encodeToByteArray()
+        var status: MutationResultStatus? = null
+        val worker = launch(Dispatchers.IO) {
+            status = repo.createDownloadFromFileResult(taskFileSource(bytes)).status
+        }
+        assertTrue(transport.submissionStarted.await(2, TimeUnit.SECONDS))
+
+        worker.cancel()
+        transport.allowSubmission.countDown()
+        worker.join()
+
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, status)
+        assertEquals(1, transport.requests.count { it.body is MultipartBody })
+    }
+
+    @Test
     fun `同名同大小的不同任务文件不会被误判为重复提交`() = runBlocking {
         val transport = ConcurrentFileCreationInterceptor()
         val repo = repository(transport)
@@ -459,6 +517,14 @@ class DownloadCreationResultTest {
         } else {
             emptyMap()
         },
+    )
+
+    private fun taskFileSource(bytes: ByteArray) = UploadSource(
+        displayName = "synthetic.torrent",
+        contentType = "application/x-bittorrent",
+        contentLength = bytes.size.toLong(),
+        openInputStream = { ByteArrayInputStream(bytes) },
+        requestToken = "matrix-request",
     )
 }
 

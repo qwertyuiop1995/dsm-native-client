@@ -17,7 +17,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.BufferedSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -217,6 +219,122 @@ class VirtualMachineMutationResultTest {
         assertEquals(listOf("list"), transport.methods())
     }
 
+    @Test
+    fun `生命周期提交断线后只回读确认最终状态`() = runBlocking {
+        val transport = ScriptedVmmInterceptor(
+            VmmStep.Json(guestList("running")),
+            VmmStep.Failure(IOException("synthetic lifecycle disconnect")),
+            VmmStep.Json(guestList("shutdown")),
+        )
+
+        val result = repository(transport, API_GUEST, API_GUEST_ACTION)
+            .controlVirtualMachineResult("guest-1", ResourceState.RUNNING, "shutdown")
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(listOf("list", "shutdown", "list"), transport.methods())
+        assertEquals(1, transport.methods().count { it == "shutdown" })
+    }
+
+    @Test
+    fun `生命周期写后回读失败保持未确认`() = runBlocking {
+        val transport = ScriptedVmmInterceptor(
+            VmmStep.Json(guestList("running")),
+            VmmStep.Json(SUCCESS),
+            VmmStep.Json("""{"success":true,"data":{}}"""),
+        )
+
+        val result = repository(transport, API_GUEST, API_GUEST_ACTION)
+            .controlVirtualMachineResult("guest-1", ResourceState.RUNNING, "shutdown")
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertTrue(result.submitted)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, transport.methods().count { it == "shutdown" })
+    }
+
+    @Test
+    fun `生命周期与删除在途取消只回读且不重放`() = runBlocking {
+        val controlTransport = ScriptedVmmInterceptor(
+            VmmStep.Json(guestList("running")),
+            VmmStep.Cancellation,
+            VmmStep.Json(guestList("running")),
+        )
+        val control = repository(controlTransport, API_GUEST, API_GUEST_ACTION)
+            .controlVirtualMachineResult("guest-1", ResourceState.RUNNING, "shutdown")
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, control.status)
+        assertEquals(1, controlTransport.methods().count { it == "shutdown" })
+
+        val deleteTransport = ScriptedVmmInterceptor(
+            VmmStep.Json(guestList("stopped")),
+            VmmStep.Cancellation,
+            VmmStep.Json(guestList("stopped")),
+        )
+        val delete = repository(deleteTransport, API_GUEST).deleteVirtualMachineResult("guest-1")
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, delete.status)
+        assertEquals(1, deleteTransport.methods().count { it == "delete" })
+    }
+
+    @Test
+    fun `虚拟机删除提交断线后只回读确认目标消失`() = runBlocking {
+        val transport = ScriptedVmmInterceptor(
+            VmmStep.Json(guestList("stopped")),
+            VmmStep.Failure(IOException("synthetic delete disconnect")),
+            VmmStep.Json("""{"success":true,"data":{"guests":[]}}"""),
+        )
+
+        val result = repository(transport, API_GUEST).deleteVirtualMachineResult("guest-1")
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(listOf("list", "delete", "list"), transport.methods())
+        assertEquals(1, transport.methods().count { it == "delete" })
+    }
+
+    @Test
+    fun `虚拟机删除写后回读失败保持未确认`() = runBlocking {
+        val transport = ScriptedVmmInterceptor(
+            VmmStep.Json(guestList("stopped")),
+            VmmStep.Json(SUCCESS),
+            VmmStep.Json("""{"success":true,"data":{}}"""),
+        )
+
+        val result = repository(transport, API_GUEST).deleteVirtualMachineResult("guest-1")
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, transport.methods().count { it == "delete" })
+    }
+
+    @Test
+    fun `公开映像删除成功断线与取消均不重放`() = runBlocking {
+        val imageList = """{"success":true,"data":{"images":[{"id":"image-1","name":"Synthetic","status":"normal"}]}}"""
+        val emptyImages = """{"success":true,"data":{"images":[]}}"""
+
+        val successTransport = ScriptedVmmInterceptor(
+            VmmStep.Json(imageList), VmmStep.Json(SUCCESS), VmmStep.Json(emptyImages),
+        )
+        val success = repository(successTransport, API_IMAGE)
+            .deleteVirtualMachineImageResult("image-1")
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, success.status)
+
+        val disconnectTransport = ScriptedVmmInterceptor(
+            VmmStep.Json(imageList),
+            VmmStep.Failure(IOException("synthetic image delete disconnect")),
+            VmmStep.Json(emptyImages),
+        )
+        val disconnect = repository(disconnectTransport, API_IMAGE)
+            .deleteVirtualMachineImageResult("image-1")
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, disconnect.status)
+        assertEquals(1, disconnectTransport.methods().count { it == "delete" })
+
+        val cancelTransport = ScriptedVmmInterceptor(
+            VmmStep.Json(imageList), VmmStep.Cancellation, VmmStep.Json(imageList),
+        )
+        val cancel = repository(cancelTransport, API_IMAGE)
+            .deleteVirtualMachineImageResult("image-1")
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, cancel.status)
+        assertEquals(1, cancelTransport.methods().count { it == "delete" })
+    }
+
     private fun repository(interceptor: Interceptor, vararg capabilities: String) = DsmRepository(
         NasProfile("test", "Test", "https://nas.example.invalid", "tester"),
         DsmSession("test", "test-session", "test-token"),
@@ -295,6 +413,43 @@ private class VmmImageReadbackFailureInterceptor : Interceptor {
     }
 
     fun methods(): List<String?> = requests.map { it.formFields()["method"] }
+}
+
+private sealed interface VmmStep {
+    data class Json(val body: String) : VmmStep
+    data class Failure(val error: IOException) : VmmStep
+    data object Cancellation : VmmStep
+}
+
+private class ScriptedVmmInterceptor(vararg steps: VmmStep) : Interceptor {
+    private val pending = ArrayDeque(steps.toList())
+    val requests = mutableListOf<Request>()
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        requests += request
+        return when (val step = pending.removeFirstOrNull()
+            ?: VmmStep.Failure(IOException("缺少合成 VMM 响应"))) {
+            is VmmStep.Json -> vmmResponse(request, step.body)
+            is VmmStep.Failure -> throw step.error
+            VmmStep.Cancellation -> Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .body(VmmCancellationBody())
+                .build()
+        }
+    }
+
+    fun methods(): List<String?> = requests.map { it.formFields()["method"] }
+}
+
+private class VmmCancellationBody : ResponseBody() {
+    override fun contentType() = "application/json".toMediaType()
+    override fun contentLength() = -1L
+    override fun source(): BufferedSource =
+        throw kotlinx.coroutines.CancellationException("synthetic VMM cancellation")
 }
 
 private fun vmmResponse(request: Request, body: String): Response = Response.Builder()

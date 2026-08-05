@@ -7,7 +7,12 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmApiClient
 import java.io.IOException
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -101,6 +106,44 @@ class PhotoRestoreRepositoryTest {
     }
 
     @Test
+    fun `恢复任务完成但回读失败时保持未确认且不重放`() = runBlocking {
+        val transport = RestoreInterceptor(
+            fileResponse("/photos/旅行", "旅行", true, true),
+            listResponse("/photos/旅行", 0, ""),
+            """{"success":true,"data":{"taskid":"restore-task"}}""",
+            """{"success":true,"data":{"finished":true}}""",
+            """{"success":false,"error":{"code":100}}""",
+        )
+
+        val result = repository(transport)
+            .restoreFromRecycleResult("/photos/#recycle/旅行/海边.jpg")
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertEquals(1, result.counts.unknown)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, transport.requests.count { it.restoreMethod() == "start" })
+    }
+
+    @Test
+    fun `恢复提交后的取消只停止任务且不重放`() = runBlocking {
+        val transport = BlockingRestoreStatusInterceptor()
+        val repo = repository(transport)
+        var status: MutationResultStatus? = null
+        val worker = launch(Dispatchers.IO) {
+            status = repo.restoreFromRecycleResult("/photos/#recycle/旅行/海边.jpg").status
+        }
+        assertTrue(transport.statusStarted.await(2, TimeUnit.SECONDS))
+
+        worker.cancel()
+        transport.allowStatus.countDown()
+        worker.join()
+
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, status)
+        assertEquals(1, transport.methods().count { it == "start" })
+        assertEquals(1, transport.methods().count { it == "stop" })
+    }
+
+    @Test
     fun `恢复路径或能力无效时零请求拒绝`() = runBlocking {
         val invalidTransport = RestoreInterceptor()
         val invalid = repository(invalidTransport).restoreFromRecycleResult("/photos/海边.jpg")
@@ -185,5 +228,45 @@ private class RestoreInterceptor(vararg responses: String) : Interceptor {
                     .toResponseBody("application/json".toMediaType()),
             )
             .build()
+    }
+}
+
+private class BlockingRestoreStatusInterceptor : Interceptor {
+    val statusStarted = CountDownLatch(1)
+    val allowStatus = CountDownLatch(1)
+    private val requests: MutableList<Request> = Collections.synchronizedList(mutableListOf())
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        requests += request
+        val method = request.restoreMethod()
+        val body = when (method) {
+            "getinfo" -> """{"success":true,"data":{"files":[{"name":"旅行","path":"/photos/旅行","isdir":true,"additional":{"perm":{"write":true}}}]}}"""
+            "list" -> """{"success":true,"data":{"offset":0,"total":0,"files":[]}}"""
+            "start" -> """{"success":true,"data":{"taskid":"restore-task"}}"""
+            "status" -> {
+                statusStarted.countDown()
+                check(allowStatus.await(2, TimeUnit.SECONDS)) { "等待恢复状态响应超时" }
+                """{"success":true,"data":{"finished":false}}"""
+            }
+            "stop" -> """{"success":true,"data":{}}"""
+            else -> error("未处理的恢复方法：$method")
+        }
+        return Response.Builder()
+            .request(request)
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body(body.toResponseBody("application/json".toMediaType()))
+            .build()
+    }
+
+    fun methods(): List<String?> = requests.map(Request::restoreMethod)
+}
+
+private fun Request.restoreMethod(): String? {
+    val form = body as? okhttp3.FormBody ?: return null
+    return (0 until form.size).firstNotNullOfOrNull { index ->
+        form.value(index).takeIf { form.name(index) == "method" }
     }
 }

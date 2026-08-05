@@ -1076,6 +1076,10 @@
     <string name="files_copied">已复制 %1$d 项内容</string>
     <string name="files_moved">已移动 %1$d 项内容</string>
     <string name="file_copy_move_unavailable">当前 NAS 不支持复制或移动内容。</string>
+    <string name="file_copy_move_destination_nas">目标 NAS</string>
+    <string name="file_copy_move_current_nas">%1$s（当前）</string>
+    <string name="file_copy_move_cross_nas_hint">文件会通过有限内存直接传送。移动时，只有全部上传确认完成后才会删除源文件。</string>
+    <string name="file_copy_move_cross_nas_directory_move_unavailable">文件夹可以复制到另一台 NAS，但暂时不能安全移动。请先复制并核对结果，再自行删除源文件夹。</string>
     <string name="file_copy_move_partial">已完成 %1$d 项，另有 %2$d 项需要处理。请先刷新源文件夹和目标文件夹，再重试。</string>
     <string name="file_copy_move_unverified">NAS 已收到请求，但无法确认最终结果。请先刷新源文件夹和目标文件夹，再进行其他操作。</string>
     <string name="file_copy_move_permission_denied">当前账号无法在所选文件夹完成此操作。请选择其他文件夹或检查访问权限。</string>

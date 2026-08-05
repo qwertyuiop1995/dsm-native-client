@@ -307,6 +307,82 @@ class VirtualMachineCreationRepositoryTest {
     }
 
     @Test
+    fun `常规设置提交断线后只回读且不重放`() = runBlocking {
+        val transport = VirtualMachineCreationInterceptor(
+            guestList("""{"guest_id":"guest-1","guest_name":"Old name","status":"shutdown"}"""),
+            guestDetails(name = "Old name", cpu = 1, memory = 1024, autorun = 0, description = ""),
+            "not-json",
+            guestDetails(cpu = 2, memory = 2048, autorun = 2, description = "Updated"),
+        )
+
+        val result = repository(transport).updateVirtualMachineSettingsResult(
+            "guest-1",
+            VirtualMachineSettings("Old name", "", 1, 1024, false),
+            VirtualMachineSettings("Synthetic VM", "Updated", 2, 2048, true),
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        val methods = transport.requests.map { it.vmmCreationFields()["method"] }
+        assertEquals(listOf("list", "get", "set"), methods.take(3))
+        assertTrue(methods.drop(3).all { it == "get" })
+        assertEquals(1, transport.requests.count { it.vmmCreationFields()["method"] == "set" })
+    }
+
+    @Test
+    fun `常规设置写后回读结构失败保持未确认`() = runBlocking {
+        val transport = VirtualMachineCreationInterceptor(
+            guestList("""{"guest_id":"guest-1","guest_name":"Old name","status":"shutdown"}"""),
+            guestDetails(name = "Old name", cpu = 1, memory = 1024, autorun = 0, description = ""),
+            """{"success":true,"data":{}}""",
+            """{"success":true,"data":{"guest_id":"guest-1"}}""",
+        )
+
+        val result = repository(transport).updateVirtualMachineSettingsResult(
+            "guest-1",
+            VirtualMachineSettings("Old name", "", 1, 1024, false),
+            VirtualMachineSettings("Synthetic VM", "Updated", 2, 2048, true),
+        )
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertTrue(result.submitted)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, transport.requests.count { it.vmmCreationFields()["method"] == "set" })
+    }
+
+    @Test
+    fun `常规设置写请求在途取消只回读且不重放`() = runBlocking {
+        val transport = VirtualMachineCreationInterceptor(
+            guestList("""{"guest_id":"guest-1","guest_name":"Old name","status":"shutdown"}"""),
+            guestDetails(name = "Old name", cpu = 1, memory = 1024, autorun = 0, description = ""),
+            CANCEL_RESPONSE,
+            guestDetails(name = "Old name", cpu = 1, memory = 1024, autorun = 0, description = ""),
+        )
+        val repo = repository(transport)
+        val captured = CompletableDeferred<io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResult>()
+        val job = launch(Dispatchers.Default) {
+            captured.complete(
+                repo.updateVirtualMachineSettingsResult(
+                    "guest-1",
+                    VirtualMachineSettings("Old name", "", 1, 1024, false),
+                    VirtualMachineSettings("Synthetic VM", "Updated", 2, 2048, true),
+                ),
+            )
+        }
+        assertTrue(transport.cancellationRequestEntered.await(5, TimeUnit.SECONDS))
+        job.cancel()
+        transport.releaseCancellationRequest.countDown()
+        job.join()
+        val result = captured.await()
+
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, result.status)
+        assertTrue(result.submitted)
+        assertEquals(1, transport.requests.count { it.vmmCreationFields()["method"] == "set" })
+        val methods = transport.requests.map { it.vmmCreationFields()["method"] }
+        assertEquals(listOf("list", "get", "set"), methods.take(3))
+        assertTrue(methods.drop(3).all { it == "get" })
+    }
+
+    @Test
     fun `缺少用户所见基线的旧设置入口零请求拒绝`() = runBlocking {
         val transport = VirtualMachineCreationInterceptor()
 

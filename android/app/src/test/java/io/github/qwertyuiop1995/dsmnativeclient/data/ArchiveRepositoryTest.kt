@@ -443,6 +443,53 @@ class ArchiveRepositoryTest {
     }
 
     @Test
+    fun `解压提交后取消会停止任务且不会再次启动`() = runBlocking {
+        val transport = BlockingExtractStatusInterceptor()
+        val repo = repository(transport)
+        var status: MutationResultStatus? = null
+        val worker = launch(Dispatchers.IO) {
+            status = repo.extractResult("/home/archive.zip", "/home/target").status
+        }
+        assertTrue(transport.statusStarted.await(2, TimeUnit.SECONDS))
+
+        worker.cancel()
+        transport.allowStatus.countDown()
+        worker.join()
+
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, status)
+        assertEquals(1, transport.methods().count { it == "start" })
+        assertEquals(1, transport.methods().count { it == "stop" })
+    }
+
+    @Test
+    fun `恢复已提交压缩任务取消时只停止本地观察且不发送写请求`() = runBlocking {
+        val transport = BlockingResumeArchiveStatusInterceptor()
+        val worker = launch(Dispatchers.IO) {
+            repository(transport).resumeArchiveMutationResult(
+                operation = FileServerMutationOperation.COMPRESS,
+                taskId = "compress-task",
+                expectedOutputs = listOf(
+                    FileServerMutationExpectedOutput(
+                        path = "/home/archive.zip",
+                        isDirectory = false,
+                        requiresNonEmptyFile = true,
+                    ),
+                ),
+            )
+        }
+        assertTrue(transport.statusStarted.await(2, TimeUnit.SECONDS))
+
+        worker.cancel()
+        transport.allowStatus.countDown()
+        worker.join()
+
+        assertTrue(worker.isCancelled)
+        assertEquals(listOf("status"), transport.methods())
+        assertFalse(transport.methods().contains("start"))
+        assertFalse(transport.methods().contains("stop"))
+    }
+
+    @Test
     fun `同一压缩目标进行中时拒绝重复提交`() = runBlocking {
         val transport = BlockingArchiveInterceptor(targetAppears = true)
         val repo = repository(transport)
@@ -862,6 +909,65 @@ private class BlockingExtractListInterceptor : Interceptor {
         canWrite: Boolean = false,
     ) = """{"success":true,"data":{"files":[{"name":"$name","path":"$path","isdir":$isDirectory,"size":$size,"additional":{"owner":"tester","perm":{"read":true,"write":$canWrite,"delete":false}}}]}}"""
 }
+
+private class BlockingExtractStatusInterceptor : Interceptor {
+    val statusStarted = CountDownLatch(1)
+    val allowStatus = CountDownLatch(1)
+    private val requests: MutableList<Request> = Collections.synchronizedList(mutableListOf())
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        requests += request
+        val fields = request.formFields()
+        val body = when (fields["method"]) {
+            "getinfo" -> when (fields["path"]) {
+                "[\"/home/target\"]" -> fileInfo("target", "/home/target", isDirectory = true, canWrite = true)
+                "[\"/home/target/a.txt\"]" -> """{"success":true,"data":{"files":[]}}"""
+                else -> error("未处理的解压路径：${fields["path"]}")
+            }
+            "list" -> """{"success":true,"data":{"items":[{"itemid":1,"name":"a.txt","path":"/a.txt","is_dir":false}]}}"""
+            "start" -> """{"success":true,"data":{"taskid":"extract-task"}}"""
+            "status" -> {
+                statusStarted.countDown()
+                check(allowStatus.await(2, TimeUnit.SECONDS)) { "等待解压状态响应超时" }
+                """{"success":true,"data":{"finished":false}}"""
+            }
+            "stop" -> """{"success":true,"data":{}}"""
+            else -> error("未处理的解压方法：${fields["method"]}")
+        }
+        return archiveTestResponse(request, body)
+    }
+
+    fun methods(): List<String?> = requests.map { it.formFields()["method"] }
+
+    private fun fileInfo(name: String, path: String, isDirectory: Boolean, canWrite: Boolean) =
+        """{"success":true,"data":{"files":[{"name":"$name","path":"$path","isdir":$isDirectory,"additional":{"perm":{"write":$canWrite}}}]}}"""
+}
+
+private class BlockingResumeArchiveStatusInterceptor : Interceptor {
+    val statusStarted = CountDownLatch(1)
+    val allowStatus = CountDownLatch(1)
+    private val requests: MutableList<Request> = Collections.synchronizedList(mutableListOf())
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        requests += request
+        check(request.formFields()["method"] == "status")
+        statusStarted.countDown()
+        check(allowStatus.await(2, TimeUnit.SECONDS)) { "等待恢复任务状态响应超时" }
+        return archiveTestResponse(request, """{"success":true,"data":{"finished":false}}""")
+    }
+
+    fun methods(): List<String?> = requests.map { it.formFields()["method"] }
+}
+
+private fun archiveTestResponse(request: Request, body: String): Response = Response.Builder()
+    .request(request)
+    .protocol(Protocol.HTTP_1_1)
+    .code(200)
+    .message("OK")
+    .body(body.toResponseBody("application/json".toMediaType()))
+    .build()
 
 private fun Request.formFields(): Map<String, String> {
     val body = body as? okhttp3.FormBody ?: return emptyMap()

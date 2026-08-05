@@ -1084,6 +1084,10 @@
     <string name="files_copied">Copied %1$d items</string>
     <string name="files_moved">Moved %1$d items</string>
     <string name="file_copy_move_unavailable">Copying and moving are not available on this NAS.</string>
+    <string name="file_copy_move_destination_nas">Destination NAS</string>
+    <string name="file_copy_move_current_nas">%1$s (current)</string>
+    <string name="file_copy_move_cross_nas_hint">Files are sent directly between these connections using limited memory. Moving removes the source only after every upload is confirmed.</string>
+    <string name="file_copy_move_cross_nas_directory_move_unavailable">Folders can be copied to another NAS, but cannot be moved safely. Copy the folder, check the result, then delete the source yourself.</string>
     <string name="file_copy_move_partial">Completed %1$d items; %2$d need attention. Refresh both folders before trying again.</string>
     <string name="file_copy_move_unverified">The NAS received the request, but the final result could not be confirmed. Refresh both folders before taking another action.</string>
     <string name="file_copy_move_permission_denied">Your account cannot complete this operation in the selected folder. Choose another folder or check your access.</string>

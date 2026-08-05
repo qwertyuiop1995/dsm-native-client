@@ -21,7 +21,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.BufferedSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -159,6 +161,19 @@ class PackageUninstallMutationTest {
         assertEquals(listOf("list", "feasibility_check", "uninstall", "list"), transport.methods())
     }
 
+    @Test
+    fun `卸载写请求在途取消只严格回读一次且不重放`() = runBlocking {
+        val transport = CancellingUninstallInterceptor()
+
+        val result = repository(transport).uninstallPackageResult(packageInfo())
+
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, result.status)
+        assertTrue(result.submitted)
+        assertTrue(result.requiresRefresh)
+        assertEquals(listOf("list", "feasibility_check", "uninstall", "list"), transport.methods())
+        assertEquals(1, transport.methods().count { it == "uninstall" })
+    }
+
     private fun repository(interceptor: Interceptor, uninstallMinVersion: Int = 1) = DsmRepository(
         NasProfile("test", "Test", "https://nas.example.invalid", "tester"),
         DsmSession("test", "test-session", "test-token"),
@@ -260,6 +275,36 @@ private class BlockingUninstallInterceptor : Interceptor {
     fun methods(): List<String?> = synchronized(requests) {
         requests.map { it.fields()["method"] }
     }
+}
+
+private class CancellingUninstallInterceptor : Interceptor {
+    val requests = mutableListOf<Request>()
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        requests += request
+        return when (requests.size) {
+            1 -> uninstallResponse(request, uninstallablePackageList())
+            2 -> uninstallResponse(request, """{"success":true,"data":{}}""")
+            3 -> Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .body(UninstallCancellationBody())
+                .build()
+            else -> uninstallResponse(request, uninstallablePackageList())
+        }
+    }
+
+    fun methods(): List<String?> = requests.map { it.fields()["method"] }
+}
+
+private class UninstallCancellationBody : ResponseBody() {
+    override fun contentType() = "application/json".toMediaType()
+    override fun contentLength() = -1L
+    override fun source(): BufferedSource =
+        throw kotlinx.coroutines.CancellationException("synthetic package uninstall cancellation")
 }
 
 private fun uninstallablePackageList() =

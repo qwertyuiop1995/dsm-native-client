@@ -105,16 +105,103 @@ class PhotoMoveRepositoryTest {
             listResponse(1, """{"name":"b.txt","path":"/share/target/b.txt","isdir":false}"""),
         )
 
-        repository(transport).copy(
+        val result = repository(transport).copyResult(
             listOf("/share/source/a.txt", "/share/source/b.txt"),
             "/share/target",
         )
 
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(2, result.counts.succeeded)
         val start = transport.requests.first { it.formFields()["method"] == "start" }.formFields()
         assertEquals("false", start["remove_src"])
         assertEquals("false", start["overwrite"])
         assertEquals("[\"/share/source/a.txt\",\"/share/source/b.txt\"]", start["path"])
         assertEquals(7, transport.requests.size)
+    }
+
+    @Test
+    fun `批量复制提交断线保持未确认且不自动重放`() = runBlocking {
+        val transport = StepMoveInterceptor(
+            MoveStep.Json(fileResponse("/share/target", "target", directory = true, writable = true)),
+            MoveStep.Json(listResponse(0, "")),
+            MoveStep.Json(listResponse(0, "")),
+            MoveStep.Failure(IOException("synthetic copy disconnect")),
+        )
+
+        val result = repository(transport).copyResult(
+            listOf("/share/source/a.txt", "/share/source/b.txt"),
+            "/share/target",
+        )
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertEquals(2, result.counts.unknown)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, transport.requests.count { it.formFields()["method"] == "start" })
+    }
+
+    @Test
+    fun `批量复制任务完成但回读失败时保持未确认`() = runBlocking {
+        val transport = StepMoveInterceptor(
+            MoveStep.Json(fileResponse("/share/target", "target", directory = true, writable = true)),
+            MoveStep.Json(listResponse(0, "")),
+            MoveStep.Json(listResponse(0, "")),
+            MoveStep.Json("""{"success":true,"data":{"taskid":"copy-task"}}"""),
+            MoveStep.Json("""{"success":true,"data":{"finished":true}}"""),
+            MoveStep.Failure(IOException("synthetic first copy readback failure")),
+            MoveStep.Failure(IOException("synthetic second copy readback failure")),
+        )
+
+        val result = repository(transport).copyResult(
+            listOf("/share/source/a.txt", "/share/source/b.txt"),
+            "/share/target",
+        )
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertEquals(2, result.counts.unknown)
+        assertEquals(1, transport.requests.count { it.formFields()["method"] == "start" })
+    }
+
+    @Test
+    fun `复制提交后的取消只停止任务且不重放`() = runBlocking {
+        val transport = BlockingMoveStatusInterceptor()
+        val repo = repository(transport)
+        var status: MutationResultStatus? = null
+        val worker = launch(Dispatchers.IO) {
+            status = repo.copyResult(listOf("/home/Photos/a.jpg"), "/home/Photos/Trips").status
+        }
+        assertTrue(transport.statusStarted.await(2, TimeUnit.SECONDS))
+
+        worker.cancel()
+        transport.allowStatusResponse.countDown()
+        worker.join()
+
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, status)
+        assertEquals(1, transport.methods().count { it == "start" })
+        assertEquals(1, transport.methods().count { it == "stop" })
+    }
+
+    @Test
+    fun `批量复制逐项回读并报告部分成功`() = runBlocking {
+        val transport = MoveInterceptor(
+            fileResponse("/share/target", "target", directory = true, writable = true),
+            listResponse(0, ""),
+            listResponse(0, ""),
+            """{"success":true,"data":{"taskid":"copy-task"}}""",
+            """{"success":true,"data":{"finished":true}}""",
+            listResponse(1, """{"name":"a.txt","path":"/share/target/a.txt","isdir":false}"""),
+            listResponse(0, ""),
+        )
+
+        val result = repository(transport).copyResult(
+            listOf("/share/source/a.txt", "/share/source/b.txt"),
+            "/share/target",
+        )
+
+        assertEquals(MutationResultStatus.PARTIAL_SUCCESS, result.status)
+        assertEquals(1, result.counts.succeeded)
+        assertEquals(1, result.counts.failed)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, transport.requests.count { it.formFields()["method"] == "start" })
     }
 
     @Test

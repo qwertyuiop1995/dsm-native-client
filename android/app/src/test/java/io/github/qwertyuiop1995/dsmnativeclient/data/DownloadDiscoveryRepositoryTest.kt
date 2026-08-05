@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.FormBody
 import okhttp3.Interceptor
@@ -135,6 +136,40 @@ class DownloadDiscoveryRepositoryTest {
     }
 
     @Test
+    fun `RSS 刷新提交成功但回读失败时保持未确认且不重放`() = runBlocking {
+        val transport = DownloadDiscoveryInterceptor(
+            """{"success":true,"data":{"site":[{"id":6,"title":"Synthetic feed","is_updating":false}]}}""",
+            """{"success":true,"data":{}}""",
+            IOException("synthetic RSS readback failure"),
+        )
+
+        val result = repository(transport).refreshDownloadRssSiteResult("6")
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertTrue(result.submitted)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, transport.requests.count { it.discoveryFields()["method"] == "refresh" })
+    }
+
+    @Test
+    fun `RSS 刷新提交后的取消只要求刷新且不重放`() = runBlocking {
+        val transport = BlockingDownloadRssRefreshInterceptor()
+        val repository = repository(transport)
+        var status: MutationResultStatus? = null
+        val worker = launch(Dispatchers.IO) {
+            status = repository.refreshDownloadRssSiteResult("6").status
+        }
+        assertTrue(transport.refreshEntered.await(5, TimeUnit.SECONDS))
+
+        worker.cancel()
+        transport.releaseRefresh.countDown()
+        worker.join()
+
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, status)
+        assertEquals(1, transport.refreshCount.get())
+    }
+
+    @Test
     fun `同一 RSS 站点刷新中拒绝重复提交`() = runBlocking {
         val transport = BlockingDownloadRssRefreshInterceptor()
         val repository = repository(transport)
@@ -217,20 +252,22 @@ private class DownloadRssRefreshDisconnectInterceptor : Interceptor {
     }
 }
 
-private class DownloadDiscoveryInterceptor(vararg responses: String) : Interceptor {
+private class DownloadDiscoveryInterceptor(vararg responses: Any) : Interceptor {
     private val pending = ArrayDeque(responses.toList())
     val requests = mutableListOf<Request>()
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         requests += request
+        val step = pending.removeFirstOrNull() ?: error("缺少合成 Download Station 发现响应")
+        if (step is IOException) throw step
         return Response.Builder()
             .request(request)
             .protocol(Protocol.HTTP_1_1)
             .code(200)
             .message("OK")
             .body(
-                (pending.removeFirstOrNull() ?: error("缺少合成 Download Station 发现响应"))
+                (step as String)
                     .toResponseBody("application/json".toMediaType()),
             )
             .build()

@@ -863,6 +863,9 @@ private class InputStreamRequestBody(
 
     override fun contentLength() = contentLength
 
+    // ContentResolver、跨 NAS 管道等上传源均不可倒带，禁止 OkHttp 自动重放正文。
+    override fun isOneShot() = true
+
     override fun writeTo(sink: BufferedSink) {
         var completed = 0L
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)

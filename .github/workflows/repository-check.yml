@@ -37,7 +37,10 @@ jobs:
         run: |
           python -m unittest discover -s tools/codex/tests -p 'test_*.py'
           python tools/codex/check_android_motion_audit.py
+          python tools/codex/check_android_page_state_matrix.py
+          python tools/codex/check_android_plan_progress.py
           python tools/codex/check_android_touch_targets.py
+          python tools/codex/check_android_write_test_matrix.py
 
       - name: 校验 Fixture 脱敏与契约工具
         run: |

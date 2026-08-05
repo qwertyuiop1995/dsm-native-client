@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -57,9 +59,12 @@ internal fun FileCopyMoveDialog(state: WorkspaceState, model: AppViewModel) {
     val destinationTitle = operation.location.path.substringAfterLast('/').ifBlank {
         stringResource(R.string.shared_folders)
     }
-    val sameFolder = operation.items.any {
+    val sameFolder = operation.targetProfileId == operation.sourceProfileId && operation.items.any {
         it.path.substringBeforeLast('/', "") == operation.location.path
     }
+    val crossNasDirectoryMoveUnsupported = !isCopy &&
+        operation.targetProfileId != operation.sourceProfileId &&
+        operation.items.any(FileItem::isDirectory)
 
     Dialog(
         onDismissRequest = model::cancelFileCopyMove,
@@ -99,6 +104,47 @@ internal fun FileCopyMoveDialog(state: WorkspaceState, model: AppViewModel) {
                     }
                 }
                 HorizontalDivider()
+                if (operation.targetProfiles.size > 1) {
+                    Text(
+                        stringResource(R.string.file_copy_move_destination_nas),
+                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(operation.targetProfiles, key = { it.id }) { profile ->
+                            FilterChip(
+                                selected = profile.id == operation.targetProfileId,
+                                onClick = { model.selectFileCopyMoveTarget(profile.id) },
+                                enabled = !state.isPerformingAction,
+                                label = {
+                                    Text(
+                                        if (profile.id == operation.sourceProfileId) {
+                                            stringResource(
+                                                R.string.file_copy_move_current_nas,
+                                                profile.name,
+                                            )
+                                        } else profile.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                            )
+                        }
+                    }
+                    if (operation.targetProfileId != operation.sourceProfileId) {
+                        Text(
+                            stringResource(R.string.file_copy_move_cross_nas_hint),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    HorizontalDivider()
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -137,7 +183,11 @@ internal fun FileCopyMoveDialog(state: WorkspaceState, model: AppViewModel) {
                             model::retryFileCopyMoveFolders,
                         )
                         is Loadable.Ready -> {
-                            val paths = operation.items.map(FileItem::path)
+                            val paths = if (operation.targetProfileId == operation.sourceProfileId) {
+                                operation.items.map(FileItem::path)
+                            } else {
+                                emptyList()
+                            }
                             val available = folders.value.items.filter { folder ->
                                 folder.isDirectory && paths.none { source ->
                                     folder.path == source || folder.path.startsWith("$source/")
@@ -190,6 +240,14 @@ internal fun FileCopyMoveDialog(state: WorkspaceState, model: AppViewModel) {
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                if (crossNasDirectoryMoveUnsupported) {
+                    Text(
+                        stringResource(R.string.file_copy_move_cross_nas_directory_move_unavailable),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 if (state.isPerformingAction) LinearProgressIndicator(Modifier.fillMaxWidth())
                 HorizontalDivider()
                 Row(
@@ -207,7 +265,8 @@ internal fun FileCopyMoveDialog(state: WorkspaceState, model: AppViewModel) {
                     Button(
                         onClick = { model.requestFileCopyMoveConfirmation() },
                         enabled = operation.location.path.isNotBlank() && operation.location.canWrite &&
-                            !sameFolder && !state.isPerformingAction && !mutation.confirmationRequested,
+                            !sameFolder && !crossNasDirectoryMoveUnsupported &&
+                            !state.isPerformingAction && !mutation.confirmationRequested,
                         modifier = Modifier.padding(start = 8.dp).heightIn(min = 48.dp),
                     ) {
                         Text(stringResource(if (isCopy) R.string.copy_here else R.string.move_here))

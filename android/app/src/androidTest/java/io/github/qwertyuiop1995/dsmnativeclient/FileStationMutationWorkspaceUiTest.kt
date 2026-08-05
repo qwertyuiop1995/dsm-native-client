@@ -18,6 +18,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.core.app.ApplicationProvider
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
+import io.github.qwertyuiop1995.dsmnativeclient.ui.FileCopyMoveDialog
 import io.github.qwertyuiop1995.dsmnativeclient.ui.FileStationMutationConfirmationDialog
 import io.github.qwertyuiop1995.dsmnativeclient.ui.FileStationNameEditorDialog
 import io.github.qwertyuiop1995.dsmnativeclient.ui.theme.LanStashTheme
@@ -149,11 +150,73 @@ class FileStationMutationWorkspaceUiTest {
         assertFalse(state.fileStationMutationState.mutationInProgress)
     }
 
+    @Test
+    fun 跨Nas目标选择显示有界传输说明() {
+        val context = context()
+        val model = AppViewModel(ApplicationProvider.getApplicationContext<Application>())
+        val source = profile()
+        val target = profile(id = "profile-target", name = "Backup NAS")
+        val state = WorkspaceState(
+            profile = source,
+            fileCopyMove = FileCopyMoveState(
+                items = listOf(file()),
+                operation = FileCopyMoveOperation.COPY,
+                sourceProfileId = source.id,
+                targetProfileId = target.id,
+                targetProfiles = listOf(source, target),
+                location = FileCopyMoveLocation(destination().path, canWrite = true),
+                destinationBaselines = mapOf(destination().path to destination()),
+            ),
+            fileCopyMoveFolders = Loadable.Ready(
+                io.github.qwertyuiop1995.dsmnativeclient.domain.FilePage(emptyList(), 0, 0),
+            ),
+        )
+        rule.setContent { LanStashTheme { FileCopyMoveDialog(state, model) } }
+
+        rule.onNodeWithText(context.getString(R.string.file_copy_move_destination_nas))
+            .assertIsDisplayed()
+        rule.onNodeWithText("Backup NAS").assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.file_copy_move_cross_nas_hint))
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun 跨Nas文件夹移动在提交前禁用并说明安全替代操作() {
+        val context = context()
+        val model = AppViewModel(ApplicationProvider.getApplicationContext<Application>())
+        val source = profile()
+        val target = profile(id = "profile-target", name = "Backup NAS")
+        val state = WorkspaceState(
+            profile = source,
+            fileCopyMove = FileCopyMoveState(
+                items = listOf(destination().copy(path = "/synthetic/source-folder")),
+                operation = FileCopyMoveOperation.MOVE,
+                sourceProfileId = source.id,
+                targetProfileId = target.id,
+                targetProfiles = listOf(source, target),
+                location = FileCopyMoveLocation(destination().path, canWrite = true),
+                destinationBaselines = mapOf(destination().path to destination()),
+            ),
+            fileCopyMoveFolders = Loadable.Ready(
+                io.github.qwertyuiop1995.dsmnativeclient.domain.FilePage(emptyList(), 0, 0),
+            ),
+        )
+        rule.setContent { LanStashTheme { FileCopyMoveDialog(state, model) } }
+
+        rule.onNodeWithText(
+            context.getString(R.string.file_copy_move_cross_nas_directory_move_unavailable),
+        ).assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.move_here)).assertIsNotEnabled()
+    }
+
     private fun context() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    private fun profile() = io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile(
-        id = "profile-synthetic",
-        name = "Synthetic",
+    private fun profile(
+        id: String = "profile-synthetic",
+        name: String = "Synthetic",
+    ) = io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile(
+        id = id,
+        name = name,
         address = "https://nas.example.invalid",
         username = "operator",
     )

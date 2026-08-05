@@ -21,7 +21,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.BufferedSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -147,6 +149,28 @@ class DirectoryDeletionMutationTest {
     }
 
     @Test
+    fun `群组删除响应丢失后只回读且不重放`() = runBlocking {
+        val transport = AmbiguousDirectoryInterceptor(groupList(), emptyGroups())
+
+        val result = repository(transport).deleteGroupResult(group())
+
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(listOf("list", "delete", "list"), transport.methods())
+        assertEquals(1, transport.methods().count { it == "delete" })
+    }
+
+    @Test
+    fun `群组删除写后畸形回读保持未确认`() = runBlocking {
+        val transport = DirectoryInterceptor(groupList(), SUCCESS, SUCCESS)
+
+        val result = repository(transport).deleteGroupResult(group())
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertTrue(result.submitted)
+        assertEquals(1, transport.methods().count { it == "delete" })
+    }
+
+    @Test
     fun `同一账号已有删除请求时第二次调用不访问网络`() = runBlocking {
         val transport = BlockingDirectoryInterceptor()
         val repo = repository(transport)
@@ -161,6 +185,29 @@ class DirectoryDeletionMutationTest {
         transport.allowSubmission.countDown()
         assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, first.await().status)
         assertEquals(listOf("list", "delete", "list"), transport.methods())
+    }
+
+    @Test
+    fun `账号与群组删除在途取消只回读且不重放`() = runBlocking {
+        val accountTransport = CancellingDirectoryInterceptor(userList(), SUCCESS)
+        val accountResult = repository(accountTransport).deleteAccountResult(account())
+        assertEquals(
+            MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+            accountResult.status,
+        )
+        assertTrue(accountResult.submitted)
+        assertEquals(listOf("list", "delete", "list"), accountTransport.methods())
+        assertEquals(1, accountTransport.methods().count { it == "delete" })
+
+        val groupTransport = CancellingDirectoryInterceptor(groupList(), SUCCESS)
+        val groupResult = repository(groupTransport).deleteGroupResult(group())
+        assertEquals(
+            MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+            groupResult.status,
+        )
+        assertTrue(groupResult.submitted)
+        assertEquals(listOf("list", "delete", "list"), groupTransport.methods())
+        assertEquals(1, groupTransport.methods().count { it == "delete" })
     }
 
     @Test
@@ -231,7 +278,10 @@ private class DirectoryInterceptor(vararg responses: String) : Interceptor {
     fun methods() = requests.map { it.directoryFields()["method"] }
 }
 
-private class AmbiguousDirectoryInterceptor : Interceptor {
+private class AmbiguousDirectoryInterceptor(
+    private val initialList: String = DirectoryDeletionMutationTest.userList(),
+    private val finalList: String = DirectoryDeletionMutationTest.emptyUsers(),
+) : Interceptor {
     val requests = mutableListOf<Request>()
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -239,8 +289,7 @@ private class AmbiguousDirectoryInterceptor : Interceptor {
         if (requests.size == 2) throw IOException("synthetic ambiguous account delete")
         return directoryResponse(
             request,
-            if (requests.size == 1) DirectoryDeletionMutationTest.userList()
-            else DirectoryDeletionMutationTest.emptyUsers(),
+            if (requests.size == 1) initialList else finalList,
         )
     }
     fun methods() = requests.map { it.directoryFields()["method"] }
@@ -265,6 +314,38 @@ private class BlockingDirectoryInterceptor : Interceptor {
         return directoryResponse(request, body)
     }
     fun methods() = synchronized(requests) { requests.map { it.directoryFields()["method"] } }
+}
+
+private class CancellingDirectoryInterceptor(
+    private val initialList: String,
+    private val readbackList: String,
+) : Interceptor {
+    val requests = mutableListOf<Request>()
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        requests += request
+        return when (requests.size) {
+            1 -> directoryResponse(request, initialList)
+            2 -> Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .body(DirectoryCancellationBody())
+                .build()
+            else -> directoryResponse(request, readbackList)
+        }
+    }
+
+    fun methods() = requests.map { it.directoryFields()["method"] }
+}
+
+private class DirectoryCancellationBody : ResponseBody() {
+    override fun contentType() = "application/json".toMediaType()
+    override fun contentLength() = -1L
+    override fun source(): BufferedSource =
+        throw kotlinx.coroutines.CancellationException("synthetic directory cancellation")
 }
 
 private fun directoryResponse(request: Request, body: String): Response = Response.Builder()

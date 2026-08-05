@@ -279,7 +279,11 @@ private fun NasSettingsTab(
         )
         3 -> NasPackageManagementScreen(snapshot, state, model)
         4 -> NasDirectoryManagementScreen(snapshot, state, model)
-        5 -> LogList(snapshot.logs)
+        5 -> LogList(
+            logs = snapshot.logs,
+            isAvailable = snapshot.logsAvailable,
+            onRetry = { model.load(Module.NAS_SETTINGS) },
+        )
         6 -> NasConnectionScreen(
             connections = snapshot.connections,
             connectionsAvailable = snapshot.connectionsAvailable,

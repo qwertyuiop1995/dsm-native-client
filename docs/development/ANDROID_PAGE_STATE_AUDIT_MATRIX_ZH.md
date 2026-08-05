@@ -36,16 +36,16 @@
 | `nas/NasRemoteAccessSettingsScreen.kt` | 远程访问设置 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层并区分不可用；`RemoteAccessSettingsUiTest` |
 | `nas/NasSecuritySettingsScreen.kt` | 安全设置 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层并区分不可用；安全设置界面测试 |
 | `nas/NasServiceSettingsScreen.kt` | 文件服务、终端与代理设置 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 局部 | 数据继承 NAS 设置外层并区分不可用；File Service/Terminal/Proxy 反馈测试 |
-| `nas/NasSettingsScreen.kt` | NAS 设置外层与总览/日志 | 覆盖 | 覆盖 | 缺口 | 覆盖 | 覆盖 | 局部 | 外层 `LoadableContent` 覆盖四态；`LogList` 把源日志为空和筛选后为空合并成 `no_records_for_filter`，且缺总览/日志五态直测 |
+| `nas/NasSettingsScreen.kt` | NAS 设置外层与总览/日志 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 局部 | 外层 `LoadableContent` 覆盖四态；日志请求可用性独立保留，失败显示局部错误和重试，不再冒充源空；共用 `LogList` 区分源空和筛选空，`LogListStateUiTest` 覆盖日志五态分支，但 NAS 总览其他分区仍缺完整页面级直测 |
 | `nas/NasStorageScreen.kt` | 存储、内容分析与 SMART | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 局部 | `NasStorageScreenTest` 覆盖分析失败和空闲/运行/结果，但未覆盖整页所有适用态 |
-| `services/ServiceScreens.kt` | Container、Registry 与 VMM | 覆盖 | 覆盖 | 缺口 | 覆盖 | 覆盖 | 局部 | `LoadableContent` 覆盖主列表；Container/VMM/Registry 测试已有局部证据；事件和 VMM 日志的 `LogList` 同样混用源空与筛选空 |
+| `services/ServiceScreens.kt` | Container、Registry 与 VMM | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 局部 | `LoadableContent` 与 `unavailableSections` 覆盖主列表及日志局部错误；事件和 VMM 日志共用已区分源空、筛选空、错误与正常内容的 `LogList`，但各页面其他分区完整五态仍缺直测 |
 | `services/VirtualMachineCreationDialog.kt` | 虚拟机创建向导 | 不适用 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 局部 | 存储不可用/校验错误/正常步骤；`VirtualMachineCreationDialogTest`，不把表单提交状态当页面加载 |
 | `settings/SettingsScreen.kt` | 应用设置与语言 | 不适用 | 不适用 | 不适用 | 不适用 | 覆盖 | 局部 | 完全本地静态设置；设置与本地化测试，不适用远端数据五态 |
 | `transfers/TransfersScreen.kt` | App 传输与 NAS 后台任务 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 完整 | `FileBackgroundTaskUiTest` 直接覆盖 NAS 五态，`TransferServerPresentationTest` 覆盖来源筛选空与正常任务 |
 
 ## 当前结论与后续闭环
 
-- 生产清单共 29 个页面/弹窗文件；存在 2 个生产状态缺口，均来自共用 `LogList` 未区分“源日志为空”和“筛选后为空”。这不是接口或 ViewModel 缺口，可在 `ServiceScreens.kt` 的共用日志组件用 `logs.isEmpty()` 与 `filtered.isEmpty()` 分流解决。
+- 生产清单共 29 个页面/弹窗文件；共用 `LogList` 已区分“源日志为空”和“筛选后为空”，当前生产状态缺口为 0。
 - 27 个页面仍只有局部页面级自动化。通用 `PageUiStateTest`、`PageErrorAccessibilityTest` 能证明状态策略和错误语义，但不能替代把每个适用状态实际送入页面的 Compose 测试。
-- 因此 A8“每页五态”叶子目标必须保持未勾选。先修复两个日志缺口，再按高频主页面、NAS 子页、异步弹窗三组补齐页面级测试；无需给不适用的静态表单制造虚假 loading/error 分支。
+- 因此 A8“每页五态”叶子目标必须保持未勾选。后续按高频主页面、NAS 子页、异步弹窗三组补齐页面级测试；无需给不适用的静态表单制造虚假 loading/error 分支。
 - `tools/codex/check_android_page_state_matrix.py` 会扫描新增/删除的生产页面文件、矩阵状态词和计划勾选状态。矩阵仍有生产缺口或自动化未闭环时，若有人提前勾选 A8 叶子，门禁会失败。

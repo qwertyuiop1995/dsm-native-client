@@ -755,9 +755,11 @@
     <string name="ethernet_refresh_differs">Refresh completed: the interface does not match all requested settings. Review the current values before saving again.</string>
     <string name="ethernet_refresh_target_missing">Refresh completed: this interface is no longer listed. Check the NAS connection before trying again.</string>
     <string name="no_log_entries">No logs</string>
+    <string name="no_log_entries_description">Logs recorded by the NAS will appear here after new activity.</string>
+    <string name="no_matching_log_entries">No matching logs</string>
+    <string name="no_matching_log_entries_description">Change the search text or choose another log level.</string>
     <string name="no_network_info">No network information</string>
     <string name="no_security_status">No security status</string>
-    <string name="no_records_for_filter">No records match the current filters.</string>
     <string name="normal">Normal</string>
     <string name="running">Running</string>
     <string name="stopped">Stopped</string>

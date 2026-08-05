@@ -10716,13 +10716,13 @@ class DsmRepository(
         val packageResult = runCatching { packageList() }
         val accountResult = runCatching { accountList() }
         val groupResult = runCatching { groupList() }
-        val logJson = runCatching {
+        val logResult = runCatching {
             firstSuccessful(
                 preferred("SYNO.LogCenter.History", "SYNO.Core.SyslogClient.Log"),
                 listOf("list", "get"),
                 mapOf("offset" to "0", "limit" to "200"),
             )
-        }.getOrNull()
+        }
         val connectionResult = runCatching { connectionList() }
         val ethernetResult = runCatching { ethernetInterfaces() }
         val ddnsResult = runCatching { ddnsDirectory() }
@@ -10744,7 +10744,7 @@ class DsmRepository(
             accountsAvailable = accountResult.isSuccess,
             groups = groupResult.getOrDefault(emptyList()),
             groupsAvailable = groupResult.isSuccess,
-            logs = logJson?.let(::logs).orEmpty(),
+            logs = logResult.getOrNull()?.let(::logs).orEmpty(),
             connections = connectionResult.getOrDefault(emptyList()),
             connectionsAvailable = connectionResult.isSuccess,
             networkInterfaces = ethernetResult.getOrDefault(emptyList()),
@@ -10762,6 +10762,7 @@ class DsmRepository(
             hardwareSettingsAvailable = hardwareSettingsResult.isSuccess,
             remoteAccessSettings = remoteAccessSettingsResult.getOrNull(),
             remoteAccessSettingsAvailable = remoteAccessSettingsResult.isSuccess,
+            logsAvailable = logResult.isSuccess,
         )
     }
 

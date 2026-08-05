@@ -63,10 +63,64 @@ class NasSettingsAvailabilityTest {
         assertFalse(snapshot.packages.single().canUninstall)
     }
 
+    @Test
+    fun `日志请求成功返回空列表时保留可信源空状态`() = runBlocking {
+        val snapshot = logRepository(logRequestSucceeds = true).nasSettings()
+
+        assertTrue(snapshot.logsAvailable)
+        assertTrue(snapshot.logs.isEmpty())
+    }
+
+    @Test
+    fun `日志请求失败时空列表必须标记为不可用`() = runBlocking {
+        val snapshot = logRepository(logRequestSucceeds = false).nasSettings()
+
+        assertFalse(snapshot.logsAvailable)
+        assertTrue(snapshot.logs.isEmpty())
+    }
+
+    private fun logRepository(logRequestSucceeds: Boolean) = DsmRepository(
+        NasProfile("test", "Test", "https://nas.example.invalid", "tester"),
+        DsmSession("test", "test-session", "test-token"),
+        DsmApiClient(
+            OkHttpClient.Builder()
+                .addInterceptor(LogAvailabilityInterceptor(logRequestSucceeds))
+                .build(),
+        ),
+        mapOf(LOG_API to ApiCapability(LOG_API, "entry.cgi", 1, 1)),
+    )
+
     private companion object {
         const val PACKAGE_API = "SYNO.Core.Package"
         const val USER_API = "SYNO.Core.User"
         const val GROUP_API = "SYNO.Core.Group"
+        const val LOG_API = "SYNO.LogCenter.History"
+    }
+}
+
+private class LogAvailabilityInterceptor(
+    private val succeeds: Boolean,
+) : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val form = request.body as FormBody
+        val fields = (0 until form.size).associate { form.name(it) to form.value(it) }
+        val body = if (fields["api"] == "SYNO.LogCenter.History") {
+            if (succeeds) {
+                """{"success":true,"data":{"logs":[]}}"""
+            } else {
+                """{"success":false,"error":{"code":105}}"""
+            }
+        } else {
+            error("出现未预期的日志可用性请求")
+        }
+        return Response.Builder()
+            .request(request)
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body(body.toResponseBody("application/json".toMediaType()))
+            .build()
     }
 }
 

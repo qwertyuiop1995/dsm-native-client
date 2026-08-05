@@ -1,0 +1,120 @@
+package io.github.qwertyuiop1995.dsmnativeclient.domain
+
+data class DownloadTask(
+    val id: String,
+    val type: String?,
+    val title: String,
+    val status: ResourceState,
+    val size: Long?,
+    val transferred: Long?,
+    val downloadSpeed: Long?,
+    val uploadSpeed: Long?,
+    val destination: String?,
+    val error: String?,
+    val createdAtEpochSeconds: Long? = null,
+    val priority: String? = null,
+    val totalPeers: Int? = null,
+    val connectedSeeders: Int? = null,
+    val connectedLeechers: Int? = null,
+    val files: List<DownloadTaskFile> = emptyList(),
+    val trackers: List<DownloadTaskTracker> = emptyList(),
+    val peers: List<DownloadTaskPeer> = emptyList(),
+)
+
+/** Download Station 任务控制使用的稳定操作类型，避免以自由字符串区分危险删除语义。 */
+enum class DownloadTaskMutationAction {
+    PAUSE,
+    RESUME,
+    REMOVE_TASK,
+    REMOVE_TASK_AND_FILES,
+}
+
+/**
+ * 写入确认前保存的稳定任务基线。速率、已传输字节和 Peer 等易变字段不得参与写前冲突判断。
+ */
+data class DownloadTaskMutationBaseline(
+    val id: String,
+    val type: String?,
+    val title: String,
+    val status: ResourceState,
+    val size: Long?,
+    val destination: String?,
+    val createdAtEpochSeconds: Long?,
+) {
+    companion object {
+        fun from(task: DownloadTask) = DownloadTaskMutationBaseline(
+            id = task.id,
+            type = task.type,
+            title = task.title,
+            status = task.status,
+            size = task.size,
+            destination = task.destination,
+            createdAtEpochSeconds = task.createdAtEpochSeconds,
+        )
+    }
+}
+
+data class DownloadTaskFile(
+    val name: String,
+    val size: Long?,
+    val downloaded: Long?,
+    val priority: String?,
+)
+
+data class DownloadTaskTracker(
+    val url: String,
+    val status: String?,
+    val updateTimerSeconds: Int?,
+    val seeds: Int?,
+    val peers: Int?,
+)
+
+data class DownloadTaskPeer(
+    val address: String,
+    val agent: String?,
+    val progress: Double?,
+    val downloadSpeed: Long?,
+    val uploadSpeed: Long?,
+)
+
+data class DownloadRssSite(
+    val id: String,
+    val title: String,
+    val isUpdating: Boolean,
+    val lastUpdatedAtEpochSeconds: Long?,
+)
+
+data class DownloadRssFeed(
+    val title: String,
+    val size: Long?,
+    val publishedAtEpochSeconds: Long?,
+    val downloadUri: String,
+    val externalLink: String?,
+)
+
+data class DownloadBtSearchResult(
+    val title: String,
+    val size: Long?,
+    val listedAt: String?,
+    val downloadUri: String,
+    val externalLink: String?,
+    val peers: Int?,
+    val seeds: Int?,
+    val leeches: Int?,
+    val provider: String?,
+)
+
+data class DownloadSettings(
+    val defaultDestination: String = "",
+    val emuleEnabled: Boolean = false,
+    val autoExtractEnabled: Boolean = false,
+    val btDownloadLimitKb: Int = 0,
+    val btUploadLimitKb: Int = 0,
+    val httpDownloadLimitKb: Int = 0,
+    val ftpDownloadLimitKb: Int = 0,
+    val nzbDownloadLimitKb: Int = 0,
+    val emuleDownloadLimitKb: Int = 0,
+    val emuleUploadLimitKb: Int = 0,
+    val scheduleEnabled: Boolean = false,
+    val emuleScheduleEnabled: Boolean = false,
+)

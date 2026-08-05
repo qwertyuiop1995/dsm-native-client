@@ -14,6 +14,7 @@ import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -50,7 +51,7 @@ class BackupFolderRepositoryTest {
         val transport = BackupFolderInterceptor()
 
         val failure = runCatching {
-            repository(transport).ensureSubdirectory("/photo/移动备份", "/photo/其他")
+            repository(transport).ensureSubdirectoryResult("/photo/移动备份", "/photo/其他")
         }.exceptionOrNull()
 
         assertTrue(failure is IllegalArgumentException)
@@ -111,6 +112,28 @@ class BackupFolderRepositoryTest {
     }
 
     @Test
+    fun `目录创建提交断线后只读回读且不重放`() = runBlocking {
+        val transport = BackupFolderInterceptor(
+            emptyListResponse,
+            infoResponse("移动备份", "/photo/移动备份"),
+            emptyListResponse,
+            disconnectResponse,
+            emptyListResponse,
+        )
+
+        val result = repository(transport).ensureSubdirectoryResult(
+            "/photo/移动备份",
+            "/photo/移动备份/旅行",
+        )
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertTrue(result.submitted)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, result.counts.unknown)
+        assertEquals(1, transport.requests.count { it.backupFields()["method"] == "create" })
+    }
+
+    @Test
     fun `并发创建只有读回确认为目录后才算成功`() = runBlocking {
         val transport = BackupFolderInterceptor(
             emptyListResponse,
@@ -161,6 +184,7 @@ class BackupFolderRepositoryTest {
     private companion object {
         const val emptyListResponse = """{"success":true,"data":{"offset":0,"total":0,"files":[]}}"""
         const val successResponse = """{"success":true,"data":{}}"""
+        const val disconnectResponse = "__disconnect__"
 
         fun infoResponse(name: String, path: String) =
             """{"success":true,"data":{"files":[{"name":"$name","path":"$path","isdir":true,"additional":{"perm":{"write":true}}}]}}"""
@@ -177,14 +201,15 @@ private class BackupFolderInterceptor(vararg responses: String) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         requests += request
+        val body = pending.removeFirstOrNull() ?: error("缺少合成备份目录响应")
+        if (body == "__disconnect__") throw IOException("synthetic disconnect")
         return Response.Builder()
             .request(request)
             .protocol(Protocol.HTTP_1_1)
             .code(200)
             .message("OK")
             .body(
-                (pending.removeFirstOrNull() ?: error("缺少合成备份目录响应"))
-                    .toResponseBody("application/json".toMediaType()),
+                body.toResponseBody("application/json".toMediaType()),
             )
             .build()
     }

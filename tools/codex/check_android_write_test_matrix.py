@@ -4,22 +4,53 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
 VIEW_MODEL = ROOT / "android/app/src/main/java/io/github/qwertyuiop1995/dsmnativeclient/AppViewModel.kt"
+CROSS_NAS_COORDINATOR = ROOT / (
+    "android/app/src/main/java/io/github/qwertyuiop1995/dsmnativeclient/data/"
+    "CrossNasTransferCoordinator.kt"
+)
 MATRIX = ROOT / "docs/development/ANDROID_WRITE_MUTATION_TEST_MATRIX_ZH.md"
 TEST_ROOT = ROOT / "android/app/src/test/java"
+REPOSITORY = ROOT / "android/app/src/main/java/io/github/qwertyuiop1995/dsmnativeclient/data/DsmRepository.kt"
+UI_ROOT = ROOT / "android/app/src/main/java/io/github/qwertyuiop1995/dsmnativeclient/ui"
+PRODUCTION_ROOT = ROOT / "android/app/src/main/java"
 
-CALL_PATTERN = re.compile(
-    r"\b(?:repo|repository|claim\.repository)\.([A-Za-z0-9_]+Result)\s*\("
-)
 ROW_PATTERN = re.compile(r"<!-- WRITE-MUTATION (?P<body>.*?) -->")
 FIELD_PATTERN = re.compile(r"(?P<key>[a-z]+)=(?P<value>[^;]*)(?:;|$)")
 REQUIRED_OPEN_SCENARIOS = ("pre", "success", "disconnect", "readback", "cancel")
 VALID_STATES = {"open", "closed", "readonly", "pending"}
+REPOSITORY_FUNCTION_PATTERN = re.compile(
+    r"(?m)^\s{4}(?:(?:internal|public|open|final|override)\s+)*"
+    r"(?:suspend\s+)?fun\s+([A-Za-z_][A-Za-z0-9_]*)\s*\("
+)
+VIEW_MODEL_FUNCTION_PATTERN = re.compile(
+    r"(?m)^\s{4}(?:(?:private|internal|public|protected|open|override|final)\s+)*"
+    r"(?:suspend\s+)?fun\s+(?:<[^>\n]+>\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\("
+)
+FLAT_RESULT_COORDINATORS = {"action", "nasSettingsMutation"}
+
+# 这里记录的是已经逐调用人工审查过的生产文件。门禁不尝试用正则猜测 Kotlin
+# 数据流；任一文件内容、调用数量或调用所在文件变化都会要求重新审查并更新指纹。
+AUDITED_PRODUCTION_FILES = {
+    "io/github/qwertyuiop1995/dsmnativeclient/AppViewModel.kt": (
+        "4abc9b58f41d23aa98d7023bdd9ce6ba80cdd3eb50ea52f4bb1c6be6ed624a23",
+        63,
+    ),
+    "io/github/qwertyuiop1995/dsmnativeclient/PhotoBackupWorker.kt": (
+        "52afb09663aaefc417b8193fd2b4fd883e6598400b82cc83344f3964d5e8abce",
+        2,
+    ),
+    "io/github/qwertyuiop1995/dsmnativeclient/data/CrossNasTransferCoordinator.kt": (
+        "87d52134afcb1ec0e4a1ad7fffec50e9413c2f7a5df5009e78b63379236996f8",
+        6,
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -30,9 +61,167 @@ class MatrixRow:
     fields: dict[str, str]
 
 
-def production_result_calls(source: str | None = None) -> set[str]:
+@dataclass(frozen=True)
+class ViewModelFunction:
+    name: str
+    body: str
+
+
+def _view_model_functions(source: str) -> list[ViewModelFunction]:
+    """提取 AppViewModel 的成员函数范围，兼容块函数和表达式函数。"""
+    matches = list(VIEW_MODEL_FUNCTION_PATTERN.finditer(source))
+    return [
+        ViewModelFunction(
+            name=match.group(1),
+            body=source[match.start() : matches[index + 1].start()]
+            if index + 1 < len(matches)
+            else source[match.start() :],
+        )
+        for index, match in enumerate(matches)
+    ]
+
+
+def _repository_methods(source: str | None = None) -> set[str]:
+    text = REPOSITORY.read_text(encoding="utf-8") if source is None else source
+    return set(REPOSITORY_FUNCTION_PATTERN.findall(text))
+
+
+def _default_ui_source() -> str:
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(UI_ROOT.rglob("*.kt"))
+    )
+
+
+def _calls_coordinator(body: str, names: set[str]) -> bool:
+    return any(re.search(rf"\b{re.escape(name)}\s*(?:\(|\{{)", body) for name in names)
+
+
+def _result_call_pattern(result_methods: set[str]) -> re.Pattern[str]:
+    names = "|".join(re.escape(name) for name in sorted(result_methods, key=len, reverse=True))
+    return re.compile(rf"\.\s*(?P<direct>{names})\s*\(|::\s*(?P<reference>{names})\b")
+
+
+def _result_calls(source: str, result_methods: set[str]) -> list[str]:
+    if not result_methods:
+        return []
+    return [
+        match.group("direct") or match.group("reference")
+        for match in _result_call_pattern(result_methods).finditer(source)
+    ]
+
+
+def _legacy_repository_calls(source: str, repository_methods: set[str]) -> list[str]:
+    result_methods = {method for method in repository_methods if method.endswith("Result")}
+    legacy_methods = {
+        method.removesuffix("Result")
+        for method in result_methods
+        if method.removesuffix("Result") in repository_methods
+    }
+    if not legacy_methods:
+        return []
+    aliases = {"repo", "repository"}
+    aliases.update(re.findall(
+        r"\b([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:DsmRepository|CrossNasTransferEndpoint)\b",
+        source,
+    ))
+    receiver = "|".join(re.escape(alias) for alias in sorted(aliases, key=len, reverse=True))
+    method = "|".join(re.escape(name) for name in sorted(legacy_methods, key=len, reverse=True))
+    pattern = re.compile(
+        rf"\b(?:{receiver}|[A-Za-z_][A-Za-z0-9_]*\.repository)\s*"
+        rf"(?:\.\s*|::\s*)(?P<method>{method})\b"
+    )
+    return [match.group("method") for match in pattern.finditer(source)]
+
+
+def _production_sources() -> dict[str, str]:
+    return {
+        path.relative_to(PRODUCTION_ROOT).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(PRODUCTION_ROOT.rglob("*.kt"))
+    }
+
+
+def _container_gate_is_fixed_closed(source: str, functions: list[ViewModelFunction]) -> bool:
+    gate_is_false = re.search(
+        r"\bfun\s+containerWriteActionsEnabled\s*\([^)]*\)\s*:\s*Boolean\s*=\s*false\b",
+        source,
+    ) is not None
+    coordinator = next((item for item in functions if item.name == "containerMutation"), None)
+    if not gate_is_false or coordinator is None:
+        return False
+    gate = coordinator.body.find("if (!containerWriteActionsEnabled())")
+    repository_claim = coordinator.body.find("val repo = repository")
+    return gate >= 0 and repository_claim >= 0 and gate < repository_claim
+
+
+def validate_workspace_routing(
+    source: str | None = None,
+    repository_source: str | None = None,
+    ui_source: str | None = None,
+    additional_sources: tuple[str, ...] | None = None,
+) -> list[str]:
+    """确保生产写调用仍与已人工审查的文件快照完全一致。"""
     text = VIEW_MODEL.read_text(encoding="utf-8") if source is None else source
-    return set(CALL_PATTERN.findall(text))
+    functions = _view_model_functions(text)
+    repository_methods = _repository_methods(repository_source)
+    result_methods = {method for method in repository_methods if method.endswith("Result")}
+    errors: list[str] = []
+
+    container_entries = {
+        function.name
+        for function in functions
+        if function.name != "containerMutation" and
+        _calls_coordinator(function.body, {"containerMutation"})
+    }
+    resolved_ui_source = _default_ui_source() if ui_source is None else ui_source
+    container_is_closed = _container_gate_is_fixed_closed(text, functions) and all(
+        re.search(rf"\b(?:model|viewModel)\s*\.\s*{re.escape(name)}\s*\(", resolved_ui_source)
+        is None
+        for name in container_entries
+    )
+
+    # 合成源码只用于门禁单测：任何未登记 Result 调用都必须触发人工审查。
+    if source is not None:
+        synthetic_text = "\n".join((text, *(additional_sources or ())))
+        legacy = _legacy_repository_calls(synthetic_text, repository_methods)
+        for method in sorted(set(legacy)):
+            errors.append(f"发现旧服务端写入口 {method}，必须改用 {method}Result")
+        calls = _result_calls(synthetic_text, result_methods)
+        if calls and not container_is_closed:
+            errors.append("发现未进入已审生产文件快照的 Result 调用，必须人工复核持久结果路由")
+        return errors
+
+    sources = _production_sources()
+    call_files = {
+        relative: calls
+        for relative, source_text in sources.items()
+        if (calls := _result_calls(source_text, result_methods))
+    }
+    for relative in sorted(call_files.keys() - AUDITED_PRODUCTION_FILES.keys()):
+        errors.append(f"新增疑似 Result 调用文件未审计：{relative}")
+    for relative in sorted(AUDITED_PRODUCTION_FILES.keys() - call_files.keys()):
+        errors.append(f"已审 Result 调用文件不再包含调用：{relative}")
+    for relative in sorted(call_files.keys() & AUDITED_PRODUCTION_FILES.keys()):
+        expected_digest, expected_count = AUDITED_PRODUCTION_FILES[relative]
+        path = PRODUCTION_ROOT / relative
+        actual_digest = sha256(path.read_bytes()).hexdigest()
+        if actual_digest != expected_digest:
+            errors.append(f"已审写调用文件发生变化，必须重新复核并更新指纹：{relative}")
+        if len(call_files[relative]) != expected_count:
+            errors.append(
+                f"已审写调用数量变化：{relative}（预期 {expected_count}，"
+                f"当前 {len(call_files[relative])}）"
+            )
+    for relative, source_text in sources.items():
+        for method in sorted(set(_legacy_repository_calls(source_text, repository_methods))):
+            errors.append(f"{relative} 使用旧服务端写入口 {method}，必须改用 {method}Result")
+    return errors
+
+
+def production_result_calls(source: str | None = None) -> set[str]:
+    result_methods = {method for method in _repository_methods() if method.endswith("Result")}
+    sources = [source] if source is not None else _production_sources().values()
+    return {method for text in sources for method in _result_calls(text, result_methods)}
 
 
 def parse_rows(text: str | None = None) -> list[MatrixRow]:
@@ -140,6 +329,8 @@ def validate(
     for method, count in sorted(represented.items()):
         if count != 1:
             errors.append(f"生产写入口必须且只能记录一次：{method}（当前 {count} 次）")
+    if calls is None and rows is None:
+        errors.extend(validate_workspace_routing())
     return errors
 
 
@@ -149,7 +340,7 @@ def main() -> int:
         for error in errors:
             print(f"错误：{error}")
         return 1
-    print("Android 写操作测试矩阵通过：生产入口、适用场景与测试证据均完整。")
+    print("Android 写操作测试矩阵通过：生产调用文件已审，入口、适用场景与测试证据均完整。")
     return 0
 
 

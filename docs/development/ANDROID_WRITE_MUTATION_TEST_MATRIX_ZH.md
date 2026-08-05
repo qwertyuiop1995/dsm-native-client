@@ -1,18 +1,20 @@
 # Android 写操作测试审计矩阵
 
-本文以 `AppViewModel.kt` 中实际调用的 `*Result` 方法为生产入口事实源，审计每项写操作
+本文以生产 Kotlin 中实际调用的 `*Result` 方法为生产入口事实源，审计每项写操作
 是否具备提交前失败、成功回读、提交断线、写后回读失败和取消测试。批量或多阶段写入
 还必须覆盖部分成功；单目标原子写入不伪造部分成功语义。固定失败关闭的能力只要求
 证明零写请求；`resumeArchiveMutationResult` 只读恢复已提交任务，不计为新的写请求。
 
 ## 结论
 
-- 当前识别 60 个 `AppViewModel` 生产 `*Result` 调用，其中包含固定关闭与只读恢复调用；全部已进入下方机器可读清单，新增或删除调用会
-  由 `check_android_write_test_matrix.py` 报告漂移。
+- 当前在 `AppViewModel`、跨 NAS 协调器和照片备份 Worker 三个已审文件中识别 71 个
+  `*Result` 调用点、61 个唯一方法，其中包含固定关闭与只读恢复调用；全部已进入下方
+  机器可读清单。三个文件的内容指纹、调用数量或生产源码中的调用文件集合变化时，
+  `check_android_write_test_matrix.py` 会要求重新人工复核，不用正则猜测结果数据流。
 - 所有已开放写入口均已形成闭环，包括文件操作、Download Station、Chat、NAS 设置、
   账号与群组、套件及 VMM；单目标原子操作按不适用记录 `partial=na`，不伪造部分成功。
 - 固定失败关闭并有零请求证据的入口是 5 项容器写入口和 2 项 VMM 内部网络写入口。
-- 60 个生产 `*Result` 调用的适用场景均有现存测试方法证据，矩阵门禁当前无
+- 61 个生产 `*Result` 方法的适用场景均有现存测试方法证据，矩阵门禁当前无
   `pending` 或 `gap`；A1“每项写操作测试”叶子目标已闭环。真实 NAS 权限、断线、
   取消和副作用仍按用户安排留待统一打包验收，不以自动化结果替代。
 
@@ -50,6 +52,7 @@
 <!-- WRITE-MUTATION methods=createShareLinkResult;state=open;multi=no;pre=PhotoShareRepositoryTest.kt::共享链接输入或能力无效时零请求拒绝;success=PhotoShareRepositoryTest.kt::创建公开共享链接后必须通过列表回读确认;disconnect=PhotoShareRepositoryTest.kt::共享链接提交断线保持未确认;readback=PhotoShareRepositoryTest.kt::共享链接回读断线保持未确认;cancel=PhotoShareRepositoryTest.kt::共享链接提交后的取消;partial=na -->
 <!-- WRITE-MUTATION methods=deleteShareLinksResult;state=open;multi=yes;pre=ShareLinkDeletionTest.kt::非法目标不支持能力和已消失目标;success=ShareLinkDeletionTest.kt::删除共享链接只提交一次并在列表回读消失后确认;disconnect=ShareLinkDeletionTest.kt::提交断线但回读链接已消失;readback=ShareLinkDeletionTest.kt::提交成功但回读失败;cancel=ShareLinkDeletionTest.kt::删除提交后取消只回读;partial=ShareLinkDeletionTest.kt::批量删除只移除部分链接时返回部分成功 -->
 <!-- WRITE-MUTATION methods=uploadResult;state=open;multi=no;pre=FileUploadTest.kt::上传非法输入和能力不足均不访问网络;success=FileUploadTest.kt::上传请求符合公共Fixture且写后大小回读一致;disconnect=FileUploadTest.kt::上传断线但大小回读一致;readback=FileUploadTest.kt::上传响应成功但回读大小不一致;cancel=FileUploadTest.kt::上传提交后取消只要求刷新;partial=na -->
+<!-- WRITE-MUTATION methods=ensureSubdirectoryResult;state=open;multi=yes;pre=BackupFolderRepositoryTest.kt::拒绝在配置根目录之外创建备份目录;success=BackupFolderRepositoryTest.kt::自动备份只在配置根目录下逐层创建子目录;disconnect=BackupFolderRepositoryTest.kt::目录创建提交断线后只读回读且不重放;readback=BackupFolderRepositoryTest.kt::提交后无法读回时保留未知且不重放创建;cancel=BackupFolderRepositoryTest.kt::取消发生在提交前后时返回不同状态;partial=BackupFolderRepositoryTest.kt::后续层级失败时保留已创建层级和部分成功语义 -->
 <!-- WRITE-MUTATION methods=saveTextResult;state=open;multi=no;pre=FileUploadTest.kt::文本基线漂移时不发送;success=FileUploadTest.kt::文本覆盖保存后重新读取并逐字核对;disconnect=FileUploadTest.kt::上传断线且目标未确认;readback=FileUploadTest.kt::文本上传后读取失败保持未确认;cancel=FileUploadTest.kt::上传提交后取消只要求刷新;partial=na -->
 
 ### Download Station

@@ -749,9 +749,11 @@
     <string name="ethernet_refresh_differs">刷新完成：此网卡仍有设置与请求不一致。再次保存前，请核对当前值。</string>
     <string name="ethernet_refresh_target_missing">刷新完成：列表中已没有此网卡。再次尝试前，请检查 NAS 连接。</string>
     <string name="no_log_entries">没有日志</string>
+    <string name="no_log_entries_description">NAS 记录新的活动后，日志会显示在这里。</string>
+    <string name="no_matching_log_entries">没有符合条件的日志</string>
+    <string name="no_matching_log_entries_description">请修改搜索内容，或选择其他日志级别。</string>
     <string name="no_network_info">没有网络信息</string>
     <string name="no_security_status">没有安全状态</string>
-    <string name="no_records_for_filter">当前筛选条件下没有可显示的记录。</string>
     <string name="normal">正常</string>
     <string name="running">运行中</string>
     <string name="stopped">已停止</string>

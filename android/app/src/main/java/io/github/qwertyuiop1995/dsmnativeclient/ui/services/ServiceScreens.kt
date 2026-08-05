@@ -5,6 +5,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -30,9 +31,9 @@ import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -136,7 +137,11 @@ internal fun ContainersScreen(state: WorkspaceState, model: AppViewModel) {
                 return@LoadableContent
             }
             if (tab == 5) {
-                LogList(overview.events)
+                LogList(
+                    logs = overview.events,
+                    isAvailable = true,
+                    onRetry = { model.load(Module.CONTAINERS) },
+                )
                 return@LoadableContent
             }
             val resources = when (tab) {
@@ -490,7 +495,11 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
             }
             when (tab) {
                 5 -> ProtectionContent(overview, protectionTab) { protectionTab = it }
-                6 -> LogList(overview.logs)
+                6 -> LogList(
+                    logs = overview.logs,
+                    isAvailable = true,
+                    onRetry = { model.load(Module.VIRTUAL_MACHINES) },
+                )
                 else -> {
                     val resources = overview.forTab(tab)
                     if (tab == 0 && resources.isEmpty()) {
@@ -750,7 +759,11 @@ private fun ProtectionContent(
 }
 
 @Composable
-internal fun LogList(logs: List<LogEntry>) {
+internal fun LogList(
+    logs: List<LogEntry>,
+    isAvailable: Boolean,
+    onRetry: () -> Unit,
+) {
     var query by rememberSaveable { mutableStateOf("") }
     var level by rememberSaveable { mutableStateOf<LogLevel?>(null) }
     val filtered = logs.filter { log ->
@@ -758,49 +771,75 @@ internal fun LogList(logs: List<LogEntry>) {
             (query.isBlank() || log.event.contains(query, true) || log.user.contains(query, true))
     }
     Column {
-        LazyRow(
-            contentPadding = PaddingValues(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                AssistChip(onClick = { level = null }, label = { Text(stringResource(R.string.all)) })
+        if (!isAvailable) {
+            ServiceSectionUnavailable(onRetry)
+        } else if (logs.isEmpty()) {
+            Box(
+                Modifier.fillMaxSize().semantics { liveRegion = LiveRegionMode.Polite },
+            ) {
+                EmptyState(
+                    stringResource(R.string.no_log_entries),
+                    stringResource(R.string.no_log_entries_description),
+                    Icons.AutoMirrored.Outlined.ListAlt,
+                )
             }
-            items(LogLevel.entries) { value ->
-                AssistChip(onClick = { level = value }, label = { Text(value.displayName()) })
-            }
-        }
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = { Text(stringResource(R.string.search_logs)) },
-            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-        )
-        if (filtered.isEmpty()) {
-            EmptyState(
-                stringResource(R.string.no_log_entries),
-                stringResource(R.string.no_records_for_filter),
-                Icons.AutoMirrored.Outlined.ListAlt,
-            )
         } else {
-            LazyColumn {
-                items(filtered, key = LogEntry::id) { log ->
-                    ListItem(
-                        headlineContent = { Text(log.event) },
-                        supportingContent = {
-                            Text(
-                                listOfNotNull(
-                                    log.user,
-                                    log.timeEpochSeconds?.let(::formatDate),
-                                ).joinToString(" · "),
-                            )
-                        },
-                        leadingContent = {
-                            Icon(log.level.icon(), contentDescription = log.level.displayName())
-                        },
+            LazyRow(
+                contentPadding = PaddingValues(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item {
+                    FilterChip(
+                        selected = level == null,
+                        onClick = { level = null },
+                        label = { Text(stringResource(R.string.all)) },
                     )
-                    HorizontalDivider(Modifier.padding(start = 72.dp))
+                }
+                items(LogLevel.entries) { value ->
+                    FilterChip(
+                        selected = level == value,
+                        onClick = { level = value },
+                        label = { Text(value.displayName()) },
+                    )
+                }
+            }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                label = { Text(stringResource(R.string.search_logs)) },
+                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            )
+            if (filtered.isEmpty()) {
+                Box(
+                    Modifier.fillMaxSize().semantics { liveRegion = LiveRegionMode.Polite },
+                ) {
+                    EmptyState(
+                        stringResource(R.string.no_matching_log_entries),
+                        stringResource(R.string.no_matching_log_entries_description),
+                        Icons.AutoMirrored.Outlined.ListAlt,
+                    )
+                }
+            } else {
+                LazyColumn {
+                    items(filtered, key = LogEntry::id) { log ->
+                        ListItem(
+                            headlineContent = { Text(log.event) },
+                            supportingContent = {
+                                Text(
+                                    listOfNotNull(
+                                        log.user,
+                                        log.timeEpochSeconds?.let(::formatDate),
+                                    ).joinToString(" · "),
+                                )
+                            },
+                            leadingContent = {
+                                Icon(log.level.icon(), contentDescription = log.level.displayName())
+                            },
+                        )
+                        HorizontalDivider(Modifier.padding(start = 72.dp))
+                    }
                 }
             }
         }

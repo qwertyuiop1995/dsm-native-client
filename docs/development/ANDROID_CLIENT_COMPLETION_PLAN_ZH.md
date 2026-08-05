@@ -98,7 +98,7 @@ A9 的真机、NAS、签名和发布验收单独报告，不能用开发完成�
 | A8 | Android 体验、无障碍与性能 | `IN_PROGRESS` | 手机/平板、深浅色、TalkBack 和压力场景通过 |
 | A9 | 发布与真实环境验收 | `IN_PROGRESS` | 签名、回归、兼容记录和发布材料完整 |
 
-开发目标统计（2026-08-05，A0–A8 叶子目标口径）：181 项完成、21 项未完成，共 202 项，完成度约 89.6%。旧的 201/243 将父目标、子证据和换电脑检查混合等权统计，同时漏掉 A8 多项通用体验目标，现已废止。父项只表达其同一行切片的实现状态，子项独立记录更深能力或验收缺口，两者均不重复计分；A9 真机、NAS、签名和发布验收仍单列为未完成，89.6% 不代表可发布或已通过真实环境验收。
+开发目标统计（2026-08-05，A0–A8 叶子目标口径）：183 项完成、19 项未完成，共 202 项，完成度约 90.6%。旧的 201/243 将父目标、子证据和换电脑检查混合等权统计，同时漏掉 A8 多项通用体验目标，现已废止。父项只表达其同一行切片的实现状态，子项独立记录更深能力或验收缺口，两者均不重复计分；A9 真机、NAS、签名和发布验收仍单列为未完成，90.6% 不代表可发布或已通过真实环境验收。
 
 2026-08-05 用户指定当前开发阶段跳过实体机验收，由用户后续取得打包产物统一验证。真机、真实 NAS、OEM 分屏、TalkBack、Doze、重启和正式签名等条目保持原目标与“未验证”状态，不据此缩减 202 项目标；当前优先完成可由源码、自动化、API 35 模拟器和 GitHub CI 闭环的剩余项。
 
@@ -118,9 +118,9 @@ A9 的真机、NAS、签名和发布验收单独报告，不能用开发完成�
   - [x] 已将传输中心、应用设置/语言菜单拆到 `ui/transfers/`、`ui/settings/`。
   - [x] 已将 Container/VMM 和 NAS 管理页拆到 `ui/services/`、`ui/nas/`，日志列表在服务边界内显式共享；`LanStashApp.kt` 已降至约 1,050 行。
   - [x] 已将登录/资料管理和公共加载、错误、空状态、对话框、资源列表组件拆到 `ui/login/`、`ui/components/`；`LanStashApp.kt` 最终降至 203 行。
-- [ ] 按功能建立 `ui/<feature>/`、`data/<feature>/` 与必要的领域边界，避免动态 `Map` 进入 UI。
+- [x] 按功能建立 `ui/<feature>/`、`data/<feature>/` 与必要的领域边界，避免动态 `Map` 进入 UI。
   - [x] Download Station 已建立首个 `ui/downloads/` 功能目录；设置草稿使用强类型 `DownloadSettings`，不向 UI 暴露动态字段表。
-  - [ ] 将仍集中在大型 `DsmRepository.kt`、`AppViewModel.kt` 和共享领域模型中的功能边界按实际依赖继续拆分；不得为计分创建无调用者的平行抽象。
+  - [x] 大型文件按真实调用边界完成首轮拆分：共享 `Models.kt` 的 89 个类型声明及 1 个 `internal` helper 原样迁入 5 个领域文件；`AppViewModel.kt` 将 2,414 行类外状态和纯策略迁入 5 个功能状态文件，协调方法及必须保持文件私有的执行令牌仍留在原类；Container 的总览、附属分区、Registry 与现有写门禁迁入 `data/container/ContainerRepository.kt`，原 10 个公开入口继续由 `DsmRepository` 唯一转发。没有新增无调用者的平行抽象，模型字段、默认值、可见性及未验证写入口状态均未改变。
 - [ ] 引入明确的页面路由和返回栈；支持 Android 预测返回，返回时保留目录、筛选、滚动和输入状态。
   - [x] 已接入基础系统返回策略：手机抽屉优先关闭，File Station 子目录返回上级，根页面交回系统。
   - [x] 当前模块与 File Station 目录历史、搜索、排序、筛选和视图已按 NAS 加密持久化；批量选择不恢复，损坏状态安全回退。
@@ -269,7 +269,7 @@ A9 的真机、NAS、签名和发布验收单独报告，不能用开发完成�
   - [x] 有加密保存会话的下载使用联网约束 WorkManager 和 `dataSync` 前台服务；Android 13+ 提供通知授权说明，通知不显示文件名、NAS、账号或路径，点击进入传输中心。
   - [x] 用户主动上传在保存会话时使用联网约束 WorkManager、前台通知和进程重建监控；无保存会话或无法取得长期 URI 授权时明确降级为当前前台任务。
   - [x] Worker 和 WorkInfo 观察器以当前 Work ID/执行令牌区分系统约束停止与用户取消：系统重排保留下载片段和可恢复状态，排队任务显式取消可最终收敛，旧观察器不覆盖新执行且终态后退出。
-  - [ ] 显式重试、Doze/后台限制和低电量设备验收继续实施。
+  - [ ] 普通持久上传“从头重试”、失败下载“继续下载”及用户重试 `REPLACE` 已实现；Doze、后台限制和低电量实体机验收仍待完成。
 - [x] 支持暂停/取消语义；无法安全续传的上传明确从头开始，不伪装断点续传。
   - [x] 前台上传可请求取消；已经发送正文时要求先刷新目标文件夹，不提供自动续传或立即重试。
   - [x] 下载可取消；有保存会话时进程重建由唯一 WorkManager 恢复同一任务，失败文件可在严格 Range 校验下显式续传；用户取消会清理残片。
@@ -519,6 +519,8 @@ python3 tools/contract-validation/validate_fixtures.py
 
 | 日期 | 阶段 | 变更摘要 | 验证命令/设备 | 结果 | 剩余风险 |
 | --- | --- | --- | --- | --- | --- |
+| 2026-08-05 | A0 | 第 77 批按真实依赖完成首轮核心边界拆分：89 个共享领域类型及 1 个内部 helper 等价迁入 5 个领域文件；`AppViewModel` 的类外状态与纯策略迁入 5 个功能状态文件；Container 总览、附属分区、Registry 与现有写门禁迁入内部功能仓储，`DsmRepository` 原 10 个入口保持唯一公开门面 | 三路子 Agent 分文件实施、主 Agent 统一复核和独立只读终审；生产、单元测试与 AndroidTest Kotlin 编译；完整 JVM 1115 项；API 35 Container/主页面矩阵 31 项；本地化、计划统计、页面矩阵、48 项工具测试和差异门禁；本批单提交承担 GitHub 完整门禁 | JVM 1115/1115、API 35 31/31、工具测试 48/48，均 0 失败、0 跳过；类型与 helper 无缺失、额外或重复；`AppViewModel.kt` 减少 2,414 行；Container 未验证写入口保持关闭且没有平行实现。独立终审无 P0/P1/P2。A0 模块边界叶子完成，A0–A8 为 183/202（90.6%），剩余 19 项 | 结构拆分不替代实体机、真实 NAS、OEM、TalkBack 或签名验收；缺少稳定契约及专用写环境的能力继续关闭，未修改公开契约或持久结构 |
+| 2026-08-05 | A8 | 第 76 批完成 21 个主页面/页根、16 个确认场景和 15 个持久反馈组件族的精确 2× 字体矩阵；生产 Composable、真实父页面驱动的内联确认及可见/启用/点击语义均有映射 | 生产与 AndroidTest Kotlin 编译；API 35 `Medium_Phone_API_35` 六类测试；本地化、矩阵与差异门禁；GitHub Android Build 30985684652、Repository Check 30985684640 | API 35 47/47、0 跳过、0 失败；A8 2× 字体叶子完成，A0–A8 为 182/202（90.1%），剩余 20 项 | 独立 Dialog 不冒充小屏验证；实体机、TalkBack、OEM、真实 NAS 和签名保持未验证 |
 | 2026-08-05 | A8 | 第 75 批将 29 个生产页面/弹窗文件的全部适用状态送入真实生产 Composable；DDNS 抽出由生产网络宿主和测试共同复用的 `DdnsManagementContent`。API 35 迭代同时发现并修复 NAS 日志、Container 事件和 VMM 日志未占用页签下剩余高度的裁切 | UI/UX Pro Max；三路子 Agent 分组实施、矩阵复核、2× 字体独立审计；生产与 AndroidTest Kotlin 编译；API 35 四轮串行验证；本批单提交承担 GitHub 完整门禁 | 三个新矩阵类共 56 项在 `Medium_Phone_API_35` 56/56、0 跳过、0 失败；29/29 自动化完整。A0–A8 为 181/202（89.6%），剩余 21 项 | 2× 字体仍缺 3 个主页面、绝大多数确认框和 5 类持久反馈卡；实体机、TalkBack、OEM、真实 NAS 和签名按用户安排跳过并保持未验证 |
 | 2026-08-05 | A1/A3/A8 | 第 67 批完成第 66 批剩余闭环：文本覆盖保存复用 File Station Workspace，保存不可逆内容摘要、字节数、完整文件基线、原始八态结果、异常、继续编辑、专项 Range 回读和退出门禁；压缩/解压在路径锁内复读源项和目标目录完整基线，任务生命周期进入既有 TransferTask，保留 Repository/NAS/目标/代次、原始结果、异常、预期顶层输出和目标目录恢复操作。压缩回读要求非目录且非空；解压按顶层路径与类型复查，不声称递归内容或校验和已验证 | UI/UX Pro Max；三路子 Agent 分层实现、交叉对抗终审与主线程复核；53 项 Repository/状态 JVM、API 35 文本/传输/导航交叉 34 项；Kotlin/AndroidTest 编译、本地化、请求契约、Fixture、计划统计与差异门禁；GitHub [Android Build 30964477119](https://github.com/yuangy1995/dsm-native-client/actions/runs/30964477119) 与 [Repository Check 30964477135](https://github.com/yuangy1995/dsm-native-client/actions/runs/30964477135) | 本地聚焦 JVM 53/53、API 35 34/34，Debug 与 AndroidTest Kotlin 编译通过；GitHub 完成 1021 项 JVM（0 失败、0 跳过）、Debug/Release/R8、仪器测试 APK、Debug lint 与四组产物上传；1781 项 Android 双语资源、72 份请求 Fixture、1 份结果示例、3 组响应 Fixture与计划统计通过。终审发现的目录恢复基线、挂载类型读取不对称、只读浏览被基线读取绑死、零字节误判、解压输出断链、旧异常永久门禁、动态 live region、配置重建覆盖和旧任务误清新选择均已修复，最终无 P0/P1/P2；A0–A8 保持 175/202（86.6%），剩余 27 项 | 未操作浏览器或真实 NAS，未执行真实文本覆盖、压缩或解压；真实 DSM 任务状态字段、目录递归内容、权限、断线、取消、挂载切换和副作用仍待专用测试环境验收 |
 | 2026-08-04 | A0/A1/A5/A8 | 第 63–65 批一次迁移 Chat 七类管理写操作与逐消息文字/单附件发送：九类操作共用持久结构化 Workspace，保留稳定目标、完整删除基线、八态、计数、异常、专项刷新、120 秒提交归属、配置重建和 Repository/NAS/目标/代次门禁；删除九个旧瞬时字段与错误字符串旁路，修复 API 35 DEX `VerifyError`。最终审计又补齐 A→B 会话迟到结果的可见页隔离、未确认结果回读后的原子处置、附件预处理离页 ABA 门禁、终态及工作区销毁时的 URI 权限释放；选择失败也进入提交前结构化结果，Retry 统一由 entry 状态派生。GitHub Android 工作流增加手动触发、同分支旧运行取消及 Debug/Release/AndroidTest/报告产物上传，本机只保留轻量验证 | UI/UX Pro Max；三路子 Agent 分层实现与主线程监督、独立终审；Chat Repository 57 项、状态策略 19 项、API 35 Chat 交叉 25 项；Kotlin/AndroidTest 编译、本地化、请求契约、Fixture、计划统计、YAML 与差异门禁；GitHub [Android Build 30924874267](https://github.com/yuangy1995/dsm-native-client/actions/runs/30924874267) 与 [Repository Check 30924872048](https://github.com/yuangy1995/dsm-native-client/actions/runs/30924872048) | 990 项完整 JVM 0 失败/0 跳过；Debug、Release、R8、仪器测试 APK、Debug lint 及四组 APK/报告产物均由 GitHub Runner 完成，云端门禁耗时 10 分 29 秒。聚焦 Chat JVM 与 API 35 共 101 项通过；1755 项 Android 双语资源、71 份请求 Fixture、1 份结果示例和 3 组响应 Fixture通过。首轮 CI 暴露的网卡在途取消竞态测试已按契约修正并连续聚焦重跑 5 次；A0–A8 保持 175/202（86.6%），剩余 27 项 | 未操作浏览器或真实 NAS，未执行真实 Chat 写入；真实 Chat Server 版本、权限、断线、附件上传、实时连接、设备 TalkBack/大字体和正式签名仍待验收；CI 编译不替代模拟器、真机或 NAS 行为验证 |
@@ -710,6 +712,7 @@ git status：
 74. A0/A1/A8：将 Download Station 领域模型与纯 Workspace 状态策略从共享 `Models.kt`、`AppViewModel.kt` 机械拆到独立文件，减少两个集中式文件 671 行而不改变调用语义；删除无调用者的写操作扁平协调器。写门禁经两轮对抗复核后放弃启发式数据流正则，改为扫描全部生产 Kotlin，并锁定 `AppViewModel`、跨 NAS 协调器和照片备份 Worker 三个已审文件的 SHA-256 与调用数量；新增文件、内联方法引用、直接返回、丢弃/等待结果或修改既有实现都会触发重新人工审计。审计同时发现并为照片备份 `ensureSubdirectoryResult` 补入矩阵及提交断线不重放测试，当前共 71 个生产调用点、61 个唯一 `*Result` 方法，A1 最后一项完成。日志请求可用性不再折叠为空列表；共用日志列表区分局部失败、源空、筛选空和正常内容，提供重试、原生筛选选中语义、稳定搜索标签、中英文原因及礼貌播报。29 个生产页面当前状态分支缺口降为 0，但 27 个页面仍缺完整页面级五态自动化，A8 保持未完成。（写门禁及 `tools/codex` 48/48、Download 状态聚焦 JVM 52/52、备份目录 Repository 7/7、日志 Repository 4/4、API 35 日志 UI 5/5、Debug/AndroidTest Kotlin 编译、1828 项 Android 双语资源与计划/页面门禁通过；[Android Build 30979473636](https://github.com/yuangy1995/dsm-native-client/actions/runs/30979473636) 与 [Repository Check 30979473640](https://github.com/yuangy1995/dsm-native-client/actions/runs/30979473640) 均通过完整门禁。实体机与真实 NAS 按用户安排跳过并保持未验证。A0–A8 为 180/202、89.1%，剩余 22 项）
 75. A8：补齐 29 个生产页面/弹窗文件的全部适用状态自动化，三组新矩阵测试直接渲染生产 Composable；DDNS 根由生产宿主复用，NAS/Container/VMM 日志内容区占满页签下剩余高度。静态表单、已有实体详情和无筛选器列表不制造虚假状态。（API 35 `Medium_Phone_API_35` 56/56、0 跳过、0 失败；生产与 AndroidTest Kotlin 编译通过。A8 页面五态叶子完成，A0–A8 为 181/202、89.6%，剩余 21 项；实体机与真实 NAS按用户安排跳过）
 76. A8：完成全部主页面、确认框和持久反馈卡的 2× 字体矩阵。新增 3 项主页面测试补齐 Transfers、性能页和 NAS 日志页根；16 项确认测试覆盖通用确认、13 个专用确认及通过真实父页面驱动的上传覆盖/文本丢弃确认，并核对两端操作可见、启用和点击语义；12 个反馈矩阵方法直接覆盖 12 个生产反馈族及其可变上下文，Download 创建、RSS 和 VMM 复用三个已有精确 2× 方法，合计 15 个反馈族均有可追溯映射。API 35 `Medium_Phone_API_35` 六类测试最终 47/47、0 跳过、0 失败；独立 Dialog 仅继承 `fontScale=2f`，不把宿主尺寸冒充对话框小屏验证。A0–A8 为 182/202、90.1%，剩余 20 项；实体机、TalkBack、OEM、真实 NAS 和签名按用户安排跳过并保持未验证。
+77. A0：完成首轮核心功能边界拆分。共享 `Models.kt` 的 89 个类型声明及 1 个 `internal` helper 按 Core、File Station、Chat、Service 和 NAS 等价迁移；`AppViewModel.kt` 将 2,414 行类外状态与纯策略迁入 5 个功能文件，必须保持文件私有的执行令牌及协调方法不外移；Container 的读能力、Registry 与现有写门禁迁入内部功能仓储，`DsmRepository` 原 10 个公开入口保持签名不变并真实委托。未新增动态字段、平行实现、持久结构或公开契约，未验证写入口仍关闭。（Kotlin 三类编译、完整 JVM 1115/1115、API 35 Container/主页面矩阵 31/31、工具测试 48/48、本地化、页面与写矩阵、计划统计和差异门禁通过，独立终审无 P0/P1/P2；GitHub 完整门禁结果见本批交付。A0 模块边界叶子完成，A0–A8 为 183/202、90.6%，剩余 19 项；实体机与真实 NAS 按用户安排跳过）
 
    GitHub [Android Build 30974205760](https://github.com/yuangy1995/dsm-native-client/actions/runs/30974205760) 完成 1068 项 JVM（0 失败、0 跳过）、Debug/Release/R8、仪器测试 APK、Debug lint 和四组产物上传；[Repository Check 30974205783](https://github.com/yuangy1995/dsm-native-client/actions/runs/30974205783) 通过。
 

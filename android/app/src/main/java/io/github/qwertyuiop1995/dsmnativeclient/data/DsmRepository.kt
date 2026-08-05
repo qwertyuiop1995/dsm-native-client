@@ -1,5 +1,7 @@
 package io.github.qwertyuiop1995.dsmnativeclient.data
 
+import io.github.qwertyuiop1995.dsmnativeclient.data.container.ContainerRepository
+import io.github.qwertyuiop1995.dsmnativeclient.data.container.ContainerRepositoryGateway
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ActiveConnection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ApiCapability
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ArchiveCompressionLevel
@@ -254,6 +256,91 @@ class DsmRepository(
     private val completedGroupConversations = mutableMapOf<String, ChatConversation>()
     private val pendingChatGroupChannelIds = mutableMapOf<String, String>()
     @Volatile private var currentChatUserId: String? = null
+
+    private val containerRepository = ContainerRepository(object : ContainerRepositoryGateway {
+        override fun supports(apiName: String): Boolean = this@DsmRepository.supports(apiName)
+
+        override fun supportsVersion(apiName: String, version: Int): Boolean =
+            this@DsmRepository.supportsVersion(apiName, version)
+
+        override suspend fun call(
+            apiName: String,
+            method: String,
+            parameters: Map<String, String>,
+            version: Int?,
+        ): JsonObject = this@DsmRepository.call(apiName, method, parameters, version)
+
+        override fun strictResources(
+            data: JsonObject,
+            vararg roots: String,
+        ): List<ManagedResource> = this@DsmRepository.strictContainerResources(data, *roots)
+
+        override fun elements(data: JsonObject, key: String): List<JsonElement> = data.elements(key)
+
+        override fun firstNonBlank(data: JsonObject, vararg keys: String): String? =
+            data.firstNonBlank(*keys)
+
+        override fun bool(data: JsonObject, key: String): Boolean? = data.bool(key)
+
+        override suspend fun resourceList(
+            apiName: String,
+            methods: List<String>,
+            vararg roots: String,
+        ): List<ManagedResource> = this@DsmRepository.resourceList(apiName, methods, *roots)
+
+        override fun unsupportedMutation(operation: String, diagnosticTag: String): MutationResult =
+            this@DsmRepository.unsupportedServiceMutation(operation, diagnosticTag)
+
+        override fun mutationResult(
+            operation: String,
+            status: MutationResultStatus,
+            submitted: Boolean,
+            requiresRefresh: Boolean,
+            errorCategory: MutationErrorCategory?,
+            diagnosticTag: String,
+            affectedCount: Int,
+        ): MutationResult = this@DsmRepository.serviceMutationResult(
+            operation = operation,
+            status = status,
+            submitted = submitted,
+            requiresRefresh = requiresRefresh,
+            errorCategory = errorCategory,
+            diagnosticTag = diagnosticTag,
+            affectedCount = affectedCount,
+        )
+
+        override suspend fun verifiedMutation(
+            operation: String,
+            targetKey: String,
+            requiredApi: String,
+            preflight: suspend () -> Boolean,
+            submit: suspend () -> Unit,
+            verify: suspend () -> Boolean,
+        ): MutationResult = this@DsmRepository.verifiedServiceMutation(
+            operation = operation,
+            targetKey = targetKey,
+            requiredApi = requiredApi,
+            preflight = preflight,
+            submit = submit,
+            verify = verify,
+        )
+
+        override suspend fun deleteResourceResult(
+            operation: String,
+            targetType: String,
+            id: String,
+            apiName: String,
+            root: String,
+            method: String,
+        ): MutationResult = this@DsmRepository.deleteServiceResourceResult(
+            operation = operation,
+            targetType = targetType,
+            id = id,
+            apiName = apiName,
+            root = root,
+            method = method,
+        )
+    })
 
     fun availability(): List<ModuleAvailability> = listOf(
         ModuleAvailability(Module.FILES, supports("SYNO.FileStation.List")),
@@ -6308,70 +6395,9 @@ class DsmRepository(
         diagnosticTag = diagnosticTag,
     )
 
-    suspend fun containerOverview(): ContainerOverview {
-        if (!supportsVersion("SYNO.Docker.Container", 1)) throw DsmFailure(
-            102,
-            "Container Manager is unavailable",
-            "Update Container Manager and try again.",
-            kind = DsmErrorKind.FEATURE_UNSUPPORTED,
-        )
-        val containers = strictContainerResources(
-            call(
-                "SYNO.Docker.Container",
-                "list",
-                mapOf("offset" to "0", "limit" to "-1", "type" to "all"),
-                version = 1,
-            ),
-            "containers", "container", "data", "list",
-        )
-        val unavailable = mutableSetOf<ContainerSection>()
-        suspend fun supplementary(
-            section: ContainerSection,
-            apiName: String,
-            method: String,
-            parameters: Map<String, String> = emptyMap(),
-            vararg roots: String,
-        ): List<ManagedResource> {
-            if (!supports(apiName)) {
-                unavailable += section
-                return emptyList()
-            }
-            return runCatching {
-                strictContainerResources(call(apiName, method, parameters), *roots)
-            }.getOrElse {
-                unavailable += section
-                emptyList()
-            }
-        }
-        val images = supplementary(
-            ContainerSection.IMAGES, "SYNO.Docker.Image", "list", roots = arrayOf("images", "image", "data", "list"),
-        )
-        val networks = supplementary(
-            ContainerSection.NETWORKS, "SYNO.Docker.Network", "list", roots = arrayOf("networks", "network", "data", "list"),
-        )
-        val projects = supplementary(
-            ContainerSection.PROJECTS, "SYNO.Docker.Project", "list", roots = arrayOf("projects", "project", "data", "list"),
-        )
-        val eventData = if (supports("SYNO.Docker.Log")) runCatching {
-            call("SYNO.Docker.Log", "list", mapOf("offset" to "0", "limit" to "200"))
-        }.getOrElse {
-            unavailable += ContainerSection.EVENTS
-            null
-        } else {
-            unavailable += ContainerSection.EVENTS
-            null
-        }
-        return ContainerOverview(
-            containers,
-            images,
-            networks,
-            projects,
-            events = eventData?.let(::parseVirtualizationLogs).orEmpty(),
-            unavailableSections = unavailable,
-        )
-    }
+    suspend fun containerOverview(): ContainerOverview = containerRepository.overview()
 
-    fun supportsContainerRegistry(): Boolean = supportsVersion("SYNO.Docker.Registry", 1)
+    fun supportsContainerRegistry(): Boolean = containerRepository.supportsRegistry()
 
     /**
      * Container Manager 写接口尚未取得专用测试目标上的行为验证证据。
@@ -6379,204 +6405,28 @@ class DsmRepository(
      * 该门禁必须独立于运行时 API 能力发现：NAS 返回接口名称或版本范围，并不能证明写操作的
      * 参数、副作用和写后状态已经验证。完成版本化契约与实机行为验证前，Android 始终拒绝提交。
      */
-    fun supportsVerifiedContainerWrites(): Boolean = false
+    fun supportsVerifiedContainerWrites(): Boolean = containerRepository.supportsVerifiedWrites()
 
-    suspend fun searchContainerRegistry(query: String): List<ContainerRegistryImage> {
-        val normalizedQuery = query.trim()
-        require(normalizedQuery.isNotEmpty() && normalizedQuery.length <= 200)
-        if (!supportsContainerRegistry()) throw DsmFailure(
-            102,
-            "Container image search is unavailable",
-            "Search for the image in Container Manager.",
-            kind = DsmErrorKind.FEATURE_UNSUPPORTED,
-        )
-        val data = call(
-            "SYNO.Docker.Registry",
-            "search",
-            mapOf(
-                "offset" to "0",
-                "limit" to "50",
-                "page_size" to "50",
-                "q" to normalizedQuery,
-            ),
-            version = 1,
-        )
-        return sequenceOf("data", "items", "results", "_array")
-            .flatMap { data.elements(it).asSequence() }
-            .distinctBy(JsonElement::toString)
-            .mapNotNull { element ->
-                val item = element as? JsonObject ?: return@mapNotNull null
-                val name = item.firstNonBlank("name", "repository", "repo")
-                    ?: return@mapNotNull null
-                ContainerRegistryImage(
-                    name = name,
-                    registry = item.firstNonBlank("registry") ?: "docker.io",
-                    description = item.firstNonBlank("description"),
-                    starCount = item.int("star_count") ?: item.int("stars") ?: 0,
-                    isOfficial = item.bool("is_official") ?: item.bool("official") ?: false,
-                    isAutomated = item.bool("is_automated") ?: item.bool("automated") ?: false,
-                    isTrusted = item.bool("is_trusted") ?: item.bool("trusted") ?: false,
-                )
-            }
-            .distinctBy(ContainerRegistryImage::id)
-            .toList()
-    }
+    suspend fun searchContainerRegistry(query: String): List<ContainerRegistryImage> =
+        containerRepository.searchRegistry(query)
 
-    suspend fun containerRegistryTags(repository: String): List<String> {
-        val normalizedRepository = repository.trim()
-        require(normalizedRepository.isNotEmpty() && normalizedRepository.length <= 500)
-        if (!supportsContainerRegistry()) throw DsmFailure(
-            102,
-            "Container image tags are unavailable",
-            "View the image tags in Container Manager.",
-            kind = DsmErrorKind.FEATURE_UNSUPPORTED,
-        )
-        val data = call(
-            "SYNO.Docker.Registry",
-            "tags",
-            mapOf("repo" to normalizedRepository),
-            version = 1,
-        )
-        return sequenceOf("data", "tags", "items", "_array")
-            .flatMap { data.elements(it).asSequence() }
-            .mapNotNull { element ->
-                when (element) {
-                    is JsonObject -> element.firstNonBlank("tag", "name")
-                    is JsonPrimitive -> element.contentOrNull?.trim()?.takeIf(String::isNotBlank)
-                    else -> null
-                }
-            }
-            .distinct()
-            .toList()
-    }
+    suspend fun containerRegistryTags(repository: String): List<String> =
+        containerRepository.registryTags(repository)
 
-    suspend fun controlContainerResult(id: String, action: String): MutationResult {
-        if (!supportsVerifiedContainerWrites()) return unsupportedServiceMutation(
-            "containerControl",
-            "container.control.behavior-unverified",
-        )
-        val normalizedId = id.trim()
-        if (normalizedId.isEmpty() || action !in setOf("start", "stop", "restart")) {
-            return serviceMutationResult(
-                operation = "containerControl",
-                status = MutationResultStatus.CONFIRMED_FAILURE,
-                submitted = false,
-                errorCategory = MutationErrorCategory.VALIDATION,
-                diagnosticTag = "container.control.invalid-input",
-            )
-        }
-        val expectedState = if (action == "stop") ResourceState.STOPPED else ResourceState.RUNNING
-        return verifiedServiceMutation(
-            operation = "containerControl",
-            targetKey = "container:$normalizedId",
-            requiredApi = "SYNO.Docker.Container",
-            preflight = {
-                resourceList(
-                    "SYNO.Docker.Container",
-                    listOf("list", "get"),
-                    "containers",
-                ).any { it.id == normalizedId }
-            },
-            submit = {
-                call("SYNO.Docker.Container", action, mapOf("id" to normalizedId))
-            },
-            verify = {
-                resourceList(
-                    "SYNO.Docker.Container",
-                    listOf("list", "get"),
-                    "containers",
-                ).any { it.id == normalizedId && it.state == expectedState }
-            },
-        )
-    }
+    suspend fun controlContainerResult(id: String, action: String): MutationResult =
+        containerRepository.controlResult(id, action)
 
-    suspend fun deleteContainerResult(id: String): MutationResult {
-        if (!supportsVerifiedContainerWrites()) return unsupportedServiceMutation(
-            "containerDelete",
-            "container.delete.behavior-unverified",
-        )
-        return deleteServiceResourceResult(
-            operation = "containerDelete",
-            targetType = "container",
-            id = id,
-            apiName = "SYNO.Docker.Container",
-            root = "containers",
-            method = "delete",
-        )
-    }
+    suspend fun deleteContainerResult(id: String): MutationResult =
+        containerRepository.deleteResult(id)
 
-    suspend fun deleteContainerImageResult(id: String): MutationResult {
-        if (!supportsVerifiedContainerWrites()) return unsupportedServiceMutation(
-            "containerImageDelete",
-            "container.image.delete.behavior-unverified",
-        )
-        return deleteServiceResourceResult(
-            operation = "containerImageDelete",
-            targetType = "container-image",
-            id = id,
-            apiName = "SYNO.Docker.Image",
-            root = "images",
-            method = "delete",
-        )
-    }
+    suspend fun deleteContainerImageResult(id: String): MutationResult =
+        containerRepository.deleteImageResult(id)
 
-    suspend fun createContainerNetworkResult(name: String, driver: String): MutationResult {
-        if (!supportsVerifiedContainerWrites()) return unsupportedServiceMutation(
-            "containerNetworkCreate",
-            "container.network.create.behavior-unverified",
-        )
-        val normalizedName = name.trim()
-        if (normalizedName.isEmpty() || driver !in setOf("bridge", "host", "macvlan", "ipvlan")) {
-            return serviceMutationResult(
-                operation = "containerNetworkCreate",
-                status = MutationResultStatus.CONFIRMED_FAILURE,
-                submitted = false,
-                errorCategory = MutationErrorCategory.VALIDATION,
-                diagnosticTag = "container.network.create.invalid-input",
-            )
-        }
-        return verifiedServiceMutation(
-            operation = "containerNetworkCreate",
-            targetKey = "container-network-name:${normalizedName.lowercase(Locale.ROOT)}",
-            requiredApi = "SYNO.Docker.Network",
-            preflight = {
-                resourceList(
-                    "SYNO.Docker.Network",
-                    listOf("list", "get"),
-                    "networks",
-                ).none { it.name.equals(normalizedName, ignoreCase = true) }
-            },
-            submit = {
-                call(
-                    "SYNO.Docker.Network",
-                    "create",
-                    mapOf("name" to normalizedName, "driver" to driver),
-                )
-            },
-            verify = {
-                resourceList(
-                    "SYNO.Docker.Network",
-                    listOf("list", "get"),
-                    "networks",
-                ).any { it.name.equals(normalizedName, ignoreCase = true) }
-            },
-        )
-    }
+    suspend fun createContainerNetworkResult(name: String, driver: String): MutationResult =
+        containerRepository.createNetworkResult(name, driver)
 
-    suspend fun deleteContainerNetworkResult(id: String): MutationResult {
-        if (!supportsVerifiedContainerWrites()) return unsupportedServiceMutation(
-            "containerNetworkDelete",
-            "container.network.delete.behavior-unverified",
-        )
-        return deleteServiceResourceResult(
-            operation = "containerNetworkDelete",
-            targetType = "container-network",
-            id = id,
-            apiName = "SYNO.Docker.Network",
-            root = "networks",
-            method = "remove",
-        )
-    }
+    suspend fun deleteContainerNetworkResult(id: String): MutationResult =
+        containerRepository.deleteNetworkResult(id)
 
     suspend fun virtualMachineOverview(): VirtualMachineOverview {
         val guestApi = preferred("SYNO.Virtualization.API.Guest", "SYNO.Virtualization.Guest")

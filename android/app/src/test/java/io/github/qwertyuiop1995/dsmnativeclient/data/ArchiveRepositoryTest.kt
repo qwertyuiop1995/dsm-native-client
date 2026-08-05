@@ -4,6 +4,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.ApiCapability
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ArchiveCompressionLevel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ArchiveFormat
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationErrorCategory
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
@@ -37,7 +38,7 @@ class ArchiveRepositoryTest {
             listResponse(),
             success("""{"taskid":"compress-task"}"""),
             success("""{"finished":true}"""),
-            listResponse("""{"name":"资料.7z","path":"/home/资料.7z","isdir":false}"""),
+            listResponse("""{"name":"资料.7z","path":"/home/资料.7z","isdir":false,"size":123}"""),
         )
 
         repository(transport).compress(
@@ -63,7 +64,7 @@ class ArchiveRepositoryTest {
     }
 
     @Test
-    fun `解压先读取内容拒绝覆盖并在任务完成后复查`() = runBlocking {
+    fun `解压先读取内容拒绝覆盖并按顶层类型复查`() = runBlocking {
         val transport = ArchiveInterceptor(
             success("""{"files":[{"name":"target","path":"/home/target","isdir":true,"additional":{"perm":{"write":true}}}]}"""),
             success("""{"items":[{"itemid":7,"name":"存档","path":"/存档","is_dir":true}]}"""),
@@ -73,7 +74,7 @@ class ArchiveRepositoryTest {
             listResponse("""{"name":"存档","path":"/home/target/存档","isdir":true}"""),
         )
 
-        repository(transport).extract(
+        val result = repository(transport).extractResult(
             filePath = "/home/资料.zip",
             destinationFolder = "/home/target",
             codepage = "chs",
@@ -90,6 +91,8 @@ class ArchiveRepositoryTest {
             transport.requests.first { it.formFields()["method"] == "start" },
             "file-station/extract/synthetic-archive/request.json",
         )
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, result.status)
+        assertEquals(1, transport.methods().count { it == "start" })
     }
 
     @Test
@@ -115,7 +118,7 @@ class ArchiveRepositoryTest {
             directoryResponse("/home", canWrite = true),
             listResponse(),
             IOException("synthetic disconnect"),
-            listResponse("""{"name":"archive.zip","path":"/home/archive.zip","isdir":false}"""),
+            listResponse("""{"name":"archive.zip","path":"/home/archive.zip","isdir":false,"size":123}"""),
         )
 
         val result = repository(transport).compressResult(
@@ -203,6 +206,10 @@ class ArchiveRepositoryTest {
         assertEquals(MutationResultStatus.PERMISSION_DENIED, result.status)
         assertFalse(result.submitted)
         assertEquals(listOf("getinfo"), transport.methods())
+        assertTrue(
+            transport.requests.single().formFields().getValue("additional")
+                .contains("mount_point_type"),
+        )
     }
 
     @Test
@@ -340,6 +347,188 @@ class ArchiveRepositoryTest {
         assertFalse(transport.methods().contains("delete"))
     }
 
+    @Test
+    fun `压缩源文件基线漂移时零提交`() = runBlocking {
+        val destination = directoryItem("/home")
+        val source = fileItem("/home/source.txt", size = 10)
+        val transport = ArchiveInterceptor(
+            fileInfoResponse(destination),
+            fileInfoResponse(source.copy(size = 11)),
+        )
+
+        val result = repository(transport).compressResult(
+            sourceBaselines = listOf(source),
+            destinationBaseline = destination,
+            destinationFilePath = "/home/archive.zip",
+            format = ArchiveFormat.ZIP,
+            level = ArchiveCompressionLevel.MODERATE,
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
+        assertEquals(MutationErrorCategory.CONFLICT, result.errorCategory)
+        assertFalse(result.submitted)
+        assertEquals(listOf("getinfo", "getinfo"), transport.methods())
+        assertFalse(transport.methods().contains("start"))
+    }
+
+    @Test
+    fun `压缩目标目录基线漂移时零提交`() = runBlocking {
+        val destination = directoryItem("/home")
+        val source = fileItem("/home/source.txt", size = 10)
+        val transport = ArchiveInterceptor(fileInfoResponse(destination.copy(owner = "changed")))
+
+        val result = repository(transport).compressResult(
+            sourceBaselines = listOf(source),
+            destinationBaseline = destination,
+            destinationFilePath = "/home/archive.zip",
+            format = ArchiveFormat.ZIP,
+            level = ArchiveCompressionLevel.MODERATE,
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
+        assertEquals(MutationErrorCategory.CONFLICT, result.errorCategory)
+        assertFalse(result.submitted)
+        assertEquals(listOf("getinfo"), transport.methods())
+    }
+
+    @Test
+    fun `压缩完成后零字节目标不能确认成功`() = runBlocking {
+        val responses = mutableListOf<Any>(
+            directoryResponse("/home", canWrite = true),
+            listResponse(),
+            success("""{"taskid":"compress-task"}"""),
+            success("""{"finished":true}"""),
+        )
+        repeat(8) {
+            responses += listResponse(
+                """{"name":"archive.zip","path":"/home/archive.zip","isdir":false,"size":0}""",
+            )
+        }
+        val transport = ArchiveInterceptor(*responses.toTypedArray())
+
+        val result = repository(transport).compressResult(
+            paths = listOf("/home/source.txt"),
+            destinationFilePath = "/home/archive.zip",
+            format = ArchiveFormat.ZIP,
+            level = ArchiveCompressionLevel.MODERATE,
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
+        assertEquals(0, result.counts.succeeded)
+        assertEquals(1, transport.methods().count { it == "start" })
+    }
+
+    @Test
+    fun `压缩完成后同名目录不能冒充归档文件`() = runBlocking {
+        val responses = mutableListOf<Any>(
+            directoryResponse("/home", canWrite = true),
+            listResponse(),
+            success("""{"taskid":"compress-task"}"""),
+            success("""{"finished":true}"""),
+        )
+        repeat(8) {
+            responses += listResponse(
+                """{"name":"archive.zip","path":"/home/archive.zip","isdir":true,"size":123}""",
+            )
+        }
+        val transport = ArchiveInterceptor(*responses.toTypedArray())
+
+        val result = repository(transport).compressResult(
+            paths = listOf("/home/source.txt"),
+            destinationFilePath = "/home/archive.zip",
+            format = ArchiveFormat.ZIP,
+            level = ArchiveCompressionLevel.MODERATE,
+        )
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
+        assertEquals(0, result.counts.succeeded)
+    }
+
+    @Test
+    fun `解压源文件基线漂移时不会读取归档或启动任务`() = runBlocking {
+        val destination = directoryItem("/home/target")
+        val source = fileItem("/home/archive.zip", size = 10)
+        val transport = ArchiveInterceptor(
+            fileInfoResponse(destination),
+            fileInfoResponse(source.copy(size = 11)),
+        )
+
+        val result = repository(transport).extractResult(source, destination)
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
+        assertEquals(MutationErrorCategory.CONFLICT, result.errorCategory)
+        assertFalse(result.submitted)
+        assertEquals(listOf("getinfo", "getinfo"), transport.methods())
+        assertFalse(transport.methods().contains("list"))
+        assertFalse(transport.methods().contains("start"))
+    }
+
+    @Test
+    fun `解压目标目录基线漂移时不会读取归档或启动任务`() = runBlocking {
+        val destination = directoryItem("/home/target")
+        val source = fileItem("/home/archive.zip", size = 10)
+        val transport = ArchiveInterceptor(fileInfoResponse(destination.copy(owner = "changed")))
+
+        val result = repository(transport).extractResult(source, destination)
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
+        assertEquals(MutationErrorCategory.CONFLICT, result.errorCategory)
+        assertFalse(result.submitted)
+        assertEquals(listOf("getinfo"), transport.methods())
+    }
+
+    @Test
+    fun `解压完成后输出类型必须与归档目录项一致`() = runBlocking {
+        val destination = directoryItem("/home/target")
+        val source = fileItem("/home/archive.zip", size = 10)
+        val responses = mutableListOf<Any>(
+            fileInfoResponse(destination),
+            fileInfoResponse(source),
+            success("""{"items":[{"itemid":1,"name":"a.txt","path":"/a.txt","is_dir":false}]}"""),
+            listResponse(),
+            success("""{"taskid":"extract-task"}"""),
+            success("""{"finished":true}"""),
+        )
+        repeat(8) {
+            responses += listResponse(
+                """{"name":"a.txt","path":"/home/target/a.txt","isdir":true}""",
+            )
+        }
+        val transport = ArchiveInterceptor(*responses.toTypedArray())
+
+        val result = repository(transport).extractResult(source, destination)
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, result.status)
+        assertEquals(0, result.counts.succeeded)
+        assertEquals(
+            listOf("getinfo", "getinfo", "list", "getinfo", "start", "status"),
+            transport.methods().take(6),
+        )
+    }
+
+    @Test
+    fun `解压在读取归档前持有源文件路径锁`() = runBlocking {
+        val transport = BlockingExtractListInterceptor()
+        val repo = repository(transport)
+        val extraction = async(Dispatchers.IO) {
+            repo.extractResult(
+                fileItem("/home/archive.zip", size = 10),
+                directoryItem("/home/target"),
+            )
+        }
+        assertTrue(transport.listStarted.await(2, TimeUnit.SECONDS))
+
+        val deletion = repo.deleteResult(listOf("/home/archive.zip"))
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, deletion.status)
+        assertEquals(MutationErrorCategory.CONFLICT, deletion.errorCategory)
+        assertFalse(deletion.submitted)
+        assertFalse(transport.methods().contains("delete"))
+        transport.allowList.countDown()
+        assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, extraction.await().status)
+        assertEquals(listOf("getinfo", "getinfo", "list"), transport.methods().take(3))
+    }
+
     private fun repository(
         interceptor: Interceptor,
         supportsArchives: Boolean = true,
@@ -364,6 +553,26 @@ class ArchiveRepositoryTest {
     )
 
     private fun success(data: String) = """{"success":true,"data":$data}"""
+
+    private fun directoryItem(path: String) = FileItem(
+        path = path,
+        name = path.substringAfterLast('/'),
+        isDirectory = true,
+        owner = "tester",
+        canWrite = true,
+    )
+
+    private fun fileItem(path: String, size: Long) = FileItem(
+        path = path,
+        name = path.substringAfterLast('/'),
+        isDirectory = false,
+        size = size,
+        owner = "tester",
+    )
+
+    private fun fileInfoResponse(item: FileItem) = success(
+        """{"files":[{"name":"${item.name}","path":"${item.path}","isdir":${item.isDirectory},"size":${item.size},"additional":{"owner":"${item.owner}","perm":{"read":${item.canRead},"write":${item.canWrite},"delete":${item.canDelete}}}}]}""",
+    )
 
     private fun directoryResponse(path: String, canWrite: Boolean) = success(
         """{"files":[{"name":"${path.substringAfterLast('/')}","path":"$path","isdir":true,"additional":{"perm":{"write":$canWrite}}}]}""",
@@ -409,7 +618,15 @@ private class BlockingArchiveInterceptor(
         val fields = request.formFields()
         val method = fields["method"]
         val body = when (method) {
-            "getinfo" -> """{"success":true,"data":{"files":[{"name":"home","path":"/home","isdir":true,"additional":{"perm":{"write":true}}}]}}"""
+            "getinfo" -> if (fields["path"] == "[\"/home/archive.zip\"]") {
+                if (targetAppears && statusStarted.count == 0L) {
+                    """{"success":true,"data":{"files":[{"name":"archive.zip","path":"/home/archive.zip","isdir":false,"size":123}]}}"""
+                } else {
+                    """{"success":true,"data":{"files":[]}}"""
+                }
+            } else {
+                """{"success":true,"data":{"files":[{"name":"home","path":"/home","isdir":true,"additional":{"perm":{"write":true}}}]}}"""
+            }
             "start" -> """{"success":true,"data":{"taskid":"compress-task"}}"""
             "status" -> {
                 statusStarted.countDown()
@@ -417,11 +634,7 @@ private class BlockingArchiveInterceptor(
                 """{"success":true,"data":{"finished":true}}"""
             }
             "stop" -> """{"success":true,"data":{}}"""
-            "list" -> if (targetAppears && statusStarted.count == 0L) {
-                """{"success":true,"data":{"offset":0,"total":1,"files":[{"name":"archive.zip","path":"/home/archive.zip","isdir":false}]}}"""
-            } else {
-                """{"success":true,"data":{"offset":0,"total":0,"files":[]}}"""
-            }
+            "list" -> """{"success":true,"data":{"offset":0,"total":0,"files":[]}}"""
             else -> error("未处理的压缩方法：$method")
         }
         return Response.Builder()
@@ -434,6 +647,72 @@ private class BlockingArchiveInterceptor(
     }
 
     fun methods(): List<String?> = requests.map { it.formFields()["method"] }
+}
+
+private class BlockingExtractListInterceptor : Interceptor {
+    val listStarted = CountDownLatch(1)
+    val allowList = CountDownLatch(1)
+    val requests: MutableList<Request> = Collections.synchronizedList(mutableListOf())
+    @Volatile
+    private var taskStarted = false
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        requests += request
+        val fields = request.formFields()
+        val method = fields["method"]
+        val body = when (method) {
+            "getinfo" -> when (fields["path"]) {
+                "[\"/home/target\"]" -> fileInfo(
+                    name = "target",
+                    path = "/home/target",
+                    isDirectory = true,
+                    size = 0,
+                    canWrite = true,
+                )
+                "[\"/home/archive.zip\"]" -> fileInfo(
+                    name = "archive.zip",
+                    path = "/home/archive.zip",
+                    isDirectory = false,
+                    size = 10,
+                )
+                "[\"/home/target/a.txt\"]" -> if (taskStarted) {
+                    fileInfo("a.txt", "/home/target/a.txt", isDirectory = false, size = 5)
+                } else {
+                    """{"success":true,"data":{"files":[]}}"""
+                }
+                else -> error("未处理的解压路径：${fields["path"]}")
+            }
+            "list" -> {
+                listStarted.countDown()
+                check(allowList.await(2, TimeUnit.SECONDS)) { "等待解压列表响应超时" }
+                """{"success":true,"data":{"items":[{"itemid":1,"name":"a.txt","path":"/a.txt","is_dir":false}]}}"""
+            }
+            "start" -> {
+                taskStarted = true
+                """{"success":true,"data":{"taskid":"extract-task"}}"""
+            }
+            "status" -> """{"success":true,"data":{"finished":true}}"""
+            else -> error("未处理的解压方法：$method")
+        }
+        return Response.Builder()
+            .request(request)
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body(body.toResponseBody("application/json".toMediaType()))
+            .build()
+    }
+
+    fun methods(): List<String?> = requests.map { it.formFields()["method"] }
+
+    private fun fileInfo(
+        name: String,
+        path: String,
+        isDirectory: Boolean,
+        size: Long,
+        canWrite: Boolean = false,
+    ) = """{"success":true,"data":{"files":[{"name":"$name","path":"$path","isdir":$isDirectory,"size":$size,"additional":{"owner":"tester","perm":{"read":true,"write":$canWrite,"delete":false}}}]}}"""
 }
 
 private fun Request.formFields(): Map<String, String> {

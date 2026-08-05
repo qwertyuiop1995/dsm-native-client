@@ -1742,6 +1742,12 @@
     <string name="no_filtered_transfer_tasks_description">Choose another source to view its tasks.</string>
     <string name="nas_task_percent_progress">%1$d%% complete</string>
     <string name="nas_task_refresh_before_retry">Refresh the affected folder before trying again.</string>
+    <string name="open_and_refresh_affected_folder">Open and refresh affected folder</string>
+    <string name="refreshing_affected_folder">Refreshing affected folder…</string>
+    <string name="affected_folder_refresh_matches">The folder was refreshed. Review the latest contents before continuing.</string>
+    <string name="affected_folder_refresh_differs">The latest folder contents do not match the expected result. Review them before trying again.</string>
+    <string name="affected_folder_refresh_disappeared">The expected result is not in the refreshed folder. Review the folder before trying again.</string>
+    <string name="affected_folder_refresh_unavailable">The folder still could not be refreshed. Check the NAS connection and try again.</string>
     <string name="app_transfers_title">App transfers</string>
     <string name="file_background_tasks_title">NAS file tasks</string>
     <string name="file_background_tasks_loading">Loading NAS file tasks…</string>

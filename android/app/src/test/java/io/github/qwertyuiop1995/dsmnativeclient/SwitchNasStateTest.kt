@@ -2,6 +2,11 @@ package io.github.qwertyuiop1995.dsmnativeclient
 
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedDownload
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedUpload
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationLifecycle
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationOperation
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationTarget
+import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferDirection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferState
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferTask
@@ -131,6 +136,7 @@ class SwitchNasStateTest {
                         TransferDirection.SERVER,
                         TransferState.CANCELLED,
                         requiresRefresh = true,
+                        fileServerMutation = pendingFileServerMutation(),
                     ),
                 ),
             ),
@@ -175,6 +181,7 @@ class SwitchNasStateTest {
         direction: TransferDirection,
         state: TransferState,
         requiresRefresh: Boolean = false,
+        fileServerMutation: FileServerMutationLifecycle? = null,
     ) = TransferTask(
         id = "transfer-${direction.name}-${state.name}",
         title = "synthetic",
@@ -182,5 +189,37 @@ class SwitchNasStateTest {
         direction = direction,
         state = state,
         requiresRefresh = requiresRefresh,
+        fileServerMutation = fileServerMutation,
     )
+
+    private fun pendingFileServerMutation(): FileServerMutationLifecycle {
+        val destination = FileItem(
+            path = "/synthetic",
+            name = "synthetic",
+            isDirectory = true,
+            canRead = true,
+            canWrite = true,
+            canDelete = false,
+        )
+        return FileServerMutationLifecycle(
+            target = FileServerMutationTarget(
+                profileId = "profile",
+                module = Module.FILES,
+                operation = FileServerMutationOperation.COMPRESS,
+                sourceBaselines = listOf(
+                    FileItem(
+                        path = "/synthetic/source.txt",
+                        name = "source.txt",
+                        isDirectory = false,
+                        size = 1,
+                        canRead = true,
+                        canWrite = true,
+                        canDelete = true,
+                    ),
+                ),
+                destinationFolderBaseline = destination,
+            ),
+            result = cancelledFileServerMutationResult(FileServerMutationOperation.COMPRESS),
+        )
+    }
 }

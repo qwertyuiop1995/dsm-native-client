@@ -114,7 +114,6 @@ internal fun FilePreviewDialog(
     modifier: Modifier = Modifier,
 ) {
     var showDetails by rememberSaveable(item.path) { mutableStateOf(false) }
-    var confirmSave by remember(item.path) { mutableStateOf(false) }
     val previewContent: @Composable () -> Unit = {
         Surface(
             modifier = modifier.fillMaxSize(),
@@ -193,7 +192,9 @@ internal fun FilePreviewDialog(
                             textDraft,
                             onDraftChange = onTextDraftChange,
                             onCancelEdit = onCancelTextEdit,
-                            onRequestSave = { confirmSave = true },
+                            onRequestSave = {
+                                textDraft?.let { draft -> onSaveText?.invoke(item, draft) }
+                            },
                             canEditText = onSaveText != null,
                             savingText = savingText,
                         )
@@ -230,28 +231,6 @@ internal fun FilePreviewDialog(
             dismissButton = {
                 TextButton(onClick = onDismissDiscard) {
                     Text(stringResource(R.string.keep_editing))
-                }
-            },
-        )
-    }
-    if (confirmSave) {
-        AlertDialog(
-            onDismissRequest = { confirmSave = false },
-            title = { Text(stringResource(R.string.save_text_changes_title)) },
-            text = { Text(stringResource(R.string.save_text_changes_message)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmSave = false
-                        textDraft?.let { onSaveText?.invoke(item, it) }
-                    },
-                ) {
-                    Text(stringResource(R.string.replace_existing))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmSave = false }) {
-                    Text(stringResource(R.string.cancel))
                 }
             },
         )
@@ -751,13 +730,17 @@ private fun TextPreview(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
-                TextButton(onClick = onCancelEdit, enabled = !saving) {
+                TextButton(
+                    onClick = onCancelEdit,
+                    enabled = !saving,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
                     Text(stringResource(R.string.cancel))
                 }
                 Button(
                     onClick = onRequestSave,
                     enabled = !saving && draft != content.value,
-                    modifier = Modifier.padding(start = 8.dp),
+                    modifier = Modifier.padding(start = 8.dp).heightIn(min = 48.dp),
                 ) {
                     if (saving) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)

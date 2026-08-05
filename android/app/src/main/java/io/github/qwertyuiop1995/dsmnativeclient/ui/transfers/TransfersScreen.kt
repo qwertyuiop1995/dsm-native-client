@@ -58,6 +58,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskPage
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskState
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskSummary
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationVerification
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferDirection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferState
 import io.github.qwertyuiop1995.dsmnativeclient.localization.localize
@@ -193,6 +194,9 @@ private fun AppTransfersContent(state: WorkspaceState, model: AppViewModel) {
                     onResume = { model.resumeTransfer(task.id) },
                     onCancel = { model.cancelTransfer(task.id) },
                     onRetry = { model.retryTransfer(task.id) },
+                    canRefreshTarget = model.canRefreshFileServerTransfer(task.id),
+                    isRefreshingTarget = task.fileServerMutation?.refreshInProgress == true,
+                    onOpenAndRefreshTarget = { model.openAndRefreshFileServerTransferTarget(task.id) },
                 )
             }
         }
@@ -428,6 +432,9 @@ internal fun TransferTaskCard(
     onResume: () -> Unit,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
+    canRefreshTarget: Boolean = false,
+    isRefreshingTarget: Boolean = false,
+    onOpenAndRefreshTarget: () -> Unit = {},
 ) {
     Card {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -481,6 +488,29 @@ internal fun TransferTaskCard(
                         actions()
                     }
                 }
+                if (canRefreshTarget || isRefreshingTarget) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            onClick = onOpenAndRefreshTarget,
+                            enabled = canRefreshTarget && !isRefreshingTarget,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
+                            if (isRefreshingTarget) {
+                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            }
+                            Text(
+                                stringResource(
+                                    if (isRefreshingTarget) R.string.refreshing_affected_folder
+                                    else R.string.open_and_refresh_affected_folder,
+                                ),
+                                modifier = Modifier.padding(start = if (isRefreshingTarget) 8.dp else 0.dp),
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -491,17 +521,16 @@ internal fun TransferTaskDetails(
     task: io.github.qwertyuiop1995.dsmnativeclient.domain.TransferTask,
     nowEpochMillis: Long = System.currentTimeMillis(),
 ) {
-    val statusLiveRegion = if (task.errorMessage != null || task.requiresRefresh) {
+    val fileServerMutation = task.fileServerMutation
+    val statusLiveRegion = if (
+        task.errorMessage != null || task.requiresRefresh || fileServerMutation?.refreshFailure != null ||
+        fileServerMutation?.verification?.let { it != FileServerMutationVerification.MATCHES } == true
+    ) {
         LiveRegionMode.Assertive
     } else {
         LiveRegionMode.Polite
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            task.detail,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.semantics { liveRegion = statusLiveRegion },
-        )
         val transferProgress = task.progress
         val isActive = task.state in setOf(
             TransferState.WAITING,
@@ -560,27 +589,58 @@ internal fun TransferTaskDetails(
                 }
             }
         }
-        task.errorMessage?.let { message ->
+        Column(
+            modifier = Modifier.semantics { liveRegion = statusLiveRegion },
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             Text(
-                message,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
+                task.detail,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-        if (task.requiresRefresh) {
-            Text(
-                stringResource(
-                    if (task.direction == TransferDirection.SERVER) {
-                        R.string.nas_task_refresh_before_retry
-                    } else {
-                        R.string.transfer_refresh_before_retry
-                    },
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
-            )
+            task.errorMessage?.let { message ->
+                Text(
+                    message,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (task.requiresRefresh) {
+                Text(
+                    stringResource(
+                        if (task.direction == TransferDirection.SERVER) {
+                            R.string.nas_task_refresh_before_retry
+                        } else {
+                            R.string.transfer_refresh_before_retry
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            fileServerMutation?.refreshFailure?.let { failure ->
+                Text(
+                    failure.localize(LocalContext.current).combined,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            fileServerMutation?.verification?.let { verification ->
+                Text(
+                    stringResource(verification.messageResource()),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
+}
+
+@androidx.annotation.StringRes
+private fun FileServerMutationVerification.messageResource(): Int = when (this) {
+    FileServerMutationVerification.MATCHES -> R.string.affected_folder_refresh_matches
+    FileServerMutationVerification.DIFFERS -> R.string.affected_folder_refresh_differs
+    FileServerMutationVerification.DISAPPEARED -> R.string.affected_folder_refresh_disappeared
+    FileServerMutationVerification.UNAVAILABLE -> R.string.affected_folder_refresh_unavailable
 }
 
 @androidx.annotation.StringRes

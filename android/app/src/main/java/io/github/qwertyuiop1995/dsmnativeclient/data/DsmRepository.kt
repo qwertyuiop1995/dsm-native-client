@@ -33,6 +33,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadSettings
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationExpectedOutput
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskPage
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBackgroundTaskState
@@ -149,7 +150,7 @@ data class ShareLinkMutationOutcome(
 private fun FileItem.matchesMutationBaseline(baseline: FileItem): Boolean =
     path == baseline.path && name == baseline.name && isDirectory == baseline.isDirectory &&
         owner == baseline.owner && canRead == baseline.canRead && canWrite == baseline.canWrite &&
-        canDelete == baseline.canDelete && (isDirectory ||
+        canDelete == baseline.canDelete && mountPointType == baseline.mountPointType && (isDirectory ||
         size == baseline.size && modifiedAtEpochSeconds == baseline.modifiedAtEpochSeconds)
 
 /** 写后移动结果只比较跨目录后仍应保持的内容属性，不把 ACL 继承变化误判为移动失败。 */
@@ -319,7 +320,7 @@ class DsmRepository(
                 "sort_by" to sortBy,
                 "sort_direction" to if (sortAscending) "asc" else "desc",
                 "filetype" to fileType,
-                "additional" to "[\"real_path\",\"size\",\"owner\",\"time\",\"perm\"]",
+                "additional" to "[\"real_path\",\"size\",\"owner\",\"time\",\"perm\",\"mount_point_type\"]",
             ),
         )
         return filePage(data, "files")
@@ -362,7 +363,7 @@ class DsmRepository(
             "getinfo",
             mapOf(
                 "path" to jsonStrings(listOf(path)),
-                "additional" to "[\"real_path\",\"size\",\"owner\",\"time\",\"perm\"]",
+                "additional" to "[\"real_path\",\"size\",\"owner\",\"time\",\"perm\",\"mount_point_type\"]",
             ),
         )
         return filePage(data, "files").items.firstOrNull { it.path == path }
@@ -843,7 +844,7 @@ class DsmRepository(
                 ),
             )
         }
-        val upload = uploadResult(
+        val upload = uploadResultInternal(
             source = UploadSource(
                 displayName = item.name,
                 contentType = "text/plain; charset=utf-8",
@@ -853,6 +854,7 @@ class DsmRepository(
             destinationPath = item.path.substringBeforeLast('/', ""),
             overwrite = true,
             onProgress = onProgress,
+            targetBaseline = item,
         )
         if (upload.status != MutationResultStatus.CONFIRMED_SUCCESS) {
             return TextSaveMutationOutcome(
@@ -1913,6 +1915,20 @@ class DsmRepository(
         destinationPath: String,
         overwrite: Boolean = false,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ): MutationResult = uploadResultInternal(
+        source,
+        destinationPath,
+        overwrite,
+        onProgress,
+        targetBaseline = null,
+    )
+
+    private suspend fun uploadResultInternal(
+        source: UploadSource,
+        destinationPath: String,
+        overwrite: Boolean,
+        onProgress: (Long, Long) -> Unit,
+        targetBaseline: FileItem?,
     ): MutationResult {
         val destination = destinationPath.trim().trimEnd('/')
         val valid = destination.startsWith('/') && destination.length > 1 &&
@@ -1959,11 +1975,33 @@ class DsmRepository(
             )
         }
         try {
-        val permissionFilename = if (overwrite) {
-            "LanStash-Write-Check-${UUID.randomUUID()}.tmp"
-        } else {
-            source.displayName
-        }
+            if (targetBaseline != null) {
+                val observed = try {
+                    fileInfo(target)
+                } catch (_: CancellationException) {
+                    return uploadMutationResult(
+                        MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+                        submitted = false,
+                        diagnosticTag = "file-station.upload.cancelled-before-submission",
+                    )
+                } catch (failure: DsmFailure) {
+                    return uploadPreflightFailure(failure)
+                }
+                if (observed == null || !observed.matchesMutationBaseline(targetBaseline)) {
+                    return uploadMutationResult(
+                        MutationResultStatus.CONFIRMED_FAILURE,
+                        submitted = false,
+                        failed = 1,
+                        errorCategory = MutationErrorCategory.CONFLICT,
+                        diagnosticTag = "file-station.upload.target-baseline-drift",
+                    )
+                }
+            }
+            val permissionFilename = if (overwrite) {
+                "LanStash-Write-Check-${UUID.randomUUID()}.tmp"
+            } else {
+                source.displayName
+            }
             try {
                 call(
                     FILE_STATION_CHECK_PERMISSION_API,
@@ -3467,15 +3505,60 @@ class DsmRepository(
         level: ArchiveCompressionLevel,
         password: String? = null,
         onProgress: (Long, Long?) -> Unit = { _, _ -> },
+    ): MutationResult = compressResultInternal(
+        paths = paths,
+        sourceBaselines = null,
+        destinationBaseline = null,
+        destinationFilePath = destinationFilePath,
+        format = format,
+        level = level,
+        password = password,
+        onProgress = onProgress,
+    )
+
+    suspend fun compressResult(
+        sourceBaselines: List<FileItem>,
+        destinationBaseline: FileItem,
+        destinationFilePath: String,
+        format: ArchiveFormat,
+        level: ArchiveCompressionLevel,
+        password: String? = null,
+        onProgress: (Long, Long?) -> Unit = { _, _ -> },
+    ): MutationResult = compressResultInternal(
+        paths = sourceBaselines.map(FileItem::path),
+        sourceBaselines = sourceBaselines,
+        destinationBaseline = destinationBaseline,
+        destinationFilePath = destinationFilePath,
+        format = format,
+        level = level,
+        password = password,
+        onProgress = onProgress,
+    )
+
+    private suspend fun compressResultInternal(
+        paths: List<String>,
+        sourceBaselines: List<FileItem>?,
+        destinationBaseline: FileItem?,
+        destinationFilePath: String,
+        format: ArchiveFormat,
+        level: ArchiveCompressionLevel,
+        password: String?,
+        onProgress: (Long, Long?) -> Unit,
     ): MutationResult {
         val normalizedPaths = paths.map(String::trim).filter(String::isNotEmpty).distinct()
         val target = destinationFilePath.trim()
         val parent = target.substringBeforeLast('/', "")
+        val sourceBaselinesByPath = sourceBaselines?.associateBy(FileItem::path)
         val valid = normalizedPaths.isNotEmpty() &&
             normalizedPaths.size == paths.size &&
             normalizedPaths.none { it == target } &&
             target.startsWith('/') &&
             parent.isNotBlank() &&
+            (sourceBaselines == null ||
+                sourceBaselines.size == normalizedPaths.size &&
+                sourceBaselinesByPath?.keys == normalizedPaths.toSet()) &&
+            (destinationBaseline == null ||
+                destinationBaseline.path == parent && destinationBaseline.isDirectory) &&
             target.substringAfterLast('/').lowercase(Locale.ROOT)
                 .endsWith(".${format.fileExtension.lowercase(Locale.ROOT)}")
         if (!valid) {
@@ -3527,6 +3610,16 @@ class DsmRepository(
                     diagnosticTag = "file-station.archive-compress.destination-missing",
                 )
             }
+            if (destinationBaseline != null && !destination.matchesMutationBaseline(destinationBaseline)) {
+                return archiveMutationResult(
+                    operation = "archiveCompress",
+                    status = MutationResultStatus.CONFIRMED_FAILURE,
+                    submitted = false,
+                    failed = 1,
+                    errorCategory = MutationErrorCategory.CONFLICT,
+                    diagnosticTag = "file-station.archive-compress.destination-baseline-drift",
+                )
+            }
             if (!destination.canWrite) {
                 return archiveMutationResult(
                     operation = "archiveCompress",
@@ -3536,6 +3629,29 @@ class DsmRepository(
                     errorCategory = MutationErrorCategory.PERMISSION,
                     diagnosticTag = "file-station.archive-compress.destination-read-only",
                 )
+            }
+            if (sourceBaselinesByPath != null) {
+                for (path in normalizedPaths) {
+                    val observed = try {
+                        fileInfo(path)
+                    } catch (_: CancellationException) {
+                        return archiveCancelledBeforeSubmission("archiveCompress", "archive-compress")
+                    } catch (failure: DsmFailure) {
+                        return archivePreflightFailure("archiveCompress", "archive-compress", failure)
+                    }
+                    if (observed == null ||
+                        !observed.matchesMutationBaseline(checkNotNull(sourceBaselinesByPath[path]))
+                    ) {
+                        return archiveMutationResult(
+                            operation = "archiveCompress",
+                            status = MutationResultStatus.CONFIRMED_FAILURE,
+                            submitted = false,
+                            failed = 1,
+                            errorCategory = MutationErrorCategory.CONFLICT,
+                            diagnosticTag = "file-station.archive-compress.source-baseline-drift",
+                        )
+                    }
+                }
             }
             val targetExists = try {
                 itemExists(target)
@@ -3558,7 +3674,9 @@ class DsmRepository(
                 operation = "archiveCompress",
                 diagnosticOperation = "archive-compress",
                 apiName = FILE_STATION_COMPRESS_API,
-                expectedPaths = listOf(target),
+                expectedOutputs = listOf(
+                    ArchiveExpectedOutput(target, isDirectory = false, requiresNonEmptyFile = true),
+                ),
                 onProgress = onProgress,
             ) {
                 call(
@@ -3632,13 +3750,55 @@ class DsmRepository(
         password: String? = null,
         codepage: String? = null,
         onProgress: (Long, Long?) -> Unit = { _, _ -> },
+    ): MutationResult = extractResultInternal(
+        filePath = filePath,
+        destinationFolder = destinationFolder,
+        sourceBaseline = null,
+        destinationBaseline = null,
+        password = password,
+        codepage = codepage,
+        onProgress = onProgress,
+        onExpectedOutputs = {},
+    )
+
+    suspend fun extractResult(
+        sourceBaseline: FileItem,
+        destinationBaseline: FileItem,
+        password: String? = null,
+        codepage: String? = null,
+        onProgress: (Long, Long?) -> Unit = { _, _ -> },
+        onExpectedOutputs: (List<FileServerMutationExpectedOutput>) -> Unit = {},
+    ): MutationResult = extractResultInternal(
+        filePath = sourceBaseline.path,
+        destinationFolder = destinationBaseline.path,
+        sourceBaseline = sourceBaseline,
+        destinationBaseline = destinationBaseline,
+        password = password,
+        codepage = codepage,
+        onProgress = onProgress,
+        onExpectedOutputs = onExpectedOutputs,
+    )
+
+    private suspend fun extractResultInternal(
+        filePath: String,
+        destinationFolder: String,
+        sourceBaseline: FileItem?,
+        destinationBaseline: FileItem?,
+        password: String?,
+        codepage: String?,
+        onProgress: (Long, Long?) -> Unit,
+        onExpectedOutputs: (List<FileServerMutationExpectedOutput>) -> Unit,
     ): MutationResult {
         val sourcePath = filePath.trim()
         val destinationPath = destinationFolder.trim()
         if (
             sourcePath.isBlank() || destinationPath.isBlank() ||
             !sourcePath.startsWith('/') || !destinationPath.startsWith('/') ||
-            sourcePath == destinationPath
+            sourcePath == destinationPath ||
+            (sourceBaseline != null &&
+                (sourceBaseline.path != sourcePath || sourceBaseline.isDirectory)) ||
+            (destinationBaseline != null &&
+                (destinationBaseline.path != destinationPath || !destinationBaseline.isDirectory))
         ) {
             return archiveMutationResult(
                 operation = "archiveExtract",
@@ -3659,66 +3819,108 @@ class DsmRepository(
                 diagnosticTag = "file-station.archive-extract.unsupported",
             )
         }
-        val destination = try {
-            fileInfo(destinationPath)
-        } catch (_: CancellationException) {
-            return archiveCancelledBeforeSubmission("archiveExtract", "archive-extract")
-        } catch (failure: DsmFailure) {
-            return archivePreflightFailure("archiveExtract", "archive-extract", failure)
-        }
-        if (destination == null || !destination.isDirectory) {
-            return archiveMutationResult(
-                operation = "archiveExtract",
-                status = MutationResultStatus.CONFIRMED_FAILURE,
-                submitted = false,
-                failed = 1,
-                errorCategory = MutationErrorCategory.CONFLICT,
-                diagnosticTag = "file-station.archive-extract.destination-missing",
-            )
-        }
-        if (!destination.canWrite) {
-            return archiveMutationResult(
-                operation = "archiveExtract",
-                status = MutationResultStatus.PERMISSION_DENIED,
-                submitted = false,
-                failed = 1,
-                errorCategory = MutationErrorCategory.PERMISSION,
-                diagnosticTag = "file-station.archive-extract.destination-read-only",
-            )
-        }
-        val archiveItems = try {
-            listArchiveItems(sourcePath, codepage, password)
-        } catch (_: CancellationException) {
-            return archiveCancelledBeforeSubmission("archiveExtract", "archive-extract")
-        } catch (failure: DsmFailure) {
-            return archivePreflightFailure("archiveExtract", "archive-extract", failure)
-        }
-        val topLevelNames = archiveItems.map(ArchiveItem::name).distinct()
-        if (topLevelNames.isEmpty()) {
-            return archiveMutationResult(
-                operation = "archiveExtract",
-                status = MutationResultStatus.CONFIRMED_FAILURE,
-                submitted = false,
-                failed = 1,
-                errorCategory = MutationErrorCategory.VALIDATION,
-                diagnosticTag = "file-station.archive-extract.empty-archive",
-            )
-        }
-        val expectedPaths = topLevelNames.map { join(destinationPath, it) }
-        val affectedPaths = (expectedPaths + sourcePath + destinationPath).toSet()
+        // 目标目录路径锁会覆盖其所有子路径，必须在归档预读前取得，消除 list/start 间的替换窗口。
+        val affectedPaths = setOf(sourcePath, destinationPath)
         if (!claimFilePathMutation(affectedPaths)) {
             return archiveMutationResult(
                 operation = "archiveExtract",
                 status = MutationResultStatus.CONFIRMED_FAILURE,
                 submitted = false,
-                failed = topLevelNames.size,
+                failed = 1,
                 errorCategory = MutationErrorCategory.CONFLICT,
                 diagnosticTag = "file-station.archive-extract.duplicate-submission",
             )
         }
         try {
+            val destination = try {
+                fileInfo(destinationPath)
+            } catch (_: CancellationException) {
+                return archiveCancelledBeforeSubmission("archiveExtract", "archive-extract")
+            } catch (failure: DsmFailure) {
+                return archivePreflightFailure("archiveExtract", "archive-extract", failure)
+            }
+            if (destination == null || !destination.isDirectory) {
+                return archiveMutationResult(
+                    operation = "archiveExtract",
+                    status = MutationResultStatus.CONFIRMED_FAILURE,
+                    submitted = false,
+                    failed = 1,
+                    errorCategory = MutationErrorCategory.CONFLICT,
+                    diagnosticTag = "file-station.archive-extract.destination-missing",
+                )
+            }
+            if (destinationBaseline != null &&
+                !destination.matchesMutationBaseline(destinationBaseline)
+            ) {
+                return archiveMutationResult(
+                    operation = "archiveExtract",
+                    status = MutationResultStatus.CONFIRMED_FAILURE,
+                    submitted = false,
+                    failed = 1,
+                    errorCategory = MutationErrorCategory.CONFLICT,
+                    diagnosticTag = "file-station.archive-extract.destination-baseline-drift",
+                )
+            }
+            if (!destination.canWrite) {
+                return archiveMutationResult(
+                    operation = "archiveExtract",
+                    status = MutationResultStatus.PERMISSION_DENIED,
+                    submitted = false,
+                    failed = 1,
+                    errorCategory = MutationErrorCategory.PERMISSION,
+                    diagnosticTag = "file-station.archive-extract.destination-read-only",
+                )
+            }
+            if (sourceBaseline != null) {
+                val observedSource = try {
+                    fileInfo(sourcePath)
+                } catch (_: CancellationException) {
+                    return archiveCancelledBeforeSubmission("archiveExtract", "archive-extract")
+                } catch (failure: DsmFailure) {
+                    return archivePreflightFailure("archiveExtract", "archive-extract", failure)
+                }
+                if (observedSource == null ||
+                    !observedSource.matchesMutationBaseline(sourceBaseline)
+                ) {
+                    return archiveMutationResult(
+                        operation = "archiveExtract",
+                        status = MutationResultStatus.CONFIRMED_FAILURE,
+                        submitted = false,
+                        failed = 1,
+                        errorCategory = MutationErrorCategory.CONFLICT,
+                        diagnosticTag = "file-station.archive-extract.source-baseline-drift",
+                    )
+                }
+            }
+            val archiveItems = try {
+                listArchiveItems(sourcePath, codepage, password)
+            } catch (_: CancellationException) {
+                return archiveCancelledBeforeSubmission("archiveExtract", "archive-extract")
+            } catch (failure: DsmFailure) {
+                return archivePreflightFailure("archiveExtract", "archive-extract", failure)
+            }
+            val topLevelItems = archiveItems.distinctBy(ArchiveItem::name)
+            if (topLevelItems.isEmpty()) {
+                return archiveMutationResult(
+                    operation = "archiveExtract",
+                    status = MutationResultStatus.CONFIRMED_FAILURE,
+                    submitted = false,
+                    failed = 1,
+                    errorCategory = MutationErrorCategory.VALIDATION,
+                    diagnosticTag = "file-station.archive-extract.empty-archive",
+                )
+            }
+            val expectedOutputs = topLevelItems.map { item ->
+                ArchiveExpectedOutput(
+                    path = join(destinationPath, item.name),
+                    isDirectory = item.isDirectory,
+                )
+            }
+            onExpectedOutputs(
+                expectedOutputs.map { FileServerMutationExpectedOutput(it.path, it.isDirectory) },
+            )
             val existing = try {
-                archiveReadbackCount(expectedPaths)
+                archiveExistingOutputCount(expectedOutputs)
             } catch (_: CancellationException) {
                 return archiveCancelledBeforeSubmission("archiveExtract", "archive-extract")
             } catch (failure: DsmFailure) {
@@ -3729,7 +3931,7 @@ class DsmRepository(
                     operation = "archiveExtract",
                     status = MutationResultStatus.CONFIRMED_FAILURE,
                     submitted = false,
-                    failed = topLevelNames.size,
+                    failed = expectedOutputs.size,
                     errorCategory = MutationErrorCategory.CONFLICT,
                     diagnosticTag = "file-station.archive-extract.target-exists",
                 )
@@ -3738,7 +3940,7 @@ class DsmRepository(
                 operation = "archiveExtract",
                 diagnosticOperation = "archive-extract",
                 apiName = FILE_STATION_EXTRACT_API,
-                expectedPaths = expectedPaths,
+                expectedOutputs = expectedOutputs,
                 onProgress = onProgress,
             ) {
                 call(
@@ -3764,7 +3966,7 @@ class DsmRepository(
         operation: String,
         diagnosticOperation: String,
         apiName: String,
-        expectedPaths: List<String>,
+        expectedOutputs: List<ArchiveExpectedOutput>,
         onProgress: (Long, Long?) -> Unit,
         submit: suspend () -> JsonObject,
     ): MutationResult {
@@ -3772,9 +3974,9 @@ class DsmRepository(
             submit()
         } catch (_: CancellationException) {
             val confirmed = withContext(NonCancellable) {
-                runCatching { archiveReadbackCount(expectedPaths) }.getOrDefault(0)
+                runCatching { archiveReadbackCount(expectedOutputs) }.getOrDefault(0)
             }
-            return archiveResultAfterCancellation(operation, diagnosticOperation, confirmed, expectedPaths.size)
+            return archiveResultAfterCancellation(operation, diagnosticOperation, confirmed, expectedOutputs.size)
         } catch (failure: DsmFailure) {
             val category = archiveMutationErrorCategory(failure)
             if (category in setOf(MutationErrorCategory.PERMISSION, MutationErrorCategory.AUTHENTICATION)) {
@@ -3782,7 +3984,7 @@ class DsmRepository(
                     operation,
                     MutationResultStatus.PERMISSION_DENIED,
                     submitted = true,
-                    failed = expectedPaths.size,
+                    failed = expectedOutputs.size,
                     errorCategory = category,
                     diagnosticTag = "file-station.$diagnosticOperation.permission-denied",
                 )
@@ -3792,7 +3994,7 @@ class DsmRepository(
                     operation,
                     MutationResultStatus.UNSUPPORTED,
                     submitted = true,
-                    failed = expectedPaths.size,
+                    failed = expectedOutputs.size,
                     errorCategory = category,
                     diagnosticTag = "file-station.$diagnosticOperation.unsupported",
                 )
@@ -3807,43 +4009,43 @@ class DsmRepository(
                     operation,
                     MutationResultStatus.CONFIRMED_FAILURE,
                     submitted = true,
-                    failed = expectedPaths.size,
+                    failed = expectedOutputs.size,
                     errorCategory = category,
                     diagnosticTag = "file-station.$diagnosticOperation.rejected",
                 )
             }
             val confirmed = try {
-                archiveReadbackCount(expectedPaths)
+                archiveReadbackCount(expectedOutputs)
             } catch (_: CancellationException) {
-                return archiveResultAfterCancellation(operation, diagnosticOperation, 0, expectedPaths.size)
+                return archiveResultAfterCancellation(operation, diagnosticOperation, 0, expectedOutputs.size)
             } catch (_: DsmFailure) {
                 0
             }
             if (confirmed > 0) {
-                return archiveResultFromReadback(operation, diagnosticOperation, confirmed, expectedPaths.size)
+                return archiveResultFromReadback(operation, diagnosticOperation, confirmed, expectedOutputs.size)
             }
             return archiveMutationResult(
                 operation,
                 MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
                 submitted = true,
                 requiresRefresh = true,
-                unknown = expectedPaths.size,
+                unknown = expectedOutputs.size,
                 errorCategory = category,
                 diagnosticTag = "file-station.$diagnosticOperation.submission-unverified",
             )
         }
         val taskId = start.string("taskid")
         if (taskId == null) {
-            val confirmed = runCatching { archiveReadbackCount(expectedPaths) }.getOrDefault(0)
+            val confirmed = runCatching { archiveReadbackCount(expectedOutputs) }.getOrDefault(0)
             return if (confirmed > 0) {
-                archiveResultFromReadback(operation, diagnosticOperation, confirmed, expectedPaths.size)
+                archiveResultFromReadback(operation, diagnosticOperation, confirmed, expectedOutputs.size)
             } else {
                 archiveMutationResult(
                     operation,
                     MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
                     submitted = true,
                     requiresRefresh = true,
-                    unknown = expectedPaths.size,
+                    unknown = expectedOutputs.size,
                     errorCategory = MutationErrorCategory.SERVER,
                     diagnosticTag = "file-station.$diagnosticOperation.task-id-missing",
                 )
@@ -3862,12 +4064,15 @@ class DsmRepository(
                     }
                 }
                 if (status.bool("finished") == true) {
-                    val confirmed = archiveReadbackCount(expectedPaths, DOWNLOAD_MUTATION_READBACK_ATTEMPTS)
+                    val confirmed = archiveReadbackCount(
+                        expectedOutputs,
+                        DOWNLOAD_MUTATION_READBACK_ATTEMPTS,
+                    )
                     return archiveResultFromReadback(
                         operation,
                         diagnosticOperation,
                         confirmed,
-                        expectedPaths.size,
+                        expectedOutputs.size,
                     )
                 }
                 delay(FILE_TASK_POLL_INTERVAL_MILLIS)
@@ -3877,7 +4082,7 @@ class DsmRepository(
                 MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
                 submitted = true,
                 requiresRefresh = true,
-                unknown = expectedPaths.size,
+                unknown = expectedOutputs.size,
                 errorCategory = MutationErrorCategory.SERVER,
                 diagnosticTag = "file-station.$diagnosticOperation.task-timeout",
             )
@@ -3886,39 +4091,39 @@ class DsmRepository(
                 runCatching { call(apiName, "stop", mapOf("taskid" to taskId)) }
             }
             val confirmed = withContext(NonCancellable) {
-                runCatching { archiveReadbackCount(expectedPaths) }.getOrDefault(0)
+                runCatching { archiveReadbackCount(expectedOutputs) }.getOrDefault(0)
             }
             return archiveResultAfterCancellation(
                 operation,
                 diagnosticOperation,
                 confirmed,
-                expectedPaths.size,
+                expectedOutputs.size,
             )
         } catch (failure: DsmFailure) {
             val confirmed = try {
-                archiveReadbackCount(expectedPaths)
+                archiveReadbackCount(expectedOutputs)
             } catch (_: CancellationException) {
-                return archiveResultAfterCancellation(operation, diagnosticOperation, 0, expectedPaths.size)
+                return archiveResultAfterCancellation(operation, diagnosticOperation, 0, expectedOutputs.size)
             } catch (_: DsmFailure) {
                 return archiveMutationResult(
                     operation,
                     MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
                     submitted = true,
                     requiresRefresh = true,
-                    unknown = expectedPaths.size,
+                    unknown = expectedOutputs.size,
                     errorCategory = archiveMutationErrorCategory(failure),
                     diagnosticTag = "file-station.$diagnosticOperation.readback-failed",
                 )
             }
             return if (confirmed > 0) {
-                archiveResultFromReadback(operation, diagnosticOperation, confirmed, expectedPaths.size)
+                archiveResultFromReadback(operation, diagnosticOperation, confirmed, expectedOutputs.size)
             } else {
                 archiveMutationResult(
                     operation,
                     MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
                     submitted = true,
                     requiresRefresh = true,
-                    unknown = expectedPaths.size,
+                    unknown = expectedOutputs.size,
                     errorCategory = archiveMutationErrorCategory(failure),
                     diagnosticTag = "file-station.$diagnosticOperation.status-unverified",
                 )
@@ -3926,14 +4131,27 @@ class DsmRepository(
         }
     }
 
+    private data class ArchiveExpectedOutput(
+        val path: String,
+        val isDirectory: Boolean,
+        val requiresNonEmptyFile: Boolean = false,
+    )
+
+    private suspend fun archiveExistingOutputCount(expectedOutputs: List<ArchiveExpectedOutput>): Int =
+        expectedOutputs.count { fileInfo(it.path) != null }
+
     private suspend fun archiveReadbackCount(
-        expectedPaths: List<String>,
+        expectedOutputs: List<ArchiveExpectedOutput>,
         attempts: Int = 1,
     ): Int {
         var confirmed = 0
         repeat(attempts.coerceAtLeast(1)) { attempt ->
-            confirmed = expectedPaths.count { itemExists(it) }
-            if (confirmed == expectedPaths.size) return confirmed
+            confirmed = expectedOutputs.count { expected ->
+                val observed = fileInfo(expected.path)
+                observed != null && observed.isDirectory == expected.isDirectory &&
+                    (!expected.requiresNonEmptyFile || observed.size > 0)
+            }
+            if (confirmed == expectedOutputs.size) return confirmed
             if (attempt + 1 < attempts) delay(DOWNLOAD_MUTATION_READBACK_INTERVAL_MILLIS)
         }
         return confirmed

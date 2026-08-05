@@ -66,6 +66,11 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.FilePage
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FilePreviewContent
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FilePreviewKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FilePreviewSequence
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationExpectedOutput
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationLifecycle
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationOperation
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationTarget
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationVerification
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MediaDetails
 import io.github.qwertyuiop1995.dsmnativeclient.domain.previewKind
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
@@ -210,6 +215,7 @@ data class FileCopyMoveState(
 )
 
 enum class FileStationMutationOperation {
+    TEXT_SAVE,
     CREATE_FOLDER,
     RENAME,
     FAVORITE_ADD,
@@ -241,6 +247,8 @@ data class FileStationMutationTarget(
     val destinationBaseline: FileItem? = null,
     val requestedName: String? = null,
     val shareLinkBaselines: List<FileShareLink> = emptyList(),
+    val expectedContentSha256: String? = null,
+    val expectedContentByteCount: Long? = null,
 ) {
     init {
         require(profileId.isNotBlank()) { "file_station.invalid_profile" }
@@ -251,6 +259,14 @@ data class FileStationMutationTarget(
             "file_station.duplicate_share_link"
         }
         when (operation) {
+            FileStationMutationOperation.TEXT_SAVE ->
+                require(
+                    sourceBaselines.size == 1 && !sourceBaselines.single().isDirectory &&
+                        !expectedContentSha256.isNullOrBlank() &&
+                        expectedContentByteCount != null && expectedContentByteCount >= 0,
+                ) {
+                    "file_station.invalid_text_save_target"
+                }
             FileStationMutationOperation.CREATE_FOLDER ->
                 require(
                     parentBaseline != null && parentBaseline.isDirectory &&
@@ -311,6 +327,7 @@ private enum class FileStationMutationRefresh {
     PHOTOS,
     FAVORITES,
     SHARE_LINKS,
+    TEXT_PREVIEW,
 }
 
 internal fun fileStationMutationCallbackMatches(
@@ -358,6 +375,7 @@ internal fun canContinueEditingFileStationMutation(
         FileStationMutationOperation.RENAME,
         FileStationMutationOperation.COPY,
         FileStationMutationOperation.MOVE,
+        FileStationMutationOperation.TEXT_SAVE,
     ) && (state.mutationFailure != null || state.mutationResult?.status in setOf(
         MutationResultStatus.CONFIRMED_FAILURE,
         MutationResultStatus.PERMISSION_DENIED,
@@ -436,6 +454,7 @@ internal fun fileStationMutationVerification(
             FileStationMutationVerification.DISAPPEARED
         } else FileStationMutationVerification.DIFFERS
     } ?: FileStationMutationVerification.UNAVAILABLE
+    FileStationMutationOperation.TEXT_SAVE -> FileStationMutationVerification.UNAVAILABLE
     }
 }
 
@@ -508,6 +527,7 @@ internal suspend fun verifyFileStationMutationOutcome(
     } else {
         FileStationMutationVerification.DIFFERS
     }
+    FileStationMutationOperation.TEXT_SAVE -> FileStationMutationVerification.UNAVAILABLE
     else -> fileStationMutationVerification(
         target = if (target.operation == FileStationMutationOperation.SHARE_CREATE) {
             createdShareLink?.let { target.copy(shareLinkBaselines = listOf(it)) } ?: target
@@ -535,6 +555,7 @@ internal fun shouldClearFileSelectionAfterDelete(
 
 private val FileStationMutationOperation.resultOperation: String
     get() = when (this) {
+        FileStationMutationOperation.TEXT_SAVE -> "textSave"
         FileStationMutationOperation.CREATE_FOLDER -> "folderCreate"
         FileStationMutationOperation.RENAME -> "fileRename"
         FileStationMutationOperation.FAVORITE_ADD -> "favoriteAdd"
@@ -647,6 +668,14 @@ private data class FileServerTransferClaim(
     val repository: DsmRepository,
     val profileId: String,
     val sourceModule: Module,
+    val taskId: String,
+    val target: FileServerMutationTarget,
+    val generation: Long,
+)
+
+private data class FileServerMutationExecution(
+    val result: MutationResult,
+    val expectedOutputs: List<FileServerMutationExpectedOutput>,
 )
 
 enum class PreviewOwner { FILES, PHOTOS }
@@ -3004,7 +3033,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val foregroundDownloadExecutionIds = mutableMapOf<String, String>()
     private val transferWatchJobs = mutableMapOf<String, Job>()
     private var previewJob: Job? = null
-    private var textPreviewSaveJob: Job? = null
     private var pendingModuleAfterPreviewDiscard: Module? = null
     private var photoTimelineJob: Job? = null
     private var chatRefreshJob: Job? = null
@@ -3022,6 +3050,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var downloadDiscoverySearchJob: Job? = null
     private val fileBrowserRequestGeneration = AtomicLong(0)
     private val fileStationMutationGeneration = AtomicLong(0)
+    private val fileServerMutationGeneration = AtomicLong(0)
     private val fileUploadPreflightGeneration = AtomicLong(0)
     private val downloadListRequestGeneration = AtomicLong(0)
     private val fileBackgroundTaskRequestGeneration = AtomicLong(0)
@@ -3034,7 +3063,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val chatMutationGenerations = ConcurrentHashMap<String, Long>()
     private val chatAttachmentPreflightGeneration = AtomicLong(0)
     private val previewRequestGeneration = AtomicLong(0)
-    private val textPreviewSaveGeneration = AtomicLong(0)
     private val nasSettingsRequestGeneration = AtomicLong(0)
     private val nasSettingsStructuredMutationLock = Any()
     // 下载创建、任务控制、设置保存和工作区退出共用同一 claim 边界，避免跨线程旧状态覆盖。
@@ -3485,7 +3513,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             return@synchronized WorkspaceNavigationResult.REJECTED
         }
         if (state.selectedModule != module && state.previewItem != null) {
-            if (textPreviewSaveJob?.isActive == true) {
+            if (fileStationMutationBlocksWorkspaceExit(state.fileStationMutationState)) {
                 return@synchronized WorkspaceNavigationResult.DEFERRED
             }
             if (state.hasDirtyTextPreview()) {
@@ -5619,6 +5647,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             it?.copy(
                 fileBrowser = it.fileBrowser.openShortcut(item.path),
                 fileFavorites = Loadable.Idle,
+                fileDirectoryBaselines = it.fileDirectoryBaselines + (item.path to item),
             )
         }
         repository?.let { repo -> viewModelScope.launch { loadFileBrowser(repo) } }
@@ -5651,6 +5680,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             it?.copy(
                 fileBrowser = it.fileBrowser.openShortcut(item.path),
                 fileRemoteLocations = Loadable.Idle,
+                fileDirectoryBaselines = it.fileDirectoryBaselines + (item.path to item),
             )
         }
         repository?.let { repo -> viewModelScope.launch { loadFileBrowser(repo) } }
@@ -5679,6 +5709,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             it?.copy(
                 fileBrowser = it.fileBrowser.openShortcut(item.path),
                 fileRecentLocations = Loadable.Idle,
+                fileDirectoryBaselines = it.fileDirectoryBaselines + (item.path to item),
             )
         }
         repository?.let { repo -> viewModelScope.launch { loadFileBrowser(repo) } }
@@ -5689,7 +5720,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (fileStationMutationBlocksOrdinaryLoad(state.fileStationMutationState)) return
         val next = state.fileBrowser.navigateTo(path) ?: return
         _workspace.update { it?.copy(fileBrowser = next) }
-        repository?.let { repo -> viewModelScope.launch { loadFileBrowser(repo) } }
+        repository?.let { repo ->
+            viewModelScope.launch {
+                runCatching { repo.fileInfo(path) }.getOrNull()?.takeIf(FileItem::isDirectory)?.let { item ->
+                    _workspace.update { current ->
+                        current?.takeIf {
+                            repository === repo && it.fileBrowser.path == path
+                        }?.copy(
+                            fileDirectoryBaselines = current.fileDirectoryBaselines + (path to item),
+                        ) ?: current
+                    }
+                }
+                loadFileBrowser(repo)
+            }
+        }
     }
 
     fun refreshFiles() {
@@ -5952,42 +5996,74 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         format: ArchiveFormat,
         password: String?,
     ) {
-        val folder = _workspace.value?.fileBrowser?.path.orEmpty()
+        val current = _workspace.value ?: return
+        val folder = current.fileBrowser.path
+        val destinationBaseline = current.fileDirectoryBaselines[folder] ?: return
         val requestedName = archiveName.trim()
         val cleanName = requestedName.substringBeforeLast('.', requestedName)
         if (items.isEmpty() || folder.isBlank() || cleanName.isBlank() || '/' in cleanName) return
         val title = "$cleanName.${format.fileExtension}"
-        enqueueServerTransfer(title, R.string.archive_creating) { repo, progress ->
+        val destinationPath = "$folder/$title"
+        val target = FileServerMutationTarget(
+            profileId = current.profile.id,
+            module = Module.FILES,
+            operation = FileServerMutationOperation.COMPRESS,
+            sourceBaselines = items,
+            destinationFolderBaseline = destinationBaseline,
+            expectedOutputs = listOf(
+                FileServerMutationExpectedOutput(
+                    destinationPath,
+                    isDirectory = false,
+                    requiresNonEmptyFile = true,
+                ),
+            ),
+        )
+        enqueueServerTransfer(title, R.string.archive_creating, target) { repo, progress ->
             val result = repo.compressResult(
-                paths = items.map(FileItem::path),
-                destinationFilePath = "$folder/$cleanName.${format.fileExtension}",
+                sourceBaselines = items,
+                destinationBaseline = destinationBaseline,
+                destinationFilePath = destinationPath,
                 format = format,
                 level = ArchiveCompressionLevel.MODERATE,
                 password = password,
                 onProgress = progress,
             )
-            if (result.status == MutationResultStatus.CONFIRMED_SUCCESS) {
-                _workspace.update { it?.copy(fileBrowser = it.fileBrowser.clearSelection()) }
-            }
             if ((result.submitted || result.requiresRefresh) && currentCoroutineContext().isActive) {
                 loadFileBrowser(repo)
             }
-            result
+            FileServerMutationExecution(result, target.expectedOutputs)
         }
     }
 
     fun extractFile(item: FileItem, password: String?) {
-        val folder = _workspace.value?.fileBrowser?.path.orEmpty()
+        val current = _workspace.value ?: return
+        val folder = current.fileBrowser.path
+        val destinationBaseline = current.fileDirectoryBaselines[folder] ?: return
         if (folder.isBlank() || item.isDirectory || !item.canRead) return
+        val target = FileServerMutationTarget(
+            profileId = current.profile.id,
+            module = Module.FILES,
+            operation = FileServerMutationOperation.EXTRACT,
+            sourceBaselines = listOf(item),
+            destinationFolderBaseline = destinationBaseline,
+        )
         enqueueServerTransfer(
             item.name,
             R.string.archive_extracting,
+            target,
         ) { repo, progress ->
-            val result = repo.extractResult(item.path, folder, password = password, onProgress = progress)
+            var expectedOutputs = emptyList<FileServerMutationExpectedOutput>()
+            val result = repo.extractResult(
+                sourceBaseline = item,
+                destinationBaseline = destinationBaseline,
+                password = password,
+                onProgress = progress,
+                onExpectedOutputs = { expectedOutputs = it },
+            )
             if ((result.submitted || result.requiresRefresh) && currentCoroutineContext().isActive) {
                 loadFileBrowser(repo)
             }
-            result
+            FileServerMutationExecution(result, expectedOutputs)
         }
     }
 
@@ -6211,6 +6287,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 state.mutationRefreshFailure == null
             ) return false
             val refresh = when (target.operation) {
+                FileStationMutationOperation.TEXT_SAVE -> FileStationMutationRefresh.TEXT_PREVIEW
                 FileStationMutationOperation.FAVORITE_ADD,
                 FileStationMutationOperation.FAVORITE_REMOVE,
                 FileStationMutationOperation.FAVORITE_ADD_BATCH,
@@ -6565,6 +6642,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val target = _workspace.value?.fileStationMutationState?.draftTarget ?: return false
         if (_workspace.value?.fileStationMutationState?.confirmationRequested != true) return false
         return when (target.operation) {
+            FileStationMutationOperation.TEXT_SAVE -> executeTextPreviewSave(target)
             FileStationMutationOperation.MOVE -> executePhotoMove(target)
             FileStationMutationOperation.DELETE -> executeFileStationDeletion(target)
             FileStationMutationOperation.RESTORE -> executeFileRestore(target)
@@ -6574,6 +6652,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             else -> return false
         }
     }
+
+    fun confirmFileStationMutation(): Boolean = confirmFileStationLifecycleMutation()
+
+    fun cancelFileStationMutationConfirmation(): Boolean = cancelPendingFileStationMutation()
 
     fun prepareFileUploads(uris: List<Uri>) {
         val destination = _workspace.value?.fileBrowser?.path.orEmpty()
@@ -7782,89 +7864,53 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         state.previewItem?.let { startPreview(it, owner) }
     }
 
+    fun requestTextPreviewSave(item: FileItem, value: String): Boolean {
+        val current = _workspace.value ?: return false
+        if (current.previewOwner != PreviewOwner.FILES ||
+            current.previewItem?.path != item.path || !item.canWrite
+        ) return false
+        val bytes = value.encodeToByteArray()
+        val target = FileStationMutationTarget(
+            profileId = current.profile.id,
+            module = Module.FILES,
+            operation = FileStationMutationOperation.TEXT_SAVE,
+            sourceBaselines = listOf(item),
+            expectedContentSha256 = sha256Hex(bytes),
+            expectedContentByteCount = bytes.size.toLong(),
+        )
+        return requestFileStationLifecycleMutation(target)
+    }
+
     fun saveTextPreview(item: FileItem, value: String) {
-        val repo = repository ?: return
-        val state = _workspace.value ?: return
-        if (state.isPerformingAction || textPreviewSaveJob?.isActive == true) return
-        if (state.previewOwner != PreviewOwner.FILES || state.previewItem?.path != item.path) return
-        val operationGeneration = textPreviewSaveGeneration.incrementAndGet()
-        lateinit var job: Job
-        job = viewModelScope.launch(start = CoroutineStart.LAZY) {
-            runCatching { repo.saveTextResult(item, value) }
-                .onSuccess { outcome ->
-                    val saved = outcome.content
-                    if (outcome.result.status == MutationResultStatus.CONFIRMED_SUCCESS && saved != null) {
-                        _workspace.update { current ->
-                            current?.takeIf {
-                                repository === repo && it.previewOwner == PreviewOwner.FILES &&
-                                    it.previewItem?.path == item.path &&
-                                    textPreviewSaveGeneration.get() == operationGeneration
-                            }?.copy(
-                                previewItem = saved.item,
-                                preview = Loadable.Ready(saved),
-                                isPerformingAction = false,
-                                message = getApplication<Application>().getString(R.string.text_file_saved),
-                                textPreviewDraft = null,
-                            ) ?: current
-                        }
-                    } else {
-                        _workspace.update { current ->
-                            current?.takeIf {
-                                repository === repo && it.previewOwner == PreviewOwner.FILES &&
-                                    it.previewItem?.path == item.path &&
-                                    textPreviewSaveGeneration.get() == operationGeneration
-                            }?.copy(
-                                isPerformingAction = false,
-                                message = getApplication<Application>().getString(
-                                    textSaveMutationMessageResource(outcome.result),
-                                ),
-                            ) ?: current
-                        }
-                    }
-                    if (
-                        (outcome.result.submitted || outcome.result.requiresRefresh) &&
-                        currentCoroutineContext().isActive && repository === repo &&
-                        textPreviewSaveGeneration.get() == operationGeneration
-                    ) {
-                        loadFileBrowser(repo)
-                    }
-                }
-                .onFailure { error ->
-                    if (error is CancellationException) return@onFailure
-                    _workspace.update { current ->
-                        current?.takeIf {
-                            repository === repo && it.previewOwner == PreviewOwner.FILES &&
-                                it.previewItem?.path == item.path &&
-                                textPreviewSaveGeneration.get() == operationGeneration
-                        }?.copy(
-                            isPerformingAction = false,
-                            message = error.asDsmFailure()
-                                .localize(getApplication<Application>())
-                                .combined,
-                        ) ?: current
-                    }
-                }
-        }
-        textPreviewSaveJob = job
-        _workspace.update { current ->
-            current?.takeIf {
-                repository === repo && it.previewOwner == PreviewOwner.FILES &&
-                    it.previewItem?.path == item.path
-            }?.copy(isPerformingAction = true, message = null) ?: current
-        }
-        val acquired = _workspace.value?.let {
-            repository === repo && it.previewOwner == PreviewOwner.FILES &&
-                it.previewItem?.path == item.path && it.isPerformingAction
-        } == true
-        if (!acquired) {
-            textPreviewSaveJob = null
-            job.cancel()
-            return
-        }
-        job.invokeOnCompletion {
-            if (textPreviewSaveJob === job) textPreviewSaveJob = null
-        }
-        job.start()
+        requestTextPreviewSave(item, value)
+    }
+
+    private fun executeTextPreviewSave(target: FileStationMutationTarget): Boolean {
+        val current = _workspace.value ?: return false
+        val value = current.textPreviewDraft ?: return false
+        val bytes = value.encodeToByteArray()
+        if (sha256Hex(bytes) != target.expectedContentSha256 ||
+            bytes.size.toLong() != target.expectedContentByteCount
+        ) return false
+        var savedContent: FilePreviewContent.Text? = null
+        return fileStationMutation(
+            target,
+            FileStationMutationRefresh.TEXT_PREVIEW,
+            ::textSaveMutationMessageResource,
+            applyResult = { workspace, result ->
+                val saved = savedContent
+                if (result.status == MutationResultStatus.CONFIRMED_SUCCESS && saved != null &&
+                    workspace.previewOwner == PreviewOwner.FILES &&
+                    workspace.previewItem?.path == target.sourceBaselines.single().path
+                ) workspace.copy(
+                    previewItem = saved.item,
+                    preview = Loadable.Ready(saved),
+                    textPreviewDraft = null,
+                ) else workspace
+            },
+        ) { repo -> repo.saveTextResult(target.sourceBaselines.single(), value).also {
+            savedContent = it.content
+        }.result }
     }
 
     fun updateTextPreviewDraft(value: String?) {
@@ -7909,7 +7955,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun confirmDiscardTextPreview() {
-        if (textPreviewSaveJob?.isActive == true) return
+        if (fileStationMutationBlocksWorkspaceExit(
+                _workspace.value?.fileStationMutationState ?: return,
+            )
+        ) return
         val shouldClose = _workspace.value?.previewDiscardClosesPreview == true
         val pendingModule = pendingModuleAfterPreviewDiscard
         pendingModuleAfterPreviewDiscard = null
@@ -8202,10 +8251,85 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         TransferState.SUCCEEDED,
                         TransferState.FAILED,
                         TransferState.CANCELLED,
-                    )
+                    ) || fileServerMutationBlocksWorkspaceExit(it.fileServerMutation) &&
+                        !fileServerMutationCanBeExplicitlyCleared(it.fileServerMutation)
                 },
             )
         }
+    }
+
+    fun canRefreshFileServerTransfer(id: String): Boolean {
+        val current = _workspace.value ?: return false
+        val lifecycle = current.transfers.singleOrNull { it.id == id }
+            ?.fileServerMutation ?: return false
+        val needsRecovery = lifecycle.refreshFailure != null || !lifecycle.refreshCompleted &&
+            (lifecycle.result?.requiresRefresh == true || lifecycle.failure != null)
+        return repository != null && lifecycle.target.profileId == current.profile.id &&
+            !lifecycle.refreshInProgress && needsRecovery
+    }
+
+    fun refreshFileServerTransfer(id: String): Boolean {
+        val claim = synchronized(fileStationMutationLock) {
+            val repo = repository ?: return false
+            val current = _workspace.value ?: return false
+            val task = current.transfers.singleOrNull { it.id == id } ?: return false
+            val lifecycle = task.fileServerMutation ?: return false
+            if (!canRefreshFileServerTransfer(id)) return false
+            val candidate = FileServerTransferClaim(
+                repo,
+                current.profile.id,
+                lifecycle.target.module,
+                id,
+                lifecycle.target,
+                lifecycle.generation,
+            )
+            _workspace.value = current.copy(
+                transfers = current.transfers.map {
+                    if (it.id == id) it.copy(
+                        fileServerMutation = lifecycle.copy(
+                            refreshInProgress = true,
+                            refreshFailure = null,
+                        ),
+                    ) else it
+                },
+            )
+            candidate
+        }
+        viewModelScope.launch {
+            val outcome = runCatching {
+                verifyFileServerMutation(claim.repository, claim.target)
+            }
+            updateServerTransfer(claim, id) { task ->
+                val lifecycle = checkNotNull(task.fileServerMutation)
+                task.copy(
+                    requiresRefresh = outcome.isFailure,
+                    fileServerMutation = lifecycle.copy(
+                        refreshInProgress = false,
+                        refreshCompleted = outcome.isSuccess,
+                        refreshFailure = outcome.exceptionOrNull()?.asDsmFailure(),
+                        verification = outcome.getOrNull()
+                            ?: FileServerMutationVerification.UNAVAILABLE,
+                    ),
+                )
+            }
+            val current = _workspace.value
+            if (current?.selectedModule == Module.FILES &&
+                current.fileBrowser.path == claim.target.destinationFolderBaseline.path
+            ) loadFileBrowser(claim.repository)
+        }
+        return true
+    }
+
+    fun openAndRefreshFileServerTransferTarget(id: String): Boolean {
+        val current = _workspace.value ?: return false
+        val target = current.transfers.singleOrNull { it.id == id }
+            ?.fileServerMutation?.target ?: return false
+        if (target.profileId != current.profile.id) return false
+        _workspace.value = current.copy(
+            selectedModule = Module.FILES,
+            fileBrowser = current.fileBrowser.openShortcut(target.destinationFolderBaseline.path),
+        )
+        return refreshFileServerTransfer(id)
     }
 
     fun beginDownloadDestinationSelection() {
@@ -13396,9 +13520,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             candidate
         }
         chatPendingAttachmentUrisForRelease(state).forEach(::releasePersistedReadPermission)
-        textPreviewSaveGeneration.incrementAndGet()
-        textPreviewSaveJob?.cancel()
-        textPreviewSaveJob = null
         transferJobs.values.forEach(Job::cancel)
         transferJobs.clear()
         transferWatchJobs.values.forEach(Job::cancel)
@@ -13510,9 +13631,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             activeState.files != Loadable.Loading
         ) return
         runCatching {
-            browser.activeSearchQuery?.let { repo.search(browser.path, it) }
+            // 目录基线只决定后续写入口是否可用，读取失败不能阻断原本可用的浏览。
+            val directoryBaseline = browser.path.takeIf(String::isNotBlank)?.let { path ->
+                runCatching { repo.fileInfo(path) }.getOrElse { error ->
+                    if (error is CancellationException) throw error
+                    null
+                }
+            }
+            val page = browser.activeSearchQuery?.let { repo.search(browser.path, it) }
                 ?: listFilePage(repo, browser, 0)
-        }.onSuccess { page ->
+            directoryBaseline to page
+        }.onSuccess { (directoryBaseline, page) ->
             _workspace.update { current ->
                 current?.takeIf {
                     repo === repository &&
@@ -13522,6 +13651,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             fileBrowserRequestGeneration.get(),
                         )
                 }?.copy(
+                    fileDirectoryBaselines = directoryBaseline?.let { baseline ->
+                        current.fileDirectoryBaselines + (baseline.path to baseline)
+                    } ?: current.fileDirectoryBaselines,
                     files = Loadable.Ready(
                         page.copy(
                             items = page.items.map { item ->
@@ -14365,8 +14497,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val links = claim.repository.listShareLinks()
                     _workspace.update { it?.copy(fileShareLinks = Loadable.Ready(links)) }
                 }
+                FileStationMutationRefresh.TEXT_PREVIEW -> Unit
             }
-            verifyFileStationMutation(claim.repository, claim.target)
+            if (claim.target.operation == FileStationMutationOperation.TEXT_SAVE) {
+                verifyTextPreviewSave(claim.repository, claim.target)
+            } else {
+                verifyFileStationMutation(claim.repository, claim.target) to null
+            }
         }
         synchronized(fileStationMutationLock) {
             val current = _workspace.value ?: return@synchronized
@@ -14381,9 +14518,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     globalGeneration = fileStationMutationGeneration.get(),
                 )
             ) return@synchronized
-            val verification = outcome.getOrNull()
-                ?: FileStationMutationVerification.UNAVAILABLE
+            val verified = outcome.getOrNull()
+            val verification = verified?.first ?: FileStationMutationVerification.UNAVAILABLE
+            val refreshedText = verified?.second
             _workspace.value = current.copy(
+                previewItem = refreshedText?.item ?: current.previewItem,
+                preview = refreshedText?.let { Loadable.Ready(it) } ?: current.preview,
+                textPreviewDraft = if (
+                    verification == FileStationMutationVerification.MATCHES && refreshedText != null
+                ) null else current.textPreviewDraft,
                 fileStationMutationState = state.copy(
                     mutationRefreshInProgress = false,
                     mutationRefreshCompleted = outcome.isSuccess,
@@ -14392,6 +14535,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 ),
             )
         }
+    }
+
+    private suspend fun verifyTextPreviewSave(
+        repo: DsmRepository,
+        target: FileStationMutationTarget,
+    ): Pair<FileStationMutationVerification, FilePreviewContent.Text?> {
+        val source = target.sourceBaselines.single()
+        val current = repo.fileInfo(source.path)
+            ?: return FileStationMutationVerification.DISAPPEARED to null
+        if (current.isDirectory || current.previewKind() != FilePreviewKind.TEXT) {
+            return FileStationMutationVerification.DIFFERS to null
+        }
+        val (value, truncated) = repo.readTextPreview(current)
+        val content = FilePreviewContent.Text(current, value, truncated)
+        val bytes = value.encodeToByteArray()
+        val matches = !truncated && bytes.size.toLong() == target.expectedContentByteCount &&
+            sha256Hex(bytes) == target.expectedContentSha256
+        return (if (matches) FileStationMutationVerification.MATCHES
+        else FileStationMutationVerification.DIFFERS) to content
     }
 
     private suspend fun verifyFileStationMutation(
@@ -15760,11 +15922,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun enqueueServerTransfer(
         title: String,
         @StringRes runningMessage: Int,
-        block: suspend (DsmRepository, (Long, Long?) -> Unit) -> MutationResult,
+        target: FileServerMutationTarget,
+        block: suspend (DsmRepository, (Long, Long?) -> Unit) -> FileServerMutationExecution,
     ) {
         val repo = repository ?: return
         val taskId = UUID.randomUUID().toString()
         val application = getApplication<Application>()
+        val generation = fileServerMutationGeneration.incrementAndGet()
         val task = TransferTask(
             id = taskId,
             title = title,
@@ -15772,6 +15936,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             direction = TransferDirection.SERVER,
             state = TransferState.RUNNING,
             startedAtEpochMillis = System.currentTimeMillis(),
+            fileServerMutation = FileServerMutationLifecycle(target = target, generation = generation),
         )
         val claim = synchronized(fileStationMutationLock) {
             val current = _workspace.value ?: return
@@ -15780,21 +15945,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 transfers = listOf(task) + current.transfers,
                 message = null,
             )
-            FileServerTransferClaim(repo, current.profile.id, current.selectedModule)
+            FileServerTransferClaim(
+                repo,
+                current.profile.id,
+                current.selectedModule,
+                taskId,
+                target,
+                generation,
+            )
         }
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
-                val result = block(repo) { completed, total ->
+                val execution = block(repo) { completed, total ->
                     updateServerTransfer(claim, taskId) {
                         it.copy(completedBytes = completed, totalBytes = total)
                     }
                 }
+                val result = execution.result
                 val message = application.getString(archiveMutationMessageResource(result))
                 val completed = result.status == MutationResultStatus.CONFIRMED_SUCCESS
                 val cancelled = result.status in setOf(
                     MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
                     MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
                 )
+                if (completed) clearFileSelectionAfterServerMutation(claim)
                 updateServerTransfer(claim, taskId) {
                     it.copy(
                         state = when {
@@ -15805,25 +15979,37 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         detail = message,
                         errorMessage = message.takeUnless { completed || cancelled },
                         requiresRefresh = result.requiresRefresh,
+                        fileServerMutation = it.fileServerMutation?.copy(
+                            target = it.fileServerMutation.target.copy(
+                                expectedOutputs = execution.expectedOutputs,
+                            ),
+                            result = result,
+                            failure = null,
+                        ),
                     )
                 }
                 updateServerTransferMessage(claim, message)
-            } catch (_: CancellationException) {
+            } catch (error: CancellationException) {
+                val result = cancelledFileServerMutationResult(target.operation)
                 updateServerTransfer(claim, taskId) {
                     it.copy(
                         state = TransferState.CANCELLED,
                         detail = application.getString(R.string.transfer_cancelled_refresh),
                         requiresRefresh = true,
+                        fileServerMutation = it.fileServerMutation?.copy(result = result),
                     )
                 }
+                throw error
             } catch (error: Throwable) {
-                val message = error.asDsmFailure().localize(application).combined
+                val failure = error.asDsmFailure()
+                val message = failure.localize(application).combined
                 updateServerTransfer(claim, taskId) {
                     it.copy(
                         state = TransferState.FAILED,
                         detail = application.getString(R.string.transfer_failed),
                         errorMessage = message,
                         requiresRefresh = true,
+                        fileServerMutation = it.fileServerMutation?.copy(failure = failure),
                     )
                 }
             }
@@ -15843,9 +16029,51 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 repository === claim.repository && it.profile.id == claim.profileId
             }?.copy(
                 transfers = current.transfers.map { task ->
-                    if (task.id == taskId) transform(task) else task
+                    if (task.id == taskId && fileServerMutationCallbackMatches(task, claim)) {
+                        transform(task)
+                    } else task
                 },
             ) ?: current
+        }
+    }
+
+    private fun clearFileSelectionAfterServerMutation(claim: FileServerTransferClaim) {
+        _workspace.update { current ->
+            current?.takeIf {
+                repository === claim.repository && it.profile.id == claim.profileId &&
+                    it.selectedModule == Module.FILES &&
+                    it.fileBrowser.path == claim.target.destinationFolderBaseline.path &&
+                    it.transfers.any { task -> fileServerMutationCallbackMatches(task, claim) }
+            }?.copy(fileBrowser = current.fileBrowser.clearSelection()) ?: current
+        }
+    }
+
+    private fun fileServerMutationCallbackMatches(
+        task: TransferTask,
+        claim: FileServerTransferClaim,
+    ): Boolean {
+        val lifecycle = task.fileServerMutation ?: return false
+        return task.id == claim.taskId && lifecycle.target == claim.target &&
+            lifecycle.generation == claim.generation
+    }
+
+    private suspend fun verifyFileServerMutation(
+        repo: DsmRepository,
+        target: FileServerMutationTarget,
+    ): FileServerMutationVerification {
+        val destination = repo.fileInfo(target.destinationFolderBaseline.path)
+            ?: return FileServerMutationVerification.DISAPPEARED
+        if (!destination.isDirectory) return FileServerMutationVerification.DIFFERS
+        if (target.expectedOutputs.isEmpty()) return FileServerMutationVerification.UNAVAILABLE
+        val outputsMatch = target.expectedOutputs.all { expected ->
+                repo.fileInfo(expected.path)?.let { actual ->
+                    actual.path == expected.path && actual.isDirectory == expected.isDirectory &&
+                        (!expected.requiresNonEmptyFile || actual.size > 0)
+                } == true
+            }
+        return when {
+            !outputsMatch -> FileServerMutationVerification.DIFFERS
+            else -> FileServerMutationVerification.MATCHES
         }
     }
 
@@ -16892,17 +17120,50 @@ internal fun canSafelySwitchNas(
     }
     if (activeForegroundUpload) return false
 
-    return transfers.none { transfer ->
-        transfer.direction == TransferDirection.SERVER &&
-            transfer.state !in TERMINAL_TRANSFER_STATES
-    }
+    return !hasBlockingFileServerTransfer(transfers)
 }
 
 internal fun hasBlockingFileServerTransfer(transfers: List<TransferTask>): Boolean =
     transfers.any { transfer ->
-        transfer.direction == TransferDirection.SERVER &&
-            (transfer.state !in TERMINAL_TRANSFER_STATES || transfer.requiresRefresh)
+        transfer.direction == TransferDirection.SERVER && (
+            transfer.state !in TERMINAL_TRANSFER_STATES ||
+                fileServerMutationBlocksWorkspaceExit(transfer.fileServerMutation)
+            )
     }
+
+internal fun fileServerMutationBlocksWorkspaceExit(
+    lifecycle: FileServerMutationLifecycle?,
+): Boolean = lifecycle?.let {
+    it.refreshInProgress || it.refreshFailure != null ||
+        (it.failure != null && (!it.refreshCompleted ||
+            it.verification == FileServerMutationVerification.UNAVAILABLE)) ||
+        (it.result?.requiresRefresh == true && (!it.refreshCompleted ||
+            it.verification == FileServerMutationVerification.UNAVAILABLE))
+} == true
+
+internal fun fileServerMutationCanBeExplicitlyCleared(
+    lifecycle: FileServerMutationLifecycle?,
+): Boolean = lifecycle?.let {
+    it.refreshCompleted && !it.refreshInProgress && it.refreshFailure == null
+} == true
+
+internal fun cancelledFileServerMutationResult(
+    operation: FileServerMutationOperation,
+): MutationResult = MutationResult(
+    schemaVersion = 1,
+    status = MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+    operation = when (operation) {
+        FileServerMutationOperation.COMPRESS -> "archiveCompress"
+        FileServerMutationOperation.EXTRACT -> "archiveExtract"
+    },
+    submitted = true,
+    requiresRefresh = true,
+    counts = MutationResultCounts(succeeded = 0, failed = 0, unknown = 1),
+)
+
+internal fun sha256Hex(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+    .digest(bytes)
+    .joinToString("") { "%02x".format(it) }
 
 internal fun <K, V : Any> MutableMap<K, V>.removeIfSame(key: K, expected: V): Boolean {
     if (this[key] !== expected) return false

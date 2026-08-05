@@ -1733,6 +1733,12 @@
     <string name="no_filtered_transfer_tasks_description">请选择其他来源查看对应任务。</string>
     <string name="nas_task_percent_progress">已完成 %1$d%%</string>
     <string name="nas_task_refresh_before_retry">再次尝试前，请先刷新受影响的文件夹。</string>
+    <string name="open_and_refresh_affected_folder">打开并刷新受影响的文件夹</string>
+    <string name="refreshing_affected_folder">正在刷新受影响的文件夹…</string>
+    <string name="affected_folder_refresh_matches">文件夹已刷新，请核对最新内容后再继续。</string>
+    <string name="affected_folder_refresh_differs">文件夹中的最新内容与预期结果不一致，请核对后再重试。</string>
+    <string name="affected_folder_refresh_disappeared">刷新后的文件夹中没有预期结果，请核对后再重试。</string>
+    <string name="affected_folder_refresh_unavailable">仍然无法刷新文件夹，请检查 NAS 连接后重试。</string>
     <string name="app_transfers_title">App 传输</string>
     <string name="file_background_tasks_title">NAS 文件任务</string>
     <string name="file_background_tasks_loading">正在载入 NAS 文件任务…</string>

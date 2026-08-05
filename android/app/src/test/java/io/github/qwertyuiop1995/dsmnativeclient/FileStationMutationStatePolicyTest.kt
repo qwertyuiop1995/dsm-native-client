@@ -51,8 +51,16 @@ class FileStationMutationStatePolicyTest {
     )
 
     @Test
-    fun `十类操作目标保留稳定标识和用户所见基线`() {
+    fun `十一类操作目标保留稳定标识和用户所见基线`() {
         val targets = listOf(
+            FileStationMutationTarget(
+                "profile-a",
+                Module.FILES,
+                FileStationMutationOperation.TEXT_SAVE,
+                sourceBaselines = listOf(file),
+                expectedContentSha256 = sha256Hex("updated".encodeToByteArray()),
+                expectedContentByteCount = 7,
+            ),
             FileStationMutationTarget(
                 "profile-a",
                 Module.FILES,
@@ -131,6 +139,65 @@ class FileStationMutationStatePolicyTest {
             targets.first { it.operation == FileStationMutationOperation.DELETE }.sourceBaselines,
         )
         assertEquals(link, targets.last().shareLinkBaselines.single())
+    }
+
+    @Test
+    fun `文本保存目标仅保留摘要字节数和文件基线`() {
+        val plaintext = "只留摘要，不留明文"
+        val bytes = plaintext.encodeToByteArray()
+        val target = FileStationMutationTarget(
+            profileId = "profile-a",
+            module = Module.FILES,
+            operation = FileStationMutationOperation.TEXT_SAVE,
+            sourceBaselines = listOf(file),
+            expectedContentSha256 = sha256Hex(bytes),
+            expectedContentByteCount = bytes.size.toLong(),
+        )
+
+        assertEquals(file, target.sourceBaselines.single())
+        assertEquals(bytes.size.toLong(), target.expectedContentByteCount)
+        assertEquals(64, target.expectedContentSha256?.length)
+        assertFalse(target.toString().contains(plaintext))
+    }
+
+    @Test
+    fun `文本保存失败可继续编辑而未知结果在核对前阻止退出`() {
+        val target = textSaveTarget()
+        assertTrue(canContinueEditingFileStationMutation(
+            FileStationMutationWorkspaceState(
+                draftTarget = target,
+                target = target,
+                mutationResult = result(MutationResultStatus.CONFIRMED_FAILURE),
+            ),
+        ))
+        assertTrue(fileStationMutationBlocksWorkspaceExit(
+            FileStationMutationWorkspaceState(target = target, mutationResult = unverified()),
+        ))
+        assertFalse(fileStationMutationBlocksWorkspaceExit(
+            FileStationMutationWorkspaceState(
+                target = target,
+                mutationResult = unverified(),
+                mutationRefreshCompleted = true,
+            ),
+        ))
+    }
+
+    @Test
+    fun `文本保存迟到回调被旧代次旧NAS和不同摘要目标拒绝`() {
+        val target = textSaveTarget()
+        assertTrue(fileStationMutationCallbackMatches(true, true, target, target, 12, 12, 12))
+        assertFalse(fileStationMutationCallbackMatches(true, true, target, target, 11, 12, 12))
+        assertFalse(fileStationMutationCallbackMatches(false, true, target, target, 12, 12, 12))
+        assertFalse(fileStationMutationCallbackMatches(true, false, target, target, 12, 12, 12))
+        assertFalse(fileStationMutationCallbackMatches(
+            true,
+            true,
+            target.copy(expectedContentSha256 = "0".repeat(64)),
+            target,
+            12,
+            12,
+            12,
+        ))
     }
 
     @Test
@@ -622,6 +689,15 @@ class FileStationMutationStatePolicyTest {
         FileStationMutationOperation.RENAME,
         sourceBaselines = listOf(file),
         requestedName = "renamed.txt",
+    )
+
+    private fun textSaveTarget() = FileStationMutationTarget(
+        "profile-a",
+        Module.FILES,
+        FileStationMutationOperation.TEXT_SAVE,
+        sourceBaselines = listOf(file),
+        expectedContentSha256 = sha256Hex("updated".encodeToByteArray()),
+        expectedContentByteCount = 7,
     )
 
     private fun unverified() = result(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED)

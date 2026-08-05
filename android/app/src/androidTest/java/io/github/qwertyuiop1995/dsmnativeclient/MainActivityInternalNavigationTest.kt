@@ -8,7 +8,17 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.FileBrowserState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileItem
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationLifecycle
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationOperation
+import io.github.qwertyuiop1995.dsmnativeclient.domain.FileServerMutationTarget
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResult
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultCounts
+import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ResourceState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferDirection
+import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.WorkspaceRoute
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
@@ -193,6 +203,86 @@ class MainActivityInternalNavigationTest {
                     routes,
                 )
                 assertFalse(routes.toString().contains("private-query"))
+            }
+        }
+    }
+
+    @Test
+    fun Activity重建保留文本保存反馈和归档恢复证据且不制造新任务() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val file = FileItem(
+            path = "/synthetic/readme.txt",
+            name = "readme.txt",
+            isDirectory = false,
+            size = 7,
+            canRead = true,
+            canWrite = true,
+        )
+        val folder = FileItem(
+            path = "/synthetic",
+            name = "synthetic",
+            isDirectory = true,
+            canRead = true,
+            canWrite = true,
+        )
+        val result = MutationResult(
+            schemaVersion = 1,
+            status = MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+            operation = "textSave",
+            submitted = true,
+            requiresRefresh = true,
+            counts = MutationResultCounts(succeeded = 0, failed = 0, unknown = 1),
+        )
+        val textState = FileStationMutationWorkspaceState(
+            target = FileStationMutationTarget(
+                profileId = "synthetic",
+                module = Module.FILES,
+                operation = FileStationMutationOperation.TEXT_SAVE,
+                sourceBaselines = listOf(file),
+                expectedContentSha256 = "0".repeat(64),
+                expectedContentByteCount = 7,
+            ),
+            mutationResult = result,
+        )
+        val archiveTask = TransferTask(
+            id = "synthetic-archive-task",
+            title = "Archive",
+            detail = "Synthetic",
+            direction = TransferDirection.SERVER,
+            state = TransferState.FAILED,
+            fileServerMutation = FileServerMutationLifecycle(
+                target = FileServerMutationTarget(
+                    profileId = "synthetic",
+                    module = Module.FILES,
+                    operation = FileServerMutationOperation.COMPRESS,
+                    sourceBaselines = listOf(file),
+                    destinationFolderBaseline = folder,
+                ),
+                result = cancelledFileServerMutationResult(FileServerMutationOperation.COMPRESS),
+                generation = 7,
+            ),
+        )
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                workspace(activity).value = syntheticWorkspace().copy(
+                    selectedModule = Module.FILES,
+                    fileStationMutationState = textState,
+                    transfers = listOf(archiveTask),
+                )
+            }
+
+            scenario.recreate()
+
+            scenario.onActivity { activity ->
+                val rebuilt = workspace(activity).value!!
+                assertEquals(textState, rebuilt.fileStationMutationState)
+                assertEquals(listOf(archiveTask), rebuilt.transfers)
+                assertFalse(rebuilt.fileStationMutationState.mutationInProgress)
+                assertEquals(7L, rebuilt.transfers.single().fileServerMutation?.generation)
             }
         }
     }

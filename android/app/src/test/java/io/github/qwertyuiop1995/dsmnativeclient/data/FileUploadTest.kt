@@ -145,6 +145,7 @@ class FileUploadTest {
     @Test
     fun `文本覆盖保存后重新读取并逐字核对`() = runBlocking {
         val transport = UploadRecordingInterceptor(
+            textBaselineResponse(),
             """{"success":true}""",
             """{"success":true}""",
             """{"success":true,"data":{"files":[{"path":"/share/note.txt","name":"note.txt","isdir":false,"size":6}]}}""",
@@ -162,7 +163,10 @@ class FileUploadTest {
 
         assertEquals("你好", saved.value)
         assertFalse(saved.truncated)
-        assertEquals(listOf("write", "upload", "list", "download"), transport.requests.map(::method))
+        assertEquals(
+            listOf("getinfo", "write", "upload", "list", "download"),
+            transport.requests.map(::method),
+        )
     }
 
     @Test
@@ -284,6 +288,7 @@ class FileUploadTest {
     @Test
     fun `文本大小一致但内容不同不会报告保存成功`() = runBlocking {
         val transport = UploadRecordingInterceptor(
+            textBaselineResponse(),
             """{"success":true}""",
             """{"success":true}""",
             uploadedTextResponse(),
@@ -301,6 +306,7 @@ class FileUploadTest {
     @Test
     fun `文本上传后读取失败保持未确认`() = runBlocking {
         val transport = UploadRecordingInterceptor(
+            textBaselineResponse(),
             """{"success":true}""",
             """{"success":true}""",
             uploadedTextResponse(),
@@ -312,6 +318,19 @@ class FileUploadTest {
         assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, outcome.result.status)
         assertTrue(outcome.result.requiresRefresh)
         assertTrue(outcome.content == null)
+    }
+
+    @Test
+    fun `文本基线漂移时不发送权限探针和正文`() = runBlocking {
+        val transport = UploadRecordingInterceptor(textBaselineResponse(size = 4))
+
+        val outcome = repository(transport).saveTextResult(writableTextItem(), "你好")
+
+        assertEquals(MutationResultStatus.CONFIRMED_FAILURE, outcome.result.status)
+        assertEquals(MutationErrorCategory.CONFLICT, outcome.result.errorCategory)
+        assertFalse(outcome.result.submitted)
+        assertEquals(listOf("getinfo"), transport.requests.map(::method))
+        assertTrue(transport.multipartBodies.isEmpty())
     }
 
     private fun source(bytes: ByteArray) = UploadSource(
@@ -334,6 +353,9 @@ class FileUploadTest {
 
     private fun uploadedTextResponse() =
         """{"success":true,"data":{"files":[{"path":"/share/note.txt","name":"note.txt","isdir":false,"size":6}]}}"""
+
+    private fun textBaselineResponse(size: Long = 3) =
+        """{"success":true,"data":{"files":[{"path":"/share/note.txt","name":"note.txt","isdir":false,"size":$size,"additional":{"perm":{"read":true,"write":true,"delete":false}}}]}}"""
 
     private fun repository(
         interceptor: Interceptor,

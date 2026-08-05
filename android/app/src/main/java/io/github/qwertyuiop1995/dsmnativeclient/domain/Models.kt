@@ -261,6 +261,36 @@ enum class TransferDirection { DOWNLOAD, UPLOAD, SERVER }
 @Serializable
 enum class TransferState { WAITING, RUNNING, PAUSED, CANCELLING, SUCCEEDED, FAILED, CANCELLED }
 
+enum class FileServerMutationOperation { COMPRESS, EXTRACT }
+
+enum class FileServerMutationVerification { MATCHES, DIFFERS, DISAPPEARED, UNAVAILABLE }
+
+data class FileServerMutationExpectedOutput(
+    val path: String,
+    val isDirectory: Boolean,
+    val requiresNonEmptyFile: Boolean = false,
+)
+
+data class FileServerMutationTarget(
+    val profileId: String,
+    val module: Module,
+    val operation: FileServerMutationOperation,
+    val sourceBaselines: List<FileItem>,
+    val destinationFolderBaseline: FileItem,
+    val expectedOutputs: List<FileServerMutationExpectedOutput> = emptyList(),
+)
+
+data class FileServerMutationLifecycle(
+    val target: FileServerMutationTarget,
+    val result: MutationResult? = null,
+    val failure: DsmFailure? = null,
+    val refreshInProgress: Boolean = false,
+    val refreshCompleted: Boolean = false,
+    val refreshFailure: DsmFailure? = null,
+    val verification: FileServerMutationVerification? = null,
+    val generation: Long = 0L,
+)
+
 data class TransferTask(
     val id: String,
     val title: String,
@@ -272,6 +302,7 @@ data class TransferTask(
     val errorMessage: String? = null,
     val requiresRefresh: Boolean = false,
     val startedAtEpochMillis: Long? = null,
+    val fileServerMutation: FileServerMutationLifecycle? = null,
 ) {
     val progress: Float?
         get() = totalBytes?.takeIf { it > 0 }?.let {

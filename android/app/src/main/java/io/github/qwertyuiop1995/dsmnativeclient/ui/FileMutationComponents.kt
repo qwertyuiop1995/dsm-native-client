@@ -48,6 +48,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.fileStationFavoriteMessageResour
 import io.github.qwertyuiop1995.dsmnativeclient.localization.localize
 import io.github.qwertyuiop1995.dsmnativeclient.shareLinkDeleteMessageResource
 import io.github.qwertyuiop1995.dsmnativeclient.shareLinkMutationMessageResource
+import io.github.qwertyuiop1995.dsmnativeclient.textSaveMutationMessageResource
 
 internal data class FileStationMutationFeedbackPolicy(
     @StringRes val title: Int,
@@ -102,6 +103,7 @@ internal fun canDismissFileStationMutationFeedback(
 internal fun canContinueEditingFileStationMutationFeedback(
     state: FileStationMutationWorkspaceState,
 ): Boolean = state.target?.operation in setOf(
+    FileStationMutationOperation.TEXT_SAVE,
     FileStationMutationOperation.CREATE_FOLDER,
     FileStationMutationOperation.RENAME,
     FileStationMutationOperation.COPY,
@@ -196,6 +198,7 @@ internal fun FileStationMutationConfirmationDialog(
         stringResource(R.string.shared_folders)
     }.orEmpty()
     val title = when (target.operation) {
+        FileStationMutationOperation.TEXT_SAVE -> stringResource(R.string.save_text_changes_title)
         FileStationMutationOperation.COPY -> stringResource(R.string.confirm_copy_files)
         FileStationMutationOperation.MOVE -> stringResource(
             if (target.module == Module.PHOTOS) R.string.confirm_move_photo
@@ -214,6 +217,7 @@ internal fun FileStationMutationConfirmationDialog(
         else -> return
     }
     val message = when (target.operation) {
+        FileStationMutationOperation.TEXT_SAVE -> stringResource(R.string.save_text_changes_message)
         FileStationMutationOperation.COPY -> stringResource(
             R.string.confirm_copy_files_message,
             target.sourceBaselines.size,
@@ -251,6 +255,7 @@ internal fun FileStationMutationConfirmationDialog(
         else -> return
     }
     val confirm = when (target.operation) {
+        FileStationMutationOperation.TEXT_SAVE -> R.string.replace_existing
         FileStationMutationOperation.COPY -> R.string.copy_action
         FileStationMutationOperation.MOVE -> R.string.move_action
         FileStationMutationOperation.DELETE -> R.string.delete
@@ -434,6 +439,7 @@ private fun fileStationMutationMessageResource(
     target: FileStationMutationTarget,
     result: MutationResult,
 ): Int = when (target.operation) {
+    FileStationMutationOperation.TEXT_SAVE -> textSaveMutationMessageResource(result)
     FileStationMutationOperation.CREATE_FOLDER,
     FileStationMutationOperation.RENAME,
     -> fileEntryMutationMessageResource(result)

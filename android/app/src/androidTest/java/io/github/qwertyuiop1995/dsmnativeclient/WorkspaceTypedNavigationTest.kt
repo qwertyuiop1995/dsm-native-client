@@ -122,47 +122,56 @@ class WorkspaceTypedNavigationTest {
         val model = model()
         val workspace = workspace(model)
         val item = syntheticTextItem()
-        val saveJob = Job()
-        AppViewModel::class.java.getDeclaredField("textPreviewSaveJob").apply {
-            isAccessible = true
-            set(model, saveJob)
-        }
+        val target = textSaveTarget(item)
         workspace.value = syntheticWorkspace(selectedModule = Module.FILES).copy(
             previewItem = item,
             preview = Loadable.Ready(FilePreviewContent.Text(item, "saved", truncated = false)),
             previewOwner = PreviewOwner.FILES,
             textPreviewDraft = "changed",
             isPerformingAction = true,
+            fileStationMutationState = FileStationMutationWorkspaceState(
+                target = target,
+                mutationInProgress = true,
+            ),
         )
 
         assertEquals(
-            WorkspaceNavigationResult.DEFERRED,
+            WorkspaceNavigationResult.REJECTED,
             model.navigateTo(WorkspaceRoute.ModuleRoot(Module.PHOTOS)),
         )
         assertFalse(workspace.value?.previewDiscardConfirmationVisible == true)
         model.confirmDiscardTextPreview()
         assertEquals(Module.FILES, workspace.value?.selectedModule)
         assertEquals(item, workspace.value?.previewItem)
-        saveJob.cancel()
     }
 
     @Test
-    fun 退出登录会取消文本保存并释放任务所有权() {
+    fun 文本保存进行中会阻止退出登录并保留任务证据() {
         val model = model()
         val workspace = workspace(model)
-        val saveJob = Job()
-        val field = AppViewModel::class.java.getDeclaredField("textPreviewSaveJob").apply {
-            isAccessible = true
-            set(model, saveJob)
-        }
-        workspace.value = syntheticWorkspace(selectedModule = Module.FILES)
+        val item = syntheticTextItem()
+        val target = textSaveTarget(item)
+        workspace.value = syntheticWorkspace(selectedModule = Module.FILES).copy(
+            fileStationMutationState = FileStationMutationWorkspaceState(
+                target = target,
+                mutationInProgress = true,
+            ),
+        )
 
         model.logout()
 
-        assertTrue(saveJob.isCancelled)
-        assertEquals(null, field.get(model))
-        assertEquals(null, workspace.value)
+        assertEquals(target, workspace.value?.fileStationMutationState?.target)
+        assertTrue(workspace.value?.fileStationMutationState?.mutationInProgress == true)
     }
+
+    private fun textSaveTarget(item: FileItem) = FileStationMutationTarget(
+        profileId = "synthetic-profile",
+        module = Module.FILES,
+        operation = FileStationMutationOperation.TEXT_SAVE,
+        sourceBaselines = listOf(item),
+        expectedContentSha256 = sha256Hex("changed".encodeToByteArray()),
+        expectedContentByteCount = 7,
+    )
 
     @Test
     fun 照片查看器返回先关闭并保留文件夹历史() {

@@ -195,6 +195,8 @@ private fun FileBrowserContent(
         mutation.target != null || mutation.mutationInProgress || mutation.mutationRefreshInProgress ||
         mutation.mutationResult != null || mutation.mutationFailure != null ||
         mutation.mutationRefreshFailure != null
+    val textSaveInProgress = mutation.target?.operation == FileStationMutationOperation.TEXT_SAVE &&
+        mutation.mutationInProgress
 
     fun handleDownloadDestination(uri: android.net.Uri?) {
         val resolution = resolveDownloadDestination(
@@ -666,8 +668,8 @@ private fun FileBrowserContent(
                         onNext = sequence?.let { model::showNextFileImage },
                         previousEnabled = sequence?.hasPrevious == true,
                         nextEnabled = sequence?.hasNext == true,
-                        onSaveText = model::saveTextPreview,
-                        savingText = state.isPerformingAction,
+                        onSaveText = model::requestTextPreviewSave,
+                        savingText = textSaveInProgress,
                         textDraft = state.textPreviewDraft,
                         onTextDraftChange = model::updateTextPreviewDraft,
                         onCancelTextEdit = model::requestCancelTextPreviewEdit,
@@ -970,8 +972,8 @@ private fun FileBrowserContent(
             onNext = sequence?.let { model::showNextFileImage },
             previousEnabled = sequence?.hasPrevious == true,
             nextEnabled = sequence?.hasNext == true,
-            onSaveText = model::saveTextPreview,
-            savingText = state.isPerformingAction,
+            onSaveText = model::requestTextPreviewSave,
+            savingText = textSaveInProgress,
             textDraft = state.textPreviewDraft,
             onTextDraftChange = model::updateTextPreviewDraft,
             onCancelTextEdit = model::requestCancelTextPreviewEdit,
@@ -1014,6 +1016,7 @@ private fun FileBrowserContent(
     }
     val lifecycleConfirmationTarget = mutation.draftTarget?.takeIf { target ->
         target.module == Module.FILES && mutation.confirmationRequested && target.operation in setOf(
+            FileStationMutationOperation.TEXT_SAVE,
             FileStationMutationOperation.DELETE,
             FileStationMutationOperation.RESTORE,
             FileStationMutationOperation.SHARE_CREATE,
@@ -1023,8 +1026,8 @@ private fun FileBrowserContent(
     lifecycleConfirmationTarget?.let { target ->
         FileStationMutationConfirmationDialog(
             target = target,
-            onConfirm = model::confirmFileStationLifecycleMutation,
-            onDismiss = model::cancelPendingFileStationMutation,
+            onConfirm = model::confirmFileStationMutation,
+            onDismiss = model::cancelFileStationMutationConfirmation,
         )
     }
     if (mutation.target?.module == Module.FILES) {

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "vmm.clear-finished-tasks.synthetic-task",
+  "module": "vmm",
+  "operation": "clearFinishedTasks",
+  "api": {
+    "name": "SYNO.Virtualization.API.Task.Info",
+    "method": "clear",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "task_id",
+      "valueType": "string",
+      "encodedValue": "<synthetic-vmm-task>"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "standardWrite",
+    "readbackPolicy": "required"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "publicDocumentation"
+  }
+}

@@ -2,6 +2,9 @@ package io.github.qwertyuiop1995.dsmnativeclient.ui.downloads
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,8 +13,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Download
@@ -20,6 +25,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,11 +38,6 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
@@ -54,9 +55,16 @@ import io.github.qwertyuiop1995.dsmnativeclient.DownloadCreationSourceKind
 import io.github.qwertyuiop1995.dsmnativeclient.Loadable
 import io.github.qwertyuiop1995.dsmnativeclient.R
 import io.github.qwertyuiop1995.dsmnativeclient.WorkspaceState
+import io.github.qwertyuiop1995.dsmnativeclient.canSubmitDownloadBtSearch
 import io.github.qwertyuiop1995.dsmnativeclient.canDismissDownloadRssRefreshMutation
 import io.github.qwertyuiop1995.dsmnativeclient.downloadRssRefreshRequiresReadback
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchResult
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchCatalog
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchDirection
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchModuleScope
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchOptions
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchSort
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadDiscoveryTab
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadRssFeed
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadRssSite
 import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationErrorCategory
@@ -68,8 +76,6 @@ import io.github.qwertyuiop1995.dsmnativeclient.ui.LoadableContent
 import io.github.qwertyuiop1995.dsmnativeclient.ui.formatBytes
 import java.text.DateFormat
 import java.util.Date
-
-private enum class DiscoveryTab { RSS, BT_SEARCH }
 
 internal data class DownloadRssRefreshFeedbackPolicy(
     @StringRes val title: Int,
@@ -132,12 +138,13 @@ internal fun DownloadDiscoveryDialog(
     canCreateTask: Boolean,
     onCreateTask: (title: String, uri: String, sourceKind: DownloadCreationSourceKind) -> Unit,
     onDismiss: () -> Unit,
+    onSelectTab: (DownloadDiscoveryTab) -> Unit = model::selectDownloadDiscoveryTab,
 ) {
     val tabs = buildList {
-        if (state.supportsDownloadRss) add(DiscoveryTab.RSS)
-        if (state.supportsDownloadBtSearch) add(DiscoveryTab.BT_SEARCH)
+        if (state.supportsDownloadRss) add(DownloadDiscoveryTab.RSS)
+        if (state.supportsDownloadBtSearch) add(DownloadDiscoveryTab.BT_SEARCH)
     }
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    val selectedTab = tabs.indexOf(state.downloadAdvancedRead.discoveryTab).takeIf { it >= 0 } ?: 0
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.download_discovery)) },
@@ -155,11 +162,11 @@ internal fun DownloadDiscoveryDialog(
                     tabs.forEachIndexed { index, tab ->
                         Tab(
                             selected = selectedTab == index,
-                            onClick = { selectedTab = index },
+                            onClick = { onSelectTab(tab) },
                             text = {
                                 Text(
                                     stringResource(
-                                        if (tab == DiscoveryTab.RSS) {
+                                        if (tab == DownloadDiscoveryTab.RSS) {
                                             R.string.download_discovery_rss
                                         } else {
                                             R.string.download_discovery_bt_search
@@ -171,13 +178,13 @@ internal fun DownloadDiscoveryDialog(
                     }
                 }
                 when (tabs[selectedTab.coerceIn(0, tabs.lastIndex)]) {
-                    DiscoveryTab.RSS -> DownloadRssContent(
+                    DownloadDiscoveryTab.RSS -> DownloadRssContent(
                         state = state,
                         model = model,
                         canCreateTask = canCreateTask,
                         onCreateTask = onCreateTask,
                     )
-                    DiscoveryTab.BT_SEARCH -> DownloadBtSearchContent(
+                    DownloadDiscoveryTab.BT_SEARCH -> DownloadBtSearchContent(
                         state = state,
                         model = model,
                         canCreateTask = canCreateTask,
@@ -448,37 +455,56 @@ private fun DownloadBtSearchContent(
     canCreateTask: Boolean,
     onCreateTask: (String, String, DownloadCreationSourceKind) -> Unit,
 ) {
-    var keyword by rememberSaveable { mutableStateOf("") }
+    val options = state.downloadAdvancedRead.btSearchOptions
+    val catalog = state.downloadAdvancedRead.btSearchCatalog
+    val canSearch = canSubmitDownloadBtSearch(
+        catalog,
+        options,
+        state.downloadAdvancedRead.btSearchResults,
+    )
     Column {
         Row(Modifier.fillMaxWidth().padding(12.dp)) {
             OutlinedTextField(
-                value = keyword,
-                onValueChange = { if (it.length <= 200) keyword = it },
+                value = options.keyword,
+                onValueChange = {
+                    if (it.length <= 200) {
+                        model.updateDownloadBtSearchOptions(options.copy(keyword = it))
+                    }
+                },
                 label = { Text(stringResource(R.string.download_bt_keyword)) },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(8.dp))
             Button(
-                onClick = { model.searchDownloadBt(keyword) },
-                enabled = keyword.isNotBlank() && state.downloadBtSearchResults !is Loadable.Loading,
+                onClick = model::searchDownloadBt,
+                enabled = canSearch,
+                modifier = Modifier.heightIn(min = 48.dp),
             ) {
                 Icon(Icons.Outlined.Search, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
                 Text(stringResource(R.string.download_bt_search_action))
             }
         }
-        when (state.downloadBtSearchResults) {
+        DownloadBtSearchOptionsContent(
+            catalog = catalog,
+            options = options,
+            expanded = state.downloadAdvancedRead.btAdvancedOptionsVisible,
+            onToggleExpanded = model::toggleDownloadBtAdvancedOptions,
+            onRetry = model::loadDownloadBtSearchCatalog,
+            onOptionsChanged = model::updateDownloadBtSearchOptions,
+        )
+        when (state.downloadAdvancedRead.btSearchResults) {
             Loadable.Idle -> EmptyState(
                 stringResource(R.string.download_discovery_bt_search),
                 stringResource(R.string.download_bt_search_hint),
                 Icons.Outlined.Search,
             )
             else -> LoadableContent(
-                value = state.downloadBtSearchResults,
+                value = state.downloadAdvancedRead.btSearchResults,
                 emptyTitle = stringResource(R.string.download_bt_search_empty),
                 emptyMessage = stringResource(R.string.download_bt_search_empty_description),
-                onRetry = { model.searchDownloadBt(keyword) },
+                onRetry = model::searchDownloadBt,
             ) { results ->
                 DownloadBtResultList(
                     results = results,
@@ -488,6 +514,214 @@ private fun DownloadBtSearchContent(
             }
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DownloadBtSearchOptionsContent(
+    catalog: Loadable<DownloadBtSearchCatalog>,
+    options: DownloadBtSearchOptions,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    onRetry: () -> Unit,
+    onOptionsChanged: (DownloadBtSearchOptions) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        TextButton(
+            onClick = onToggleExpanded,
+            enabled = catalog is Loadable.Ready,
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) {
+            Text(
+                stringResource(
+                    if (expanded) R.string.download_bt_hide_options
+                    else R.string.download_bt_show_options,
+                ),
+            )
+        }
+        when (catalog) {
+            Loadable.Idle, Loadable.Loading -> {
+                Text(stringResource(R.string.download_bt_options_loading))
+                LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
+            }
+            is Loadable.Failed -> Column(
+                Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+            ) {
+                Text(stringResource(R.string.download_bt_options_failed))
+                TextButton(
+                    onClick = onRetry,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) { Text(stringResource(R.string.retry)) }
+            }
+            is Loadable.Ready -> {
+                if (catalog.value.modules.isEmpty()) {
+                    Text(stringResource(R.string.download_bt_options_empty))
+                } else if (expanded) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        DownloadBtOptionLabel(R.string.download_bt_provider_scope)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            DownloadBtSearchModuleScope.entries.forEach { scope ->
+                                FilterChip(
+                                    selected = options.moduleScope == scope,
+                                    onClick = {
+                                        onOptionsChanged(
+                                            options.copy(
+                                                moduleScope = scope,
+                                                selectedModuleIds = if (
+                                                    scope == DownloadBtSearchModuleScope.SELECTED
+                                                ) options.selectedModuleIds else emptySet(),
+                                            ),
+                                        )
+                                    },
+                                    label = { Text(stringResource(scope.labelResource())) },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                )
+                            }
+                        }
+                        if (options.moduleScope == DownloadBtSearchModuleScope.SELECTED) {
+                            DownloadBtOptionLabel(R.string.download_bt_specific_providers)
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                catalog.value.modules.forEach { module ->
+                                    val selected = module.id in options.selectedModuleIds
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = {
+                                            onOptionsChanged(
+                                                options.copy(
+                                                    selectedModuleIds = if (selected) {
+                                                        options.selectedModuleIds - module.id
+                                                    } else {
+                                                        options.selectedModuleIds + module.id
+                                                    },
+                                                ),
+                                            )
+                                        },
+                                        label = {
+                                            Text(
+                                                if (module.enabled) module.title else stringResource(
+                                                    R.string.download_bt_provider_disabled,
+                                                    module.title,
+                                                ),
+                                            )
+                                        },
+                                        modifier = Modifier.heightIn(min = 48.dp),
+                                    )
+                                }
+                            }
+                        }
+                        DownloadBtOptionLabel(R.string.download_bt_category)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            FilterChip(
+                                selected = options.categoryId == null,
+                                onClick = { onOptionsChanged(options.copy(categoryId = null)) },
+                                label = { Text(stringResource(R.string.download_bt_all_categories)) },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
+                            catalog.value.categories
+                                .filterNot { it.id == "_allcat_" }
+                                .forEach { category ->
+                                    FilterChip(
+                                        selected = options.categoryId == category.id,
+                                        onClick = {
+                                            onOptionsChanged(options.copy(categoryId = category.id))
+                                        },
+                                        label = { Text(category.title) },
+                                        modifier = Modifier.heightIn(min = 48.dp),
+                                    )
+                                }
+                        }
+                        DownloadBtOptionLabel(R.string.download_bt_sort)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            DownloadBtSearchSort.entries.forEach { sort ->
+                                FilterChip(
+                                    selected = options.sort == sort,
+                                    onClick = { onOptionsChanged(options.copy(sort = sort)) },
+                                    label = { Text(stringResource(sort.labelResource())) },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                )
+                            }
+                        }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            DownloadBtSearchDirection.entries.forEach { direction ->
+                                FilterChip(
+                                    selected = options.direction == direction,
+                                    onClick = {
+                                        onOptionsChanged(options.copy(direction = direction))
+                                    },
+                                    label = { Text(stringResource(direction.labelResource())) },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                )
+                            }
+                        }
+                        OutlinedTextField(
+                            value = options.titleFilter,
+                            onValueChange = {
+                                if (it.length <= 200) {
+                                    onOptionsChanged(options.copy(titleFilter = it))
+                                }
+                            },
+                            label = { Text(stringResource(R.string.download_bt_title_filter)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadBtOptionLabel(@StringRes resource: Int) {
+    Text(
+        stringResource(resource),
+        style = MaterialTheme.typography.labelLarge,
+        modifier = Modifier.padding(top = 8.dp),
+    )
+}
+
+@StringRes
+private fun DownloadBtSearchModuleScope.labelResource(): Int = when (this) {
+    DownloadBtSearchModuleScope.ALL -> R.string.download_bt_scope_all
+    DownloadBtSearchModuleScope.ENABLED -> R.string.download_bt_scope_enabled
+    DownloadBtSearchModuleScope.SELECTED -> R.string.download_bt_scope_selected
+}
+
+@StringRes
+private fun DownloadBtSearchSort.labelResource(): Int = when (this) {
+    DownloadBtSearchSort.TITLE -> R.string.download_bt_sort_title
+    DownloadBtSearchSort.SIZE -> R.string.download_bt_sort_size
+    DownloadBtSearchSort.DATE -> R.string.download_bt_sort_date
+    DownloadBtSearchSort.PEERS -> R.string.download_bt_sort_peers
+    DownloadBtSearchSort.PROVIDER -> R.string.download_bt_sort_provider
+    DownloadBtSearchSort.SEEDS -> R.string.download_bt_sort_seeds
+    DownloadBtSearchSort.LEECHES -> R.string.download_bt_sort_leeches
+}
+
+@StringRes
+private fun DownloadBtSearchDirection.labelResource(): Int = when (this) {
+    DownloadBtSearchDirection.ASCENDING -> R.string.download_bt_sort_ascending
+    DownloadBtSearchDirection.DESCENDING -> R.string.download_bt_sort_descending
 }
 
 @Composable

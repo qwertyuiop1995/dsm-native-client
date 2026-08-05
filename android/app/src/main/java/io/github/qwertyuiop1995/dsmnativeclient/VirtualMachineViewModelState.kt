@@ -6,6 +6,7 @@ import java.security.MessageDigest
 enum class VirtualMachineMutationKind {
     CREATION,
     IMAGE_IMPORT,
+    TASK_CLEANUP,
     SETTINGS,
     LIFECYCLE,
 }
@@ -199,6 +200,11 @@ data class VirtualMachineMutationWorkspaceState(
     val settingsDraft: VirtualMachineSettingsDraftState? = null,
     val lifecycleConfirmationTarget: VirtualMachineLifecycleTarget? = null,
     val lifecycleConfirmationRequested: Boolean = false,
+    val taskCleanupConfirmationRequested: Boolean = false,
+    /** 仅在当前 Workspace 内存中保留清理前任务基线，不进入 SavedState 或磁盘。 */
+    val taskCleanupBaseline: List<VirtualMachineTask> = emptyList(),
+    /** Repository 已完成回读的清理结果；只用于取消协程无法正常返回时交接证据。 */
+    val taskCleanupResolvedResult: MutationResult? = null,
     val target: VirtualMachineMutationTarget? = null,
     val mutationInProgress: Boolean = false,
     val mutationResult: MutationResult? = null,
@@ -265,7 +271,8 @@ internal fun virtualMachineMutationBlocksWorkspaceExit(
     state: VirtualMachineMutationWorkspaceState,
 ): Boolean {
     if (state.creationEditorVisible || state.imageImportEditorVisible || state.settingsEditorVisible ||
-        state.lifecycleConfirmationRequested || state.mutationInProgress ||
+        state.lifecycleConfirmationRequested || state.taskCleanupConfirmationRequested ||
+        state.mutationInProgress ||
         state.mutationRefreshInProgress
     ) return true
     if (state.imageImportTaskId != null) return true
@@ -297,6 +304,7 @@ internal fun canContinueEditingVirtualMachineMutation(
             state.creationEditorVisible && state.creationDraft != null
         VirtualMachineMutationKind.IMAGE_IMPORT ->
             state.imageImportEditorVisible && state.imageImportDraft?.toImportOrNull() != null
+        VirtualMachineMutationKind.TASK_CLEANUP -> false
         VirtualMachineMutationKind.SETTINGS ->
             state.settingsEditorVisible && state.settingsTargetId != null &&
                 state.settingsBaseline != null && state.settingsDraft != null
@@ -333,21 +341,37 @@ internal fun virtualMachineOverviewCallbackMatches(
 internal fun virtualMachineOrdinaryLoadBlocked(
     state: VirtualMachineMutationWorkspaceState,
 ): Boolean = state.creationEditorVisible || state.imageImportEditorVisible || state.settingsEditorVisible ||
-    state.lifecycleConfirmationRequested || state.target != null || state.mutationInProgress ||
+    state.lifecycleConfirmationRequested || state.taskCleanupConfirmationRequested ||
+    state.target != null || state.mutationInProgress ||
     state.mutationRefreshInProgress || state.mutationResult != null || state.mutationFailure != null
 
 internal fun cancelledVirtualMachineMutationResult(
     target: VirtualMachineMutationTarget,
-): MutationResult = MutationResult(
-    schemaVersion = 1,
-    status = MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
-    operation = target.operation,
-    submitted = true,
-    requiresRefresh = true,
-    counts = MutationResultCounts(succeeded = 0, failed = 0, unknown = 1),
-    errorCategory = MutationErrorCategory.UNKNOWN,
-    diagnosticTag = "vmm.${target.kind.name.lowercase()}.cancelled-externally",
-)
+    resolvedTaskCleanupResult: MutationResult? = null,
+): MutationResult {
+    if (target.kind == VirtualMachineMutationKind.TASK_CLEANUP) {
+        return resolvedTaskCleanupResult ?: MutationResult(
+            schemaVersion = 1,
+            status = MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+            operation = target.operation,
+            submitted = false,
+            requiresRefresh = false,
+            counts = MutationResultCounts(succeeded = 0, failed = 0, unknown = 0),
+            errorCategory = MutationErrorCategory.UNKNOWN,
+            diagnosticTag = "vmm.task_cleanup.cancelled-without-submission-evidence",
+        )
+    }
+    return MutationResult(
+        schemaVersion = 1,
+        status = MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+        operation = target.operation,
+        submitted = true,
+        requiresRefresh = true,
+        counts = MutationResultCounts(succeeded = 0, failed = 0, unknown = 1),
+        errorCategory = MutationErrorCategory.UNKNOWN,
+        diagnosticTag = "vmm.${target.kind.name.lowercase()}.cancelled-externally",
+    )
+}
 
 internal fun virtualMachineSettingsBaseline(
     resource: io.github.qwertyuiop1995.dsmnativeclient.domain.ManagedResource,
@@ -385,6 +409,21 @@ internal fun virtualMachineMutationVerification(
         VirtualMachineMutationKind.IMAGE_IMPORT -> {
             // 未确认结果没有稳定 image_id，不能按名称认领其他客户端创建的映像。
             VirtualMachineMutationVerification.UNAVAILABLE
+        }
+        VirtualMachineMutationKind.TASK_CLEANUP -> {
+            if (overview.taskCenterState != VirtualMachineTaskCenterState.AVAILABLE) {
+                return VirtualMachineMutationVerification.UNAVAILABLE
+            }
+            val expected = state.taskCleanupBaseline
+                .filter(VirtualMachineTask::isFinished)
+                .map(VirtualMachineTask::taskToken)
+                .toSet()
+            if (expected.isEmpty()) return VirtualMachineMutationVerification.UNAVAILABLE
+            if (overview.tasks.none { it.taskToken in expected }) {
+                VirtualMachineMutationVerification.MATCHES
+            } else {
+                VirtualMachineMutationVerification.DIFFERS
+            }
         }
         VirtualMachineMutationKind.SETTINGS -> {
             val id = state.settingsTargetId ?: target.resourceId

@@ -11,6 +11,8 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.MutationResultStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ResourceState
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineOverview
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSettings
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTask
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTaskCenterState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -327,6 +329,78 @@ class VirtualMachineMutationStatePolicyTest {
         assertFalse(virtualMachineMutationRequiresRefreshBeforeDismiss(cleared))
         assertFalse(virtualMachineMutationBlocksWorkspaceExit(cleared))
         assertTrue(canDismissVirtualMachineMutation(cleared))
+    }
+
+    @Test
+    fun `任务清理确认和回读只按原始任务基线判断`() {
+        val completed = VirtualMachineTask(
+            id = "local-a",
+            isFinished = true,
+            progressPercent = 100,
+            taskToken = "task-a",
+        )
+        val state = VirtualMachineMutationWorkspaceState(
+            taskCleanupConfirmationRequested = true,
+            taskCleanupBaseline = listOf(completed),
+        )
+        assertTrue(virtualMachineMutationBlocksWorkspaceExit(state))
+        assertTrue(virtualMachineOrdinaryLoadBlocked(state))
+
+        val submitted = state.copy(
+            taskCleanupConfirmationRequested = false,
+            target = target.copy(kind = VirtualMachineMutationKind.TASK_CLEANUP),
+        )
+        assertEquals(
+            VirtualMachineMutationVerification.DIFFERS,
+            virtualMachineMutationVerification(
+                submitted,
+                overview().copy(
+                    tasks = listOf(completed),
+                    taskCenterState = VirtualMachineTaskCenterState.AVAILABLE,
+                ),
+            ),
+        )
+        assertEquals(
+            VirtualMachineMutationVerification.MATCHES,
+            virtualMachineMutationVerification(
+                submitted,
+                overview().copy(
+                    tasks = emptyList(),
+                    taskCenterState = VirtualMachineTaskCenterState.AVAILABLE,
+                ),
+            ),
+        )
+        assertEquals(
+            VirtualMachineMutationVerification.UNAVAILABLE,
+            virtualMachineMutationVerification(
+                submitted,
+                overview().copy(taskCenterState = VirtualMachineTaskCenterState.LOAD_FAILED),
+            ),
+        )
+    }
+
+    @Test
+    fun `任务清理外部取消只采用 Repository 已解析证据`() {
+        val cleanupTarget = target.copy(
+            kind = VirtualMachineMutationKind.TASK_CLEANUP,
+            operation = "virtualMachineTaskCleanup",
+        )
+        val withoutEvidence = cancelledVirtualMachineMutationResult(cleanupTarget)
+        assertEquals(MutationResultStatus.CANCELLED_BEFORE_SUBMISSION, withoutEvidence.status)
+        assertFalse(withoutEvidence.submitted)
+        assertEquals(MutationResultCounts(0, 0, 0), withoutEvidence.counts)
+
+        val resolved = MutationResult(
+            schemaVersion = 1,
+            status = MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+            operation = "virtualMachineTaskCleanup",
+            submitted = true,
+            requiresRefresh = true,
+            counts = MutationResultCounts(succeeded = 1, failed = 1, unknown = 2),
+            errorCategory = MutationErrorCategory.UNKNOWN,
+            diagnosticTag = "vmm.task.cleanup.cancelled-after-readback",
+        )
+        assertEquals(resolved, cancelledVirtualMachineMutationResult(cleanupTarget, resolved))
     }
 
     @Test

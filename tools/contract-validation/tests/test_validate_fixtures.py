@@ -150,6 +150,19 @@ class FixtureValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(validator.ValidationError, "稳定环境别名"):
             validator.validate_metadata(metadata, self.fixture_directory / "metadata.json")
 
+    def test_accepts_official_lower_camel_case_method(self) -> None:
+        metadata = copy.deepcopy(self.metadata)
+        metadata["api"]["method"] = "getCategory"
+
+        validator.validate_metadata(metadata, self.fixture_directory / "metadata.json")
+
+    def test_rejects_method_starting_with_uppercase(self) -> None:
+        metadata = copy.deepcopy(self.metadata)
+        metadata["api"]["method"] = "GetCategory"
+
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_metadata(metadata, self.fixture_directory / "metadata.json")
+
     def test_rejects_unredacted_session_field(self) -> None:
         response = copy.deepcopy(self.response)
         response["sid"] = "real-session"

@@ -38,7 +38,7 @@ DSM_VERSION_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}$")
 BUILD_PATTERN = re.compile(r"^[0-9]{4,8}$")
 API_PATTERN = re.compile(r"^SYNO\.[A-Za-z0-9_.]+$")
 API_PATH_PATTERN = re.compile(r"^(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.cgi$")
-METHOD_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
+METHOD_PATTERN = re.compile(r"^[a-z][A-Za-z0-9_]{0,79}$")
 PLACEHOLDER_PATTERN = re.compile(r"^<redacted:[a-z0-9-]+>$")
 
 SENSITIVE_KEY_PATTERN = re.compile(

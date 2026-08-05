@@ -30,7 +30,13 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadTaskPeer
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadTaskTracker
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadRssSite
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadRssFeed
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchCatalog
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchCategory
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchModule
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchModuleScope
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchOptions
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchResult
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadStationActivity
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadSettings
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
@@ -4911,6 +4917,106 @@ class DsmRepository(
 
     fun supportsDownloadBtSearch(): Boolean = supports("SYNO.DownloadStation.BTSearch")
 
+    fun supportsDownloadActivity(): Boolean =
+        supportsVersion("SYNO.DownloadStation.Statistic", 1)
+
+    suspend fun loadDownloadActivity(): DownloadStationActivity {
+        if (!supportsDownloadActivity()) throw DsmFailure(
+            null,
+            "Download activity is unavailable",
+            "Refresh Download Station or use DSM to view current speeds.",
+            kind = DsmErrorKind.FEATURE_UNSUPPORTED,
+        )
+        val data = call(
+            "SYNO.DownloadStation.Statistic",
+            "getinfo",
+            version = 1,
+        )
+        fun requiredRate(key: String): Long = data.long(key)?.takeIf { it >= 0 }
+            ?: throw invalidDownloadAdvancedResponse("activity-$key")
+        return DownloadStationActivity(
+            downloadBytesPerSecond = requiredRate("speed_download"),
+            uploadBytesPerSecond = requiredRate("speed_upload"),
+            emuleDownloadBytesPerSecond = requiredRate("emule_speed_download"),
+            emuleUploadBytesPerSecond = requiredRate("emule_speed_upload"),
+        )
+    }
+
+    suspend fun loadDownloadBtSearchCatalog(): DownloadBtSearchCatalog {
+        if (!supportsVersion("SYNO.DownloadStation.BTSearch", 1)) throw DsmFailure(
+            null,
+            "Download search options are unavailable",
+            "Refresh Download Station and try again.",
+            kind = DsmErrorKind.FEATURE_UNSUPPORTED,
+        )
+        val moduleData = call(
+            "SYNO.DownloadStation.BTSearch",
+            "getModule",
+            version = 1,
+        )
+        val categoryData = call(
+            "SYNO.DownloadStation.BTSearch",
+            "getCategory",
+            version = 1,
+        )
+        val moduleValues = moduleData["modules"] as? JsonArray
+            ?: throw invalidDownloadAdvancedResponse("modules")
+        val categoryValues = categoryData["categories"] as? JsonArray
+            ?: throw invalidDownloadAdvancedResponse("categories")
+        val modules = moduleValues.map { value ->
+            val item = value as? JsonObject ?: throw invalidDownloadAdvancedResponse("module")
+            DownloadBtSearchModule(
+                id = requiredDownloadSearchId(item, "id", commaSeparated = true),
+                title = requiredDownloadSearchTitle(item),
+                enabled = item.bool("enabled")
+                    ?: throw invalidDownloadAdvancedResponse("module-enabled"),
+            )
+        }
+        val categories = categoryValues.map { value ->
+            val item = value as? JsonObject ?: throw invalidDownloadAdvancedResponse("category")
+            DownloadBtSearchCategory(
+                id = requiredDownloadSearchId(item, "id", commaSeparated = false),
+                title = requiredDownloadSearchTitle(item),
+            )
+        }
+        if (modules.map { it.id }.toSet().size != modules.size) {
+            throw invalidDownloadAdvancedResponse("duplicate-module")
+        }
+        if (categories.map { it.id }.toSet().size != categories.size) {
+            throw invalidDownloadAdvancedResponse("duplicate-category")
+        }
+        return DownloadBtSearchCatalog(modules = modules, categories = categories)
+    }
+
+    private fun requiredDownloadSearchId(
+        item: JsonObject,
+        key: String,
+        commaSeparated: Boolean,
+    ): String {
+        val id = item.string(key) ?: throw invalidDownloadAdvancedResponse(key)
+        if (id.isBlank() || id != id.trim() || id.any(Char::isISOControl) ||
+            (commaSeparated && ',' in id)
+        ) {
+            throw invalidDownloadAdvancedResponse(key)
+        }
+        return id
+    }
+
+    private fun requiredDownloadSearchTitle(item: JsonObject): String {
+        val title = item.string("title") ?: throw invalidDownloadAdvancedResponse("title")
+        if (title.isBlank() || title != title.trim() || title.any(Char::isISOControl)) {
+            throw invalidDownloadAdvancedResponse("title")
+        }
+        return title
+    }
+
+    private fun invalidDownloadAdvancedResponse(scope: String) = DsmFailure(
+        null,
+        "The NAS returned invalid Download Station data",
+        "Refresh Download Station and try again.",
+        kind = DsmErrorKind.INVALID_RESPONSE,
+    )
+
     suspend fun listDownloadRssSites(): List<DownloadRssSite> {
         val data = call(
             "SYNO.DownloadStation.RSS.Site",
@@ -5060,15 +5166,45 @@ class DsmRepository(
         }
     }
 
-    suspend fun searchDownloadBt(keyword: String): List<DownloadBtSearchResult> {
-        val normalized = keyword.trim()
+    suspend fun searchDownloadBt(keyword: String): List<DownloadBtSearchResult> =
+        searchDownloadBt(DownloadBtSearchOptions(keyword = keyword))
+
+    suspend fun searchDownloadBt(options: DownloadBtSearchOptions): List<DownloadBtSearchResult> {
+        val normalized = options.keyword.trim()
         require(normalized.isNotEmpty() && normalized.length <= 200) {
             "Enter a search keyword up to 200 characters"
+        }
+        val titleFilter = options.titleFilter.trim()
+        require(titleFilter.length <= 200 && titleFilter.none(Char::isISOControl)) {
+            "Enter a title filter up to 200 characters"
+        }
+        val category = options.categoryId?.also { id ->
+            require(id.isNotBlank() && id == id.trim() && id.none(Char::isISOControl)) {
+                "Choose a valid search category"
+            }
+        }.orEmpty()
+        val module = when (options.moduleScope) {
+            DownloadBtSearchModuleScope.ALL -> {
+                require(options.selectedModuleIds.isEmpty()) { "Selected modules require selected mode" }
+                "all"
+            }
+            DownloadBtSearchModuleScope.ENABLED -> {
+                require(options.selectedModuleIds.isEmpty()) { "Selected modules require selected mode" }
+                "enabled"
+            }
+            DownloadBtSearchModuleScope.SELECTED -> {
+                require(options.selectedModuleIds.isNotEmpty()) { "Choose at least one search provider" }
+                options.selectedModuleIds.onEach { id ->
+                    require(id.isNotBlank() && id == id.trim() && ',' !in id && id.none(Char::isISOControl)) {
+                        "Choose valid search providers"
+                    }
+                }.sorted().joinToString(",")
+            }
         }
         val started = call(
             "SYNO.DownloadStation.BTSearch",
             "start",
-            mapOf("keyword" to normalized, "module" to "enabled"),
+            mapOf("keyword" to normalized, "module" to module),
             version = 1,
         )
         val taskId = started.string("taskid") ?: throw DsmFailure(
@@ -5086,10 +5222,10 @@ class DsmRepository(
                         "taskid" to taskId,
                         "offset" to "0",
                         "limit" to "200",
-                        "sort_by" to "seeds",
-                        "sort_direction" to "desc",
-                        "filter_category" to "",
-                        "filter_title" to "",
+                        "sort_by" to options.sort.apiValue,
+                        "sort_direction" to options.direction.apiValue,
+                        "filter_category" to category,
+                        "filter_title" to titleFilter,
                     ),
                     version = 1,
                 )
@@ -7547,6 +7683,11 @@ class DsmRepository(
         val state: VirtualMachineTaskCenterState,
     )
 
+    private data class VirtualMachineTaskRecord(
+        val taskToken: String,
+        val task: VirtualMachineTask,
+    )
+
     private suspend fun virtualMachineTaskCenter(): VirtualMachineTaskCenterRead {
         if (!supportsVersion("SYNO.Virtualization.API.Task.Info", 1)) {
             return VirtualMachineTaskCenterRead(
@@ -7556,7 +7697,7 @@ class DsmRepository(
         }
         return try {
             VirtualMachineTaskCenterRead(
-                tasks = readOfficialVirtualMachineTasks(),
+                tasks = readOfficialVirtualMachineTaskRecords().map(VirtualMachineTaskRecord::task),
                 state = VirtualMachineTaskCenterState.AVAILABLE,
             )
         } catch (cancelled: CancellationException) {
@@ -7573,7 +7714,7 @@ class DsmRepository(
         }
     }
 
-    private suspend fun readOfficialVirtualMachineTasks(): List<VirtualMachineTask> {
+    private suspend fun readOfficialVirtualMachineTaskRecords(): List<VirtualMachineTaskRecord> {
         val list = call(
             "SYNO.Virtualization.API.Task.Info",
             "list",
@@ -7588,7 +7729,7 @@ class DsmRepository(
         if (ids.size > MAX_VMM_TASK_CENTER_ITEMS || ids.distinct().size != ids.size) {
             throw invalidVirtualizationResponse("task-list-bounds")
         }
-        return ids.mapIndexed { index, taskId ->
+        return ids.map { taskId ->
             val task = call(
                 "SYNO.Virtualization.API.Task.Info",
                 "get",
@@ -7606,13 +7747,247 @@ class DsmRepository(
                 value.strictIntValue()?.takeIf { it in 0..100 }
                     ?: throw invalidVirtualizationResponse("task-progress")
             }
-            VirtualMachineTask(
-                id = "task-${index + 1}",
-                isFinished = finished,
-                progressPercent = progress,
+            VirtualMachineTaskRecord(
+                taskToken = taskId,
+                task = VirtualMachineTask(
+                    id = virtualMachineTaskDigest(taskId),
+                    isFinished = finished,
+                    progressPercent = progress,
+                    taskToken = taskId,
+                ),
             )
         }
     }
+
+    /**
+     * 清除用户刚刚确认过的已完成 VMM 任务。
+     *
+     * 服务端任务标识只在本次内存基线和请求边界内使用。提交异常或取消后仅进行一次严格回读，
+     * 不自动重放 `clear`；进行中任务、基线漂移和重复批次均在任何写请求前关闭。
+     */
+    suspend fun clearFinishedVirtualMachineTasksResult(
+        baseline: List<VirtualMachineTask>,
+        onResultResolved: (MutationResult) -> Unit = {},
+    ): MutationResult = clearFinishedVirtualMachineTasksResultInternal(baseline)
+        .also(onResultResolved)
+
+    private suspend fun clearFinishedVirtualMachineTasksResultInternal(
+        baseline: List<VirtualMachineTask>,
+    ): MutationResult {
+        val operation = "virtualMachineTaskCleanup"
+        val diagnosticPrefix = "vmm.task.cleanup"
+        val targets = baseline.filter(VirtualMachineTask::isFinished)
+        if (!supportsVersion("SYNO.Virtualization.API.Task.Info", 1)) {
+            return settingsMutationResult(
+                operation,
+                MutationResultStatus.UNSUPPORTED,
+                submitted = false,
+                total = targets.size,
+                failed = targets.size,
+                errorCategory = MutationErrorCategory.UNSUPPORTED,
+                diagnosticTag = "$diagnosticPrefix.unsupported",
+            )
+        }
+        if (baseline.isEmpty() || targets.isEmpty() ||
+            baseline.map(VirtualMachineTask::taskToken).distinct().size != baseline.size
+        ) {
+            return settingsMutationResult(
+                operation,
+                MutationResultStatus.CONFIRMED_FAILURE,
+                submitted = false,
+                total = targets.size,
+                failed = targets.size,
+                errorCategory = MutationErrorCategory.VALIDATION,
+                diagnosticTag = "$diagnosticPrefix.invalid-baseline",
+            )
+        }
+        val targetKey = "vmm-task-cleanup"
+        if (!claimServiceMutation(targetKey)) {
+            return settingsMutationResult(
+                operation,
+                MutationResultStatus.CONFIRMED_FAILURE,
+                submitted = false,
+                total = targets.size,
+                failed = targets.size,
+                errorCategory = MutationErrorCategory.CONFLICT,
+                diagnosticTag = "$diagnosticPrefix.duplicate",
+            )
+        }
+        try {
+            val current = try {
+                readOfficialVirtualMachineTaskRecords()
+            } catch (_: CancellationException) {
+                return settingsMutationResult(
+                    operation,
+                    MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+                    submitted = false,
+                    total = targets.size,
+                    diagnosticTag = "$diagnosticPrefix.cancelled-before-submission",
+                )
+            } catch (error: Throwable) {
+                val failure = error.asRepositoryFailure()
+                return settingsMutationResult(
+                    operation,
+                    if (failure.kind in setOf(
+                            DsmErrorKind.PERMISSION_DENIED,
+                            DsmErrorKind.SESSION_EXPIRED,
+                            DsmErrorKind.AUTHENTICATION_FAILED,
+                        )
+                    ) MutationResultStatus.PERMISSION_DENIED else MutationResultStatus.CONFIRMED_FAILURE,
+                    submitted = false,
+                    total = targets.size,
+                    failed = targets.size,
+                    errorCategory = failure.mutationErrorCategory(),
+                    diagnosticTag = "$diagnosticPrefix.preflight-failed",
+                )
+            }
+            if (!virtualMachineTaskBaselineMatches(baseline, current)) {
+                return settingsMutationResult(
+                    operation,
+                    MutationResultStatus.CONFIRMED_FAILURE,
+                    submitted = false,
+                    total = targets.size,
+                    failed = targets.size,
+                    errorCategory = MutationErrorCategory.CONFLICT,
+                    diagnosticTag = "$diagnosticPrefix.baseline-changed",
+                )
+            }
+
+            val submittedTokens = mutableListOf<String>()
+            var submissionFailure: Throwable? = null
+            for (target in targets) {
+                try {
+                    currentCoroutineContext().ensureActive()
+                    submittedTokens += target.taskToken
+                    call(
+                        "SYNO.Virtualization.API.Task.Info",
+                        "clear",
+                        mapOf("task_id" to target.taskToken),
+                        version = 1,
+                    )
+                } catch (error: Throwable) {
+                    submissionFailure = error
+                    break
+                }
+            }
+            if (submittedTokens.isEmpty()) {
+                return settingsMutationResult(
+                    operation,
+                    MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+                    submitted = false,
+                    total = targets.size,
+                    diagnosticTag = "$diagnosticPrefix.cancelled-before-submit",
+                )
+            }
+
+            val remainingTokens = try {
+                withContext(NonCancellable) {
+                    readOfficialVirtualMachineTaskRecords().map(VirtualMachineTaskRecord::taskToken).toSet()
+                }
+            } catch (_: Throwable) {
+                return settingsMutationResult(
+                    operation,
+                    if (submissionFailure is CancellationException) {
+                        MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION
+                    } else {
+                        MutationResultStatus.SUBMITTED_BUT_UNVERIFIED
+                    },
+                    submitted = true,
+                    total = targets.size,
+                    failed = targets.size - submittedTokens.size,
+                    unknown = submittedTokens.size,
+                    requiresRefresh = true,
+                    errorCategory = submissionFailure?.asRepositoryFailure()?.mutationErrorCategory(),
+                    diagnosticTag = "$diagnosticPrefix.readback-failed",
+                )
+            }
+            val succeeded = submittedTokens.count { it !in remainingTokens }
+            val unsubmitted = targets.size - submittedTokens.size
+            if (submissionFailure != null) {
+                val unknown = submittedTokens.count { it in remainingTokens }
+                val status = when {
+                    submissionFailure is CancellationException ->
+                        MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION
+                    submissionFailure.asRepositoryFailure().isAmbiguousSettingsFailure() ->
+                        MutationResultStatus.SUBMITTED_BUT_UNVERIFIED
+                    succeeded > 0 -> MutationResultStatus.PARTIAL_SUCCESS
+                    submissionFailure.asRepositoryFailure().kind in setOf(
+                        DsmErrorKind.PERMISSION_DENIED,
+                        DsmErrorKind.SESSION_EXPIRED,
+                        DsmErrorKind.AUTHENTICATION_FAILED,
+                    ) -> MutationResultStatus.PERMISSION_DENIED
+                    else -> MutationResultStatus.CONFIRMED_FAILURE
+                }
+                return settingsMutationResult(
+                    operation,
+                    status,
+                    submitted = true,
+                    total = targets.size,
+                    succeeded = succeeded,
+                    failed = unsubmitted + if (status in setOf(
+                            MutationResultStatus.PARTIAL_SUCCESS,
+                            MutationResultStatus.PERMISSION_DENIED,
+                            MutationResultStatus.CONFIRMED_FAILURE,
+                        )
+                    ) unknown else 0,
+                    unknown = if (status in setOf(
+                            MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+                            MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+                        )
+                    ) unknown else 0,
+                    requiresRefresh = status in setOf(
+                        MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+                        MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+                    ),
+                    errorCategory = submissionFailure.asRepositoryFailure().mutationErrorCategory(),
+                    diagnosticTag = "$diagnosticPrefix.submission-interrupted",
+                )
+            }
+            val unknown = targets.size - succeeded
+            return settingsMutationResult(
+                operation,
+                when {
+                    succeeded == targets.size -> MutationResultStatus.CONFIRMED_SUCCESS
+                    succeeded > 0 -> MutationResultStatus.PARTIAL_SUCCESS
+                    else -> MutationResultStatus.SUBMITTED_BUT_UNVERIFIED
+                },
+                submitted = true,
+                total = targets.size,
+                succeeded = succeeded,
+                unknown = unknown,
+                requiresRefresh = unknown > 0,
+                errorCategory = MutationErrorCategory.CONFLICT.takeIf { unknown > 0 },
+                diagnosticTag = if (unknown == 0) {
+                    "$diagnosticPrefix.confirmed"
+                } else {
+                    "$diagnosticPrefix.readback-mismatch"
+                },
+            )
+        } finally {
+            withContext(NonCancellable) { releaseServiceMutation(targetKey) }
+        }
+    }
+
+    private fun virtualMachineTaskBaselineMatches(
+        baseline: List<VirtualMachineTask>,
+        current: List<VirtualMachineTaskRecord>,
+    ): Boolean {
+        if (baseline.size != current.size) return false
+        val currentByToken = current.associateBy(VirtualMachineTaskRecord::taskToken)
+        return currentByToken.size == current.size && baseline.all { expected ->
+            val actual = currentByToken[expected.taskToken] ?: return@all false
+            expected.id == actual.task.id &&
+                expected.isFinished == actual.task.isFinished &&
+                expected.progressPercent == actual.task.progressPercent
+        }
+    }
+
+    private fun virtualMachineTaskDigest(taskToken: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(taskToken.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte ->
+                (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+            }
 
     private suspend fun findOfficialVirtualMachine(name: String): ManagedResource? {
         return officialVirtualMachines().singleOrNull {

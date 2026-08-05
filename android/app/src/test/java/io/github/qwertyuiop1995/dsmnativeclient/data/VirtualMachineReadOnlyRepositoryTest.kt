@@ -8,6 +8,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineNetworkMode
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTaskCenterState
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmApiClient
+import java.security.MessageDigest
 import kotlinx.coroutines.runBlocking
 import okhttp3.FormBody
 import okhttp3.Interceptor
@@ -48,10 +49,17 @@ class VirtualMachineReadOnlyRepositoryTest {
         assertFalse(hardware.toString().contains("02:11:32", ignoreCase = true))
 
         assertEquals(VirtualMachineTaskCenterState.AVAILABLE, overview.taskCenterState)
-        assertEquals(listOf("task-1", "task-2"), overview.tasks.map { it.id })
+        assertEquals(
+            listOf("private-task-a", "private-task-b").map(::taskDigest),
+            overview.tasks.map { it.id },
+        )
         assertEquals(listOf(false, true), overview.tasks.map { it.isFinished })
         assertEquals(listOf(40, 100), overview.tasks.map { it.progressPercent })
         assertFalse(overview.tasks.toString().contains("private-task"))
+        assertEquals(
+            listOf("private-task-a", "private-task-b"),
+            overview.tasks.map { it.taskToken },
+        )
         assertFalse(VirtualMachineSection.HARDWARE in overview.unavailableSections)
         assertFalse(VirtualMachineSection.TASKS in overview.unavailableSections)
 
@@ -198,6 +206,10 @@ class VirtualMachineReadOnlyRepositoryTest {
         const val TASK_INFO = "SYNO.Virtualization.API.Task.Info"
     }
 }
+
+private fun taskDigest(value: String): String = MessageDigest.getInstance("SHA-256")
+    .digest(value.toByteArray(Charsets.UTF_8))
+    .joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') }
 
 private class VirtualMachineReadOnlyInterceptor(
     private val guestList: String = """{"success":true,"data":{"guests":[{"guest_id":"guest-1","guest_name":"Synthetic VM","status":"shutdown","vdisks":[{"controller":1,"unmap":true,"vdisk_id":"disk-1","vdisk_size":10240}],"vnics":[{"mac":"02:11:32:00:00:01","model":2,"network_id":"network-1","network_name":"Default Network","vnic_id":"nic-1"}]}]}}""",

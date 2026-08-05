@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -57,6 +58,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -66,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import io.github.qwertyuiop1995.dsmnativeclient.AppViewModel
 import io.github.qwertyuiop1995.dsmnativeclient.DownloadControlOperation
 import io.github.qwertyuiop1995.dsmnativeclient.DownloadCreationSourceKind
+import io.github.qwertyuiop1995.dsmnativeclient.Loadable
 import io.github.qwertyuiop1995.dsmnativeclient.R
 import io.github.qwertyuiop1995.dsmnativeclient.WorkspaceState
 import io.github.qwertyuiop1995.dsmnativeclient.canStartDownloadCreation
@@ -73,6 +77,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.downloadCreationRequiresRefreshB
 import io.github.qwertyuiop1995.dsmnativeclient.downloadControlRequiresRefreshBeforeDismiss
 import io.github.qwertyuiop1995.dsmnativeclient.downloadDestinationEditRequiresRefreshBeforeDismiss
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadTask
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadStationActivity
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import io.github.qwertyuiop1995.dsmnativeclient.ui.AdaptiveLayoutPolicy
 import io.github.qwertyuiop1995.dsmnativeclient.ui.DownloadDestinationDialog
@@ -81,11 +86,11 @@ import io.github.qwertyuiop1995.dsmnativeclient.ui.EmptyState
 import io.github.qwertyuiop1995.dsmnativeclient.ui.LoadableContent
 import io.github.qwertyuiop1995.dsmnativeclient.ui.StatusIcon
 import io.github.qwertyuiop1995.dsmnativeclient.ui.displayName
+import io.github.qwertyuiop1995.dsmnativeclient.ui.formatBytes
 
 @Composable
 internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
     var selected by remember { mutableStateOf<DownloadTask?>(null) }
-    var showDiscovery by rememberSaveable { mutableStateOf(false) }
     var settingsUnavailable by rememberSaveable { mutableStateOf(false) }
     val taskFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -135,10 +140,7 @@ internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
                 if (state.supportsDownloadRss || state.supportsDownloadBtSearch) {
                     TextButton(
                         enabled = creationActionsEnabled,
-                        onClick = {
-                            showDiscovery = true
-                            if (state.supportsDownloadRss) model.loadDownloadRssSites()
-                        },
+                        onClick = { model.openDownloadDiscovery() },
                     ) {
                         Icon(Icons.Outlined.Search, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
@@ -199,6 +201,12 @@ internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
                     onRefresh = model::refreshDownloadCreationMutation,
                     onDismiss = { model.dismissDownloadCreationMutation() },
                     onEdit = { model.editDownloadCreationAfterResult() },
+                )
+            }
+            if (state.downloadAdvancedRead.supportsActivity) {
+                DownloadActivitySummary(
+                    activity = state.downloadAdvancedRead.activity,
+                    onRetry = model::loadDownloadActivity,
                 )
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -290,7 +298,7 @@ internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
             onDismiss = model::closeDownloadSettings,
         )
     }
-    if (showDiscovery) {
+    if (state.downloadAdvancedRead.discoveryVisible) {
         DownloadDiscoveryDialog(
             state = state,
             model = model,
@@ -300,9 +308,7 @@ internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
                     model.beginDownloadDestinationSelection()
                 }
             },
-            onDismiss = {
-                if (model.closeDownloadDiscovery()) showDiscovery = false
-            },
+            onDismiss = { model.closeDownloadDiscovery() },
         )
     }
     val pendingDiscoveryUri = state.downloadCreationState.pendingDiscoveryUri
@@ -404,6 +410,65 @@ internal fun DownloadsScreen(state: WorkspaceState, model: AppViewModel) {
                 onConfirm = model::confirmDownloadDestinationEdit,
                 onDismiss = model::cancelDownloadDestinationEdit,
             )
+        }
+    }
+}
+
+@Composable
+private fun DownloadActivitySummary(
+    activity: Loadable<DownloadStationActivity>,
+    onRetry: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Text(
+                stringResource(R.string.download_activity_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            when (activity) {
+                Loadable.Idle -> Text(stringResource(R.string.download_activity_unavailable))
+                Loadable.Loading -> {
+                    Text(stringResource(R.string.download_activity_loading))
+                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+                }
+                is Loadable.Failed -> Column(
+                    Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+                ) {
+                    Text(stringResource(R.string.download_activity_failed))
+                    TextButton(
+                        onClick = onRetry,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text(stringResource(R.string.retry)) }
+                }
+                is Loadable.Ready -> {
+                    val value = activity.value
+                    if (value.downloadBytesPerSecond == 0L && value.uploadBytesPerSecond == 0L &&
+                        value.emuleDownloadBytesPerSecond == 0L &&
+                        value.emuleUploadBytesPerSecond == 0L
+                    ) {
+                        Text(stringResource(R.string.download_activity_empty))
+                    } else {
+                        Text(
+                            stringResource(
+                                R.string.download_activity_standard,
+                                formatBytes(value.downloadBytesPerSecond),
+                                formatBytes(value.uploadBytesPerSecond),
+                            ),
+                        )
+                        Text(
+                            stringResource(
+                                R.string.download_activity_emule,
+                                formatBytes(value.emuleDownloadBytesPerSecond),
+                                formatBytes(value.emuleUploadBytesPerSecond),
+                            ),
+                        )
+                    }
+                }
+            }
         }
     }
 }

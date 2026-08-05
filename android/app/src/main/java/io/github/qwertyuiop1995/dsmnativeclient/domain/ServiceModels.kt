@@ -85,11 +85,21 @@ data class VirtualMachineHardware(
 )
 
 data class VirtualMachineTask(
-    /** 仅在本次读取结果中稳定的本地标识；不包含 NAS 返回的任务标识。 */
+    /** 由服务端任务标识单向摘要得到，只用于列表稳定键。 */
     val id: String,
     val isFinished: Boolean,
     val progressPercent: Int?,
-)
+    /** 仅保存在当前 Workspace 内存中，用于清理前复核；不得展示、记录或持久化。 */
+    internal val taskToken: String = id,
+) {
+    init {
+        require(id.isNotBlank() && taskToken.isNotBlank()) { "virtual_machine.invalid_task" }
+    }
+
+    /** 避免调试输出意外包含服务端任务标识。 */
+    override fun toString(): String =
+        "VirtualMachineTask(id=$id, isFinished=$isFinished, progressPercent=$progressPercent)"
+}
 
 enum class VirtualMachineTaskCenterState {
     AVAILABLE,

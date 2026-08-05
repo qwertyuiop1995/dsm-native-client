@@ -462,6 +462,7 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
     val writeBlocked = state.isPerformingAction || mutation.creationEditorVisible ||
         mutation.imageImportEditorVisible || mutation.settingsEditorVisible ||
         mutation.lifecycleConfirmationRequested ||
+        mutation.taskCleanupConfirmationRequested ||
         mutation.target != null || mutation.mutationInProgress || mutation.mutationRefreshInProgress ||
         mutation.mutationResult != null || mutation.mutationFailure != null
     val titles = listOf(
@@ -512,6 +513,8 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                     tasks = overview.tasks,
                     state = overview.taskCenterState,
                     onRetry = { model.load(Module.VIRTUAL_MACHINES) },
+                    cleanupEnabled = !writeBlocked,
+                    onClearFinished = model::requestVirtualMachineTaskCleanupConfirmation,
                 )
                 else -> {
                     val resources = overview.forTab(tab)
@@ -698,6 +701,13 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                 resourceName = resourceName,
                 onConfirm = model::confirmVirtualMachineLifecycle,
                 onDismiss = model::cancelVirtualMachineLifecycleConfirmation,
+            )
+        }
+        if (mutation.taskCleanupConfirmationRequested && mutation.taskCleanupBaseline.isNotEmpty()) {
+            VirtualMachineTaskCleanupConfirmationDialog(
+                taskCount = mutation.taskCleanupBaseline.count { it.isFinished },
+                onConfirm = model::confirmVirtualMachineTaskCleanup,
+                onDismiss = model::cancelVirtualMachineTaskCleanupConfirmation,
             )
         }
     }

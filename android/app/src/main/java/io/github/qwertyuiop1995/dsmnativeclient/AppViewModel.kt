@@ -62,10 +62,13 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadTaskMutationBasel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadSettings
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadRssSite
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadRssFeed
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchOptions
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadDiscoveryTab
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchResult
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineCreation
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageImport
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageImportVerification
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.isEligibleForVirtualMachineImageImport
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSettings
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
@@ -338,7 +341,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var nasPerformanceJob: Job? = null
     private var nasPerformanceVisible = false
     private var downloadDiscoveryLoadJob: Job? = null
+    private var downloadBtCatalogJob: Job? = null
     private var downloadDiscoverySearchJob: Job? = null
+    private var downloadActivityJob: Job? = null
     private val fileBrowserRequestGeneration = AtomicLong(0)
     private val fileStationMutationGeneration = AtomicLong(0)
     private val fileServerMutationGeneration = AtomicLong(0)
@@ -350,6 +355,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadDestinationEditMutationGeneration = AtomicLong(0)
     private val downloadSettingsMutationGeneration = AtomicLong(0)
     private val downloadRssRefreshMutationGeneration = AtomicLong(0)
+    private val downloadDiscoveryGeneration = AtomicLong(0)
+    private val downloadActivityGeneration = AtomicLong(0)
     private val virtualMachineMutationGeneration = AtomicLong(0)
     private val virtualMachineOverviewRequestGeneration = AtomicLong(0)
     private val virtualMachineImageBrowserGeneration = AtomicLong(0)
@@ -552,6 +559,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         repo.supportsDownloadTaskDestinationEditing(),
                     supportsDownloadRss = repo.supportsDownloadRss(),
                     supportsDownloadBtSearch = repo.supportsDownloadBtSearch(),
+                    downloadAdvancedRead = DownloadAdvancedReadWorkspaceState(
+                        supportsActivity = repo.supportsDownloadActivity(),
+                    ),
                     supportsChatReminders = repo.supportsChatReminders(),
                     supportsChatScheduledMessages = repo.supportsChatScheduledMessages(),
                     supportsChatPollCreation = repo.supportsChatPollCreation(),
@@ -670,6 +680,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         repo.supportsDownloadTaskDestinationEditing(),
                     supportsDownloadRss = repo.supportsDownloadRss(),
                     supportsDownloadBtSearch = repo.supportsDownloadBtSearch(),
+                    downloadAdvancedRead = DownloadAdvancedReadWorkspaceState(
+                        supportsActivity = repo.supportsDownloadActivity(),
+                    ),
                     supportsChatReminders = repo.supportsChatReminders(),
                     supportsChatScheduledMessages = repo.supportsChatScheduledMessages(),
                     supportsChatPollCreation = repo.supportsChatPollCreation(),
@@ -1011,6 +1024,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         return@launch
                     }
+                    loadDownloadActivity()
                     capture(
                         block = { repo.listDownloads() },
                         update = { value ->
@@ -5938,6 +5952,170 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         true
     }
 
+    fun loadDownloadActivity() {
+        val repo = repository ?: return
+        val current = _workspace.value ?: return
+        if (!repo.supportsDownloadActivity() || current.selectedModule != Module.DOWNLOADS) return
+        downloadActivityJob?.cancel()
+        val generation = downloadActivityGeneration.incrementAndGet()
+        val profileId = current.profile.id
+        _workspace.value = current.withDownloadActivity(Loadable.Loading)
+        downloadActivityJob = viewModelScope.launch {
+            runCatching { repo.loadDownloadActivity() }
+                .onSuccess { activity ->
+                    _workspace.update { state ->
+                        state?.takeIf {
+                            repository === repo && it.profile.id == profileId &&
+                                it.selectedModule == Module.DOWNLOADS &&
+                                generation == downloadActivityGeneration.get()
+                        }?.withDownloadActivity(Loadable.Ready(activity)) ?: state
+                    }
+                }
+                .onFailure { error ->
+                    if (error is CancellationException) return@onFailure
+                    _workspace.update { state ->
+                        state?.takeIf {
+                            repository === repo && it.profile.id == profileId &&
+                                it.selectedModule == Module.DOWNLOADS &&
+                                generation == downloadActivityGeneration.get()
+                        }?.withDownloadActivity(Loadable.Failed(error.asDsmFailure())) ?: state
+                    }
+                }
+        }
+    }
+
+    fun openDownloadDiscovery(): Boolean {
+        val repo = repository ?: return false
+        val current = _workspace.value ?: return false
+        if (current.selectedModule != Module.DOWNLOADS ||
+            (!repo.supportsDownloadRss() && !repo.supportsDownloadBtSearch())
+        ) return false
+        downloadDiscoveryLoadJob?.cancel()
+        downloadBtCatalogJob?.cancel()
+        downloadDiscoverySearchJob?.cancel()
+        val generation = downloadDiscoveryGeneration.incrementAndGet()
+        _workspace.value = current.copy(
+            downloadAdvancedRead = current.downloadAdvancedRead.copy(
+                discoveryVisible = true,
+                discoveryTab = if (repo.supportsDownloadRss()) {
+                    DownloadDiscoveryTab.RSS
+                } else {
+                    DownloadDiscoveryTab.BT_SEARCH
+                },
+                btSearchCatalog = if (repo.supportsDownloadBtSearch()) {
+                    Loadable.Loading
+                } else {
+                    Loadable.Idle
+                },
+                btAdvancedOptionsVisible = false,
+                btSearchOptions = DownloadBtSearchOptions(),
+                btSearchResults = Loadable.Idle,
+            ),
+            downloadRssSites = if (repo.supportsDownloadRss()) Loadable.Loading else Loadable.Idle,
+            selectedDownloadRssSite = null,
+            downloadRssFeeds = Loadable.Idle,
+        )
+        if (repo.supportsDownloadRss()) loadDownloadRssSites()
+        if (repo.supportsDownloadBtSearch()) loadDownloadBtSearchCatalog(generation)
+        return true
+    }
+
+    fun loadDownloadBtSearchCatalog() {
+        val current = _workspace.value ?: return
+        if (!current.downloadAdvancedRead.discoveryVisible) return
+        loadDownloadBtSearchCatalog(downloadDiscoveryGeneration.get())
+    }
+
+    private fun loadDownloadBtSearchCatalog(generation: Long) {
+        val repo = repository ?: return
+        val current = _workspace.value ?: return
+        if (!repo.supportsDownloadBtSearch() || current.selectedModule != Module.DOWNLOADS ||
+            !current.downloadAdvancedRead.discoveryVisible
+        ) return
+        downloadBtCatalogJob?.cancel()
+        _workspace.value = current.copy(
+            downloadAdvancedRead = current.downloadAdvancedRead.copy(
+                btSearchCatalog = Loadable.Loading,
+            ),
+        )
+        val profileId = current.profile.id
+        downloadBtCatalogJob = viewModelScope.launch {
+            runCatching { repo.loadDownloadBtSearchCatalog() }
+                .onSuccess { catalog ->
+                    _workspace.update { state ->
+                        state?.takeIf {
+                            repository === repo && it.profile.id == profileId &&
+                                it.selectedModule == Module.DOWNLOADS &&
+                                it.downloadAdvancedRead.discoveryVisible &&
+                                generation == downloadDiscoveryGeneration.get()
+                        }?.let { valid ->
+                            valid.copy(
+                                downloadAdvancedRead = valid.downloadAdvancedRead.copy(
+                                    btSearchCatalog = Loadable.Ready(catalog),
+                                ),
+                            )
+                        } ?: state
+                    }
+                }
+                .onFailure { error ->
+                    if (error is CancellationException) return@onFailure
+                    _workspace.update { state ->
+                        state?.takeIf {
+                            repository === repo && it.profile.id == profileId &&
+                                it.selectedModule == Module.DOWNLOADS &&
+                                it.downloadAdvancedRead.discoveryVisible &&
+                                generation == downloadDiscoveryGeneration.get()
+                        }?.let { valid ->
+                            valid.copy(
+                                downloadAdvancedRead = valid.downloadAdvancedRead.copy(
+                                    btSearchCatalog = Loadable.Failed(error.asDsmFailure()),
+                                ),
+                            )
+                        } ?: state
+                    }
+                }
+        }
+    }
+
+    fun updateDownloadBtSearchOptions(options: DownloadBtSearchOptions) {
+        _workspace.update { current ->
+            current?.takeIf {
+                it.downloadAdvancedRead.discoveryVisible &&
+                    it.downloadAdvancedRead.btSearchResults !is Loadable.Loading
+            }?.let { valid ->
+                valid.copy(
+                    downloadAdvancedRead = valid.downloadAdvancedRead.copy(btSearchOptions = options),
+                )
+            } ?: current
+        }
+    }
+
+    fun toggleDownloadBtAdvancedOptions() {
+        _workspace.update { current ->
+            current?.takeIf { it.downloadAdvancedRead.discoveryVisible }?.let { valid ->
+                valid.copy(
+                    downloadAdvancedRead = valid.downloadAdvancedRead.copy(
+                        btAdvancedOptionsVisible = !valid.downloadAdvancedRead.btAdvancedOptionsVisible,
+                    ),
+                )
+            } ?: current
+        }
+    }
+
+    fun selectDownloadDiscoveryTab(tab: DownloadDiscoveryTab) {
+        _workspace.update { current ->
+            current?.takeIf {
+                it.downloadAdvancedRead.discoveryVisible &&
+                    (tab != DownloadDiscoveryTab.RSS || it.supportsDownloadRss) &&
+                    (tab != DownloadDiscoveryTab.BT_SEARCH || it.supportsDownloadBtSearch)
+            }?.let { valid ->
+                valid.copy(
+                    downloadAdvancedRead = valid.downloadAdvancedRead.copy(discoveryTab = tab),
+                )
+            } ?: current
+        }
+    }
+
     fun loadDownloadRssSites() {
         val claim = synchronized(downloadRssRefreshMutationLock) {
             val repo = repository ?: return
@@ -6272,21 +6450,67 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun searchDownloadBt(keyword: String) {
+        val current = _workspace.value ?: return
+        updateDownloadBtSearchOptions(current.downloadAdvancedRead.btSearchOptions.copy(keyword = keyword))
+        searchDownloadBt()
+    }
+
+    fun searchDownloadBt() {
         val repo = repository ?: return
-        if (!repo.supportsDownloadBtSearch()) return
+        val current = _workspace.value ?: return
+        val advanced = current.downloadAdvancedRead
+        if (!repo.supportsDownloadBtSearch() || current.selectedModule != Module.DOWNLOADS ||
+            !advanced.discoveryVisible || advanced.discoveryTab != DownloadDiscoveryTab.BT_SEARCH ||
+            !canSubmitDownloadBtSearch(
+                advanced.btSearchCatalog,
+                advanced.btSearchOptions,
+                advanced.btSearchResults,
+            )
+        ) return
+        val options = advanced.btSearchOptions
+        val generation = downloadDiscoveryGeneration.get()
+        val profileId = current.profile.id
         downloadDiscoverySearchJob?.cancel()
-        _workspace.update { it?.copy(downloadBtSearchResults = Loadable.Loading) }
+        _workspace.update { state ->
+            state?.copy(
+                downloadAdvancedRead = state.downloadAdvancedRead.copy(
+                    btSearchResults = Loadable.Loading,
+                ),
+            )
+        }
         downloadDiscoverySearchJob = viewModelScope.launch {
-            runCatching { repo.searchDownloadBt(keyword) }
+            runCatching { repo.searchDownloadBt(options) }
                 .onSuccess { results ->
-                    _workspace.update {
-                        it?.copy(downloadBtSearchResults = Loadable.Ready(results))
+                    _workspace.update { state ->
+                        state?.takeIf {
+                            repository === repo && it.profile.id == profileId &&
+                                it.selectedModule == Module.DOWNLOADS &&
+                                it.downloadAdvancedRead.discoveryVisible &&
+                                generation == downloadDiscoveryGeneration.get()
+                        }?.let { valid ->
+                            valid.copy(
+                                downloadAdvancedRead = valid.downloadAdvancedRead.copy(
+                                    btSearchResults = Loadable.Ready(results),
+                                ),
+                            )
+                        } ?: state
                     }
                 }
                 .onFailure { error ->
                     if (error is CancellationException) return@onFailure
-                    _workspace.update {
-                        it?.copy(downloadBtSearchResults = Loadable.Failed(error.asDsmFailure()))
+                    _workspace.update { state ->
+                        state?.takeIf {
+                            repository === repo && it.profile.id == profileId &&
+                                it.selectedModule == Module.DOWNLOADS &&
+                                it.downloadAdvancedRead.discoveryVisible &&
+                                generation == downloadDiscoveryGeneration.get()
+                        }?.let { valid ->
+                            valid.copy(
+                                downloadAdvancedRead = valid.downloadAdvancedRead.copy(
+                                    btSearchResults = Loadable.Failed(error.asDsmFailure()),
+                                ),
+                            )
+                        } ?: state
                     }
                 }
         }
@@ -6305,15 +6529,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             downloadDiscoveryLoadJob?.cancel()
             downloadDiscoveryLoadJob = null
+            downloadBtCatalogJob?.cancel()
+            downloadBtCatalogJob = null
             downloadDiscoverySearchJob?.cancel()
             downloadDiscoverySearchJob = null
+            downloadDiscoveryGeneration.incrementAndGet()
             downloadRssRefreshMutationGeneration.incrementAndGet()
             _workspace.value = current.copy(
+                downloadAdvancedRead = DownloadAdvancedReadWorkspaceState(
+                    supportsActivity = current.downloadAdvancedRead.supportsActivity,
+                ),
                 downloadRssSites = Loadable.Idle,
                 selectedDownloadRssSite = null,
                 downloadRssFeeds = Loadable.Idle,
                 downloadRssRefreshState = DownloadRssRefreshWorkspaceState(),
-                downloadBtSearchResults = Loadable.Idle,
             )
             return true
         }
@@ -6744,6 +6973,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             ) ?: return false
             val generation = downloadControlMutationGeneration.incrementAndGet()
             downloadListRequestGeneration.incrementAndGet()
+            downloadActivityGeneration.incrementAndGet()
             _workspace.value = current.copy(
                 downloadControlState = DownloadControlWorkspaceState(
                     target = target,
@@ -7460,6 +7690,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             state.creationEditorVisible || state.settingsEditorVisible ||
             state.imageImportEditorVisible ||
             state.lifecycleConfirmationRequested ||
+            state.taskCleanupConfirmationRequested ||
             !canStartVirtualMachineMutation(current.isPerformingAction, state)
         ) return false
         _workspace.value = current.copy(
@@ -7526,6 +7757,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             !current.supportsOfficialVirtualMachineImageImport ||
             state.creationEditorVisible || state.imageImportEditorVisible ||
             state.settingsEditorVisible || state.lifecycleConfirmationRequested ||
+            state.taskCleanupConfirmationRequested ||
             !canStartVirtualMachineMutation(current.isPerformingAction, state)
         ) return false
         val generation = virtualMachineImageBrowserGeneration.incrementAndGet()
@@ -7685,6 +7917,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             !current.supportsOfficialVirtualMachineSettings || state.creationEditorVisible ||
             state.imageImportEditorVisible || state.settingsEditorVisible ||
             state.lifecycleConfirmationRequested ||
+            state.taskCleanupConfirmationRequested ||
             !canStartVirtualMachineMutation(current.isPerformingAction, state)
         ) return false
         val baseline = virtualMachineSettingsBaseline(resource) ?: return false
@@ -7799,6 +8032,53 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             true
         }
 
+    fun requestVirtualMachineTaskCleanupConfirmation(): Boolean =
+        synchronized(virtualMachineMutationLock) {
+            val current = _workspace.value ?: return false
+            val overview = (current.virtualMachines as? Loadable.Ready)?.value ?: return false
+            val state = current.virtualMachineMutationState
+            val finished = overview.tasks.filter(VirtualMachineTask::isFinished)
+            if (current.selectedModule != Module.VIRTUAL_MACHINES || finished.isEmpty() ||
+                state.creationEditorVisible || state.imageImportEditorVisible ||
+                state.settingsEditorVisible || state.lifecycleConfirmationRequested ||
+                state.taskCleanupConfirmationRequested ||
+                !canStartVirtualMachineMutation(current.isPerformingAction, state)
+            ) return false
+            _workspace.value = current.copy(
+                virtualMachineMutationState = state.copy(
+                    taskCleanupConfirmationRequested = true,
+                    taskCleanupBaseline = overview.tasks,
+                ),
+            )
+            true
+        }
+
+    fun cancelVirtualMachineTaskCleanupConfirmation(): Boolean =
+        synchronized(virtualMachineMutationLock) {
+            val current = _workspace.value ?: return false
+            val state = current.virtualMachineMutationState
+            if (!state.taskCleanupConfirmationRequested || state.mutationInProgress) return false
+            _workspace.value = current.copy(
+                virtualMachineMutationState = state.copy(
+                    taskCleanupConfirmationRequested = false,
+                    taskCleanupBaseline = emptyList(),
+                ),
+            )
+            true
+        }
+
+    fun confirmVirtualMachineTaskCleanup(): Boolean {
+        val baseline = synchronized(virtualMachineMutationLock) {
+            val state = _workspace.value?.virtualMachineMutationState ?: return false
+            if (!state.taskCleanupConfirmationRequested ||
+                state.taskCleanupBaseline.none(VirtualMachineTask::isFinished) ||
+                state.mutationInProgress || state.mutationRefreshInProgress
+            ) return false
+            state.taskCleanupBaseline
+        }
+        return clearFinishedVirtualMachineTasks(baseline)
+    }
+
     fun confirmVirtualMachineLifecycle(): Boolean = synchronized(virtualMachineMutationLock) {
         val state = _workspace.value?.virtualMachineMutationState ?: return false
         val target = state.lifecycleConfirmationTarget ?: return false
@@ -7864,6 +8144,60 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             lifecycleTarget = lifecycle,
         ) { repo, _ ->
             repo.controlVirtualMachineResult(id, baselineState, normalizedCommand)
+        }
+    }
+
+    private fun clearFinishedVirtualMachineTasks(baseline: List<VirtualMachineTask>): Boolean {
+        val profileId = _workspace.value?.profile?.id ?: return false
+        val finished = baseline.filter(VirtualMachineTask::isFinished)
+        if (finished.isEmpty()) return false
+        val target = virtualMachineMutationTarget(
+            profileId = profileId,
+            kind = VirtualMachineMutationKind.TASK_CLEANUP,
+            operation = "virtualMachineTaskCleanup",
+            resourceId = null,
+            requestParts = finished.map(VirtualMachineTask::taskToken).sorted(),
+        )
+        return virtualMachineMutation(
+            target = target,
+            success = R.string.virtual_machine_tasks_cleared,
+            taskCleanupBaseline = baseline,
+        ) { repo, generation ->
+            repo.clearFinishedVirtualMachineTasksResult(baseline) { resolved ->
+                recordVirtualMachineTaskCleanupResolvedResult(
+                    repo,
+                    profileId,
+                    target,
+                    generation,
+                    resolved,
+                )
+            }
+        }
+    }
+
+    private fun recordVirtualMachineTaskCleanupResolvedResult(
+        repo: DsmRepository,
+        profileId: String,
+        target: VirtualMachineMutationTarget,
+        generation: Long,
+        result: MutationResult,
+    ) {
+        synchronized(virtualMachineMutationLock) {
+            val current = _workspace.value ?: return
+            val state = current.virtualMachineMutationState
+            if (!virtualMachineMutationCallbackMatches(
+                    repositoryMatches = repository === repo,
+                    profileMatches = current.profile.id == profileId,
+                    stateTarget = state.target,
+                    callbackTarget = target,
+                    stateGeneration = state.mutationGeneration,
+                    callbackGeneration = generation,
+                    globalGeneration = virtualMachineMutationGeneration.get(),
+                )
+            ) return
+            _workspace.value = current.copy(
+                virtualMachineMutationState = state.copy(taskCleanupResolvedResult = result),
+            )
         }
     }
 
@@ -11685,7 +12019,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             nasPerformanceVisible = false
             nasPerformanceJob = null
             downloadDiscoveryLoadJob = null
+            downloadBtCatalogJob = null
             downloadDiscoverySearchJob = null
+            downloadActivityJob = null
             chatRefreshJob = null
             chatRealtimeRefreshJob = null
             chatLocalReadMarkers = emptyMap()
@@ -13183,6 +13519,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         settingsBaseline: VirtualMachineSettings? = null,
         settingsDraft: VirtualMachineSettingsDraftState? = null,
         lifecycleTarget: VirtualMachineLifecycleTarget? = null,
+        taskCleanupBaseline: List<VirtualMachineTask> = emptyList(),
         block: suspend (DsmRepository, Long) -> MutationResult,
     ): Boolean {
         val claim = synchronized(virtualMachineMutationLock) {
@@ -13192,16 +13529,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val editorMatches = when (target.kind) {
                 VirtualMachineMutationKind.CREATION ->
                     !state.imageImportEditorVisible && !state.settingsEditorVisible &&
-                        !state.lifecycleConfirmationRequested
+                        !state.lifecycleConfirmationRequested &&
+                        !state.taskCleanupConfirmationRequested
                 VirtualMachineMutationKind.IMAGE_IMPORT ->
                     !state.creationEditorVisible && !state.settingsEditorVisible &&
-                        !state.lifecycleConfirmationRequested && state.imageImportEditorVisible
+                        !state.lifecycleConfirmationRequested &&
+                        !state.taskCleanupConfirmationRequested && state.imageImportEditorVisible
+                VirtualMachineMutationKind.TASK_CLEANUP ->
+                    !state.creationEditorVisible && !state.imageImportEditorVisible &&
+                        !state.settingsEditorVisible && !state.lifecycleConfirmationRequested &&
+                        state.taskCleanupConfirmationRequested &&
+                        state.taskCleanupBaseline == taskCleanupBaseline
                 VirtualMachineMutationKind.SETTINGS ->
                     !state.creationEditorVisible && !state.imageImportEditorVisible &&
-                        !state.lifecycleConfirmationRequested
+                        !state.lifecycleConfirmationRequested &&
+                        !state.taskCleanupConfirmationRequested
                 VirtualMachineMutationKind.LIFECYCLE ->
                     !state.creationEditorVisible && !state.imageImportEditorVisible &&
                         !state.settingsEditorVisible &&
+                        !state.taskCleanupConfirmationRequested &&
                         (!state.lifecycleConfirmationRequested ||
                             state.lifecycleConfirmationTarget == lifecycleTarget)
             }
@@ -13230,6 +13576,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     settingsDraft = settingsDraft,
                     lifecycleConfirmationTarget = lifecycleTarget,
                     lifecycleConfirmationRequested = false,
+                    taskCleanupConfirmationRequested = false,
+                    taskCleanupBaseline = taskCleanupBaseline,
+                    taskCleanupResolvedResult = null,
                     mutationInProgress = true,
                     mutationGeneration = generation,
                 ),
@@ -13266,7 +13615,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     refreshVirtualMachineMutation()
                 }
             } catch (error: CancellationException) {
-                if (finishVirtualMachineMutationCancellation(claim)) {
+                val cancellationResult = finishVirtualMachineMutationCancellation(claim)
+                if (cancellationResult?.let { it.submitted || it.requiresRefresh } == true) {
                     refreshVirtualMachineMutation()
                 }
                 throw error
@@ -13279,8 +13629,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun finishVirtualMachineMutationCancellation(
         claim: VirtualMachineMutationClaim,
-    ): Boolean = synchronized(virtualMachineMutationLock) {
-        val current = _workspace.value ?: return false
+    ): MutationResult? = synchronized(virtualMachineMutationLock) {
+        val current = _workspace.value ?: return null
         if (!virtualMachineMutationCallbackMatches(
                 repositoryMatches = repository === claim.repository,
                 profileMatches = current.profile.id == claim.profileId,
@@ -13290,16 +13640,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 callbackGeneration = claim.generation,
                 globalGeneration = virtualMachineMutationGeneration.get(),
             )
-        ) return false
+        ) return null
+        val state = current.virtualMachineMutationState
+        val result = cancelledVirtualMachineMutationResult(
+            claim.target,
+            state.taskCleanupResolvedResult,
+        )
         _workspace.value = current.copy(
             isPerformingAction = false,
-            virtualMachineMutationState = current.virtualMachineMutationState.copy(
+            virtualMachineMutationState = state.copy(
                 mutationInProgress = false,
-                mutationResult = cancelledVirtualMachineMutationResult(claim.target),
+                mutationResult = result,
                 mutationFailure = null,
             ),
         )
-        true
+        result
     }
 
     private fun finishVirtualMachineMutationFailure(

@@ -39,6 +39,39 @@ internal fun appendFileBackgroundTaskPage(
     )
 }
 
+data class DownloadAdvancedReadWorkspaceState(
+    val supportsActivity: Boolean = false,
+    val activity: Loadable<DownloadStationActivity> = Loadable.Idle,
+    val discoveryVisible: Boolean = false,
+    val discoveryTab: DownloadDiscoveryTab = DownloadDiscoveryTab.RSS,
+    val btSearchCatalog: Loadable<DownloadBtSearchCatalog> = Loadable.Idle,
+    val btAdvancedOptionsVisible: Boolean = false,
+    val btSearchOptions: DownloadBtSearchOptions = DownloadBtSearchOptions(),
+    val btSearchResults: Loadable<List<DownloadBtSearchResult>> = Loadable.Idle,
+)
+
+/** BT 搜索只能提交当前已加载目录仍能解释的选项，避免目录刷新后发送陈旧标识。 */
+internal fun canSubmitDownloadBtSearch(
+    catalogState: Loadable<DownloadBtSearchCatalog>,
+    options: DownloadBtSearchOptions,
+    resultsState: Loadable<List<DownloadBtSearchResult>>,
+): Boolean {
+    val catalog = (catalogState as? Loadable.Ready)?.value ?: return false
+    if (catalog.modules.isEmpty() || options.keyword.isBlank() || resultsState is Loadable.Loading) {
+        return false
+    }
+    val moduleIds = catalog.modules.mapTo(mutableSetOf(), DownloadBtSearchModule::id)
+    if (!moduleIds.containsAll(options.selectedModuleIds)) return false
+    when (options.moduleScope) {
+        DownloadBtSearchModuleScope.SELECTED -> if (options.selectedModuleIds.isEmpty()) return false
+        DownloadBtSearchModuleScope.ALL -> if (options.selectedModuleIds.isNotEmpty()) return false
+        DownloadBtSearchModuleScope.ENABLED -> if (
+            options.selectedModuleIds.isNotEmpty() || catalog.modules.none(DownloadBtSearchModule::enabled)
+        ) return false
+    }
+    return options.categoryId == null || catalog.categories.any { it.id == options.categoryId }
+}
+
 data class WorkspaceState(
     val profile: NasProfile,
     val selectedModule: Module = Module.FILES,
@@ -81,6 +114,8 @@ data class WorkspaceState(
     val photoBackupSourceEnabled: Boolean = false,
     val favoritePaths: Set<String> = emptySet(),
     val downloads: Loadable<List<DownloadTask>> = Loadable.Idle,
+    val downloadAdvancedRead: DownloadAdvancedReadWorkspaceState =
+        DownloadAdvancedReadWorkspaceState(),
     val downloadCreationState: DownloadCreationWorkspaceState = DownloadCreationWorkspaceState(),
     val downloadControlState: DownloadControlWorkspaceState = DownloadControlWorkspaceState(),
     val downloadDestinationEditState: DownloadDestinationEditWorkspaceState =
@@ -93,7 +128,6 @@ data class WorkspaceState(
     val downloadRssFeeds: Loadable<List<DownloadRssFeed>> = Loadable.Idle,
     val downloadRssRefreshState: DownloadRssRefreshWorkspaceState =
         DownloadRssRefreshWorkspaceState(),
-    val downloadBtSearchResults: Loadable<List<DownloadBtSearchResult>> = Loadable.Idle,
     val downloadDestinationPicker: DownloadDestinationPickerState? = null,
     val downloadDestinationFolders: Loadable<FilePage> = Loadable.Idle,
     val containers: Loadable<ContainerOverview> = Loadable.Idle,
@@ -303,6 +337,11 @@ internal data class FileBrowserRequestIdentity(
     val sortAscending: Boolean,
     val typeFilter: FileTypeFilter,
 )
+
+/** Download 活动读取独立于任务列表，读取失败或重试不得替换任务列表状态。 */
+internal fun WorkspaceState.withDownloadActivity(
+    value: Loadable<DownloadStationActivity>,
+): WorkspaceState = copy(downloadAdvancedRead = downloadAdvancedRead.copy(activity = value))
 
 internal data class DownloadListRequestToken(
     val generation: Long,

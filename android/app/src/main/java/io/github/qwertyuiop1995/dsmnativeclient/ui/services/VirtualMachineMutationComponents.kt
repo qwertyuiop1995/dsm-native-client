@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -279,10 +280,44 @@ internal fun VirtualMachineLifecycleConfirmationDialog(
     )
 }
 
+@Composable
+internal fun VirtualMachineTaskCleanupConfirmationDialog(
+    taskCount: Int,
+    onConfirm: () -> Boolean,
+    onDismiss: () -> Boolean,
+) {
+    AlertDialog(
+        onDismissRequest = { onDismiss() },
+        title = { Text(stringResource(R.string.virtual_machine_clear_finished_tasks_title)) },
+        text = {
+            Text(
+                pluralStringResource(
+                    R.plurals.virtual_machine_clear_finished_tasks_message,
+                    taskCount,
+                    taskCount,
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm() },
+                modifier = Modifier.heightIn(min = 48.dp).semantics { role = Role.Button },
+            ) { Text(stringResource(R.string.virtual_machine_clear_finished_tasks)) }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = { onDismiss() },
+                modifier = Modifier.heightIn(min = 48.dp).semantics { role = Role.Button },
+            ) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
 @StringRes
 private fun VirtualMachineMutationKind?.feedbackTitle(): Int = when (this) {
     VirtualMachineMutationKind.CREATION -> R.string.create_virtual_machine
     VirtualMachineMutationKind.IMAGE_IMPORT -> R.string.virtual_machine_image_import_title
+    VirtualMachineMutationKind.TASK_CLEANUP -> R.string.virtual_machine_task_cleanup_feedback_title
     VirtualMachineMutationKind.SETTINGS -> R.string.edit_virtual_machine
     VirtualMachineMutationKind.LIFECYCLE -> R.string.virtual_machine_action
     null -> R.string.virtual_machines

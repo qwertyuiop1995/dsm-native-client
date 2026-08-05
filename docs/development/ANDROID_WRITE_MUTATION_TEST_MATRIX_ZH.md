@@ -7,14 +7,14 @@
 
 ## 结论
 
-- 当前在 `AppViewModel`、跨 NAS 协调器、照片备份 Worker 和 `DsmRepository` 四个已审文件中识别 74 个
-  `*Result` 调用点、63 个唯一方法，其中包含固定关闭与只读恢复调用；全部已进入下方
+- 当前在 `AppViewModel`、跨 NAS 协调器、照片备份 Worker 和 `DsmRepository` 四个已审文件中识别 75 个
+  `*Result` 调用点、64 个唯一方法，其中包含固定关闭与只读恢复调用；全部已进入下方
   机器可读清单。四个文件的内容指纹、调用数量或生产源码中的调用文件集合变化时，
   `check_android_write_test_matrix.py` 会要求重新人工复核，不用正则猜测结果数据流。
 - 所有已开放写入口均已形成闭环，包括文件操作、Download Station、Chat、NAS 设置、
   账号与群组、套件及 VMM；单目标原子操作按不适用记录 `partial=na`，不伪造部分成功。
 - 固定失败关闭并有零请求证据的入口是 5 项容器写入口和 2 项 VMM 内部网络写入口。
-- 63 个生产 `*Result` 方法的适用场景均有现存测试方法证据，矩阵门禁当前无
+- 64 个生产 `*Result` 方法的适用场景均有现存测试方法证据，矩阵门禁当前无
   `pending` 或 `gap`；A1“每项写操作测试”叶子目标已闭环。真实 NAS 权限、断线、
   取消和副作用仍按用户安排留待统一打包验收，不以自动化结果替代。
 
@@ -100,6 +100,7 @@
 <!-- WRITE-MUTATION methods=controlVirtualMachineResult;state=open;multi=no;pre=VirtualMachineMutationResultTest.kt::生命周期锁内状态偏离用户所见基线;success=VirtualMachineMutationResultTest.kt::正常关机必须在列表回读为停止后才确认成功;disconnect=VirtualMachineMutationResultTest.kt::生命周期提交断线后只回读确认最终状态;readback=VirtualMachineMutationResultTest.kt::生命周期写后回读失败保持未确认;cancel=VirtualMachineMutationResultTest.kt::生命周期与删除在途取消只回读且不重放;partial=na -->
 <!-- WRITE-MUTATION methods=deleteVirtualMachineResult;state=open;multi=no;pre=VirtualMachineMutationResultTest.kt::VMM 删除预检遇到缺失标识时不发送写请求;success=VirtualMachineMutationResultTest.kt::删除虚拟机必须回读消失且发送稳定标识;disconnect=VirtualMachineMutationResultTest.kt::虚拟机删除提交断线后只回读确认目标消失;readback=VirtualMachineMutationResultTest.kt::虚拟机删除写后回读失败保持未确认;cancel=VirtualMachineMutationResultTest.kt::生命周期与删除在途取消只回读且不重放;partial=na -->
 <!-- WRITE-MUTATION methods=deleteVirtualMachineImageResult;state=open;multi=no;pre=VirtualMachineMutationResultTest.kt::仅有内部映像 API 时删除零请求关闭;success=VirtualMachineMutationResultTest.kt::公开映像删除成功断线与取消均不重放;disconnect=VirtualMachineMutationResultTest.kt::公开映像删除成功断线与取消均不重放;readback=VirtualMachineMutationResultTest.kt::映像删除提交后回读断线;cancel=VirtualMachineMutationResultTest.kt::公开映像删除成功断线与取消均不重放;partial=na -->
+<!-- WRITE-MUTATION methods=clearFinishedVirtualMachineTasksResult;state=open;multi=yes;pre=VirtualMachineTaskClearRepositoryTest.kt::能力缺失空基线和无已完成任务均零 clear;success=VirtualMachineTaskClearRepositoryTest.kt::完整复核后只清除基线中的已完成任务并严格回读;disconnect=VirtualMachineTaskClearRepositoryTest.kt::清除提交异常后只回读一次且不重放;readback=VirtualMachineTaskClearRepositoryTest.kt::clear 成功响应但任务仍存在时保持待核对;cancel=VirtualMachineTaskClearRepositoryTest.kt::提交后取消只回读且不清除后续任务;partial=VirtualMachineTaskClearRepositoryTest.kt::未提交任务并发消失不计入本批成功且计数不重叠 -->
 <!-- WRITE-MUTATION methods=renameVirtualMachineNetworkResult,deleteVirtualMachineNetworkResult;state=closed;multi=no;zero=VirtualMachineMutationResultTest.kt::内部网络改名契约未行为验证时零请求关闭 -->
 <!-- WRITE-MUTATION methods=controlContainerResult,deleteContainerResult,deleteContainerImageResult,createContainerNetworkResult,deleteContainerNetworkResult;state=closed;multi=no;zero=ContainerMutationResultTest.kt::行为未验证时所有容器写操作稳定拒绝且零请求 -->
 

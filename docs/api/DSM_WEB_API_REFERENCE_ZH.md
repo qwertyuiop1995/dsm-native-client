@@ -573,6 +573,28 @@ additional=["detail","transfer","file","tracker","peer"]
 
 典型响应为 `tasks[]`、`offset`、`total`。任务状态可能包括等待、下载、暂停、完成、校验、做种和错误；UI 应保留未知状态，不要把未知值直接映射为“失败”。
 
+#### 当前活动摘要
+
+Android 仅在 `SYNO.API.Info` 声明 `SYNO.DownloadStation.Statistic` v1 可用时调用
+`getinfo`，并严格接受非负的 `speed_download`、`speed_upload`、
+`emule_speed_download` 和 `emule_speed_upload`。界面只把这四项表达为当前标准
+下载、标准上传、eMule 下载和 eMule 上传的聚合字节速率；不把它们表述为
+历史流量、单任务速度或传输结果。活动摘要与任务列表独立加载；缺少字段、
+负数或请求失败只进入摘要的可重试错误状态，不得遮蔽或清空任务列表。
+
+#### BT 搜索
+
+Android 在搜索前使用 `SYNO.DownloadStation.BTSearch` v1 的无参数 `getModule` 和
+`getCategory` 读取提供方与类别，并拒绝重复或畸形标识。`start` 的 `module`
+只使用 `all`、`enabled` 或经当前目录校验后按标识排序、逗号连接的明确提供方；
+`list` 固定使用 `offset=0`、`limit=200`，同时传递用户选择的 `sort_by`、
+`sort_direction`、`filter_category` 和 `filter_title`。搜索完成、读取失败、
+超时或取消后均以返回的 `taskid` 尝试调用 `clean`；清理请求只针对该临时搜索任务，
+若清理请求本身失败，不冒充服务端记录已经移除。
+搜索词、标题过滤、提供方标识和搜索结果只驻留当前 Workspace 内存，不进入
+SavedState、磁盘或日志。这是公开 BT 搜索的高级查询选项，不等于套件的
+BT 协议高级设置。
+
 #### 创建任务
 
 ```text
@@ -667,11 +689,20 @@ Android 正式入口固定使用 v1，并在写前分别复核用户所见任务
 类型均严格匹配，才能确认成功。列表尚未出现该 ID 时继续保持待核对且不清理任务；终态核对完成后
 调用 `Task.Info.clear` v1，清理成功后才丢弃客户端保存的任务证据。
 
-Android 只读任务中心固定先调用 Task.Info v1 `list`，最多接受 100 个唯一任务 ID，再逐项
-调用 `get`；领域和界面只保留是否结束及可选进度，不保存或展示 NAS 任务 ID、内部状态、
-消息或日志正文，也不调用 `clear`。上述映像创建流程持有的单个任务 ID 是写操作恢复证据，
-不进入只读任务中心，且只在终态严格核对后调用 `clear`。Guest v1 `list(additional=true)` 的 `vdisks`/`vnics`
-只映射公开的磁盘容量、控制器、空间回收以及网络名称和型号；MAC 与资源 ID 不进入界面。
+Android 任务中心固定先调用 Task.Info v1 `list`，最多接受 100 个唯一任务 ID，
+再逐项调用 `get`。界面只展示是否结束及可选进度，列表稳定键由服务端任务标识
+单向摘要得到；真实任务标识只在当前 Workspace 内存和请求边界内使用，不展示、
+记录或持久化，内部状态、消息和日志正文也不进入领域或界面。
+
+只有当列表中存在已结束任务时才显示清理入口。用户确认数量后，Android 重新执行
+`list` 和逐项 `get`；仅当全部任务的标识、结束状态和进度与用户所见基线一致时，
+才依次对基线中的已结束任务调用 `Task.Info.clear` v1，进行中任务始终不清理。
+每个 `clear` 只提交一次；提交异常或取消后只严格回读一次、不重放，任务从列表
+消失才计为确认清理，未消失目标保留待核对或部分结果。清理基线和结构化结果
+可跨 Activity 配置重建保留，但不提供进程死亡或设备重启后的任务标识恢复。
+上述映像创建流程持有的单个任务 ID 是写操作恢复证据，不进入任务中心，且只在
+终态严格核对后调用 `clear`。Guest v1 `list(additional=true)` 的 `vdisks`/`vnics` 只映射
+公开的磁盘容量、控制器、空间回收以及网络名称和型号；MAC 与资源 ID 不进入界面。
 
 ### 7.2 项目使用的 VMM 内部接口
 

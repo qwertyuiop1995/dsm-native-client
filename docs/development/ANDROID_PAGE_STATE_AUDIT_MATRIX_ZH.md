@@ -21,9 +21,9 @@
 | `FilePreviewDialog.kt` | 文件预览与文本加载 | 覆盖 | 不适用 | 不适用 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测加载、失败和文本内容 |
 | `PhotoMoveDialog.kt` | 照片移动目录选择 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测四个适用态 |
 | `PhotosScreen.kt` | 文件夹、时间线与相册 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测五态 |
-| `downloads/DownloadDiscoveryDialog.kt` | RSS、BT 搜索与结果选择 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | 每次查询自身是源请求；`DownloadLoginPageStateMatrixTest` 直测四个适用态 |
+| `downloads/DownloadDiscoveryDialog.kt` | RSS、BT 搜索与结果选择 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `DownloadLoginPageStateMatrixTest` 直测既有四态；`DownloadDiscoveryDialogTest` 补模块/类别目录加载、空、错误重试、正常选项与 2× 字体 |
 | `downloads/DownloadTaskDetailsDialog.kt` | 下载任务详情/文件列表 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | 详情只在已有任务实体后打开；`DownloadLoginPageStateMatrixTest` 直测空文件与正常详情 |
-| `downloads/DownloadsScreen.kt` | 下载任务列表 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | 当前没有用户结果筛选器；`DownloadLoginPageStateMatrixTest` 直测四个适用态 |
+| `downloads/DownloadsScreen.kt` | 下载任务列表与当前活动摘要 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `DownloadLoginPageStateMatrixTest` 直测任务列表四态；`DownloadActivityUiTest` 直测活动加载、零活动、局部错误/独立重试与正常速率，统计失败不遮蔽任务列表 |
 | `login/LoginScreen.kt` | 登录、连接与证书确认 | 覆盖 | 不适用 | 不适用 | 覆盖 | 覆盖 | 完整 | `DownloadLoginPageStateMatrixTest` 直测连接中、错误与正常表单 |
 | `nas/DdnsSettingsDialog.kt` | DDNS 管理 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | `NasServicePageStateMatrixTest` 通过生产复用的 `DdnsManagementContent` 直测不可用、空和内容 |
 | `nas/EthernetSettingsDialog.kt` | 网口与代理服务器管理 | 不适用 | 覆盖 | 不适用 | 不适用 | 覆盖 | 完整 | `NasServicePageStateMatrixTest` 直测不可用、空、内容和保存中 |
@@ -48,5 +48,5 @@
 
 - 生产清单共 30 个页面/弹窗文件；共用 `LogList` 已区分“源日志为空”和“筛选后为空”，当前生产状态缺口为 0。
 - 30 个页面/弹窗文件的全部适用状态均已有生产 Composable 页面级证据；静态表单和已加载实体详情没有被人为制造 loading/error。
-- API 35 `Medium_Phone_API_35` 聚焦运行 `PrimaryPageStateMatrixTest`、`DownloadLoginPageStateMatrixTest`、`NasServicePageStateMatrixTest` 及 `VirtualMachineImageImportDialogTest` 共 61/61 通过；其中映像导入新增 5 项。测试同时发现并修复 NAS、Container 与 VMM 日志内容区未占用剩余高度的裁切问题。
+- API 35 `Medium_Phone_API_35` 既有页面矩阵运行 `PrimaryPageStateMatrixTest`、`DownloadLoginPageStateMatrixTest`、`NasServicePageStateMatrixTest` 及 `VirtualMachineImageImportDialogTest` 共 61/61 通过；第 80 批另以 `DownloadDiscoveryDialogTest` 与 `DownloadActivityUiTest` 7/7 补齐搜索目录及活动摘要状态。测试同时发现并修复 NAS、Container 与 VMM 日志内容区未占用剩余高度的裁切问题。
 - `tools/codex/check_android_page_state_matrix.py` 会扫描新增/删除的生产页面文件、矩阵状态词和计划勾选状态。矩阵仍有生产缺口或自动化未闭环时，若有人提前勾选 A8 叶子，门禁会失败。

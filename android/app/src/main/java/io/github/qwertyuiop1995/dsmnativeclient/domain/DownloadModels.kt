@@ -104,6 +104,66 @@ data class DownloadBtSearchResult(
     val provider: String?,
 )
 
+data class DownloadBtSearchModule(
+    val id: String,
+    val title: String,
+    val enabled: Boolean,
+)
+
+data class DownloadBtSearchCategory(
+    val id: String,
+    val title: String,
+)
+
+data class DownloadBtSearchCatalog(
+    val modules: List<DownloadBtSearchModule>,
+    val categories: List<DownloadBtSearchCategory>,
+)
+
+enum class DownloadDiscoveryTab {
+    RSS,
+    BT_SEARCH,
+}
+
+enum class DownloadBtSearchModuleScope {
+    ALL,
+    ENABLED,
+    SELECTED,
+}
+
+enum class DownloadBtSearchSort(val apiValue: String) {
+    TITLE("title"),
+    SIZE("size"),
+    DATE("date"),
+    PEERS("peers"),
+    PROVIDER("provider"),
+    SEEDS("seeds"),
+    LEECHES("leechs"),
+}
+
+enum class DownloadBtSearchDirection(val apiValue: String) {
+    ASCENDING("asc"),
+    DESCENDING("desc"),
+}
+
+/** 仅保存在 Workspace 内存中的 BT 搜索输入，不进入 SavedState、磁盘或日志。 */
+data class DownloadBtSearchOptions(
+    val keyword: String = "",
+    val moduleScope: DownloadBtSearchModuleScope = DownloadBtSearchModuleScope.ENABLED,
+    val selectedModuleIds: Set<String> = emptySet(),
+    val categoryId: String? = null,
+    val sort: DownloadBtSearchSort = DownloadBtSearchSort.SEEDS,
+    val direction: DownloadBtSearchDirection = DownloadBtSearchDirection.DESCENDING,
+    val titleFilter: String = "",
+)
+
+data class DownloadStationActivity(
+    val downloadBytesPerSecond: Long,
+    val uploadBytesPerSecond: Long,
+    val emuleDownloadBytesPerSecond: Long,
+    val emuleUploadBytesPerSecond: Long,
+)
+
 data class DownloadSettings(
     val defaultDestination: String = "",
     val emuleEnabled: Boolean = false,

@@ -46,14 +46,19 @@ python3 -m unittest discover -s tools/codex/tests -p 'test_check_android_motion_
   `Medium_Phone_API_35` 共 61/61 通过；新增 5 项映像导入弹窗测试覆盖加载、错误与重试、
   空内容、正常目录/文件以及提交门禁。静态表单、已加载实体详情和没有筛选器的列表
   只覆盖真实适用态，不制造虚假 loading/error/筛选空。
+- 第 80 批以 `DownloadDiscoveryDialogTest` 和 `DownloadActivityUiTest` 7/7 补充 BT 搜索
+  目录加载/空/错误/正常、2× 字体选项，以及当前活动摘要的加载、零活动、局部错误、
+  独立重试和正常速率；Statistic 失败时任务列表仍保持可见。
 - 严格按 `fontScale = 2f` 复核，不把 `Density(2f, 1f)` 的显示密度测试冒充大字体。
   当前 21 个主页面/页根均有生产 Composable 证据；第 76 批新增
   `TransfersScreen`、`NasPerformanceScreen` 和 NAS 设置真实日志页签三项 360dp 宽度
   证据，标题、错误说明和恢复操作均可到达。
-- 确认框按通用 `ConfirmDialog`、13 个专用确认组件以及文件上传覆盖确认、文本修改
-  丢弃确认统计；16 个确认场景均已在生产组件或真实生产父页面中以 `fontScale=2f`
+- 确认框按通用 `ConfirmDialog`、14 个专用确认组件以及文件上传覆盖确认、文本修改
+  丢弃确认统计；17 个确认场景均已在生产组件或真实生产父页面中以 `fontScale=2f`
   核对标题、影响说明和两端操作。宿主 `Box` 的宽高不会约束独立 `Dialog` 窗口，
   因此该结论只代表 2× 字体证据，不表述为小屏对话框验收。
+  第 80 批 `VirtualMachineTaskCleanupDialogTest.两倍字体下确认框仍显示主要操作` 直接覆盖
+  已结束任务清理确认，并另行验证只有已结束任务才显示入口及结果标题不带确认问号。
 - 持久反馈按 15 个生产组件族核对。`PersistentFeedbackFontScaleMatrixTest` 的 12 个
   测试方法直接覆盖 Chat、File Station、Download 设置/控制、DDNS、Management、
   Connection、Region、File Service/Terminal/Proxy、结构 Settings、Ethernet 和 Power；

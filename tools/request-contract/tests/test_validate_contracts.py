@@ -67,6 +67,19 @@ class RequestContractValidationTests(unittest.TestCase):
 
         validator.validate_request_fixture(request, self.request_path)
 
+    def test_accepts_official_lower_camel_case_method(self) -> None:
+        request = copy.deepcopy(self.request)
+        request["api"]["method"] = "getModule"
+
+        validator.validate_request_fixture(request, self.request_path)
+
+    def test_rejects_method_starting_with_uppercase(self) -> None:
+        request = copy.deepcopy(self.request)
+        request["api"]["method"] = "GetModule"
+
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_request_fixture(request, self.request_path)
+
     def test_rejects_redacted_marker_for_non_sensitive_parameter(self) -> None:
         request = copy.deepcopy(self.request)
         request["parameters"][0].pop("encodedValue")

@@ -16,8 +16,8 @@
 | 文件 | 列表项、网格卡片的点击与长按 | 项目占满单元格宽度且高度至少 48dp；`combinedClickable` 保留点击、长按语义与原生反馈 | 静态门禁；`FileBrowserAdaptiveScreenTest` 聚焦验证 |
 | 照片 | 照片/文件夹卡片 | 卡片占满网格单元格且高度至少 48dp；保留 Card 与 clickable 原生反馈 | 静态门禁；`PhotoBrowserAdaptiveScreenTest` 聚焦验证 |
 | Chat | 新会话成员复选行 | 整行占宽且高度至少 48dp；使用 `toggleable(Role.Checkbox)`，由整行统一处理状态切换 | 静态门禁；`ChatConversationDialogTest` 聚焦验证 |
-| 下载 | 任务管理动作行 | 占满宽度且高度至少 52dp；危险动作继续使用既有颜色和确认流程 | 静态门禁；既有下载管理 API 35 测试 |
-| 虚拟机与容器 | 自动启动、放置选项、映像类型、存储空间与 NAS 文件选择 | 整行占宽且高度至少 48dp；映像类型使用原生 FilterChip，存储与文件使用单选组及 `Role.RadioButton`，目录项保留整行点击语义 | 静态门禁；既有虚拟机测试及 `VirtualMachineImageImportDialogTest` 的类型换行、存储/文件单选和提交阻断证据 |
+| 下载 | 任务管理动作行、活动重试与 BT 搜索选项 | 任务动作行占满宽度且高度至少 52dp；搜索、重试、展开按钮及提供方/类别/排序 FilterChip 至少 48dp，保留 Material 选中与禁用语义 | 静态门禁；既有下载管理测试及第 80 批 `DownloadDiscoveryDialogTest`、`DownloadActivityUiTest` |
+| 虚拟机与容器 | 自动启动、放置选项、映像类型、存储空间、NAS 文件选择与任务清理 | 整行占宽且高度至少 48dp；映像类型使用原生 FilterChip，存储与文件使用单选组及 `Role.RadioButton`；已结束任务清理入口及确认两端按钮使用 Material 组件且至少 48dp | 静态门禁；既有虚拟机测试、`VirtualMachineImageImportDialogTest` 及第 80 批 `VirtualMachineTaskCleanupDialogTest` |
 | NAS 管理 | DDNS、网口、区域、远程访问、硬件、安全与服务开关/选项 | 整行或等权选项至少 48dp 高，宽度由占满或权重保证；保留 Switch/RadioButton 角色 | 静态门禁；既有管理与危险确认 API 35 测试 |
 | 公共动作行 | 通用操作入口 | 占满宽度且固定 52dp 高；保留 clickable ripple | 静态门禁；调用方既有聚焦测试 |
 

@@ -62,7 +62,19 @@ internal fun PhotoMoveDialog(state: WorkspaceState, model: AppViewModel) {
     val sameFolder = move.item.file.path.substringBeforeLast('/', "") == move.location.path
 
     Dialog(
-        onDismissRequest = model::cancelPhotoMove,
+        onDismissRequest = {
+            when (
+                modalFolderPickerBackAction(
+                    hasParentFolder = move.history.isNotEmpty(),
+                    isBusy = state.isPerformingAction ||
+                        state.fileStationMutationState.mutationInProgress,
+                )
+            ) {
+                ModalFolderPickerBackAction.NAVIGATE_UP -> model.goBackPhotoMoveFolder()
+                ModalFolderPickerBackAction.DISMISS -> model.cancelPhotoMove()
+                ModalFolderPickerBackAction.BLOCKED -> Unit
+            }
+        },
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
             decorFitsSystemWindows = false,

@@ -42,8 +42,9 @@ python3 -m unittest discover -s tools/codex/tests -p 'test_check_android_motion_
 
 ## 页面状态与 2× 字体矩阵
 
-- 页面五态已经按 29 个生产页面/弹窗文件闭环；三个页面矩阵测试在 API 35
-  `Medium_Phone_API_35` 共 56/56 通过。静态表单、已加载实体详情和没有筛选器的列表
+- 页面五态已经按 30 个生产页面/弹窗文件闭环；四个页面矩阵测试在 API 35
+  `Medium_Phone_API_35` 共 61/61 通过；新增 5 项映像导入弹窗测试覆盖加载、错误与重试、
+  空内容、正常目录/文件以及提交门禁。静态表单、已加载实体详情和没有筛选器的列表
   只覆盖真实适用态，不制造虚假 loading/error/筛选空。
 - 严格按 `fontScale = 2f` 复核，不把 `Density(2f, 1f)` 的显示密度测试冒充大字体。
   当前 21 个主页面/页根均有生产 Composable 证据；第 76 批新增

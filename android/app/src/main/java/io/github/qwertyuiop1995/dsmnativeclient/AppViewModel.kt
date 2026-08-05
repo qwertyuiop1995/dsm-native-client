@@ -64,6 +64,9 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadRssSite
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadRssFeed
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DownloadBtSearchResult
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineCreation
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageImport
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageImportVerification
+import io.github.qwertyuiop1995.dsmnativeclient.domain.isEligibleForVirtualMachineImageImport
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSettings
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
@@ -349,6 +352,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadRssRefreshMutationGeneration = AtomicLong(0)
     private val virtualMachineMutationGeneration = AtomicLong(0)
     private val virtualMachineOverviewRequestGeneration = AtomicLong(0)
+    private val virtualMachineImageBrowserGeneration = AtomicLong(0)
     private val chatMutationGeneration = AtomicLong(0)
     private val chatMutationGenerations = ConcurrentHashMap<String, Long>()
     private val chatAttachmentPreflightGeneration = AtomicLong(0)
@@ -554,6 +558,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     supportsContainerRegistry = repo.supportsContainerRegistry(),
                     supportsOfficialVirtualMachineCreation = repo.supportsOfficialVirtualMachineCreation(),
                     supportsOfficialVirtualMachineSettings = repo.supportsOfficialVirtualMachineSettings(),
+                    supportsOfficialVirtualMachineImageImport =
+                        repo.supportsOfficialVirtualMachineImageImport(),
                     photoBackupSourceEnabled = transferStore.photoBackupSource(profile.id)?.enabled == true,
                     chatPinnedConversationIds = restoredPinnedConversationIds(profile.id),
                     fileBackgroundTasks = backgroundTaskSnapshot?.toFileBackgroundTaskPage()
@@ -670,6 +676,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     supportsContainerRegistry = repo.supportsContainerRegistry(),
                     supportsOfficialVirtualMachineCreation = repo.supportsOfficialVirtualMachineCreation(),
                     supportsOfficialVirtualMachineSettings = repo.supportsOfficialVirtualMachineSettings(),
+                    supportsOfficialVirtualMachineImageImport =
+                        repo.supportsOfficialVirtualMachineImageImport(),
                     photoBackupSourceEnabled = transferStore.photoBackupSource(profile.id)?.enabled == true,
                     chatPinnedConversationIds = restoredPinnedConversationIds(profile.id),
                     fileBackgroundTasks = backgroundTaskSnapshot?.toFileBackgroundTaskPage()
@@ -7450,6 +7458,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (current.selectedModule != Module.VIRTUAL_MACHINES ||
             !current.supportsOfficialVirtualMachineCreation || overview.storages.isEmpty() ||
             state.creationEditorVisible || state.settingsEditorVisible ||
+            state.imageImportEditorVisible ||
             state.lifecycleConfirmationRequested ||
             !canStartVirtualMachineMutation(current.isPerformingAction, state)
         ) return false
@@ -7505,6 +7514,168 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return createVirtualMachine(desired)
     }
 
+    fun openVirtualMachineImageImportEditor(): Boolean = synchronized(virtualMachineMutationLock) {
+        val repo = repository ?: return false
+        val current = _workspace.value ?: return false
+        val overview = (current.virtualMachines as? Loadable.Ready)?.value ?: return false
+        val state = current.virtualMachineMutationState
+        val storage = overview.storages.firstOrNull {
+            it.isEligibleForVirtualMachineImageImport()
+        } ?: return false
+        if (current.selectedModule != Module.VIRTUAL_MACHINES ||
+            !current.supportsOfficialVirtualMachineImageImport ||
+            state.creationEditorVisible || state.imageImportEditorVisible ||
+            state.settingsEditorVisible || state.lifecycleConfirmationRequested ||
+            !canStartVirtualMachineMutation(current.isPerformingAction, state)
+        ) return false
+        val generation = virtualMachineImageBrowserGeneration.incrementAndGet()
+        val draft = VirtualMachineImageImportDraftState(
+            storage = storage,
+            browserItems = Loadable.Loading,
+        )
+        _workspace.value = current.copy(
+            virtualMachineMutationState = state.copy(
+                imageImportEditorVisible = true,
+                imageImportDraft = draft,
+            ),
+        )
+        viewModelScope.launch { loadVirtualMachineImageBrowser(repo, "", generation) }
+        true
+    }
+
+    fun updateVirtualMachineImageImportDraft(
+        draft: VirtualMachineImageImportDraftState,
+    ): Boolean = synchronized(virtualMachineMutationLock) {
+        val current = _workspace.value ?: return false
+        val state = current.virtualMachineMutationState
+        val existing = state.imageImportDraft ?: return false
+        if (!state.imageImportEditorVisible || state.target != null || state.mutationInProgress ||
+            state.mutationRefreshInProgress || draft.browserPath != existing.browserPath ||
+            draft.browserHistory != existing.browserHistory ||
+            draft.browserItems != existing.browserItems
+        ) return false
+        _workspace.value = current.copy(
+            virtualMachineMutationState = state.copy(imageImportDraft = draft),
+        )
+        true
+    }
+
+    fun enterVirtualMachineImageImportFolder(item: FileItem): Boolean =
+        synchronized(virtualMachineMutationLock) {
+            val repo = repository ?: return false
+            val current = _workspace.value ?: return false
+            val state = current.virtualMachineMutationState
+            val draft = state.imageImportDraft ?: return false
+            val page = (draft.browserItems as? Loadable.Ready)?.value ?: return false
+            val selected = page.items.singleOrNull { it == item } ?: return false
+            if (!state.imageImportEditorVisible || !selected.isDirectory || !selected.canRead ||
+                state.target != null || state.mutationInProgress || state.mutationRefreshInProgress
+            ) return false
+            val generation = virtualMachineImageBrowserGeneration.incrementAndGet()
+            val next = draft.copy(
+                sourceFile = null,
+                browserPath = selected.path,
+                browserHistory = draft.browserHistory + draft.browserPath,
+                browserItems = Loadable.Loading,
+            )
+            _workspace.value = current.copy(
+                virtualMachineMutationState = state.copy(imageImportDraft = next),
+            )
+            viewModelScope.launch { loadVirtualMachineImageBrowser(repo, selected.path, generation) }
+            true
+        }
+
+    fun goBackVirtualMachineImageImportFolder(): Boolean = synchronized(virtualMachineMutationLock) {
+        val repo = repository ?: return false
+        val current = _workspace.value ?: return false
+        val state = current.virtualMachineMutationState
+        val draft = state.imageImportDraft ?: return false
+        val previous = draft.browserHistory.lastOrNull() ?: return false
+        if (!state.imageImportEditorVisible || state.target != null || state.mutationInProgress ||
+            state.mutationRefreshInProgress
+        ) return false
+        val generation = virtualMachineImageBrowserGeneration.incrementAndGet()
+        _workspace.value = current.copy(
+            virtualMachineMutationState = state.copy(
+                imageImportDraft = draft.copy(
+                    sourceFile = null,
+                    browserPath = previous,
+                    browserHistory = draft.browserHistory.dropLast(1),
+                    browserItems = Loadable.Loading,
+                ),
+            ),
+        )
+        viewModelScope.launch { loadVirtualMachineImageBrowser(repo, previous, generation) }
+        true
+    }
+
+    fun selectVirtualMachineImageImportFile(item: FileItem): Boolean =
+        synchronized(virtualMachineMutationLock) {
+            val current = _workspace.value ?: return false
+            val state = current.virtualMachineMutationState
+            val draft = state.imageImportDraft ?: return false
+            val page = (draft.browserItems as? Loadable.Ready)?.value ?: return false
+            val selected = page.items.singleOrNull { it == item } ?: return false
+            if (!state.imageImportEditorVisible || selected.isDirectory || !selected.canRead ||
+                state.target != null || state.mutationInProgress || state.mutationRefreshInProgress
+            ) return false
+            _workspace.value = current.copy(
+                virtualMachineMutationState = state.copy(
+                    imageImportDraft = draft.copy(
+                        sourceFile = selected,
+                        imageName = draft.imageName.ifBlank { selected.name.substringBeforeLast('.') },
+                    ),
+                ),
+            )
+            true
+        }
+
+    fun retryVirtualMachineImageImportBrowser(): Boolean = synchronized(virtualMachineMutationLock) {
+        val repo = repository ?: return false
+        val current = _workspace.value ?: return false
+        val state = current.virtualMachineMutationState
+        val draft = state.imageImportDraft ?: return false
+        if (!state.imageImportEditorVisible || draft.browserItems !is Loadable.Failed ||
+            state.target != null || state.mutationInProgress || state.mutationRefreshInProgress
+        ) return false
+        val generation = virtualMachineImageBrowserGeneration.incrementAndGet()
+        _workspace.value = current.copy(
+            virtualMachineMutationState = state.copy(
+                imageImportDraft = draft.copy(browserItems = Loadable.Loading),
+            ),
+        )
+        viewModelScope.launch { loadVirtualMachineImageBrowser(repo, draft.browserPath, generation) }
+        true
+    }
+
+    fun closeVirtualMachineImageImportEditor(): Boolean = synchronized(virtualMachineMutationLock) {
+        val current = _workspace.value ?: return false
+        val state = current.virtualMachineMutationState
+        if (!state.imageImportEditorVisible || state.target != null || state.mutationInProgress ||
+            state.mutationRefreshInProgress
+        ) return false
+        virtualMachineImageBrowserGeneration.incrementAndGet()
+        _workspace.value = current.copy(
+            virtualMachineMutationState = state.copy(
+                imageImportEditorVisible = false,
+                imageImportDraft = null,
+            ),
+        )
+        true
+    }
+
+    fun confirmVirtualMachineImageImport(): Boolean {
+        val desired = synchronized(virtualMachineMutationLock) {
+            val current = _workspace.value ?: return false
+            val state = current.virtualMachineMutationState
+            if (!state.imageImportEditorVisible || state.target != null || state.mutationInProgress ||
+                state.mutationRefreshInProgress
+            ) return false
+            state.imageImportDraft?.toImportOrNull()
+        } ?: return false
+        return importVirtualMachineImage(desired)
+    }
+
     fun openVirtualMachineSettingsEditor(id: String): Boolean = synchronized(virtualMachineMutationLock) {
         val current = _workspace.value ?: return false
         val overview = (current.virtualMachines as? Loadable.Ready)?.value ?: return false
@@ -7512,7 +7683,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val state = current.virtualMachineMutationState
         if (current.selectedModule != Module.VIRTUAL_MACHINES ||
             !current.supportsOfficialVirtualMachineSettings || state.creationEditorVisible ||
-            state.settingsEditorVisible || state.lifecycleConfirmationRequested ||
+            state.imageImportEditorVisible || state.settingsEditorVisible ||
+            state.lifecycleConfirmationRequested ||
             !canStartVirtualMachineMutation(current.isPerformingAction, state)
         ) return false
         val baseline = virtualMachineSettingsBaseline(resource) ?: return false
@@ -7591,6 +7763,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }.firstOrNull { it.id == normalizedId }
         if (resource == null || current.selectedModule != Module.VIRTUAL_MACHINES ||
             state.creationEditorVisible || state.settingsEditorVisible ||
+            state.imageImportEditorVisible ||
             state.lifecycleConfirmationRequested ||
             !canStartVirtualMachineMutation(current.isPerformingAction, state)
         ) return false
@@ -7689,7 +7862,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             target,
             R.string.virtual_machine_state_updated,
             lifecycleTarget = lifecycle,
-        ) { repo ->
+        ) { repo, _ ->
             repo.controlVirtualMachineResult(id, baselineState, normalizedCommand)
         }
     }
@@ -7717,8 +7890,58 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             target,
             R.string.virtual_machine_created,
             creationDraft = VirtualMachineCreationDraftState.from(configuration),
-        ) { repo ->
+        ) { repo, _ ->
             repo.createVirtualMachineResult(configuration)
+        }
+    }
+
+    fun importVirtualMachineImage(configuration: VirtualMachineImageImport): Boolean {
+        val profileId = _workspace.value?.profile?.id ?: return false
+        val target = virtualMachineMutationTarget(
+            profileId,
+            VirtualMachineMutationKind.IMAGE_IMPORT,
+            "virtualMachineImageImport",
+            resourceId = null,
+            requestParts = listOf(
+                configuration.imageName.trim(),
+                configuration.imageType.apiValue,
+                configuration.sourceFile.path,
+                configuration.sourceFile.size.toString(),
+                configuration.sourceFile.modifiedAtEpochSeconds?.toString().orEmpty(),
+                configuration.storage.id,
+                configuration.storage.name,
+                configuration.storage.state.name,
+            ),
+        )
+        val draft = _workspace.value?.virtualMachineMutationState?.imageImportDraft ?: return false
+        return virtualMachineMutation(
+            target,
+            R.string.virtual_machine_image_imported,
+            imageImportDraft = draft,
+        ) { repo, claimGeneration ->
+            repo.importVirtualMachineImageResult(
+                configuration,
+                onTaskStarted = { taskId ->
+                    synchronized(virtualMachineMutationLock) {
+                        val current = _workspace.value ?: return@synchronized
+                        val state = current.virtualMachineMutationState
+                        if (virtualMachineMutationCallbackMatches(
+                                repositoryMatches = repository === repo,
+                                profileMatches = current.profile.id == target.profileId,
+                                stateTarget = state.target,
+                                callbackTarget = target,
+                                stateGeneration = state.mutationGeneration,
+                                callbackGeneration = claimGeneration,
+                                globalGeneration = virtualMachineMutationGeneration.get(),
+                            ) && state.mutationInProgress && state.imageImportTaskId == null
+                        ) {
+                            _workspace.value = current.copy(
+                                virtualMachineMutationState = state.copy(imageImportTaskId = taskId),
+                            )
+                        }
+                    }
+                },
+            )
         }
     }
 
@@ -7750,7 +7973,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             settingsTargetId = id,
             settingsBaseline = baseline,
             settingsDraft = VirtualMachineSettingsDraftState.from(settings),
-        ) { repo ->
+        ) { repo, _ ->
             repo.updateVirtualMachineSettingsResult(id, baseline, settings)
         }
     }
@@ -7783,7 +8006,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             target,
             R.string.virtual_machine_deleted,
             lifecycleTarget = lifecycle,
-        ) { repo ->
+        ) { repo, _ ->
             repo.deleteVirtualMachineResult(id)
         }
     }
@@ -7812,7 +8035,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             id,
             listOf(baselineState.name),
         )
-        return virtualMachineMutation(target, R.string.image_deleted, lifecycleTarget = lifecycle) { repo ->
+        return virtualMachineMutation(target, R.string.image_deleted, lifecycleTarget = lifecycle) { repo, _ ->
             repo.deleteVirtualMachineImageResult(id)
         }
     }
@@ -7846,7 +8069,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             id,
             listOf(baselineState.name, name.trim()),
         )
-        return virtualMachineMutation(target, R.string.network_changed, lifecycleTarget = lifecycle) { repo ->
+        return virtualMachineMutation(target, R.string.network_changed, lifecycleTarget = lifecycle) { repo, _ ->
             repo.renameVirtualMachineNetworkResult(id, name)
         }
     }
@@ -7875,7 +8098,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             id,
             listOf(baselineState.name),
         )
-        return virtualMachineMutation(target, R.string.network_deleted, lifecycleTarget = lifecycle) { repo ->
+        return virtualMachineMutation(target, R.string.network_deleted, lifecycleTarget = lifecycle) { repo, _ ->
             repo.deleteVirtualMachineNetworkResult(id)
         }
     }
@@ -12273,6 +12496,50 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun loadVirtualMachineImageBrowser(
+        repo: DsmRepository,
+        path: String,
+        generation: Long,
+    ) {
+        try {
+            val page = if (path.isBlank()) {
+                repo.listShares(limit = 500)
+            } else {
+                repo.listDirectory(path = path, limit = 500, fileType = "all")
+            }
+            _workspace.update { current ->
+                val draft = current?.virtualMachineMutationState?.imageImportDraft
+                current?.takeIf {
+                    repository === repo && it.selectedModule == Module.VIRTUAL_MACHINES &&
+                        virtualMachineImageBrowserGeneration.get() == generation &&
+                        it.virtualMachineMutationState.imageImportEditorVisible &&
+                        draft?.browserPath == path
+                }?.copy(
+                    virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                        imageImportDraft = draft?.copy(browserItems = Loadable.Ready(page)),
+                    ),
+                ) ?: current
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            val failure = error.asDsmFailure()
+            _workspace.update { current ->
+                val draft = current?.virtualMachineMutationState?.imageImportDraft
+                current?.takeIf {
+                    repository === repo && it.selectedModule == Module.VIRTUAL_MACHINES &&
+                        virtualMachineImageBrowserGeneration.get() == generation &&
+                        it.virtualMachineMutationState.imageImportEditorVisible &&
+                        draft?.browserPath == path
+                }?.copy(
+                    virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                        imageImportDraft = draft?.copy(browserItems = Loadable.Failed(failure)),
+                    ),
+                ) ?: current
+            }
+        }
+    }
+
     private fun startPhotoTimelineLoad(repo: DsmRepository) {
         photoTimelineJob?.cancel()
         val browser = _workspace.value?.photoBrowser ?: return
@@ -12911,11 +13178,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         target: VirtualMachineMutationTarget,
         @StringRes success: Int,
         creationDraft: VirtualMachineCreationDraftState? = null,
+        imageImportDraft: VirtualMachineImageImportDraftState? = null,
         settingsTargetId: String? = null,
         settingsBaseline: VirtualMachineSettings? = null,
         settingsDraft: VirtualMachineSettingsDraftState? = null,
         lifecycleTarget: VirtualMachineLifecycleTarget? = null,
-        block: suspend (DsmRepository) -> MutationResult,
+        block: suspend (DsmRepository, Long) -> MutationResult,
     ): Boolean {
         val claim = synchronized(virtualMachineMutationLock) {
             val repo = repository ?: return@synchronized null
@@ -12923,11 +13191,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val state = current.virtualMachineMutationState
             val editorMatches = when (target.kind) {
                 VirtualMachineMutationKind.CREATION ->
-                    !state.settingsEditorVisible && !state.lifecycleConfirmationRequested
-                VirtualMachineMutationKind.SETTINGS ->
-                    !state.creationEditorVisible && !state.lifecycleConfirmationRequested
-                VirtualMachineMutationKind.LIFECYCLE ->
+                    !state.imageImportEditorVisible && !state.settingsEditorVisible &&
+                        !state.lifecycleConfirmationRequested
+                VirtualMachineMutationKind.IMAGE_IMPORT ->
                     !state.creationEditorVisible && !state.settingsEditorVisible &&
+                        !state.lifecycleConfirmationRequested && state.imageImportEditorVisible
+                VirtualMachineMutationKind.SETTINGS ->
+                    !state.creationEditorVisible && !state.imageImportEditorVisible &&
+                        !state.lifecycleConfirmationRequested
+                VirtualMachineMutationKind.LIFECYCLE ->
+                    !state.creationEditorVisible && !state.imageImportEditorVisible &&
+                        !state.settingsEditorVisible &&
                         (!state.lifecycleConfirmationRequested ||
                             state.lifecycleConfirmationTarget == lifecycleTarget)
             }
@@ -12948,6 +13222,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     creationEditorVisible = state.creationEditorVisible,
                     target = target,
                     creationDraft = creationDraft,
+                    imageImportEditorVisible = state.imageImportEditorVisible,
+                    imageImportDraft = imageImportDraft,
                     settingsEditorVisible = state.settingsEditorVisible,
                     settingsTargetId = settingsTargetId,
                     settingsBaseline = settingsBaseline,
@@ -12962,7 +13238,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } ?: return false
         viewModelScope.launch {
             try {
-                val result = block(claim.repository)
+                val result = block(claim.repository, claim.generation)
                 val accepted = synchronized(virtualMachineMutationLock) {
                     val current = _workspace.value ?: return@synchronized false
                     if (!virtualMachineMutationCallbackMatches(
@@ -13079,6 +13355,65 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } ?: return false
         viewModelScope.launch {
             try {
+                val imageImportVerification = if (claim.target.kind == VirtualMachineMutationKind.IMAGE_IMPORT) {
+                    val importState = _workspace.value?.virtualMachineMutationState
+                    val importTarget = importState?.imageImportDraft?.toImportOrNull()
+                    val taskId = importState?.imageImportTaskId
+                    if (taskId != null && importTarget != null) {
+                        claim.repository.verifyVirtualMachineImageImportTask(
+                            taskId,
+                            importTarget.imageName,
+                            importTarget.imageType,
+                            onTaskCleared = { clearedTaskId ->
+                                synchronized(virtualMachineMutationLock) {
+                                    val current = _workspace.value ?: return@synchronized
+                                    val state = current.virtualMachineMutationState
+                                    if (virtualMachineMutationCallbackMatches(
+                                            repositoryMatches = repository === claim.repository,
+                                            profileMatches = current.profile.id == claim.profileId,
+                                            stateTarget = state.target,
+                                            callbackTarget = claim.target,
+                                            stateGeneration = state.mutationGeneration,
+                                            callbackGeneration = claim.generation,
+                                            globalGeneration = virtualMachineMutationGeneration.get(),
+                                        ) && state.imageImportTaskId == clearedTaskId
+                                    ) {
+                                        _workspace.value = current.copy(
+                                            virtualMachineMutationState = state.copy(
+                                                imageImportTaskId = null,
+                                            ),
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                    } else null
+                } else null
+                if (imageImportVerification == VirtualMachineImageImportVerification.PENDING) {
+                    synchronized(virtualMachineMutationLock) {
+                        val current = _workspace.value ?: return@synchronized
+                        if (!virtualMachineMutationCallbackMatches(
+                                repositoryMatches = repository === claim.repository,
+                                profileMatches = current.profile.id == claim.profileId,
+                                stateTarget = current.virtualMachineMutationState.target,
+                                callbackTarget = claim.target,
+                                stateGeneration = current.virtualMachineMutationState.mutationGeneration,
+                                callbackGeneration = claim.generation,
+                                globalGeneration = virtualMachineMutationGeneration.get(),
+                            )
+                        ) return@synchronized
+                        _workspace.value = current.copy(
+                            isPerformingAction = false,
+                            virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                                mutationRefreshFailure = null,
+                                mutationRefreshInProgress = false,
+                                mutationRefreshCompleted = false,
+                                mutationVerification = null,
+                            ),
+                        )
+                    }
+                    return@launch
+                }
                 val refreshed = claim.repository.virtualMachineOverview()
                 synchronized(virtualMachineMutationLock) {
                     val current = _workspace.value ?: return@synchronized
@@ -13099,10 +13434,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             mutationRefreshFailure = null,
                             mutationRefreshInProgress = false,
                             mutationRefreshCompleted = true,
-                            mutationVerification = virtualMachineMutationVerification(
-                                current.virtualMachineMutationState,
-                                refreshed,
-                            ),
+                            mutationVerification = when (imageImportVerification) {
+                                VirtualMachineImageImportVerification.MATCHES ->
+                                    VirtualMachineMutationVerification.MATCHES
+                                VirtualMachineImageImportVerification.DIFFERS ->
+                                    VirtualMachineMutationVerification.DIFFERS
+                                VirtualMachineImageImportVerification.PENDING -> null
+                                null -> virtualMachineMutationVerification(
+                                    current.virtualMachineMutationState,
+                                    refreshed,
+                                )
+                            },
+                            imageImportTaskId = current.virtualMachineMutationState.imageImportTaskId
+                                ?.takeUnless {
+                                    imageImportVerification ==
+                                        VirtualMachineImageImportVerification.MATCHES
+                                },
                         ),
                     )
                 }
@@ -13173,6 +13520,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 mutationRefreshInProgress = false,
                 mutationRefreshCompleted = false,
                 mutationVerification = null,
+                imageImportTaskId = null,
                 mutationGeneration = generation,
             ),
         )

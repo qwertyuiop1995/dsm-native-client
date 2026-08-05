@@ -5,6 +5,7 @@ import java.security.MessageDigest
 
 enum class VirtualMachineMutationKind {
     CREATION,
+    IMAGE_IMPORT,
     SETTINGS,
     LIFECYCLE,
 }
@@ -146,6 +147,27 @@ data class VirtualMachineSettingsDraftState(
     }
 }
 
+data class VirtualMachineImageImportDraftState(
+    val imageName: String = "",
+    val imageType: VirtualMachineImageType = VirtualMachineImageType.DISK,
+    val storage: ManagedResource? = null,
+    val sourceFile: FileItem? = null,
+    val browserPath: String = "",
+    val browserHistory: List<String> = emptyList(),
+    val browserItems: Loadable<FilePage> = Loadable.Idle,
+) {
+    fun toImportOrNull(): VirtualMachineImageImport? {
+        val name = imageName.trim()
+        val file = sourceFile ?: return null
+        val targetStorage = storage ?: return null
+        if (name.isEmpty() || name.any(Char::isISOControl) || file.path.isBlank() ||
+            !file.path.startsWith('/') || file.isDirectory || !file.canRead ||
+            !targetStorage.isEligibleForVirtualMachineImageImport()
+        ) return null
+        return VirtualMachineImageImport(name, imageType, file, targetStorage)
+    }
+}
+
 /** VMM 写目标只保存稳定标识和请求指纹，不保存 NAS 返回的完整资源内容。 */
 data class VirtualMachineMutationTarget(
     val profileId: String,
@@ -167,6 +189,10 @@ data class VirtualMachineMutationTarget(
 data class VirtualMachineMutationWorkspaceState(
     val creationEditorVisible: Boolean = false,
     val creationDraft: VirtualMachineCreationDraftState? = null,
+    val imageImportEditorVisible: Boolean = false,
+    val imageImportDraft: VirtualMachineImageImportDraftState? = null,
+    /** 仅在当前 Workspace 内存中保存，用于配置重建后的只读任务核对。 */
+    val imageImportTaskId: String? = null,
     val settingsEditorVisible: Boolean = false,
     val settingsTargetId: String? = null,
     val settingsBaseline: VirtualMachineSettings? = null,
@@ -226,7 +252,7 @@ internal fun virtualMachineMutationTarget(
 
 internal fun virtualMachineMutationRequiresRefreshBeforeDismiss(
     state: VirtualMachineMutationWorkspaceState,
-): Boolean = state.mutationFailure != null || state.mutationResult?.let { result ->
+): Boolean = state.imageImportTaskId != null || state.mutationFailure != null || state.mutationResult?.let { result ->
     result.requiresRefresh || result.counts.unknown > 0 ||
         result.status in setOf(
             MutationResultStatus.PARTIAL_SUCCESS,
@@ -238,16 +264,18 @@ internal fun virtualMachineMutationRequiresRefreshBeforeDismiss(
 internal fun virtualMachineMutationBlocksWorkspaceExit(
     state: VirtualMachineMutationWorkspaceState,
 ): Boolean {
-    if (state.creationEditorVisible || state.settingsEditorVisible ||
+    if (state.creationEditorVisible || state.imageImportEditorVisible || state.settingsEditorVisible ||
         state.lifecycleConfirmationRequested || state.mutationInProgress ||
         state.mutationRefreshInProgress
     ) return true
+    if (state.imageImportTaskId != null) return true
     return state.target != null && virtualMachineMutationRequiresRefreshBeforeDismiss(state)
 }
 
 internal fun canDismissVirtualMachineMutation(
     state: VirtualMachineMutationWorkspaceState,
-): Boolean = state.target != null && !state.mutationInProgress && !state.mutationRefreshInProgress &&
+): Boolean = state.target != null && state.imageImportTaskId == null &&
+    !state.mutationInProgress && !state.mutationRefreshInProgress &&
     (!virtualMachineMutationRequiresRefreshBeforeDismiss(state) ||
         state.mutationRefreshCompleted && state.mutationVerification != null)
 
@@ -267,6 +295,8 @@ internal fun canContinueEditingVirtualMachineMutation(
     return when (target.kind) {
         VirtualMachineMutationKind.CREATION ->
             state.creationEditorVisible && state.creationDraft != null
+        VirtualMachineMutationKind.IMAGE_IMPORT ->
+            state.imageImportEditorVisible && state.imageImportDraft?.toImportOrNull() != null
         VirtualMachineMutationKind.SETTINGS ->
             state.settingsEditorVisible && state.settingsTargetId != null &&
                 state.settingsBaseline != null && state.settingsDraft != null
@@ -302,7 +332,7 @@ internal fun virtualMachineOverviewCallbackMatches(
 
 internal fun virtualMachineOrdinaryLoadBlocked(
     state: VirtualMachineMutationWorkspaceState,
-): Boolean = state.creationEditorVisible || state.settingsEditorVisible ||
+): Boolean = state.creationEditorVisible || state.imageImportEditorVisible || state.settingsEditorVisible ||
     state.lifecycleConfirmationRequested || state.target != null || state.mutationInProgress ||
     state.mutationRefreshInProgress || state.mutationResult != null || state.mutationFailure != null
 
@@ -350,6 +380,10 @@ internal fun virtualMachineMutationVerification(
     return when (target.kind) {
         VirtualMachineMutationKind.CREATION -> {
             // 创建结果未返回稳定 guest_id；同名列表项可能来自其他客户端，不能据此归属本次写入。
+            VirtualMachineMutationVerification.UNAVAILABLE
+        }
+        VirtualMachineMutationKind.IMAGE_IMPORT -> {
+            // 未确认结果没有稳定 image_id，不能按名称认领其他客户端创建的映像。
             VirtualMachineMutationVerification.UNAVAILABLE
         }
         VirtualMachineMutationKind.SETTINGS -> {

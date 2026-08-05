@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "vmm.create-image.synthetic-image",
+  "module": "vmm",
+  "operation": "createImage",
+  "api": {
+    "name": "SYNO.Virtualization.API.Guest.Image",
+    "method": "create",
+    "preferredVersion": 1,
+    "resolvedVersion": 1,
+    "resolvedPath": "entry.cgi"
+  },
+  "transport": {
+    "httpMethod": "POST",
+    "requestFormat": "form"
+  },
+  "parameters": [
+    {
+      "name": "auto_clean_task",
+      "valueType": "boolean",
+      "encodedValue": "false"
+    },
+    {
+      "name": "ds_file_path",
+      "valueType": "string",
+      "encodedValue": "<synthetic-nas-file>"
+    },
+    {
+      "name": "image_name",
+      "valueType": "string",
+      "encodedValue": "<synthetic-image-name>"
+    },
+    {
+      "name": "storage_ids",
+      "valueType": "stringArray",
+      "encodedValue": "[\"<synthetic-storage>\"]"
+    },
+    {
+      "name": "type",
+      "valueType": "string",
+      "encodedValue": "disk"
+    }
+  ],
+  "authentication": {
+    "required": true,
+    "synoTokenRequired": false,
+    "sessionLocations": [
+      "cookie",
+      "form"
+    ],
+    "synoTokenLocations": [
+      "header",
+      "form"
+    ]
+  },
+  "policy": {
+    "retryPolicy": "queryStateBeforeDecision",
+    "risk": "standardWrite",
+    "readbackPolicy": "taskPoll"
+  },
+  "source": {
+    "kind": "synthetic",
+    "evidence": "publicDocumentation"
+  }
+}

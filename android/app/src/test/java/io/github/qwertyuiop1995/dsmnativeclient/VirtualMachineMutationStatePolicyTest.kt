@@ -310,6 +310,26 @@ class VirtualMachineMutationStatePolicyTest {
     }
 
     @Test
+    fun `映像任务未清理时即使结果已确认也持续阻止关闭与退出`() {
+        val pendingCleanup = VirtualMachineMutationWorkspaceState(
+            target = target.copy(kind = VirtualMachineMutationKind.IMAGE_IMPORT),
+            imageImportTaskId = "task-1",
+            mutationResult = result(MutationResultStatus.CONFIRMED_SUCCESS),
+            mutationRefreshCompleted = true,
+            mutationVerification = VirtualMachineMutationVerification.MATCHES,
+        )
+
+        assertTrue(virtualMachineMutationRequiresRefreshBeforeDismiss(pendingCleanup))
+        assertTrue(virtualMachineMutationBlocksWorkspaceExit(pendingCleanup))
+        assertFalse(canDismissVirtualMachineMutation(pendingCleanup))
+
+        val cleared = pendingCleanup.copy(imageImportTaskId = null)
+        assertFalse(virtualMachineMutationRequiresRefreshBeforeDismiss(cleared))
+        assertFalse(virtualMachineMutationBlocksWorkspaceExit(cleared))
+        assertTrue(canDismissVirtualMachineMutation(cleared))
+    }
+
+    @Test
     fun `刷新核对区分匹配差异消失与不可用`() {
         val desired = VirtualMachineSettings("Synthetic VM", "Expected", 2, 2048, true)
         val state = VirtualMachineMutationWorkspaceState(

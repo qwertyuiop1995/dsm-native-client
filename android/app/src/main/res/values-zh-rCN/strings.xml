@@ -1887,4 +1887,22 @@
     <string name="virtual_machine_task_in_progress">进行中</string>
     <string name="virtual_machine_task_progress">%1$d%%</string>
     <string name="virtual_machine_task_summary_with_progress">%1$s · %2$s</string>
+    <string name="virtual_machine_image_imported">映像已准备好。</string>
+    <string name="virtual_machine_import_image">从 NAS 文件创建映像</string>
+    <string name="virtual_machine_image_import_title">创建映像</string>
+    <string name="virtual_machine_image_import_description">选择这台 NAS 上已有的文件。原文件不会被修改或删除。</string>
+    <string name="virtual_machine_image_name">映像名称</string>
+    <string name="virtual_machine_image_type">映像类型</string>
+    <string name="virtual_machine_image_type_disk">虚拟磁盘</string>
+    <string name="virtual_machine_image_type_vdsm">Virtual DSM</string>
+    <string name="virtual_machine_image_type_iso">ISO 文件</string>
+    <string name="virtual_machine_image_storage">存储空间</string>
+    <string name="virtual_machine_image_source">源文件</string>
+    <string name="virtual_machine_image_source_value">源文件：%1$s</string>
+    <string name="virtual_machine_image_no_file">尚未选择文件</string>
+    <string name="virtual_machine_image_browser_root">共享文件夹</string>
+    <string name="virtual_machine_image_browser_back">返回</string>
+    <string name="virtual_machine_image_browser_empty">此处没有文件或文件夹。</string>
+    <string name="virtual_machine_image_browser_failed">无法加载文件。请检查连接后重试。</string>
+    <string name="virtual_machine_image_import_confirm">创建映像</string>
 </resources>

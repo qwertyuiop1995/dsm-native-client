@@ -1,6 +1,7 @@
 package io.github.qwertyuiop1995.dsmnativeclient.ui.services
 
 import androidx.annotation.StringRes
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
@@ -69,6 +70,13 @@ internal fun VirtualMachineCreationDialog(
         onDismissRequest = { if (!submitting) onDismiss() },
         title = { Text(stringResource(R.string.create_virtual_machine)) },
         text = {
+            BackHandler(enabled = !submitting) {
+                if (draft.step > 0) {
+                    onDraftChange(draft.copy(step = draft.step - 1))
+                } else {
+                    onDismiss()
+                }
+            }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

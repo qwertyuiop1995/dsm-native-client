@@ -98,6 +98,10 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.StorageAnalysisSnapshot
 import io.github.qwertyuiop1995.dsmnativeclient.domain.StorageDuplicateGroup
 import io.github.qwertyuiop1995.dsmnativeclient.domain.StorageFileCategory
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineOverview
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageImport
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageImportVerification
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageType
+import io.github.qwertyuiop1995.dsmnativeclient.domain.isEligibleForVirtualMachineImageImport
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineCreation
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineDisk
@@ -6799,6 +6803,270 @@ class DsmRepository(
     fun supportsOfficialVirtualMachineSettings(): Boolean =
         supportsVersion("SYNO.Virtualization.API.Guest", 1)
 
+    fun supportsOfficialVirtualMachineImageImport(): Boolean =
+        supportsVersion("SYNO.Virtualization.API.Guest.Image", 1) &&
+            supportsVersion("SYNO.Virtualization.API.Task.Info", 1) &&
+            supportsVersion("SYNO.Virtualization.API.Storage", 1) &&
+            supportsVersion("SYNO.FileStation.List", 2)
+
+    /**
+     * 使用官方 Guest.Image.create v1 从 NAS 已有文件创建映像。提交后只跟踪本次返回的
+     * task_id，并以终态 image_id 回读映像列表；连接中断或取消时绝不重放 create。
+     */
+    suspend fun importVirtualMachineImageResult(
+        target: VirtualMachineImageImport,
+        onTaskStarted: (String) -> Unit = {},
+    ): MutationResult {
+        val operation = "virtualMachineImageImport"
+        val name = target.imageName.trim()
+        val source = target.sourceFile
+        val storage = target.storage
+        val valid = name.isNotEmpty() && name.none(Char::isISOControl) &&
+            source.path.isNotBlank() && source.path.startsWith('/') && !source.isDirectory &&
+            source.canRead && storage.isEligibleForVirtualMachineImageImport()
+        if (!valid) return settingsMutationResult(
+            operation = operation,
+            status = MutationResultStatus.CONFIRMED_FAILURE,
+            submitted = false,
+            total = 1,
+            failed = 1,
+            errorCategory = MutationErrorCategory.VALIDATION,
+            diagnosticTag = "vmm.image.import.invalid-input",
+        )
+        if (!supportsOfficialVirtualMachineImageImport()) return settingsMutationResult(
+            operation = operation,
+            status = MutationResultStatus.UNSUPPORTED,
+            submitted = false,
+            total = 1,
+            failed = 1,
+            errorCategory = MutationErrorCategory.UNSUPPORTED,
+            diagnosticTag = "vmm.image.import.unsupported",
+        )
+        val targetKey = "virtual-machine-image-name:${name.lowercase(Locale.ROOT)}"
+        if (!claimServiceMutation(targetKey)) return settingsMutationResult(
+            operation = operation,
+            status = MutationResultStatus.CONFIRMED_FAILURE,
+            submitted = false,
+            total = 1,
+            failed = 1,
+            errorCategory = MutationErrorCategory.CONFLICT,
+            diagnosticTag = "vmm.image.import.duplicate-submission",
+        )
+        var taskId: String? = null
+        try {
+            try {
+                val currentFile = fileInfo(source.path)
+                val currentStorages = strictVirtualizationResourceList(
+                    "SYNO.Virtualization.API.Storage",
+                    listOf("list"),
+                    "storages",
+                )
+                val currentImages = strictVirtualizationResourceList(
+                    "SYNO.Virtualization.API.Guest.Image",
+                    listOf("list"),
+                    "images",
+                )
+                if (currentFile?.matchesMutationBaseline(source) != true || currentStorages.none {
+                        it.id == storage.id && it.name == storage.name && it.state == storage.state
+                            && it.isEligibleForVirtualMachineImageImport()
+                    } ||
+                    currentImages.any { it.name.equals(name, ignoreCase = true) }
+                ) {
+                    return settingsMutationResult(
+                        operation = operation,
+                        status = MutationResultStatus.CONFIRMED_FAILURE,
+                        submitted = false,
+                        total = 1,
+                        failed = 1,
+                        errorCategory = MutationErrorCategory.CONFLICT,
+                        diagnosticTag = "vmm.image.import.baseline-changed",
+                    )
+                }
+                currentCoroutineContext().ensureActive()
+            } catch (_: CancellationException) {
+                return settingsMutationResult(
+                    operation = operation,
+                    status = MutationResultStatus.CANCELLED_BEFORE_SUBMISSION,
+                    submitted = false,
+                    total = 1,
+                    diagnosticTag = "vmm.image.import.cancelled-before-submission",
+                )
+            } catch (error: Throwable) {
+                val failure = error.asRepositoryFailure()
+                return settingsMutationResult(
+                    operation = operation,
+                    status = when (failure.kind) {
+                        DsmErrorKind.PERMISSION_DENIED, DsmErrorKind.SESSION_EXPIRED ->
+                            MutationResultStatus.PERMISSION_DENIED
+                        DsmErrorKind.FEATURE_UNSUPPORTED, DsmErrorKind.PACKAGE_VERSION_UNSUPPORTED ->
+                            MutationResultStatus.UNSUPPORTED
+                        else -> MutationResultStatus.CONFIRMED_FAILURE
+                    },
+                    submitted = false,
+                    total = 1,
+                    failed = 1,
+                    errorCategory = failure.mutationErrorCategory(),
+                    diagnosticTag = "vmm.image.import.preflight-failed",
+                )
+            }
+
+            try {
+                val started = call(
+                    "SYNO.Virtualization.API.Guest.Image",
+                    "create",
+                    mapOf(
+                        "auto_clean_task" to "false",
+                        "storage_ids" to jsonStrings(listOf(storage.id)),
+                        "type" to target.imageType.apiValue,
+                        "ds_file_path" to source.path,
+                        "image_name" to name,
+                    ),
+                    version = 1,
+                )
+                taskId = started["task_id"].strictStringValue()?.takeIf(String::isNotBlank)
+                if (taskId == null) return vmmImageImportUnverified("missing-task-id")
+                onTaskStarted(checkNotNull(taskId))
+            } catch (_: CancellationException) {
+                return vmmImageImportCancelled("cancelled-after-submission")
+            } catch (error: Throwable) {
+                val failure = error.asRepositoryFailure()
+                return if (failure.isAmbiguousSettingsFailure()) {
+                    vmmImageImportUnverified(
+                        "submission-unverified",
+                        failure.mutationErrorCategory(),
+                    )
+                } else {
+                    settingsMutationResult(
+                        operation = operation,
+                        status = when (failure.kind) {
+                            DsmErrorKind.PERMISSION_DENIED, DsmErrorKind.SESSION_EXPIRED ->
+                                MutationResultStatus.PERMISSION_DENIED
+                            DsmErrorKind.FEATURE_UNSUPPORTED,
+                            DsmErrorKind.PACKAGE_VERSION_UNSUPPORTED,
+                            -> MutationResultStatus.UNSUPPORTED
+                            else -> MutationResultStatus.CONFIRMED_FAILURE
+                        },
+                        submitted = true,
+                        total = 1,
+                        failed = 1,
+                        errorCategory = failure.mutationErrorCategory(),
+                        diagnosticTag = "vmm.image.import.submission-failed",
+                    )
+                }
+            }
+
+            var imageId: String? = null
+            try {
+                for (attempt in 0 until MAX_VMM_CREATION_POLLS) {
+                    currentCoroutineContext().ensureActive()
+                    when (val task = readOfficialVmmImageImportTask(checkNotNull(taskId))) {
+                        is VmmImageImportTaskState.Pending -> Unit
+                        is VmmImageImportTaskState.Finished -> {
+                            imageId = task.imageId
+                            break
+                        }
+                        VmmImageImportTaskState.FinishedWithoutImage -> break
+                    }
+                    if (attempt + 1 < MAX_VMM_CREATION_POLLS) {
+                        delay(VMM_CREATION_POLL_INTERVAL_MILLIS)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                val readback = withContext(NonCancellable) {
+                    runCatching { readOfficialVmmImageImportTask(checkNotNull(taskId)) }.getOrNull()
+                }
+                imageId = (readback as? VmmImageImportTaskState.Finished)?.imageId
+                if (imageId == null) return vmmImageImportCancelled("cancelled-during-task")
+            } catch (error: Throwable) {
+                val failure = error.asRepositoryFailure()
+                val readback = withContext(NonCancellable) {
+                    runCatching { readOfficialVmmImageImportTask(checkNotNull(taskId)) }.getOrNull()
+                }
+                imageId = (readback as? VmmImageImportTaskState.Finished)?.imageId
+                if (imageId == null) return vmmImageImportUnverified(
+                    "task-unverified",
+                    failure.mutationErrorCategory(),
+                )
+            }
+            val stableImageId = imageId ?: return vmmImageImportUnverified("task-finished-without-image")
+            val confirmed = try {
+                strictVirtualizationResourceList(
+                    "SYNO.Virtualization.API.Guest.Image",
+                    listOf("list"),
+                    "images",
+                ).singleOrNull { it.id == stableImageId }?.let { image ->
+                    image.name == name && image.metadata["type"] == target.imageType.apiValue
+                } == true
+            } catch (_: CancellationException) {
+                return vmmImageImportCancelled("cancelled-during-readback")
+            } catch (error: Throwable) {
+                return vmmImageImportUnverified(
+                    "readback-failed",
+                    error.asRepositoryFailure().mutationErrorCategory(),
+                )
+            }
+            return if (confirmed) {
+                settingsMutationResult(
+                    operation = operation,
+                    status = MutationResultStatus.CONFIRMED_SUCCESS,
+                    submitted = true,
+                    total = 1,
+                    succeeded = 1,
+                    diagnosticTag = "vmm.image.import.confirmed",
+                )
+            } else {
+                vmmImageImportUnverified("readback-mismatch")
+            }
+        } finally {
+            withContext(NonCancellable) { releaseServiceMutation(targetKey) }
+        }
+    }
+
+    suspend fun verifyVirtualMachineImageImportTask(
+        taskId: String,
+        expectedName: String,
+        expectedType: VirtualMachineImageType,
+        onTaskCleared: (String) -> Unit = {},
+    ): VirtualMachineImageImportVerification {
+        return when (val task = readOfficialVmmImageImportTask(taskId)) {
+            VmmImageImportTaskState.Pending -> VirtualMachineImageImportVerification.PENDING
+            VmmImageImportTaskState.FinishedWithoutImage -> {
+                clearOfficialVmmTask(taskId)
+                onTaskCleared(taskId)
+                VirtualMachineImageImportVerification.DIFFERS
+            }
+            is VmmImageImportTaskState.Finished -> {
+                val image = strictVirtualizationResourceList(
+                    "SYNO.Virtualization.API.Guest.Image",
+                    listOf("list"),
+                    "images",
+                ).singleOrNull { it.id == task.imageId }
+                    ?: return VirtualMachineImageImportVerification.PENDING
+                val verification = if (
+                    image.name == expectedName && image.metadata["type"] == expectedType.apiValue
+                ) {
+                    VirtualMachineImageImportVerification.MATCHES
+                } else {
+                    VirtualMachineImageImportVerification.DIFFERS
+                }
+                clearOfficialVmmTask(taskId)
+                onTaskCleared(taskId)
+                verification
+            }
+        }
+    }
+
+    private suspend fun clearOfficialVmmTask(taskId: String) {
+        withContext(NonCancellable) {
+            call(
+                "SYNO.Virtualization.API.Task.Info",
+                "clear",
+                mapOf("task_id" to taskId),
+                version = 1,
+            )
+        }
+    }
+
     suspend fun createVirtualMachineResult(configuration: VirtualMachineCreation): MutationResult {
         val name = configuration.name.trim()
         val description = configuration.description.trim()
@@ -7369,6 +7637,23 @@ class DsmRepository(
         return VmmCreationTaskState.Finished(guestId)
     }
 
+    private suspend fun readOfficialVmmImageImportTask(taskId: String): VmmImageImportTaskState {
+        val task = call(
+            "SYNO.Virtualization.API.Task.Info",
+            "get",
+            mapOf("task_id" to taskId),
+            version = 1,
+        )
+        val finished = task["finish"].strictBooleanValue()
+            ?: throw invalidVirtualizationResponse("image-task-finish")
+        if (!finished) return VmmImageImportTaskState.Pending
+        val info = task["task_info"] as? JsonObject
+            ?: return VmmImageImportTaskState.FinishedWithoutImage
+        val imageId = info["image_id"].strictStringValue()?.takeIf(String::isNotBlank)
+            ?: return VmmImageImportTaskState.FinishedWithoutImage
+        return VmmImageImportTaskState.Finished(imageId)
+    }
+
     private suspend fun readOfficialVirtualMachineSettings(id: String): VmmGuestSettingsSnapshot {
         val guest = call(
             "SYNO.Virtualization.API.Guest",
@@ -7400,6 +7685,36 @@ class DsmRepository(
         object FinishedWithoutGuest : VmmCreationTaskState()
         data class Finished(val guestId: String) : VmmCreationTaskState()
     }
+
+    private sealed class VmmImageImportTaskState {
+        object Pending : VmmImageImportTaskState()
+        object FinishedWithoutImage : VmmImageImportTaskState()
+        data class Finished(val imageId: String) : VmmImageImportTaskState()
+    }
+
+    private fun vmmImageImportUnverified(
+        stage: String,
+        errorCategory: MutationErrorCategory = MutationErrorCategory.UNKNOWN,
+    ) = settingsMutationResult(
+        operation = "virtualMachineImageImport",
+        status = MutationResultStatus.SUBMITTED_BUT_UNVERIFIED,
+        submitted = true,
+        total = 1,
+        unknown = 1,
+        requiresRefresh = true,
+        errorCategory = errorCategory,
+        diagnosticTag = "vmm.image.import.$stage",
+    )
+
+    private fun vmmImageImportCancelled(stage: String) = settingsMutationResult(
+        operation = "virtualMachineImageImport",
+        status = MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION,
+        submitted = true,
+        total = 1,
+        unknown = 1,
+        requiresRefresh = true,
+        diagnosticTag = "vmm.image.import.$stage",
+    )
 
     private data class VmmGuestSettingsSnapshot(
         val name: String,

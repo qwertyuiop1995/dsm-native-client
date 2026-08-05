@@ -7,14 +7,14 @@
 
 ## 结论
 
-- 当前在 `AppViewModel`、跨 NAS 协调器、照片备份 Worker 和 `DsmRepository` 四个已审文件中识别 72 个
-  `*Result` 调用点、62 个唯一方法，其中包含固定关闭与只读恢复调用；全部已进入下方
+- 当前在 `AppViewModel`、跨 NAS 协调器、照片备份 Worker 和 `DsmRepository` 四个已审文件中识别 74 个
+  `*Result` 调用点、63 个唯一方法，其中包含固定关闭与只读恢复调用；全部已进入下方
   机器可读清单。四个文件的内容指纹、调用数量或生产源码中的调用文件集合变化时，
   `check_android_write_test_matrix.py` 会要求重新人工复核，不用正则猜测结果数据流。
 - 所有已开放写入口均已形成闭环，包括文件操作、Download Station、Chat、NAS 设置、
   账号与群组、套件及 VMM；单目标原子操作按不适用记录 `partial=na`，不伪造部分成功。
 - 固定失败关闭并有零请求证据的入口是 5 项容器写入口和 2 项 VMM 内部网络写入口。
-- 62 个生产 `*Result` 方法的适用场景均有现存测试方法证据，矩阵门禁当前无
+- 63 个生产 `*Result` 方法的适用场景均有现存测试方法证据，矩阵门禁当前无
   `pending` 或 `gap`；A1“每项写操作测试”叶子目标已闭环。真实 NAS 权限、断线、
   取消和副作用仍按用户安排留待统一打包验收，不以自动化结果替代。
 
@@ -95,6 +95,7 @@
 ### Virtual Machine Manager 与固定关闭能力
 
 <!-- WRITE-MUTATION methods=createVirtualMachineResult;state=open;multi=yes;pre=VirtualMachineCreationRepositoryTest.kt::名称预检取消按提交前取消;success=VirtualMachineCreationRepositoryTest.kt::公开 VMM 创建轮询任务应用配置并完整回读;disconnect=VirtualMachineCreationRepositoryTest.kt::创建提交响应模糊时同名回读;readback=VirtualMachineCreationRepositoryTest.kt::创建配置回读缺字段时不确认;cancel=VirtualMachineCreationRepositoryTest.kt::任务轮询取消只回读;partial=VirtualMachineCreationRepositoryTest.kt::创建成功但常规配置未确认时报告部分成功 -->
+<!-- WRITE-MUTATION methods=importVirtualMachineImageResult;state=open;multi=no;pre=VirtualMachineImageImportRepositoryTest.kt::源文件完整基线漂移时零创建;success=VirtualMachineImageImportRepositoryTest.kt::官方映像创建只提交一次并以任务映像标识严格回读;disconnect=VirtualMachineImageImportRepositoryTest.kt::创建请求断线后保持未确认且不重放;readback=VirtualMachineImageImportRepositoryTest.kt::任务终态缺少映像标识时保持未确认且不清理;cancel=VirtualMachineImageImportRepositoryTest.kt::创建请求在途取消后保持提交边界且不重放;partial=na -->
 <!-- WRITE-MUTATION methods=updateVirtualMachineSettingsResult;state=open;multi=no;pre=VirtualMachineCreationRepositoryTest.kt::常规设置锁内发现用户所见基线漂移;success=VirtualMachineCreationRepositoryTest.kt::公开 VMM 常规设置提交后完整回读;disconnect=VirtualMachineCreationRepositoryTest.kt::常规设置提交断线后只回读且不重放;readback=VirtualMachineCreationRepositoryTest.kt::常规设置写后回读结构失败保持未确认;cancel=VirtualMachineCreationRepositoryTest.kt::常规设置写请求在途取消只回读且不重放;partial=na -->
 <!-- WRITE-MUTATION methods=controlVirtualMachineResult;state=open;multi=no;pre=VirtualMachineMutationResultTest.kt::生命周期锁内状态偏离用户所见基线;success=VirtualMachineMutationResultTest.kt::正常关机必须在列表回读为停止后才确认成功;disconnect=VirtualMachineMutationResultTest.kt::生命周期提交断线后只回读确认最终状态;readback=VirtualMachineMutationResultTest.kt::生命周期写后回读失败保持未确认;cancel=VirtualMachineMutationResultTest.kt::生命周期与删除在途取消只回读且不重放;partial=na -->
 <!-- WRITE-MUTATION methods=deleteVirtualMachineResult;state=open;multi=no;pre=VirtualMachineMutationResultTest.kt::VMM 删除预检遇到缺失标识时不发送写请求;success=VirtualMachineMutationResultTest.kt::删除虚拟机必须回读消失且发送稳定标识;disconnect=VirtualMachineMutationResultTest.kt::虚拟机删除提交断线后只回读确认目标消失;readback=VirtualMachineMutationResultTest.kt::虚拟机删除写后回读失败保持未确认;cancel=VirtualMachineMutationResultTest.kt::生命周期与删除在途取消只回读且不重放;partial=na -->

@@ -67,7 +67,18 @@ internal fun FileCopyMoveDialog(state: WorkspaceState, model: AppViewModel) {
         operation.items.any(FileItem::isDirectory)
 
     Dialog(
-        onDismissRequest = model::cancelFileCopyMove,
+        onDismissRequest = {
+            when (
+                modalFolderPickerBackAction(
+                    hasParentFolder = operation.history.isNotEmpty(),
+                    isBusy = state.isPerformingAction || mutation.mutationInProgress,
+                )
+            ) {
+                ModalFolderPickerBackAction.NAVIGATE_UP -> model.goBackFileCopyMoveFolder()
+                ModalFolderPickerBackAction.DISMISS -> model.cancelFileCopyMove()
+                ModalFolderPickerBackAction.BLOCKED -> Unit
+            }
+        },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

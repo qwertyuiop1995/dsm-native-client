@@ -41,6 +41,7 @@ EXPECTED_FILES = {
     "nas/NasStorageScreen.kt",
     "services/ServiceScreens.kt",
     "services/VirtualMachineCreationDialog.kt",
+    "services/VirtualMachineImageImportDialog.kt",
     "settings/SettingsScreen.kt",
     "transfers/TransfersScreen.kt",
 }

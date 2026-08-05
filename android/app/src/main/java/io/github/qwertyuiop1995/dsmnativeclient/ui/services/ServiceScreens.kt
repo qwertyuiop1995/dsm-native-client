@@ -72,6 +72,8 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.ContainerSectionCount
 import io.github.qwertyuiop1995.dsmnativeclient.domain.LogEntry
 import io.github.qwertyuiop1995.dsmnativeclient.domain.LogLevel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ManagedResource
+import io.github.qwertyuiop1995.dsmnativeclient.domain.ResourceState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.isEligibleForVirtualMachineImageImport
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineOverview
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSection
@@ -458,7 +460,8 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
     var selected by remember { mutableStateOf<ManagedResource?>(null) }
     val mutation = state.virtualMachineMutationState
     val writeBlocked = state.isPerformingAction || mutation.creationEditorVisible ||
-        mutation.settingsEditorVisible || mutation.lifecycleConfirmationRequested ||
+        mutation.imageImportEditorVisible || mutation.settingsEditorVisible ||
+        mutation.lifecycleConfirmationRequested ||
         mutation.target != null || mutation.mutationInProgress || mutation.mutationRefreshInProgress ||
         mutation.mutationResult != null || mutation.mutationFailure != null
     val titles = listOf(
@@ -524,10 +527,8 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                             resources,
                             stringResource(R.string.no_named_items, titles[tab]),
                             onSelect = { selected = it },
-                            headerAction = if (
-                                tab == 0 && state.supportsOfficialVirtualMachineCreation
-                            ) {
-                                {
+                            headerAction = when {
+                                tab == 0 && state.supportsOfficialVirtualMachineCreation -> {{
                                     FilledTonalButton(
                                         onClick = { model.openVirtualMachineCreationEditor() },
                                         enabled = !writeBlocked && overview.storages.isNotEmpty(),
@@ -537,9 +538,21 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                                         Spacer(Modifier.width(8.dp))
                                         Text(stringResource(R.string.create_virtual_machine))
                                     }
-                                }
-                            } else {
-                                null
+                                }}
+                                tab == 4 && state.supportsOfficialVirtualMachineImageImport -> {{
+                                    FilledTonalButton(
+                                        onClick = { model.openVirtualMachineImageImportEditor() },
+                                        enabled = !writeBlocked && overview.storages.any {
+                                            it.isEligibleForVirtualMachineImageImport()
+                                        },
+                                        modifier = Modifier.heightIn(min = 48.dp),
+                                    ) {
+                                        Icon(Icons.Outlined.Add, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(stringResource(R.string.virtual_machine_import_image))
+                                    }
+                                }}
+                                else -> null
                             },
                         )
                     }
@@ -645,6 +658,22 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
                 onDraftChange = model::updateVirtualMachineCreationDraft,
                 onConfirm = model::confirmVirtualMachineCreation,
                 onDismiss = model::closeVirtualMachineCreationEditor,
+            )
+        }
+        if (mutation.imageImportEditorVisible && mutation.imageImportDraft != null && overview != null) {
+            VirtualMachineImageImportDialog(
+                draft = mutation.imageImportDraft,
+                storages = overview.storages.filter {
+                    it.isEligibleForVirtualMachineImageImport()
+                },
+                submitting = mutation.mutationInProgress || mutation.mutationRefreshInProgress,
+                onDraftChange = model::updateVirtualMachineImageImportDraft,
+                onOpenFolder = model::enterVirtualMachineImageImportFolder,
+                onBackFolder = model::goBackVirtualMachineImageImportFolder,
+                onSelectFile = model::selectVirtualMachineImageImportFile,
+                onRetry = model::retryVirtualMachineImageImportBrowser,
+                onConfirm = model::confirmVirtualMachineImageImport,
+                onDismiss = model::closeVirtualMachineImageImportEditor,
             )
         }
         if (

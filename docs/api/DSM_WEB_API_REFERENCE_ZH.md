@@ -658,9 +658,19 @@ Android 正式入口固定使用 v1，并在写前分别复核用户所见任务
 
 创建、镜像导入等明确标记为非阻塞的操作返回任务 ID，应通过 `Task.Info.get` 轮询；公开 `Guest.delete` 与 `Guest.Image.delete` v1 返回空成功响应，不得虚构任务轮询。公开 `Guest.set` v1 支持按虚拟机 ID 或名称修改名称、描述、vCPU、内存和自动启动；创建接口的未连接网卡按官方指南使用空 `network_id` 表示。`poweroff` 相当于强制断电，必须与正常 `shutdown` 在 UI 中清楚区分。
 
+从 NAS 已有文件创建映像使用官方 `SYNO.Virtualization.API.Guest.Image.create` v1，表单参数固定为
+`auto_clean_task=false`、JSON 字符串数组 `storage_ids`、官方类型值 `type`（`disk`、`vdsm` 或
+`iso`）、NAS 绝对路径 `ds_file_path` 和 `image_name`。Android 在提交前重新读取源文件完整变更基线、
+稳定存储标识/名称/状态以及映像名称占用情况，同一名称只允许一个在途提交。`create` 只调用一次；
+返回稳定 `task_id` 后使用 `SYNO.Virtualization.API.Task.Info.get` v1 跟踪，断线或取消仅继续回读，
+不得重放 `create`。只有任务终态返回稳定 `image_id`，且 `Guest.Image.list` v1 中同一 ID 的名称与
+类型均严格匹配，才能确认成功。列表尚未出现该 ID 时继续保持待核对且不清理任务；终态核对完成后
+调用 `Task.Info.clear` v1，清理成功后才丢弃客户端保存的任务证据。
+
 Android 只读任务中心固定先调用 Task.Info v1 `list`，最多接受 100 个唯一任务 ID，再逐项
 调用 `get`；领域和界面只保留是否结束及可选进度，不保存或展示 NAS 任务 ID、内部状态、
-消息或日志正文，也不调用 `clear`。Guest v1 `list(additional=true)` 的 `vdisks`/`vnics`
+消息或日志正文，也不调用 `clear`。上述映像创建流程持有的单个任务 ID 是写操作恢复证据，
+不进入只读任务中心，且只在终态严格核对后调用 `clear`。Guest v1 `list(additional=true)` 的 `vdisks`/`vnics`
 只映射公开的磁盘容量、控制器、空间回收以及网络名称和型号；MAC 与资源 ID 不进入界面。
 
 ### 7.2 项目使用的 VMM 内部接口

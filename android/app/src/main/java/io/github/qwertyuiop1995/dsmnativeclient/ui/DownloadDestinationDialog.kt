@@ -63,7 +63,19 @@ internal fun DownloadDestinationDialog(
     }
 
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            when (
+                modalFolderPickerBackAction(
+                    hasParentFolder = picker.history.isNotEmpty(),
+                    isBusy = false,
+                )
+            ) {
+                ModalFolderPickerBackAction.NAVIGATE_UP ->
+                    model.goBackDownloadDestinationFolder()
+                ModalFolderPickerBackAction.DISMISS -> onDismiss()
+                ModalFolderPickerBackAction.BLOCKED -> Unit
+            }
+        },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

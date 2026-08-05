@@ -135,6 +135,27 @@ data class VirtualMachineSettings(
     val autoStart: Boolean,
 )
 
+enum class VirtualMachineImageType(val apiValue: String) {
+    DISK("disk"),
+    VDSM("vdsm"),
+    ISO("iso"),
+}
+
+/** 从 NAS 已有文件创建 VMM 映像所需的用户所见完整基线。 */
+data class VirtualMachineImageImport(
+    val imageName: String,
+    val imageType: VirtualMachineImageType,
+    val sourceFile: FileItem,
+    val storage: ManagedResource,
+)
+
+enum class VirtualMachineImageImportVerification { PENDING, MATCHES, DIFFERS }
+
+/** 官方明确的不可用/崩溃/已满状态关闭写入口，其余已枚举可服务状态交给 VMM 最终校验。 */
+fun ManagedResource.isEligibleForVirtualMachineImageImport(): Boolean =
+    id.isNotBlank() && metadata["status"]?.lowercase() in
+        setOf("online", "degraded", "provision_warning")
+
 enum class LogLevel { INFO, WARNING, ERROR, UNKNOWN }
 
 data class LogEntry(

@@ -1896,4 +1896,22 @@
     <string name="virtual_machine_task_in_progress">In progress</string>
     <string name="virtual_machine_task_progress">%1$d%%</string>
     <string name="virtual_machine_task_summary_with_progress">%1$s · %2$s</string>
+    <string name="virtual_machine_image_imported">The image is ready.</string>
+    <string name="virtual_machine_import_image">Create image from NAS file</string>
+    <string name="virtual_machine_image_import_title">Create an image</string>
+    <string name="virtual_machine_image_import_description">Choose a file already stored on this NAS. The original file will not be changed or removed.</string>
+    <string name="virtual_machine_image_name">Image name</string>
+    <string name="virtual_machine_image_type">Image type</string>
+    <string name="virtual_machine_image_type_disk">Virtual disk</string>
+    <string name="virtual_machine_image_type_vdsm">Virtual DSM</string>
+    <string name="virtual_machine_image_type_iso">ISO file</string>
+    <string name="virtual_machine_image_storage">Storage</string>
+    <string name="virtual_machine_image_source">Source file</string>
+    <string name="virtual_machine_image_source_value">Source file: %1$s</string>
+    <string name="virtual_machine_image_no_file">No file selected</string>
+    <string name="virtual_machine_image_browser_root">Shared folders</string>
+    <string name="virtual_machine_image_browser_back">Back</string>
+    <string name="virtual_machine_image_browser_empty">There are no files or folders here.</string>
+    <string name="virtual_machine_image_browser_failed">Files could not be loaded. Check the connection and try again.</string>
+    <string name="virtual_machine_image_import_confirm">Create image</string>
 </resources>

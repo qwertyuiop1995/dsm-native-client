@@ -40,12 +40,13 @@
 | `nas/NasStorageScreen.kt` | 存储、内容分析与 SMART | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 与 `NasStorageScreenTest` 覆盖 SMART 空、分析加载/错误/结果及存储内容 |
 | `services/ServiceScreens.kt` | Container、Registry 与 VMM | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测三页主状态，并通过 Container Events/VMM Logs 真实页签覆盖筛选空 |
 | `services/VirtualMachineCreationDialog.kt` | 虚拟机创建向导 | 不适用 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `PrimaryPageStateMatrixTest` 直测校验错误、无存储与正常复核步骤 |
+| `services/VirtualMachineImageImportDialog.kt` | 从 NAS 文件创建 VMM 映像 | 覆盖 | 覆盖 | 不适用 | 覆盖 | 覆盖 | 完整 | `VirtualMachineImageImportDialogTest` 直测加载、失败与重试、源空、目录及文件正常内容，并覆盖系统返回和提交门禁 |
 | `settings/SettingsScreen.kt` | 应用设置与语言 | 不适用 | 不适用 | 不适用 | 不适用 | 覆盖 | 完整 | 完全本地静态设置；`DownloadLoginPageStateMatrixTest` 直测生产设置页 |
 | `transfers/TransfersScreen.kt` | App 传输与 NAS 后台任务 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 覆盖 | 完整 | `FileBackgroundTaskUiTest` 直接覆盖 NAS 五态，`TransferServerPresentationTest` 覆盖来源筛选空与正常任务 |
 
 ## 当前结论与后续闭环
 
-- 生产清单共 29 个页面/弹窗文件；共用 `LogList` 已区分“源日志为空”和“筛选后为空”，当前生产状态缺口为 0。
-- 29 个页面/弹窗文件的全部适用状态均已有生产 Composable 页面级证据；静态表单和已加载实体详情没有被人为制造 loading/error。
-- API 35 `Medium_Phone_API_35` 聚焦运行 `PrimaryPageStateMatrixTest`、`DownloadLoginPageStateMatrixTest`、`NasServicePageStateMatrixTest` 共 56/56 通过。测试同时发现并修复 NAS、Container 与 VMM 日志内容区未占用剩余高度的裁切问题。
+- 生产清单共 30 个页面/弹窗文件；共用 `LogList` 已区分“源日志为空”和“筛选后为空”，当前生产状态缺口为 0。
+- 30 个页面/弹窗文件的全部适用状态均已有生产 Composable 页面级证据；静态表单和已加载实体详情没有被人为制造 loading/error。
+- API 35 `Medium_Phone_API_35` 聚焦运行 `PrimaryPageStateMatrixTest`、`DownloadLoginPageStateMatrixTest`、`NasServicePageStateMatrixTest` 及 `VirtualMachineImageImportDialogTest` 共 61/61 通过；其中映像导入新增 5 项。测试同时发现并修复 NAS、Container 与 VMM 日志内容区未占用剩余高度的裁切问题。
 - `tools/codex/check_android_page_state_matrix.py` 会扫描新增/删除的生产页面文件、矩阵状态词和计划勾选状态。矩阵仍有生产缺口或自动化未闭环时，若有人提前勾选 A8 叶子，门禁会失败。

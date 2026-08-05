@@ -282,6 +282,7 @@ internal fun VirtualMachineLifecycleConfirmationDialog(
 @StringRes
 private fun VirtualMachineMutationKind?.feedbackTitle(): Int = when (this) {
     VirtualMachineMutationKind.CREATION -> R.string.create_virtual_machine
+    VirtualMachineMutationKind.IMAGE_IMPORT -> R.string.virtual_machine_image_import_title
     VirtualMachineMutationKind.SETTINGS -> R.string.edit_virtual_machine
     VirtualMachineMutationKind.LIFECYCLE -> R.string.virtual_machine_action
     null -> R.string.virtual_machines

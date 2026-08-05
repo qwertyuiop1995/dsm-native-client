@@ -100,6 +100,7 @@ data class WorkspaceState(
     val supportsContainerRegistry: Boolean = false,
     val supportsOfficialVirtualMachineCreation: Boolean = false,
     val supportsOfficialVirtualMachineSettings: Boolean = false,
+    val supportsOfficialVirtualMachineImageImport: Boolean = false,
     val containerRegistryVisible: Boolean = false,
     val containerRegistryQuery: String = "",
     val containerRegistryResults: Loadable<List<ContainerRegistryImage>> = Loadable.Idle,

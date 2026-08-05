@@ -1,13 +1,18 @@
 package io.github.qwertyuiop1995.dsmnativeclient.ui.nas
 
+import android.graphics.Bitmap
 import androidx.annotation.StringRes
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Pause
@@ -21,13 +26,21 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qwertyuiop1995.dsmnativeclient.AppViewModel
 import io.github.qwertyuiop1995.dsmnativeclient.PackageMutationOperation
 import io.github.qwertyuiop1995.dsmnativeclient.R
@@ -47,6 +60,8 @@ internal fun NasPackageManagementScreen(
 ) {
     val target = state.packageMutationTarget
     val operation = state.packageMutationOperation
+    @Suppress("UNUSED_VARIABLE")
+    val packageIconGeneration by model.packageIconGeneration.collectAsStateWithLifecycle()
     val enabled = !state.isPerformingAction && !state.packageMutationInProgress &&
         !state.packageMutationRefreshInProgress && state.packageMutationResult == null &&
         state.packageMutationFailure == null && !state.packageMutationConfirmationRequested
@@ -66,6 +81,8 @@ internal fun NasPackageManagementScreen(
         onRefresh = model::refreshPackageMutation,
         onContinue = { model.dismissPackageMutationResult() },
         onCloseResult = { model.dismissPackageMutationResult() },
+        packageIcon = { packageInfo -> model.packageIcon(packageInfo, state.profile.id) },
+        onLoadPackageIcon = { packageInfo -> model.loadPackageIcon(packageInfo, state.profile.id) },
     )
     if (state.packageMutationConfirmationRequested && target != null && operation != null) {
         PackageMutationConfirmationDialog(
@@ -94,6 +111,8 @@ internal fun PackageManagementContent(
     onRefresh: () -> Unit,
     onContinue: () -> Unit,
     onCloseResult: () -> Unit,
+    packageIcon: (PackageInfo) -> Bitmap? = { null },
+    onLoadPackageIcon: ((PackageInfo) -> Unit)? = null,
 ) {
     val targetState = if (target != null && operation != null) {
         packageTargetState(target, operation, packages, packagesAvailable, refreshCompleted)
@@ -126,7 +145,13 @@ internal fun PackageManagementContent(
             !packagesAvailable -> item { PackageStateMessage(R.string.packages_unavailable, R.string.packages_unavailable_hint) }
             packages.isEmpty() -> item { PackageStateMessage(R.string.packages_empty, R.string.packages_empty_hint) }
             else -> items(packages, key = PackageInfo::id) { packageInfo ->
-                PackageManagementRow(packageInfo, enabled, onRequest)
+                PackageManagementRow(
+                    packageInfo = packageInfo,
+                    enabled = enabled,
+                    onRequest = onRequest,
+                    icon = packageIcon(packageInfo),
+                    onLoadIcon = onLoadPackageIcon,
+                )
             }
         }
     }
@@ -137,16 +162,29 @@ internal fun PackageManagementRow(
     packageInfo: PackageInfo,
     enabled: Boolean,
     onRequest: (PackageInfo, PackageMutationOperation) -> Unit,
+    icon: Bitmap? = null,
+    onLoadIcon: ((PackageInfo) -> Unit)? = null,
 ) {
+    val currentLoadIcon by rememberUpdatedState(onLoadIcon)
+    LaunchedEffect(packageInfo.id, packageInfo.version) {
+        currentLoadIcon?.invoke(packageInfo)
+    }
     ListItem(
         headlineContent = { Text(packageInfo.name) },
         supportingContent = {
             Column {
                 Text(stringResource(R.string.package_version_and_status, packageInfo.version, packageInfo.status.displayName()))
                 packageInfo.description?.takeIf(String::isNotBlank)?.let { Text(it) }
+                if (packageInfo.isUpgradeAvailable) {
+                    Text(
+                        stringResource(R.string.package_upgrade_available),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         },
-        leadingContent = { Icon(Icons.Outlined.SettingsApplications, null) },
+        leadingContent = { PackageIconArtwork(icon) },
         trailingContent = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (packageInfo.canStart) PackageActionButton(
@@ -168,6 +206,32 @@ internal fun PackageManagementRow(
         },
     )
     HorizontalDivider(Modifier.padding(start = 72.dp))
+}
+
+@Composable
+internal fun PackageIconArtwork(bitmap: Bitmap?) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            androidx.compose.foundation.Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(40.dp),
+            )
+        } else {
+            Icon(
+                Icons.Outlined.SettingsApplications,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 @Composable

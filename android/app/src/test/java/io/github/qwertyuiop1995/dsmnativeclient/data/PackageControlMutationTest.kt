@@ -167,6 +167,17 @@ class PackageControlMutationTest {
     }
 
     @Test
+    fun `只有 available operation 明确包含 upgrade 才投影只读更新提示`() = runBlocking {
+        val withUpgrade = PackageMutationInterceptor(
+            """{"success":true,"data":{"packages":[{"id":"$PACKAGE_ID","name":"Synthetic Package","version":"1.0.0","status":"stopped","startable":true,"available_operation":["start","upgrade"],"dsm_apps":[]}]}}""",
+        )
+        val withoutUpgrade = PackageMutationInterceptor(packageList("stopped", true))
+
+        assertTrue(repository(withUpgrade).activePackagesForControl().single().isUpgradeAvailable)
+        assertFalse(repository(withoutUpgrade).activePackagesForControl().single().isUpgradeAvailable)
+    }
+
+    @Test
     fun `模糊控制写入最多专项回读三次且绝不重放`() = runBlocking {
         val transport = PackageAmbiguousUnconfirmedInterceptor()
 

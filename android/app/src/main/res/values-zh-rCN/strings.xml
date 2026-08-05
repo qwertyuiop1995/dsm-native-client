@@ -47,6 +47,7 @@
     <string name="service_section_unavailable_title">此分区暂时无法读取</string>
     <string name="service_section_unavailable_message">其他分区仍可继续使用，请尝试刷新此信息。</string>
     <string name="container_registry">镜像仓库</string>
+    <string name="container_registry_official">官方镜像</string>
     <string name="search_images">搜索镜像</string>
     <string name="image_name">镜像名称</string>
     <string name="container_registry_search_hint">输入镜像名称以搜索镜像仓库。</string>
@@ -581,6 +582,7 @@
     <string name="packages_empty">没有找到套件</string>
     <string name="packages_empty_hint">NAS 返回了空套件列表。如果你最近安装了套件，请刷新。</string>
     <string name="package_version_and_status">版本 %1$s · %2$s</string>
+    <string name="package_upgrade_available">DSM 中有可用更新</string>
     <string name="start_package_description">启动套件 %1$s</string>
     <string name="stop_package_description">停止套件 %1$s</string>
     <string name="uninstall_package_description">卸载套件 %1$s</string>

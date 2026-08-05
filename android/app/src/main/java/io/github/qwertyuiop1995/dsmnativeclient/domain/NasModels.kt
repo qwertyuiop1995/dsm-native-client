@@ -93,6 +93,8 @@ data class PackageInfo(
     val canStop: Boolean,
     val canUninstall: Boolean = false,
     val dsmApps: List<String> = emptyList(),
+    /** `available_operation` 明确给出 upgrade 时仅提示，升级提交仍保持关闭。 */
+    val isUpgradeAvailable: Boolean = false,
 )
 
 data class ActiveConnection(

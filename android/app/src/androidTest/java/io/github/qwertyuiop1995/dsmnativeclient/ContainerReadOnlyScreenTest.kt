@@ -10,6 +10,7 @@ import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -149,6 +150,7 @@ class ContainerReadOnlyScreenTest {
             registryVisible = true,
             registryTags = tags,
             registryResultCount = 50,
+            registryOfficialIndices = setOf(1),
             fontScale = 2f,
         )
 
@@ -179,9 +181,30 @@ class ContainerReadOnlyScreenTest {
         rule.onNodeWithText("synthetic/image-1")
             .assertIsDisplayed()
             .assertIsSelected()
+        rule.onNodeWithText(context.getString(R.string.container_registry_official))
+            .assertIsDisplayed()
         rule.onNodeWithTag(CONTAINER_REGISTRY_SCROLL_TEST_TAG)
             .performScrollToNode(hasText(tags.last()))
         rule.onNodeWithText(tags.last()).assertIsDisplayed()
+    }
+
+    @Test
+    fun 官方镜像仅在明确来源的搜索结果和已选详情中显示资源化标识() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val officialLabel = context.getString(R.string.container_registry_official)
+        setContainerContent(
+            supportsRegistry = true,
+            registryVisible = true,
+            registryTags = listOf("latest"),
+            registryResultCount = 3,
+            registryOfficialIndices = setOf(1),
+            registryAutomatedIndices = setOf(2),
+            registryTrustedIndices = setOf(3),
+        )
+
+        rule.onAllNodesWithText(officialLabel, useUnmergedTree = true).assertCountEquals(2)
+        rule.onAllNodesWithContentDescription(officialLabel, useUnmergedTree = true)
+            .assertCountEquals(2)
     }
 
     private fun setContainerContent(
@@ -190,6 +213,9 @@ class ContainerReadOnlyScreenTest {
         registryVisible: Boolean = false,
         registryTags: List<String> = emptyList(),
         registryResultCount: Int = 1,
+        registryOfficialIndices: Set<Int> = emptySet(),
+        registryAutomatedIndices: Set<Int> = emptySet(),
+        registryTrustedIndices: Set<Int> = emptySet(),
         fontScale: Float = 1f,
     ) {
         val model = AppViewModel(ApplicationProvider.getApplicationContext<Application>())
@@ -199,9 +225,9 @@ class ContainerReadOnlyScreenTest {
                 registry = "registry.example.invalid",
                 description = "Synthetic image $index",
                 starCount = 0,
-                isOfficial = false,
-                isAutomated = false,
-                isTrusted = false,
+                isOfficial = index in registryOfficialIndices,
+                isAutomated = index in registryAutomatedIndices,
+                isTrusted = index in registryTrustedIndices,
             )
         }
         val registryImage = registryImages.first()

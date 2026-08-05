@@ -47,6 +47,7 @@
     <string name="service_section_unavailable_title">This section is temporarily unavailable</string>
     <string name="service_section_unavailable_message">Other sections are still available. Try refreshing this information.</string>
     <string name="container_registry">Image registry</string>
+    <string name="container_registry_official">Official image</string>
     <string name="search_images">Search images</string>
     <string name="image_name">Image name</string>
     <string name="container_registry_search_hint">Enter an image name to search the registry.</string>
@@ -587,6 +588,7 @@
     <string name="packages_empty">No packages found</string>
     <string name="packages_empty_hint">The NAS returned an empty package list. Refresh if you recently installed a package.</string>
     <string name="package_version_and_status">Version %1$s · %2$s</string>
+    <string name="package_upgrade_available">Update available in DSM</string>
     <string name="start_package_description">Start package %1$s</string>
     <string name="stop_package_description">Stop package %1$s</string>
     <string name="uninstall_package_description">Uninstall package %1$s</string>

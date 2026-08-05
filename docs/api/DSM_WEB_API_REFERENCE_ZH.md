@@ -865,9 +865,9 @@ S.M.A.R.T. 检测使用能力发现返回的 `SYNO.Core.Storage.Disk` v1。`Stor
 
 套件安装 URL、计划任务脚本和任务结果都可能包含秘密。源码中存在直接安装/执行能力，不应在普通功能页静默触发。系统更新当前只读取 `System.info` 与 `Upgrade.Server.check`；候选版本为空或与当前版本相同时不宣告更新，下载、安装、取消和重启任务没有稳定契约，保持关闭。
 
-当前 macOS 使用 `Package.list` v2，并请求 `status`、`description`、`install_type`、`startable`、`dsm_apps`、`available_operation` 和 `ctl_uninstall` 附加字段，展示真实套件名称、版本、状态与说明。套件图标使用 `Package.Thumb.get` v1 读取，认证信息只放在 Cookie 与请求头，不写入图片 URL；响应限制为图片且不超过 2 MiB，失败时使用本地通用图标。
+当前 macOS 与 Android 使用 `Package.list` v2，并请求 `status`、`description`、`install_type`、`startable`、`dsm_apps`、`available_operation` 和 `ctl_uninstall` 附加字段，展示真实套件名称、版本、状态与说明。两端套件图标使用 `Package.Thumb.get` v1 读取，认证信息只放在 Cookie 与请求头，不写入图片 URL；Android 另以 2 MiB 流式上限、PNG/JPEG/GIF/WebP 签名和 Bitmap 解码约束响应，只在内存保留 4 MiB LRU，失败时使用本地通用图标。
 
-`available_operation` 明确包含 `upgrade` 时，macOS 只显示“DSM 中有可用更新”的只读
+`available_operation` 明确包含 `upgrade` 时，macOS 与 Android 只显示“DSM 中有可用更新”的只读
 提示，`canUpgrade` 仍保持关闭。`Package.Server.list` 和
 `Package.Installation.install/status/get_queue/cancel` 目前只有静态方法目录，没有
 版本化来源、参数、队列响应、取消和最终版本回读证据，客户端不探测也不调用。

@@ -39,6 +39,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
@@ -61,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -347,7 +349,14 @@ private fun ContainerRegistryDialog(state: WorkspaceState, model: AppViewModel) 
                         results.value.forEach { image ->
                             item(key = "image:${image.id}") {
                                 ListItem(
-                                    headlineContent = { Text(image.name) },
+                                    headlineContent = {
+                                        Column {
+                                            Text(image.name)
+                                            if (image.isOfficial) {
+                                                ContainerRegistryOfficialSourceLabel()
+                                            }
+                                        }
+                                    },
                                     supportingContent = {
                                         Text(
                                             listOfNotNull(
@@ -400,6 +409,11 @@ private fun LazyListScope.containerRegistryTags(
             stringResource(R.string.container_registry_tags_for, image.name),
             modifier = Modifier.semantics { heading() },
         )
+    }
+    if (image.isOfficial) {
+        item(key = "official-source:${image.id}") {
+            ContainerRegistryOfficialSourceLabel()
+        }
     }
     when (tags) {
         Loadable.Idle -> Unit
@@ -457,6 +471,16 @@ private fun LazyListScope.containerRegistryTags(
             }
         }
     }
+}
+
+@Composable
+private fun ContainerRegistryOfficialSourceLabel() {
+    val label = stringResource(R.string.container_registry_official)
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelMedium,
+        modifier = Modifier.semantics { contentDescription = label },
+    )
 }
 
 @Composable

@@ -91,6 +91,22 @@ class PackageManagementUiTest {
         rule.onNodeWithText(context.getString(R.string.package_action_in_progress)).assertIsDisplayed()
     }
 
+    @Test
+    fun 只有服务端明确允许升级时显示DSM只读更新提示() {
+        val context = context()
+        rule.setContent {
+            LanStashTheme {
+                PackageManagementRow(
+                    packageInfo = pkg().copy(isUpgradeAvailable = true),
+                    enabled = true,
+                    onRequest = { _, _ -> },
+                )
+            }
+        }
+
+        rule.onNodeWithText(context.getString(R.string.package_upgrade_available)).assertIsDisplayed()
+    }
+
     private fun context() = InstrumentationRegistry.getInstrumentation().targetContext
     private fun pkg() = PackageInfo(
         "synthetic-package", "Synthetic Package", "1.0", ResourceState.STOPPED,

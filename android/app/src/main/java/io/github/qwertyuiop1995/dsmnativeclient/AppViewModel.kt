@@ -421,6 +421,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val thumbnailCache = object : LruCache<String, Bitmap>(32 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
     }
+    private val packageIconJobs = mutableMapOf<String, Job>()
+    private val packageIconCache = object : LruCache<String, Bitmap>(MAX_PACKAGE_ICON_MEMORY_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
+    }
+    private val _packageIconGeneration = MutableStateFlow(0)
+    val packageIconGeneration: StateFlow<Int> = _packageIconGeneration.asStateFlow()
 
     private val initialProfiles = store.profiles()
     private val initialProfile = initialProfiles.firstOrNull { it.id == store.lastProfileId() }
@@ -565,6 +571,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 fileBrowserRequestGeneration.incrementAndGet()
                 downloadListRequestGeneration.incrementAndGet()
                 fileBackgroundTaskRequestGeneration.incrementAndGet()
+                clearPackageIconCache()
                 repository = repo
                 _login.value = LoginState(
                     profiles = store.profiles(),
@@ -692,6 +699,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 fileBrowserRequestGeneration.incrementAndGet()
                 downloadListRequestGeneration.incrementAndGet()
                 fileBackgroundTaskRequestGeneration.incrementAndGet()
+                clearPackageIconCache()
                 repository = repo
                 _login.update { it.copy(isConnecting = false, connectionStatus = null) }
                 val availability = repo.availability()
@@ -5302,6 +5310,60 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             thumbnailReferences[key] = remaining
         }
+    }
+
+    fun packageIcon(packageInfo: PackageInfo, profileId: String): Bitmap? = packageIconCache.get(
+        packageIconCacheKey(
+            profileId = profileId,
+            packageInfo = packageInfo,
+            requestedSize = PACKAGE_ICON_DISPLAY_SIZE,
+        ),
+    )
+
+    /** 仅为当前可见的套件行读取图标，读取失败保留本地图标且不影响套件列表。 */
+    fun loadPackageIcon(packageInfo: PackageInfo, profileId: String) {
+        val repo = repository ?: return
+        val state = _workspace.value ?: return
+        if (state.profile.id != profileId || state.selectedModule != Module.NAS_SETTINGS ||
+            !repo.supportsPackageIcons() || packageInfo.id.isBlank() || packageInfo.version.isBlank()
+        ) {
+            return
+        }
+        val requestedSize = PACKAGE_ICON_DISPLAY_SIZE
+        val key = packageIconCacheKey(profileId, packageInfo, requestedSize)
+        if (packageIconCache.get(key) != null || packageIconJobs.containsKey(key)) return
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val bitmap = try {
+                val bytes = withContext(Dispatchers.IO) { repo.packageIcon(packageInfo) }
+                withContext(Dispatchers.Default) { decodePackageIcon(bytes, requestedSize) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            if (bitmap != null) {
+                val current = _workspace.value
+                if (packageIconRequestMatches(
+                        repositoryMatches = repository === repo,
+                        currentProfileId = current?.profile?.id,
+                        currentModule = current?.selectedModule,
+                        expectedProfileId = profileId,
+                    )
+                ) {
+                    packageIconCache.put(key, bitmap)
+                    _packageIconGeneration.update { it + 1 }
+                } else {
+                    bitmap.recycle()
+                }
+            }
+        }
+        packageIconJobs[key] = job
+        job.invokeOnCompletion {
+            viewModelScope.launch {
+                packageIconJobs.removeIfSame(key, job)
+            }
+        }
+        job.start()
     }
 
     fun clearRegenerableCaches() {
@@ -12345,6 +12407,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             chatAttachmentPreflightGeneration.incrementAndGet()
             chatMutationGenerations.clear()
             repository = null
+            clearPackageIconCache()
             crossNasRepositories.clear()
             _workspace.value = null
             candidate
@@ -12464,6 +12527,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             chatAttachmentPreflightGeneration.incrementAndGet()
             chatMutationGenerations.clear()
             repository = null
+            clearPackageIconCache()
             crossNasRepositories.clear()
             _workspace.value = null
             candidate
@@ -13302,6 +13366,36 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun thumbnailKey(profileId: String, path: String): String = "$profileId\u0000$path"
+
+    private fun clearPackageIconCache() {
+        packageIconJobs.values.forEach(Job::cancel)
+        packageIconJobs.clear()
+        packageIconCache.evictAll()
+        _packageIconGeneration.update { it + 1 }
+    }
+
+    private fun decodePackageIcon(bytes: ByteArray, requestedSize: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val maximumDimension = maxOf(requestedSize * 2, MIN_PACKAGE_ICON_DECODE_DIMENSION)
+        val sampleSize = packageIconSampleSize(
+            width = bounds.outWidth,
+            height = bounds.outHeight,
+            maximumDimension = maximumDimension,
+        )
+        val bitmap = BitmapFactory.decodeByteArray(
+            bytes,
+            0,
+            bytes.size,
+            BitmapFactory.Options().apply { inSampleSize = sampleSize },
+        ) ?: return null
+        if (bitmap.allocationByteCount > MAX_PACKAGE_ICON_MEMORY_CACHE_BYTES) {
+            bitmap.recycle()
+            return null
+        }
+        return bitmap
+    }
 
     private fun thumbnailDiskDirectory() =
         File(getApplication<Application>().cacheDir, "file-thumbnails-v1")
@@ -16565,6 +16659,36 @@ internal fun sha256Hex(bytes: ByteArray): String = MessageDigest.getInstance("SH
     .digest(bytes)
     .joinToString("") { "%02x".format(it) }
 
+/** 图标缓存只依赖当前 NAS、套件 ID、版本与实际请求尺寸，不复用其它版本的图标。 */
+internal fun packageIconCacheKey(
+    profileId: String,
+    packageInfo: PackageInfo,
+    requestedSize: Int,
+): String = "$profileId\u0000${packageInfo.id}\u0000${packageInfo.version}\u0000$requestedSize"
+
+/** 旧 NAS、旧 Repository 或离开 NAS 设置页后的响应不得写回当前工作区。 */
+internal fun packageIconRequestMatches(
+    repositoryMatches: Boolean,
+    currentProfileId: String?,
+    currentModule: Module?,
+    expectedProfileId: String,
+): Boolean = repositoryMatches && currentProfileId == expectedProfileId &&
+    currentModule == Module.NAS_SETTINGS
+
+internal fun packageIconSampleSize(
+    width: Int,
+    height: Int,
+    maximumDimension: Int,
+): Int {
+    require(width > 0 && height > 0 && maximumDimension > 0)
+    var sampleSize = 1
+    while (width / sampleSize > maximumDimension || height / sampleSize > maximumDimension) {
+        if (sampleSize > Int.MAX_VALUE / 2) return sampleSize
+        sampleSize *= 2
+    }
+    return sampleSize
+}
+
 internal fun <K, V : Any> MutableMap<K, V>.removeIfSame(key: K, expected: V): Boolean {
     if (this[key] !== expected) return false
     remove(key)
@@ -16660,6 +16784,9 @@ private const val MAX_FILE_TREE_DOCUMENTS = 1_000
 private const val MAX_FILE_FAVORITES = 500
 private const val MAX_FILE_REMOTE_LOCATIONS = 200
 private const val MAX_THUMBNAIL_DISK_CACHE_BYTES = 128L * 1024L * 1024L
+private const val MAX_PACKAGE_ICON_MEMORY_CACHE_BYTES = 4 * 1024 * 1024
+private const val MIN_PACKAGE_ICON_DECODE_DIMENSION = 256
+private const val PACKAGE_ICON_DISPLAY_SIZE = 128
 
 private fun io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineImageType
     .toPersistedVirtualMachineImageType(): PersistedVirtualMachineImageType = when (this) {

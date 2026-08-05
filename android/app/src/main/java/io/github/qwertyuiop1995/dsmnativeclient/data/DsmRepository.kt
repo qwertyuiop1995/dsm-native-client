@@ -847,6 +847,9 @@ class DsmRepository(
 
     fun supportsThumbnails(): Boolean = supports(FILE_STATION_THUMB_API)
 
+    /** 已登记的内部只读图标接口；能力或 v1 不存在时不得发送请求。 */
+    fun supportsPackageIcons(): Boolean = supportsVersion(PACKAGE_THUMB_API, PACKAGE_THUMB_VERSION)
+
     fun supportsCopyMove(): Boolean = supports(FILE_STATION_COPY_MOVE_API)
 
     internal fun supportsCrossNasSource(moveSource: Boolean): Boolean =
@@ -904,6 +907,40 @@ class DsmRepository(
             parameters = mapOf("path" to path, "size" to "small", "rotate" to "0"),
             maximumBytes = MAX_THUMBNAIL_BYTES,
         )
+    }
+
+    /**
+     * 读取已安装套件图标。凭据由统一传输层仅通过 Cookie 与请求头发送，返回内容只保留在内存。
+     * `Package.Thumb` 不是公开 API，只有能力发现明确声明 v1 时才可调用。
+     */
+    suspend fun packageIcon(packageInfo: PackageInfo): ByteArray {
+        if (!supportsPackageIcons()) throw DsmFailure(
+            103,
+            "Package icons are unavailable",
+            "Use DSM to view package details.",
+            kind = DsmErrorKind.FEATURE_UNSUPPORTED,
+        )
+        val packageId = packageInfo.id.takeIf(String::isNotBlank)
+            ?: throw invalidSettingsResponse("package-icon-name")
+        val version = packageInfo.version.takeIf(String::isNotBlank)
+            ?: throw invalidSettingsResponse("package-icon-version")
+        val bytes = api.readBinary(
+            profile = profile,
+            session = session,
+            capability = requireCapability(PACKAGE_THUMB_API),
+            preferredVersion = PACKAGE_THUMB_VERSION,
+            method = "get",
+            parameters = mapOf(
+                "name" to packageId,
+                "ver" to version,
+                "size" to PACKAGE_ICON_REQUESTED_SIZE.toString(),
+            ),
+            maximumBytes = MAX_PACKAGE_ICON_BYTES,
+        )
+        if (!hasKnownPackageIconSignature(bytes)) {
+            throw invalidSettingsResponse("package-icon-image")
+        }
+        return bytes
     }
 
     suspend fun readTextPreview(item: FileItem): Pair<String, Boolean> {
@@ -15979,6 +16016,7 @@ class DsmRepository(
                 canUninstall = installType != null && installType != "system" &&
                     (uninstallAllowed == true || "uninstall" in operations),
                 dsmApps = stringList("dsm_apps", required = true),
+                isUpgradeAvailable = "upgrade" in operations,
             )
         }
         if (result.map { it.id }.distinct().size != result.size) {
@@ -16025,6 +16063,7 @@ class DsmRepository(
                 canUninstall = installType != null && installType != "system" &&
                     (bool("ctl_uninstall") == true || "uninstall" in operations),
                 dsmApps = stringList("dsm_apps"),
+                isUpgradeAvailable = "upgrade" in operations,
             )
         }
 
@@ -16803,6 +16842,8 @@ class DsmRepository(
         const val FILE_TASK_POLL_INTERVAL_MILLIS = 500L
         const val MAX_ARCHIVE_ITEMS = 1000
         const val MAX_THUMBNAIL_BYTES = 8L * 1024L * 1024L
+        internal const val PACKAGE_ICON_REQUESTED_SIZE = 128
+        private const val MAX_PACKAGE_ICON_BYTES = 2L * 1024L * 1024L
         const val MAX_TEXT_PREVIEW_BYTES = 512L * 1024L
         const val MAX_IMAGE_PREVIEW_BYTES = 128L * 1024L * 1024L
         const val MAX_VIDEO_PREVIEW_BYTES = 256L * 1024L * 1024L
@@ -16848,8 +16889,10 @@ class DsmRepository(
         const val PACKAGE_API = "SYNO.Core.Package"
         const val PACKAGE_CONTROL_API = "SYNO.Core.Package.Control"
         const val PACKAGE_UNINSTALL_API = "SYNO.Core.Package.Uninstallation"
+        const val PACKAGE_THUMB_API = "SYNO.Core.Package.Thumb"
         const val PACKAGE_READ_VERSION = 2
         const val PACKAGE_WRITE_VERSION = 1
+        const val PACKAGE_THUMB_VERSION = 1
         const val PACKAGE_CONFIRMED_READBACK_ATTEMPTS = 10
         const val PACKAGE_AMBIGUOUS_READBACK_ATTEMPTS = 3
         const val PACKAGE_READBACK_INTERVAL_MILLIS = 1_000L
@@ -16931,6 +16974,16 @@ internal fun decodeTextPreview(bytes: ByteArray): String {
 
 private fun ByteArray.startsWith(prefix: ByteArray): Boolean =
     size >= prefix.size && prefix.indices.all { this[it] == prefix[it] }
+
+/** 套件图标只接受 DSM 实际返回的常见位图格式，拒绝 HTML、SVG 和未知二进制内容。 */
+internal fun hasKnownPackageIconSignature(bytes: ByteArray): Boolean = when {
+    bytes.startsWith(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)) -> true
+    bytes.startsWith(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte())) -> true
+    bytes.startsWith(byteArrayOf(0x47, 0x49, 0x46, 0x38)) -> true
+    bytes.size >= 12 && bytes.copyOfRange(0, 4).contentEquals(byteArrayOf(0x52, 0x49, 0x46, 0x46)) &&
+        bytes.copyOfRange(8, 12).contentEquals(byteArrayOf(0x57, 0x45, 0x42, 0x50)) -> true
+    else -> false
+}
 
 /**
  * 将 File Station 列表数据转换为稳定领域语义，供生产请求和脱敏 Fixture 共用。

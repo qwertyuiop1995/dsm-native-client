@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -28,6 +29,37 @@ import org.junit.Test
 class FileBrowserAdaptiveScreenTest {
     @get:Rule
     val rule = createComposeRule()
+
+    @Test
+    fun 文件列表高频点击目标至少为48dp() {
+        val model = AppViewModel(ApplicationProvider.getApplicationContext<Application>())
+        val folder = FileItem(
+            path = "/synthetic/touch-folder",
+            name = "Synthetic touch folder",
+            isDirectory = true,
+            canRead = true,
+        )
+        rule.setContent {
+            LanStashTheme {
+                FileBrowserScreen(
+                    state = WorkspaceState(
+                        profile = NasProfile(
+                            "synthetic",
+                            "Synthetic",
+                            "https://nas.example.invalid",
+                            "operator",
+                        ),
+                        files = Loadable.Ready(FilePage(listOf(folder), 1, 0)),
+                    ),
+                    model = model,
+                )
+            }
+        }
+
+        rule.onNodeWithText("Synthetic touch folder")
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
+    }
 
     @Test
     fun 宽屏文件列表和预览同时可见() {

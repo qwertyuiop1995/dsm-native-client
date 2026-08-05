@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -31,6 +32,52 @@ import org.junit.Test
 class PhotoBrowserAdaptiveScreenTest {
     @get:Rule
     val rule = createComposeRule()
+
+    @Test
+    fun 照片网格高频点击目标至少为48dp() {
+        val folderFile = FileItem(
+            path = "/synthetic/touch-album",
+            name = "Synthetic touch album",
+            isDirectory = true,
+            canRead = true,
+        )
+        val folder = PhotoItem(
+            id = folderFile.path,
+            file = folderFile,
+            kind = PhotoItemKind.FOLDER,
+            takenAtEpochSeconds = null,
+        )
+        val model = AppViewModel(ApplicationProvider.getApplicationContext<Application>())
+        rule.setContent {
+            LanStashTheme {
+                PhotosScreen(
+                    state = WorkspaceState(
+                        profile = NasProfile(
+                            "synthetic",
+                            "Synthetic",
+                            "https://nas.example.invalid",
+                            "operator",
+                        ),
+                        photos = Loadable.Ready(
+                            PhotoPage(
+                                folderPath = "/synthetic",
+                                items = listOf(folder),
+                                offset = 0,
+                                nextOffset = 1,
+                                sourceTotal = 1,
+                                hasMore = false,
+                            ),
+                        ),
+                    ),
+                    model = model,
+                )
+            }
+        }
+
+        rule.onNodeWithText("Synthetic touch album")
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
+    }
 
     @Test
     fun 宽屏照片网格和预览同时可见() {

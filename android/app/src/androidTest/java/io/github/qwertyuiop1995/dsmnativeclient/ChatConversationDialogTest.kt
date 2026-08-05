@@ -3,6 +3,7 @@ package io.github.qwertyuiop1995.dsmnativeclient
 import android.app.Application
 import android.graphics.Bitmap
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -58,7 +59,7 @@ class ChatConversationDialogTest {
         rule.onNodeWithText(context.getString(R.string.private_group_name)).assertIsDisplayed()
         rule.onNodeWithText(context.getString(R.string.create_private_group))
             .assertIsDisplayed().assertIsEnabled()
-        rule.onNodeWithText("Member 2").assertIsDisplayed()
+        rule.onNodeWithText("Member 2").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
     }
 
     @Test

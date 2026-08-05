@@ -16,7 +16,7 @@ Android 当前完成率、自动化快照、批次记录和真实验收缺口统
 
 | 能力 | macOS | iPhone | iPad | Android | Windows |
 | --- | --- | --- | --- | --- | --- |
-| 原生 UI | 已实现，待实机验收 | SwiftUI 导航栈已实现，待真机验收 | SwiftUI 分栏已实现，待真机验收 | Compose 已建立 Compact/Medium/Expanded 统一宽度策略：Compact 使用底部导航，Medium 使用独立 NavigationRail 并可打开完整抽屉，Expanded 使用常驻抽屉；三者不在同层混用。Chat、Files、Photos 和 Download Station 的现有列表—详情按实际可用内容宽度切换双栏，Files/Photos 与 Download 均覆盖运行时收窄回退。系统返回覆盖抽屉、文件/照片目录、文件多选、消息详情和下载详情；局部 Compose 2× `fontScale` 与深色自动化通过，完整页面矩阵、真实设备及厂商大字体仍待验收。真实平板/折叠屏/OEM 分屏、API 34+ 真机预测手势与 TalkBack 仍待验收 | WinUI NavigationView 已实现，待 Windows 验收 |
+| 原生 UI | 已实现，待实机验收 | SwiftUI 导航栈已实现，待真机验收 | SwiftUI 分栏已实现，待真机验收 | Compose 已建立 Compact/Medium/Expanded 统一宽度策略：Compact 使用底部导航，Medium 使用独立 NavigationRail 并可打开完整抽屉，Expanded 使用常驻抽屉；三者不在同层混用。Chat、Files、Photos 和 Download Station 的现有列表—详情按实际可用内容宽度切换双栏，Files/Photos 与 Download 均覆盖运行时收窄回退。系统返回覆盖抽屉、文件/照片目录、文件多选、消息详情和下载详情；生产 UI 27 处自定义交互已通过 48dp 双向尺寸、语义角色和原生按压反馈的全量源码审计，API 35 交叉 44/44 通过。局部 Compose 2× `fontScale` 与深色自动化通过，完整页面矩阵、真实设备及厂商大字体仍待验收。真实平板/折叠屏/OEM 分屏、API 34+ 真机预测手势、TalkBack、显示缩放和触控精度按用户安排留待打包验收 | WinUI NavigationView 已实现，待 Windows 验收 |
 | 英语与简体中文 | 共享资源层、系统语言解析、App 内选择和本机持久化已实现 | 复用 Apple 共享资源层与语言选择 | 同 iPhone | `values` / `values-zh-rCN`、AppCompat 语言选择和本机持久化已实现 | `en-US` / `zh-CN` `.resw`、语言选择和本机持久化已实现 |
 | 不支持语言回退英语 | 已实现并有解析测试 | 已实现并有解析测试 | 已实现并有解析测试 | 已实现并有解析测试 | 已实现并有解析测试 |
 | 本地化质量门禁 | 双语键、格式参数、资源引用和可见文案硬编码由仓库检查统一验证 | 同 macOS | 同 macOS | 同一仓库检查，并由 Android 构建验证资源 | 同一仓库检查；完整 XAML 编译由 Windows CI 验证 |

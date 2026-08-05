@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.qwertyuiop1995.dsmnativeclient.domain.CapacitySummary
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasSettingsSnapshot
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasStorageDisk
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ResourceState
@@ -21,6 +22,53 @@ import org.junit.Test
 class NasStorageScreenTest {
     @get:Rule
     val rule = createComposeRule()
+
+    @Test
+    fun 内容分析失败是局部状态且保留整页内容和重试操作() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        var retries = 0
+        rule.setContent {
+            LanStashTheme {
+                NasStorageScreen(
+                    snapshot = snapshot(),
+                    analysis = Loadable.Failed(
+                        DsmFailure(null, "Synthetic analysis failure", "Try again."),
+                    ),
+                    progress = null,
+                    diskTestStatuses = emptyMap(),
+                    diskTestMutationTarget = null,
+                    diskTestMutationBaseline = null,
+                    diskTestMutationOperation = null,
+                    diskTestMutationConfirmationRequested = false,
+                    diskTestMutationInProgress = false,
+                    diskTestMutationResult = null,
+                    diskTestMutationFailure = null,
+                    diskTestMutationRefreshFailure = null,
+                    diskTestMutationRefreshInProgress = false,
+                    diskTestMutationRefreshCompleted = false,
+                    diskTestActionsEnabled = true,
+                    onBeginAnalysis = { retries += 1 },
+                    onCancelAnalysis = {},
+                    onLoadDiskTest = {},
+                    onRequestDiskTest = { _, _, _ -> },
+                    onConfirmDiskTest = { false },
+                    onCancelDiskTestConfirmation = {},
+                    onRefreshDiskTest = {},
+                    onContinueDiskTest = {},
+                    onCloseDiskTestResult = {},
+                )
+            }
+        }
+
+        rule.onNodeWithText(context.getString(R.string.storage_overview)).assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.drive_tests))
+            .performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.operation_not_completed), substring = true)
+            .performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.retry_analysis))
+            .performScrollTo().performClick()
+        rule.runOnIdle { check(retries == 1) }
+    }
 
     @Test
     fun 存储页覆盖空闲运行和结果状态() {

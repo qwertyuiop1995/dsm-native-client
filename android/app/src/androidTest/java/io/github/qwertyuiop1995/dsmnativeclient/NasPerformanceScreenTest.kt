@@ -24,6 +24,55 @@ class NasPerformanceScreenTest {
     val rule = createComposeRule()
 
     @Test
+    fun 性能页首次加载显示明确状态且不显示无样本恢复操作() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        var retries = 0
+        rule.setContent {
+            LanStashTheme {
+                NasPerformanceScreen(
+                    history = emptyList(),
+                    isLoading = true,
+                    error = null,
+                    isPaused = false,
+                    onStart = {},
+                    onStop = {},
+                    onTogglePause = {},
+                    onRetry = { retries += 1 },
+                )
+            }
+        }
+
+        rule.onNodeWithText(context.getString(R.string.performance_loading)).assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.performance_empty)).assertDoesNotExist()
+        rule.runOnIdle { check(retries == 0) }
+    }
+
+    @Test
+    fun 性能页无样本显示原因和恢复操作() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        var retries = 0
+        rule.setContent {
+            LanStashTheme {
+                NasPerformanceScreen(
+                    history = emptyList(),
+                    isLoading = false,
+                    error = null,
+                    isPaused = false,
+                    onStart = {},
+                    onStop = {},
+                    onTogglePause = {},
+                    onRetry = { retries += 1 },
+                )
+            }
+        }
+
+        rule.onNodeWithText(context.getString(R.string.performance_empty)).assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.performance_empty_message)).assertIsDisplayed()
+        rule.onNodeWithText(context.getString(R.string.retry)).performClick()
+        rule.runOnIdle { check(retries == 1) }
+    }
+
+    @Test
     fun 性能页显示精确当前值趋势文字替代并可暂停() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         var starts = 0

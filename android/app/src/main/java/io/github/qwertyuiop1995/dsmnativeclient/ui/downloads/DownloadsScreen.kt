@@ -390,6 +390,8 @@ private fun DownloadTaskList(
                         .then(
                             if (expanded) {
                                 Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
                                     .clickable { model.openDownloadTaskDetails(task) }
                                     .semantics { selected = isSelected }
                             } else {

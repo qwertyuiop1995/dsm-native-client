@@ -1,6 +1,7 @@
 package io.github.qwertyuiop1995.dsmnativeclient
 
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -10,6 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
@@ -29,6 +31,7 @@ class LoginScreenTest {
         rule.onNodeWithText(text(R.string.account)).assertIsDisplayed()
         rule.onNodeWithText(text(R.string.password)).assertIsDisplayed()
         rule.onNodeWithText(text(R.string.remember_password)).assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
         rule.onNodeWithText(text(R.string.auto_login)).assertIsDisplayed()
         rule.onAllNodesWithText(text(R.string.custom_https_port)).assertCountEquals(0)
         rule.onNodeWithText(text(R.string.advanced_connection_settings)).performScrollTo().performClick()
@@ -37,6 +40,7 @@ class LoginScreenTest {
         }
         rule.onNodeWithText(text(R.string.custom_https_port)).performScrollTo().assertIsDisplayed()
         rule.onNodeWithText(text(R.string.connect)).performScrollTo().assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
     }
 
     @Test

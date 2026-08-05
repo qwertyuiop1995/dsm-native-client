@@ -1538,6 +1538,21 @@ internal fun removeLocalChatMessage(
     )
 }
 
+internal fun WorkspaceState.withRefreshedChatConversations(
+    visible: List<ChatConversation>,
+): WorkspaceState {
+    val selected = selectedConversation
+    val refreshedSelection = if (selected == null) {
+        null
+    } else {
+        visible.firstOrNull { it.id == selected.id } ?: selected
+    }
+    return copy(
+        conversations = Loadable.Ready(visible),
+        selectedConversation = refreshedSelection,
+    )
+}
+
 internal fun chatPendingAttachmentUrisForRelease(state: WorkspaceState): List<Uri> =
     state.chatPendingAttachmentUris.values.distinct()
 
@@ -14272,12 +14287,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun updateChatConversationState(
         expectedRepository: DsmRepository,
         conversations: List<ChatConversation>?,
-        predicate: (WorkspaceState) -> Boolean = { true },
-        transform: (WorkspaceState) -> WorkspaceState = { it },
+    ) = updateChatConversationState(
+        expectedRepository,
+        conversations,
+        requireConversationListActive = false,
+    )
+
+    private fun updateChatConversationState(
+        expectedRepository: DsmRepository,
+        conversations: List<ChatConversation>?,
+        requireConversationListActive: Boolean,
     ) {
         if (repository !== expectedRepository) return
         val state = _workspace.value ?: return
-        if (!predicate(state)) return
+        if (requireConversationListActive &&
+            (state.selectedModule != Module.CHAT || state.selectedConversation != null)
+        ) return
         val withConversations = conversations?.let { incoming ->
             val overlay = applyChatLocalReadOverlay(incoming, chatLocalReadMarkers)
             chatLocalReadMarkers = overlay.markers
@@ -14285,14 +14310,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 overlay.conversations,
                 state.chatPinnedConversationIds,
             )
-            state.copy(
-                conversations = Loadable.Ready(visible),
-                selectedConversation = state.selectedConversation?.let { selected ->
-                    visible.firstOrNull { it.id == selected.id } ?: selected
-                },
-            )
+            state.withRefreshedChatConversations(visible)
         } ?: state
-        _workspace.value = transform(withConversations)
+        _workspace.value = withConversations
     }
 
     private fun startChatConversationPolling(repo: DsmRepository) {
@@ -14306,9 +14326,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     updateChatConversationState(
                         expectedRepository = repo,
                         conversations = conversations,
-                        predicate = { state ->
-                            state.selectedModule == Module.CHAT && state.selectedConversation == null
-                        },
+                        requireConversationListActive = true,
                     )
                 }
             }
@@ -14349,10 +14367,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 updateChatConversationState(
                                     expectedRepository = repo,
                                     conversations = conversations,
-                                    predicate = { current ->
-                                        current.selectedModule == Module.CHAT &&
-                                            current.selectedConversation == null
-                                    },
+                                    requireConversationListActive = true,
                                 )
                             }
                         }

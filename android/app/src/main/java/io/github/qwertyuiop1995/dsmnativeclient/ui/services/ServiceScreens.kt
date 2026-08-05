@@ -345,10 +345,13 @@ private fun ContainerRegistryDialog(state: WorkspaceState, model: AppViewModel) 
                                             ).joinToString(" · "),
                                         )
                                     },
-                                    modifier = Modifier.selectable(
-                                        selected = state.selectedContainerRegistryImage?.id == image.id,
-                                        onClick = { model.selectContainerRegistryImage(image) },
-                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .selectable(
+                                            selected = state.selectedContainerRegistryImage?.id == image.id,
+                                            onClick = { model.selectContainerRegistryImage(image) },
+                                        ),
                                 )
                             }
                             if (state.selectedContainerRegistryImage?.id == image.id) {

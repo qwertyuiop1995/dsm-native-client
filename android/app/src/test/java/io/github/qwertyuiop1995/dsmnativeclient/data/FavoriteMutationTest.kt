@@ -10,7 +10,9 @@ import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.FormBody
 import okhttp3.Interceptor
@@ -143,6 +145,31 @@ class FavoriteMutationTest {
     }
 
     @Test
+    fun `移除收藏提交断线保持未确认且不重放`() = runBlocking {
+        val transport = RecordingInterceptor(Step.Failure(IOException("synthetic network failure")))
+
+        val result = repository(transport).removeFavoriteResult("/synthetic")
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertTrue(result.requiresRefresh)
+        assertEquals(1, transport.requests.size)
+    }
+
+    @Test
+    fun `移除收藏提交成功但回读失败保持未确认`() = runBlocking {
+        val transport = RecordingInterceptor(
+            Step.Json("{\"success\":true}"),
+            Step.Failure(IOException("synthetic readback failure")),
+        )
+
+        val result = repository(transport).removeFavoriteResult("/synthetic")
+
+        assertEquals(MutationResultStatus.SUBMITTED_BUT_UNVERIFIED, result.status)
+        assertTrue(result.requiresRefresh)
+        assertEquals(2, transport.requests.size)
+    }
+
+    @Test
     fun `同一路径收藏进行中时拒绝重复提交`() = runBlocking {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -168,6 +195,82 @@ class FavoriteMutationTest {
         assertFalse(duplicate.submitted)
         assertEquals(MutationResultStatus.CONFIRMED_SUCCESS, completed.status)
         assertEquals(2, transport.requests.size)
+    }
+
+    @Test
+    fun `收藏提交前协程已取消时零请求返回`() {
+        val transport = RecordingInterceptor()
+        val job = Job()
+        var status: MutationResultStatus? = null
+
+        runCatching {
+            runBlocking(job) {
+                job.cancel()
+                status = repository(transport).addFavoriteResult("/synthetic", "Synthetic").status
+            }
+        }
+
+        assertEquals(MutationResultStatus.CANCELLED_BEFORE_SUBMISSION, status)
+        assertTrue(transport.requests.isEmpty())
+    }
+
+    @Test
+    fun `收藏写请求在途取消保持提交边界且不重放`() = runBlocking {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val transport = RecordingInterceptor(
+            Step.BlockedJson("{\"success\":true}", entered, release),
+        )
+        var status: MutationResultStatus? = null
+        val worker = launch(Dispatchers.IO) {
+            status = repository(transport).addFavoriteResult("/synthetic", "Synthetic").status
+        }
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+
+        worker.cancel()
+        release.countDown()
+        worker.join()
+
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, status)
+        assertEquals(1, transport.requests.size)
+    }
+
+    @Test
+    fun `移除收藏提交前协程已取消时零请求返回`() {
+        val transport = RecordingInterceptor()
+        val job = Job()
+        var status: MutationResultStatus? = null
+
+        runCatching {
+            runBlocking(job) {
+                job.cancel()
+                status = repository(transport).removeFavoriteResult("/synthetic").status
+            }
+        }
+
+        assertEquals(MutationResultStatus.CANCELLED_BEFORE_SUBMISSION, status)
+        assertTrue(transport.requests.isEmpty())
+    }
+
+    @Test
+    fun `移除收藏写请求在途取消保持提交边界且不重放`() = runBlocking {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val transport = RecordingInterceptor(
+            Step.BlockedJson("{\"success\":true}", entered, release),
+        )
+        var status: MutationResultStatus? = null
+        val worker = launch(Dispatchers.IO) {
+            status = repository(transport).removeFavoriteResult("/synthetic").status
+        }
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+
+        worker.cancel()
+        release.countDown()
+        worker.join()
+
+        assertEquals(MutationResultStatus.CANCELLATION_REQUESTED_AFTER_SUBMISSION, status)
+        assertEquals(1, transport.requests.size)
     }
 
     private fun repository(interceptor: RecordingInterceptor): DsmRepository {

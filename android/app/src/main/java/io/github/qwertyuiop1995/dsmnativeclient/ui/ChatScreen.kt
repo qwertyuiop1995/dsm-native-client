@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -66,6 +67,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -246,6 +248,8 @@ private fun ConversationList(
                                 }
                             },
                             modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
                                 .clickable { model.openConversation(conversation) }
                                 .semantics(mergeDescendants = true) {},
                         )
@@ -448,15 +452,19 @@ internal fun NewConversationDialog(state: WorkspaceState, model: AppViewModel) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable(
+                                        .heightIn(min = 48.dp)
+                                        .toggleable(
+                                            value = selected,
                                             enabled = !mutationInProgress,
-                                        ) { model.toggleChatConversationUser(user.id) }
+                                            role = Role.Checkbox,
+                                            onValueChange = { model.toggleChatConversationUser(user.id) },
+                                        )
                                         .padding(vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Checkbox(
                                         checked = selected,
-                                        onCheckedChange = { model.toggleChatConversationUser(user.id) },
+                                        onCheckedChange = null,
                                         enabled = !mutationInProgress,
                                     )
                                     Column(Modifier.padding(start = 8.dp)) {

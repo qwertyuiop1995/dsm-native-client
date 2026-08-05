@@ -391,7 +391,10 @@ private fun DownloadRssSiteList(
                         },
                     )
                 },
-                modifier = Modifier.clickable { onSelect(site) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable { onSelect(site) },
             )
             HorizontalDivider()
         }

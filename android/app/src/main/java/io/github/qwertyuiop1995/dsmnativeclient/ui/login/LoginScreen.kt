@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -476,12 +477,13 @@ private fun LoginForm(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(min = 48.dp)
                             .clip(MaterialTheme.shapes.small)
                             .clickable(role = Role.Switch) { onRememberPassword(!rememberPassword) }
                             .padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Switch(checked = rememberPassword, onCheckedChange = onRememberPassword)
+                        Switch(checked = rememberPassword, onCheckedChange = null)
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text(stringResource(R.string.remember_password), fontWeight = FontWeight.Medium)
@@ -496,12 +498,13 @@ private fun LoginForm(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(min = 48.dp)
                             .clip(MaterialTheme.shapes.small)
                             .clickable(role = Role.Switch) { onAutoLogin(!autoLoginEnabled) }
                             .padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Switch(checked = autoLoginEnabled, onCheckedChange = onAutoLogin)
+                        Switch(checked = autoLoginEnabled, onCheckedChange = null)
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text(stringResource(R.string.auto_login), fontWeight = FontWeight.Medium)
@@ -610,6 +613,7 @@ private fun SavedProfileCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clip(MaterialTheme.shapes.medium)
             .clickable(onClick = onSelect),
         shape = MaterialTheme.shapes.medium,

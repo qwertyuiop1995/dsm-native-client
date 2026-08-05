@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -253,7 +254,10 @@ internal fun ResourceList(
                         Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.more_actions))
                     }
                 },
-                modifier = Modifier.clickable { onSelect(resource) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable { onSelect(resource) },
             )
             HorizontalDivider(Modifier.padding(start = 72.dp))
         }

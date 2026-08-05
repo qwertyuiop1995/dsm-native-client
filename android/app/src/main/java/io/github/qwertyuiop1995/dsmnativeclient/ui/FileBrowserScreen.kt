@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -107,6 +109,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.core.content.ContextCompat
 import io.github.qwertyuiop1995.dsmnativeclient.AppViewModel
@@ -1134,7 +1137,10 @@ private fun FileBrowserContent(
                                     leadingContent = {
                                         Icon(Icons.Outlined.Folder, contentDescription = null)
                                     },
-                                    modifier = Modifier.clickable { model.openFileFavorite(folder) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .clickable { model.openFileFavorite(folder) },
                                 )
                             }
                         }
@@ -1184,9 +1190,10 @@ private fun FileBrowserContent(
                                     leadingContent = {
                                         Icon(Icons.Outlined.FolderOpen, contentDescription = null)
                                     },
-                                    modifier = Modifier.clickable {
-                                        model.openFileRemoteLocation(folder)
-                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .clickable { model.openFileRemoteLocation(folder) },
                                 )
                             }
                         }
@@ -1227,9 +1234,10 @@ private fun FileBrowserContent(
                                     leadingContent = {
                                         Icon(Icons.Outlined.History, contentDescription = null)
                                     },
-                                    modifier = Modifier.clickable {
-                                        model.openFileRecentLocation(folder)
-                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .clickable { model.openFileRecentLocation(folder) },
                                 )
                             }
                         }
@@ -1269,15 +1277,25 @@ private fun ArchiveCreateDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().selectableGroup(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     ArchiveFormat.entries.forEach { option ->
                         Row(
                             modifier = Modifier
-                                .clickable { format = option }
-                                .padding(end = 16.dp),
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .selectable(
+                                    selected = format == option,
+                                    role = Role.RadioButton,
+                                    onClick = { format = option },
+                                )
+                                .padding(horizontal = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            RadioButton(selected = format == option, onClick = { format = option })
+                            RadioButton(selected = format == option, onClick = null)
                             Text(if (option == ArchiveFormat.ZIP) "ZIP" else "7z")
                         }
                     }
@@ -1434,19 +1452,22 @@ private fun FileItems(
                         MaterialTheme.colorScheme.surface
                     },
                 ),
-                modifier = Modifier.combinedClickable(
-                    onClick = {
-                        if (selectedPaths.isNotEmpty()) {
-                            onToggleSelection(item)
-                        } else if (item.isDirectory) {
-                            onOpen(item)
-                        } else {
-                            onPreview(item)
-                        }
-                    },
-                    onLongClickLabel = selectItemLabel,
-                    onLongClick = { onToggleSelection(item) },
-                ).semantics { selected = isSelected },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .combinedClickable(
+                        onClick = {
+                            if (selectedPaths.isNotEmpty()) {
+                                onToggleSelection(item)
+                            } else if (item.isDirectory) {
+                                onOpen(item)
+                            } else {
+                                onPreview(item)
+                            }
+                        },
+                        onLongClickLabel = selectItemLabel,
+                        onLongClick = { onToggleSelection(item) },
+                    ).semantics { selected = isSelected },
             )
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
@@ -1473,19 +1494,22 @@ private fun FileGridItem(
 ) {
     val selectItemLabel = stringResource(R.string.select_item)
     Card(
-        modifier = Modifier.combinedClickable(
-            onClick = {
-                if (state.fileBrowser.selectedPaths.isNotEmpty()) {
-                    onToggleSelection(item)
-                } else if (item.isDirectory) {
-                    onOpen(item)
-                } else {
-                    onPreview(item)
-                }
-            },
-            onLongClickLabel = selectItemLabel,
-            onLongClick = { onToggleSelection(item) },
-        ).semantics { selected = isSelected },
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .combinedClickable(
+                onClick = {
+                    if (state.fileBrowser.selectedPaths.isNotEmpty()) {
+                        onToggleSelection(item)
+                    } else if (item.isDirectory) {
+                        onOpen(item)
+                    } else {
+                        onPreview(item)
+                    }
+                },
+                onLongClickLabel = selectItemLabel,
+                onLongClick = { onToggleSelection(item) },
+            ).semantics { selected = isSelected },
         colors = CardDefaults.cardColors(
             containerColor = if (isSelected) {
                 MaterialTheme.colorScheme.secondaryContainer

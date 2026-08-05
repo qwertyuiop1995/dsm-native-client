@@ -142,6 +142,49 @@ class WorkspaceRouteProjectionTest {
         assertFalse(first.entries.toString().contains("private"))
     }
 
+    @Test
+    fun `VMM任务和性能页只投影固定无载荷路由且跨模块不泄漏`() {
+        val tasks = state(emptySet()).copy(
+            selectedModule = Module.VIRTUAL_MACHINES,
+            virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                selectedTab = VirtualMachineTab.TASKS,
+            ),
+        ).workspaceRouteStack()
+        val performance = state(emptySet()).copy(
+            selectedModule = Module.NAS_SETTINGS,
+            nasPerformance = NasPerformanceWorkspaceState(
+                selectedTab = NasSettingsTab.PERFORMANCE,
+            ),
+        ).workspaceRouteStack()
+        val staleTasks = state(emptySet()).copy(
+            selectedModule = Module.FILES,
+            virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                selectedTab = VirtualMachineTab.TASKS,
+            ),
+        ).workspaceRouteStack()
+        val stalePerformance = state(emptySet()).copy(
+            selectedModule = Module.FILES,
+            nasPerformance = NasPerformanceWorkspaceState(
+                selectedTab = NasSettingsTab.PERFORMANCE,
+            ),
+        ).workspaceRouteStack()
+
+        assertEquals(
+            listOf(WorkspaceRoute.ModuleRoot(Module.VIRTUAL_MACHINES), WorkspaceRoute.VirtualMachineTasks),
+            tasks.entries,
+        )
+        assertEquals(
+            listOf(WorkspaceRoute.ModuleRoot(Module.NAS_SETTINGS), WorkspaceRoute.NasSettingsPerformance),
+            performance.entries,
+        )
+        val filesRoot = listOf(
+            WorkspaceRoute.ModuleRoot(Module.FILES),
+            WorkspaceRoute.FileDirectory(1),
+        )
+        assertEquals(filesRoot, staleTasks.entries)
+        assertEquals(filesRoot, stalePerformance.entries)
+    }
+
     private fun state(selectedPaths: Set<String>) = WorkspaceState(
         profile = NasProfile(
             id = "synthetic",

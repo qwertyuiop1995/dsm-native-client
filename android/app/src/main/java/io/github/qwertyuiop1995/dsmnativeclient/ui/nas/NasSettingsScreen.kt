@@ -40,12 +40,6 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.qwertyuiop1995.dsmnativeclient.AppViewModel
+import io.github.qwertyuiop1995.dsmnativeclient.NasSettingsTab
 import io.github.qwertyuiop1995.dsmnativeclient.R
 import io.github.qwertyuiop1995.dsmnativeclient.WorkspaceState
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ManagedResource
@@ -69,7 +64,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.ui.services.LogList
 
 @Composable
 internal fun NasSettingsScreen(state: WorkspaceState, model: AppViewModel) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val tab = state.nasPerformance.selectedTab.ordinal
     val titles = listOf(
         stringResource(R.string.overview),
         stringResource(R.string.performance),
@@ -87,7 +82,11 @@ internal fun NasSettingsScreen(state: WorkspaceState, model: AppViewModel) {
     Column(Modifier.fillMaxSize()) {
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
             titles.forEachIndexed { index, title ->
-                Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
+                Tab(
+                    selected = tab == index,
+                    onClick = { model.selectNasSettingsTab(NasSettingsTab.entries[index]) },
+                    text = { Text(title) },
+                )
             }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -104,10 +103,10 @@ internal fun NasSettingsScreen(state: WorkspaceState, model: AppViewModel) {
                     storageAnalysis = state.storageAnalysis,
                     storageAnalysisProgress = state.storageAnalysisProgress,
                     diskTestStatuses = state.diskTestStatuses,
-                    performanceHistory = state.nasPerformanceHistory,
-                    performanceIsLoading = state.nasPerformanceIsLoading,
-                    performanceError = state.nasPerformanceError,
-                    performanceIsPaused = state.nasPerformanceIsPaused,
+                    performanceHistory = state.nasPerformance.history,
+                    performanceIsLoading = state.nasPerformance.isLoading,
+                    performanceError = state.nasPerformance.error,
+                    performanceIsPaused = state.nasPerformance.isPaused,
                     systemUpdate = state.nasSystemUpdate,
                     fileServiceSettingsDraft = state.fileServiceSettingsDraft,
                     fileServiceMutationResult = state.fileServiceMutationResult,

@@ -26,6 +26,10 @@ internal sealed interface WorkspaceRoute {
     data object DownloadTaskDetails : WorkspaceRoute
 
     data object ContainerRegistry : WorkspaceRoute
+
+    data object VirtualMachineTasks : WorkspaceRoute
+
+    data object NasSettingsPerformance : WorkspaceRoute
 }
 
 internal data class WorkspaceRouteStack(
@@ -53,6 +57,12 @@ internal data class WorkspaceRouteStack(
             Module.CONTAINERS -> require(
                 nestedEntries.isEmpty() || nestedEntries == listOf(WorkspaceRoute.ContainerRegistry),
             ) { "Containers supports at most one registry route" }
+            Module.VIRTUAL_MACHINES -> require(
+                nestedEntries.isEmpty() || nestedEntries == listOf(WorkspaceRoute.VirtualMachineTasks),
+            ) { "Virtual machines supports at most one tasks route" }
+            Module.NAS_SETTINGS -> require(
+                nestedEntries.isEmpty() || nestedEntries == listOf(WorkspaceRoute.NasSettingsPerformance),
+            ) { "NAS settings supports at most one performance route" }
             else -> require(nestedEntries.isEmpty()) { "Module does not support nested routes" }
         }
     }
@@ -68,6 +78,8 @@ internal fun deriveWorkspaceRouteStack(
     hasPhotoViewer: Boolean = false,
     hasDownloadTaskDetails: Boolean = false,
     hasContainerRegistry: Boolean = false,
+    hasVirtualMachineTasks: Boolean = false,
+    hasNasSettingsPerformance: Boolean = false,
 ): WorkspaceRouteStack {
     require(fileHistoryDepth >= 0) { "File history depth cannot be negative" }
     require(photoHistoryDepth >= 0) { "Photo history depth cannot be negative" }
@@ -90,6 +102,16 @@ internal fun deriveWorkspaceRouteStack(
         }
         Module.CONTAINERS -> if (hasContainerRegistry) {
             listOf(WorkspaceRoute.ContainerRegistry)
+        } else {
+            emptyList()
+        }
+        Module.VIRTUAL_MACHINES -> if (hasVirtualMachineTasks) {
+            listOf(WorkspaceRoute.VirtualMachineTasks)
+        } else {
+            emptyList()
+        }
+        Module.NAS_SETTINGS -> if (hasNasSettingsPerformance) {
+            listOf(WorkspaceRoute.NasSettingsPerformance)
         } else {
             emptyList()
         }

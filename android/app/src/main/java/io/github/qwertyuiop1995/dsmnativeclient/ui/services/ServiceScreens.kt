@@ -72,6 +72,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.Loadable
 import io.github.qwertyuiop1995.dsmnativeclient.R
 import io.github.qwertyuiop1995.dsmnativeclient.VirtualMachineLifecycleOperation
 import io.github.qwertyuiop1995.dsmnativeclient.VirtualMachineLocalImageImportUiState
+import io.github.qwertyuiop1995.dsmnativeclient.VirtualMachineTab
 import io.github.qwertyuiop1995.dsmnativeclient.WorkspaceState
 import io.github.qwertyuiop1995.dsmnativeclient.data.PersistedVirtualMachineImageImportStage
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ContainerRegistryImage
@@ -485,7 +486,7 @@ private fun ContainerRegistryOfficialSourceLabel() {
 
 @Composable
 internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val tab = state.virtualMachineMutationState.selectedTab.ordinal
     var protectionTab by rememberSaveable { mutableIntStateOf(0) }
     var selected by remember { mutableStateOf<ManagedResource?>(null) }
     var localImportsVisible by remember { mutableStateOf(false) }
@@ -514,7 +515,11 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
     Column(Modifier.fillMaxSize()) {
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
             titles.forEachIndexed { index, title ->
-                Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
+                Tab(
+                    selected = tab == index,
+                    onClick = { model.selectVirtualMachineTab(VirtualMachineTab.entries[index]) },
+                    text = { Text(title) },
+                )
             }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {

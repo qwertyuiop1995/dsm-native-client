@@ -59,7 +59,7 @@ gh run watch <run-id> --exit-status
 工作流会上传 Debug APK、未正式签名的 Release 测试 APK、仪器测试 APK，以及 JVM/lint
 报告。中间 CI 修正提交在功能完成后合并为一个完整功能提交，再合并 `main` 并删除临时分支。
 
-当前完成率、最新自动化数量、阻塞和真实验收结论统一查看[当前开发进度](../docs/progress/STATUS.md)，稳定目标、剩余项与换电脑恢复步骤查看[Android 原生客户端完善计划](../docs/development/ANDROID_CLIENT_COMPLETION_PLAN_ZH.md)。第 56–58 批已完成 Download Station 任务控制、五类任务创建与设置保存；第 59 批完成 VMM 创建、常规设置和公开生命周期；第 60–62 批完成 File Station 主要既有写操作、Photos 管理及文件浏览器批量删除；第 63–65 批迁移 Chat 写操作；第 79–81 批依次完成 VMM NAS 映像创建、任务清理，以及多磁盘/多网卡、可见期轮询、本机文件持久导入和固定模块外部入口；第 82 批增加唯一无载荷 Container Registry 固定深页并纠正 VMM 删除映像回读 Fixture；第 83 批一次补齐套件更新只读提示、真实套件图标和 Registry 官方来源标识。以上均为既有组合目标完善，不重复计分；A0–A8 仍为 183/202（90.6%）。
+当前完成率、最新自动化数量、阻塞和真实验收结论统一查看[当前开发进度](../docs/progress/STATUS.md)，稳定目标、剩余项与换电脑恢复步骤查看[Android 原生客户端完善计划](../docs/development/ANDROID_CLIENT_COMPLETION_PLAN_ZH.md)。第 56–58 批已完成 Download Station 任务控制、五类任务创建与设置保存；第 59 批完成 VMM 创建、常规设置和公开生命周期；第 60–62 批完成 File Station 主要既有写操作、Photos 管理及文件浏览器批量删除；第 63–65 批迁移 Chat 写操作；第 79–81 批依次完成 VMM NAS 映像创建、任务清理，以及多磁盘/多网卡、可见期轮询、本机文件持久导入和固定模块外部入口；第 82 批增加唯一无载荷 Container Registry 固定深页并纠正 VMM 删除映像回读 Fixture；第 83 批一次补齐套件更新只读提示、真实套件图标和 Registry 官方来源标识；第 84 批收紧 VMM 任务页可见轮询，并增加 VMM 任务与 NAS 性能两个无载荷固定深页。以上均为既有组合目标完善，不重复计分；A0–A8 仍为 183/202（90.6%）。
 
 GitHub Actions 已配置自动及手动 Android 构建门禁：Android 或共享 Fixture 变化时运行 JVM、Debug、debug 测试签名的 Release/R8、仪器测试 APK 编译和 Debug lint；同一分支的新运行会取消旧运行，并上传 APK 与测试/lint 报告。本机 `keystore.properties` 已精确忽略，仓库检查会拒绝任何已跟踪的同名签名配置。CI 只编译仪器测试 APK，不执行模拟器/真机用例；Release 测试包也不是正式签名发布物。
 

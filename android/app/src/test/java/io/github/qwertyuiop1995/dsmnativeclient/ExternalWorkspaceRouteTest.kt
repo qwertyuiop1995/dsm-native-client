@@ -20,11 +20,16 @@ class ExternalWorkspaceRouteTest {
     }
 
     @Test
-    fun `外部入口只允许无载荷的固定Container Registry页面`() {
-        val route = "lanstash://open/containers/registry"
-
-        assertEquals(ExternalWorkspaceRoute.ContainerRegistry, route.externalWorkspaceRoute())
-        assertNull(route.externalWorkspaceModule())
+    fun `外部入口只允许无载荷的固定深页`() {
+        listOf(
+            "lanstash://open/containers/registry" to ExternalWorkspaceRoute.ContainerRegistry,
+            "lanstash://open/virtual-machines/tasks" to ExternalWorkspaceRoute.VirtualMachineTasks,
+            "lanstash://open/nas-settings/performance" to
+                ExternalWorkspaceRoute.NasSettingsPerformance,
+        ).forEach { (route, expected) ->
+            assertEquals(expected, route.externalWorkspaceRoute())
+            assertNull(route.externalWorkspaceModule())
+        }
     }
 
     @Test
@@ -42,6 +47,16 @@ class ExternalWorkspaceRouteTest {
             "lanstash://open/containers/registry/object-id",
             "lanstash://open/containers/registry/",
             "lanstash://open/containers/%72egistry",
+            "lanstash://open/virtual-machines/tasks?task=private",
+            "lanstash://open/virtual-machines/tasks#private",
+            "lanstash://open/virtual-machines/tasks/object-id",
+            "lanstash://open/virtual-machines/tasks/",
+            "lanstash://open/virtual-machines/%74asks",
+            "lanstash://open/nas-settings/performance?history=private",
+            "lanstash://open/nas-settings/performance#private",
+            "lanstash://open/nas-settings/performance/object-id",
+            "lanstash://open/nas-settings/performance/",
+            "lanstash://open/nas-settings/%70erformance",
         ).forEach { route -> assertNull(route.externalWorkspaceRoute()) }
     }
 
@@ -51,6 +66,8 @@ class ExternalWorkspaceRouteTest {
             null,
             "",
             "https://open/files",
+            "LaNsTaSh://open/files",
+            "lanstash://OPEN/files",
             "lanstash://other/files",
             "lanstash://open/unknown",
             "lanstash:files",

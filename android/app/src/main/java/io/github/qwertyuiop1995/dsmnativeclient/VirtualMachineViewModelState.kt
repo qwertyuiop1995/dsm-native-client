@@ -280,6 +280,10 @@ data class VirtualMachineMutationTarget(
 }
 
 data class VirtualMachineMutationWorkspaceState(
+    /** VMM 固定分区仅驻留内存，用于任务页可见性与无载荷路由投影。 */
+    val selectedTab: VirtualMachineTab = VirtualMachineTab.MACHINES,
+    /** 只投影已发现的公开 Task.Info v1 能力，不保存能力原始响应。 */
+    val supportsOfficialTasks: Boolean = false,
     val creationEditorVisible: Boolean = false,
     val creationDraft: VirtualMachineCreationDraftState? = null,
     val imageImportEditorVisible: Boolean = false,
@@ -317,8 +321,10 @@ data class VirtualMachineTaskPollingState(
 
 internal fun shouldPollVirtualMachineTasks(
     selectedModule: Module,
+    selectedTab: VirtualMachineTab,
     overview: VirtualMachineOverview?,
 ): Boolean = selectedModule == Module.VIRTUAL_MACHINES &&
+    selectedTab == VirtualMachineTab.TASKS &&
     overview?.taskCenterState == VirtualMachineTaskCenterState.AVAILABLE &&
     overview.tasks.any { !it.isFinished }
 

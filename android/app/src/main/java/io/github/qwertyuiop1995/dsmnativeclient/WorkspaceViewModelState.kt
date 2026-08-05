@@ -6,12 +6,64 @@ import java.io.File
 
 internal enum class FileBackgroundTaskRequestKind { REFRESH, LOAD_MORE }
 
+/** 仅保存 VMM 固定分区枚举，供可见性控制和无载荷深页投影使用。 */
+enum class VirtualMachineTab {
+    MACHINES,
+    HOSTS,
+    STORAGES,
+    NETWORKS,
+    IMAGES,
+    PROTECTION,
+    LOGS,
+    TASKS,
+}
+
+/** 仅保存 NAS 设置固定分区枚举，供性能深页和返回层级使用。 */
+enum class NasSettingsTab {
+    OVERVIEW,
+    PERFORMANCE,
+    STORAGE,
+    PACKAGES,
+    ACCOUNT,
+    LOGS,
+    CONNECTIONS,
+    SERVICES,
+    REGION_AND_TIME,
+    NETWORKS,
+    SECURITY,
+    HARDWARE_AND_POWER,
+}
+
 internal data class FileBackgroundTaskRequestToken(
     val profileId: String,
     val generation: Long,
     val offset: Int,
     val kind: FileBackgroundTaskRequestKind,
 )
+
+/** 性能读取、能力与固定页签共用单一内存状态，避免继续扩大超长 WorkspaceState 构造参数。 */
+data class NasPerformanceWorkspaceState(
+    val history: List<PerformanceSample> = emptyList(),
+    val isLoading: Boolean = false,
+    val error: DsmFailure? = null,
+    val isPaused: Boolean = false,
+    val supportsPerformance: Boolean = false,
+    val selectedTab: NasSettingsTab = NasSettingsTab.OVERVIEW,
+)
+
+internal data class NasPerformanceRequestToken(
+    val generation: Long,
+    val profileId: String,
+)
+
+internal fun WorkspaceState.matchesNasPerformanceRequest(
+    token: NasPerformanceRequestToken,
+    currentGeneration: Long,
+    repositoryMatches: Boolean,
+    isVisible: Boolean,
+): Boolean = repositoryMatches && isVisible && token.generation == currentGeneration &&
+    profile.id == token.profileId && selectedModule == Module.NAS_SETTINGS &&
+    nasPerformance.selectedTab == NasSettingsTab.PERFORMANCE && !nasPerformance.isPaused
 
 internal fun fileBackgroundTaskCallbackMatches(
     repositoryMatches: Boolean,
@@ -179,6 +231,7 @@ data class WorkspaceState(
     val chatAttachmentPreviewProgress: Float? = null,
     val chatAttachmentPreviewError: String? = null,
     val nasSettings: Loadable<NasSettingsSnapshot> = Loadable.Idle,
+    val nasPerformance: NasPerformanceWorkspaceState = NasPerformanceWorkspaceState(),
     val fileServiceSettingsDraft: io.github.qwertyuiop1995.dsmnativeclient.domain.NasFileServiceSettings? = null,
     val fileServiceMutationInProgress: Boolean = false,
     val fileServiceMutationResult: MutationResult? = null,
@@ -279,10 +332,6 @@ data class WorkspaceState(
     val directoryMutationRefreshCompleted: Boolean = false,
     val directoryMutationGeneration: Long = 0L,
     val nasSystemUpdate: Loadable<NasSystemUpdateInfo> = Loadable.Idle,
-    val nasPerformanceHistory: List<PerformanceSample> = emptyList(),
-    val nasPerformanceIsLoading: Boolean = false,
-    val nasPerformanceError: DsmFailure? = null,
-    val nasPerformanceIsPaused: Boolean = false,
     val storageAnalysis: Loadable<StorageAnalysisSnapshot> = Loadable.Idle,
     val storageAnalysisProgress: StorageAnalysisProgress? = null,
     val diskTestStatuses: Map<String, Loadable<NasDiskTestStatus>> = emptyMap(),

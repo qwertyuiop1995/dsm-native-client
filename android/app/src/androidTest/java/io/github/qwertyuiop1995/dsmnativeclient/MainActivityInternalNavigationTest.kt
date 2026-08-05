@@ -126,9 +126,13 @@ class MainActivityInternalNavigationTest {
             Intent.ACTION_VIEW,
             Uri.parse("lanstash://open/containers/registry"),
         ).putExtra(TransferNotifications.EXTRA_OPEN_TRANSFERS, true)
+        val tasks = Intent(Intent.ACTION_VIEW, Uri.parse("lanstash://open/virtual-machines/tasks"))
+        val performance = Intent(Intent.ACTION_VIEW, Uri.parse("lanstash://open/nas-settings/performance"))
 
         assertEquals(null, invalid.internalRouteRequest())
         assertEquals(InternalRouteRequest.OPEN_CONTAINER_REGISTRY, valid.internalRouteRequest())
+        assertEquals(InternalRouteRequest.OPEN_VIRTUAL_MACHINE_TASKS, tasks.internalRouteRequest())
+        assertEquals(InternalRouteRequest.OPEN_NAS_SETTINGS_PERFORMANCE, performance.internalRouteRequest())
     }
 
     @Test
@@ -188,6 +192,98 @@ class MainActivityInternalNavigationTest {
 
             waitForSelectedModule(scenario, Module.CONTAINERS)
             waitForContainerRegistry(scenario, visible = true)
+            waitForNavigationIntentConsumed(scenario)
+        }
+    }
+
+    @Test
+    fun VMM任务固定入口在Workspace就绪后打开任务深页并返回根页() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/virtual-machines/tasks"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                workspace(activity).value = syntheticWorkspace().copy(
+                    virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                        supportsOfficialTasks = true,
+                    ),
+                )
+            }
+
+            waitForSelectedModule(scenario, Module.VIRTUAL_MACHINES)
+            waitForVirtualMachineTab(scenario, VirtualMachineTab.TASKS)
+            scenario.onActivity { activity ->
+                assertEquals(null, activity.intent.data)
+                assertTrue(model(activity).navigateUp())
+            }
+            waitForVirtualMachineTab(scenario, VirtualMachineTab.MACHINES)
+        }
+    }
+
+    @Test
+    fun 性能固定入口在Workspace未就绪且重建后打开性能深页并返回根页() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/nas-settings/performance"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                workspace(activity).value = syntheticWorkspace().copy(
+                    nasPerformance = NasPerformanceWorkspaceState(
+                        supportsPerformance = true,
+                    ),
+                )
+            }
+
+            waitForSelectedModule(scenario, Module.NAS_SETTINGS)
+            waitForNasSettingsTab(scenario, NasSettingsTab.PERFORMANCE)
+            scenario.onActivity { activity ->
+                assertTrue(model(activity).navigateUp())
+            }
+            waitForNasSettingsTab(scenario, NasSettingsTab.OVERVIEW)
+            waitForNavigationIntentConsumed(scenario)
+        }
+    }
+
+    @Test
+    fun Workspace未就绪时最新固定深页入口覆盖旧目标() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launchIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/virtual-machines/tasks"),
+            context,
+            MainActivity::class.java,
+        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+
+        ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                val supersededIntent = activity.intent
+                dispatchNewIntent(
+                    activity,
+                    Intent(Intent.ACTION_VIEW, Uri.parse("lanstash://open/nas-settings/performance")),
+                )
+                assertEquals(null, supersededIntent.data)
+            }
+            scenario.onActivity { activity ->
+                workspace(activity).value = syntheticWorkspace().copy(
+                    nasPerformance = NasPerformanceWorkspaceState(
+                        supportsPerformance = true,
+                    ),
+                )
+            }
+
+            waitForSelectedModule(scenario, Module.NAS_SETTINGS)
+            waitForNasSettingsTab(scenario, NasSettingsTab.PERFORMANCE)
             waitForNavigationIntentConsumed(scenario)
         }
     }
@@ -614,6 +710,46 @@ class MainActivityInternalNavigationTest {
             Thread.sleep(20)
         }
         scenario.onActivity { activity -> assertEquals(null, activity.intent.data) }
+    }
+
+    private fun waitForVirtualMachineTab(
+        scenario: ActivityScenario<MainActivity>,
+        expected: VirtualMachineTab,
+    ) {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            var tab: VirtualMachineTab? = null
+            scenario.onActivity { activity ->
+                tab = workspace(activity).value?.virtualMachineMutationState?.selectedTab
+            }
+            if (tab == expected) return
+            Thread.sleep(20)
+        }
+        scenario.onActivity {
+            activity ->
+            assertEquals(
+                expected,
+                workspace(activity).value?.virtualMachineMutationState?.selectedTab,
+            )
+        }
+    }
+
+    private fun waitForNasSettingsTab(
+        scenario: ActivityScenario<MainActivity>,
+        expected: NasSettingsTab,
+    ) {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            var tab: NasSettingsTab? = null
+            scenario.onActivity { activity ->
+                tab = workspace(activity).value?.nasPerformance?.selectedTab
+            }
+            if (tab == expected) return
+            Thread.sleep(20)
+        }
+        scenario.onActivity {
+            activity -> assertEquals(expected, workspace(activity).value?.nasPerformance?.selectedTab)
+        }
     }
 
     private fun waitForContainerRegistry(

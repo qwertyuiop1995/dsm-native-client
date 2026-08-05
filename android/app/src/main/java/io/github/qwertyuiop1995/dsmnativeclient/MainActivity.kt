@@ -80,8 +80,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun navigatePendingRequest(request: InternalRouteRequest): WorkspaceNavigationResult {
-        if (request == InternalRouteRequest.OPEN_CONTAINER_REGISTRY) {
-            return model.navigateToContainerRegistry()
+        when (request) {
+            InternalRouteRequest.OPEN_CONTAINER_REGISTRY -> return model.navigateToContainerRegistry()
+            InternalRouteRequest.OPEN_VIRTUAL_MACHINE_TASKS -> {
+                return model.navigateToVirtualMachineTasks()
+            }
+            InternalRouteRequest.OPEN_NAS_SETTINGS_PERFORMANCE -> {
+                return model.navigateToNasSettingsPerformance()
+            }
+            else -> Unit
         }
         val moduleResult = model.navigateTo(WorkspaceRoute.ModuleRoot(request.module))
         if (moduleResult == WorkspaceNavigationResult.DEFERRED ||
@@ -89,8 +96,11 @@ class MainActivity : AppCompatActivity() {
         ) {
             return moduleResult
         }
-        if (request == InternalRouteRequest.OPEN_CONTAINERS) {
-            model.closeContainerRegistry()
+        when (request) {
+            InternalRouteRequest.OPEN_CONTAINERS -> model.closeContainerRegistry()
+            InternalRouteRequest.OPEN_VIRTUAL_MACHINES -> model.closeVirtualMachineTasks()
+            InternalRouteRequest.OPEN_NAS_SETTINGS -> model.closeNasSettingsPerformance()
+            else -> Unit
         }
         return moduleResult
     }
@@ -139,6 +149,8 @@ internal enum class InternalRouteRequest(
     OPEN_TRANSFERS(Module.TRANSFERS),
     OPEN_SETTINGS(Module.SETTINGS),
     OPEN_CONTAINER_REGISTRY(Module.CONTAINERS),
+    OPEN_VIRTUAL_MACHINE_TASKS(Module.VIRTUAL_MACHINES),
+    OPEN_NAS_SETTINGS_PERFORMANCE(Module.NAS_SETTINGS),
     ;
 
     companion object {
@@ -177,6 +189,9 @@ internal fun Intent?.internalRouteRequest(): InternalRouteRequest? = when {
         when (val route = dataString.externalWorkspaceRoute()) {
             is ExternalWorkspaceRoute.ModuleRoot -> InternalRouteRequest.openModule(route.module)
             ExternalWorkspaceRoute.ContainerRegistry -> InternalRouteRequest.OPEN_CONTAINER_REGISTRY
+            ExternalWorkspaceRoute.VirtualMachineTasks -> InternalRouteRequest.OPEN_VIRTUAL_MACHINE_TASKS
+            ExternalWorkspaceRoute.NasSettingsPerformance ->
+                InternalRouteRequest.OPEN_NAS_SETTINGS_PERFORMANCE
             null -> null
         }
     this?.getBooleanExtra(TransferNotifications.EXTRA_OPEN_TRANSFERS, false) == true ->

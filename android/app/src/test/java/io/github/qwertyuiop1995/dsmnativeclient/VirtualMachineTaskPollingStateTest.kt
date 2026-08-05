@@ -42,17 +42,37 @@ class VirtualMachineTaskPollingStateTest {
     }
 
     @Test
-    fun `仅在 VMM 可见且存在未完成任务时轮询`() {
+    fun `仅在 VMM 任务页可见且存在未完成任务时轮询`() {
         val running = overview(listOf(VirtualMachineTask("running", false, 40)))
-        assertTrue(shouldPollVirtualMachineTasks(Module.VIRTUAL_MACHINES, running))
-        assertFalse(shouldPollVirtualMachineTasks(Module.FILES, running))
+        assertTrue(
+            shouldPollVirtualMachineTasks(
+                Module.VIRTUAL_MACHINES,
+                VirtualMachineTab.TASKS,
+                running,
+            ),
+        )
         assertFalse(
             shouldPollVirtualMachineTasks(
                 Module.VIRTUAL_MACHINES,
+                VirtualMachineTab.MACHINES,
+                running,
+            ),
+        )
+        assertFalse(shouldPollVirtualMachineTasks(Module.FILES, VirtualMachineTab.TASKS, running))
+        assertFalse(
+            shouldPollVirtualMachineTasks(
+                Module.VIRTUAL_MACHINES,
+                VirtualMachineTab.TASKS,
                 overview(listOf(VirtualMachineTask("done", true, 100))),
             ),
         )
-        assertFalse(shouldPollVirtualMachineTasks(Module.VIRTUAL_MACHINES, null))
+        assertFalse(
+            shouldPollVirtualMachineTasks(
+                Module.VIRTUAL_MACHINES,
+                VirtualMachineTab.TASKS,
+                null,
+            ),
+        )
     }
 
     @Test

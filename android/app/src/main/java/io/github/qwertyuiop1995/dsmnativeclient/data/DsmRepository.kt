@@ -11974,6 +11974,9 @@ class DsmRepository(
         )
     }
 
+    /** 已登记的内部只读性能接口；运行时未发现 v1 时固定深页不得进入采样状态。 */
+    fun supportsPerformance(): Boolean = supportsVersion(PERFORMANCE_API, 1)
+
     /**
      * 读取 DSM 当前性能采样。此内部只读接口仅在运行时发现 v1 时使用，原始响应不持久化。
      */

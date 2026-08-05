@@ -26,6 +26,39 @@ import org.junit.Test
 
 class WorkspaceTypedNavigationTest {
     @Test
+    fun 模块根路由会关闭同模块固定深页() {
+        val model = model()
+        val workspace = workspace(model)
+        workspace.value = syntheticWorkspace(selectedModule = Module.VIRTUAL_MACHINES).copy(
+            virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                selectedTab = VirtualMachineTab.TASKS,
+            ),
+        )
+
+        assertEquals(
+            WorkspaceNavigationResult.ALREADY_SELECTED,
+            model.navigateTo(WorkspaceRoute.ModuleRoot(Module.VIRTUAL_MACHINES)),
+        )
+        assertEquals(
+            VirtualMachineTab.MACHINES,
+            workspace.value?.virtualMachineMutationState?.selectedTab,
+        )
+
+        workspace.value = syntheticWorkspace(selectedModule = Module.NAS_SETTINGS).copy(
+            nasPerformance = NasPerformanceWorkspaceState(
+                isPaused = true,
+                selectedTab = NasSettingsTab.PERFORMANCE,
+            ),
+        )
+        assertEquals(
+            WorkspaceNavigationResult.ALREADY_SELECTED,
+            model.navigateTo(WorkspaceRoute.ModuleRoot(Module.NAS_SETTINGS)),
+        )
+        assertEquals(NasSettingsTab.OVERVIEW, workspace.value?.nasPerformance?.selectedTab)
+        assertFalse(workspace.value?.nasPerformance?.isPaused == true)
+    }
+
+    @Test
     fun 文件预览返回先关闭且保留选择和目录() {
         val model = model()
         val workspace = workspace(model)
@@ -455,6 +488,103 @@ class WorkspaceTypedNavigationTest {
         assertEquals(WorkspaceNavigationResult.ALREADY_SELECTED, model.navigateToContainerRegistry())
         assertTrue(model.navigateUp())
         assertFalse(workspace.value?.containerRegistryVisible == true)
+    }
+
+    @Test
+    fun VMM任务固定入口受TaskInfo能力门禁并通过系统返回回根页() {
+        val model = model()
+        val workspace = workspace(model)
+
+        assertEquals(WorkspaceNavigationResult.DEFERRED, model.navigateToVirtualMachineTasks())
+
+        workspace.value = syntheticWorkspace(selectedModule = Module.FILES).copy(
+            virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                supportsOfficialTasks = false,
+            ),
+        )
+        assertEquals(WorkspaceNavigationResult.REJECTED, model.navigateToVirtualMachineTasks())
+        assertEquals(Module.FILES, workspace.value?.selectedModule)
+
+        workspace.value = workspace.value?.copy(
+            virtualMachineMutationState = workspace.value!!.virtualMachineMutationState.copy(
+                supportsOfficialTasks = true,
+            ),
+        )
+        assertEquals(WorkspaceNavigationResult.APPLIED, model.navigateToVirtualMachineTasks())
+        assertEquals(Module.VIRTUAL_MACHINES, workspace.value?.selectedModule)
+        assertEquals(
+            VirtualMachineTab.TASKS,
+            workspace.value?.virtualMachineMutationState?.selectedTab,
+        )
+        assertEquals(
+            WorkspaceRoute.VirtualMachineTasks,
+            workspace.value?.workspaceRouteStack()?.entries?.last(),
+        )
+
+        assertTrue(model.navigateUp())
+        assertEquals(
+            VirtualMachineTab.MACHINES,
+            workspace.value?.virtualMachineMutationState?.selectedTab,
+        )
+        assertEquals(
+            listOf(WorkspaceRoute.ModuleRoot(Module.VIRTUAL_MACHINES)),
+            workspace.value?.workspaceRouteStack()?.entries,
+        )
+    }
+
+    @Test
+    fun 性能固定入口受Utilization能力门禁并通过系统返回回根页() {
+        val model = model()
+        val workspace = workspace(model)
+
+        assertEquals(WorkspaceNavigationResult.DEFERRED, model.navigateToNasSettingsPerformance())
+
+        workspace.value = syntheticWorkspace(selectedModule = Module.FILES).copy(
+            nasPerformance = NasPerformanceWorkspaceState(supportsPerformance = false),
+        )
+        assertEquals(WorkspaceNavigationResult.REJECTED, model.navigateToNasSettingsPerformance())
+        assertEquals(Module.FILES, workspace.value?.selectedModule)
+
+        workspace.value = workspace.value?.copy(
+            nasPerformance = workspace.value!!.nasPerformance.copy(supportsPerformance = true),
+        )
+        assertEquals(WorkspaceNavigationResult.APPLIED, model.navigateToNasSettingsPerformance())
+        assertEquals(Module.NAS_SETTINGS, workspace.value?.selectedModule)
+        assertEquals(NasSettingsTab.PERFORMANCE, workspace.value?.nasPerformance?.selectedTab)
+        assertEquals(
+            WorkspaceRoute.NasSettingsPerformance,
+            workspace.value?.workspaceRouteStack()?.entries?.last(),
+        )
+
+        assertTrue(model.navigateUp())
+        assertEquals(NasSettingsTab.OVERVIEW, workspace.value?.nasPerformance?.selectedTab)
+        assertEquals(
+            listOf(WorkspaceRoute.ModuleRoot(Module.NAS_SETTINGS)),
+            workspace.value?.workspaceRouteStack()?.entries,
+        )
+    }
+
+    @Test
+    fun 切出VMM任务分区立即收敛轮询状态() {
+        val model = model()
+        val workspace = workspace(model)
+        workspace.value = syntheticWorkspace(selectedModule = Module.VIRTUAL_MACHINES).copy(
+            virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                selectedTab = VirtualMachineTab.TASKS,
+                taskPolling = VirtualMachineTaskPollingState(refreshing = true),
+            ),
+        )
+
+        model.selectVirtualMachineTab(VirtualMachineTab.IMAGES)
+
+        assertEquals(
+            VirtualMachineTab.IMAGES,
+            workspace.value?.virtualMachineMutationState?.selectedTab,
+        )
+        assertEquals(
+            VirtualMachineTaskPollingState(),
+            workspace.value?.virtualMachineMutationState?.taskPolling,
+        )
     }
 
     @Test

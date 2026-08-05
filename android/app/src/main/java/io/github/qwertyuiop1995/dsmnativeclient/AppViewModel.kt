@@ -374,6 +374,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var storageAnalysisJob: Job? = null
     private var nasPerformanceJob: Job? = null
     private var nasPerformanceVisible = false
+    private val nasPerformanceGeneration = AtomicLong(0)
     private var downloadDiscoveryLoadJob: Job? = null
     private var downloadBtCatalogJob: Job? = null
     private var downloadDiscoverySearchJob: Job? = null
@@ -613,6 +614,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     supportsOfficialVirtualMachineSettings = repo.supportsOfficialVirtualMachineSettings(),
                     supportsOfficialVirtualMachineImageImport =
                         repo.supportsOfficialVirtualMachineImageImport(),
+                    virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                        supportsOfficialTasks = repo.supportsOfficialVirtualMachineTasks(),
+                    ),
+                    nasPerformance = NasPerformanceWorkspaceState(
+                        supportsPerformance = repo.supportsPerformance(),
+                    ),
                     photoBackupSourceEnabled = transferStore.photoBackupSource(profile.id)?.enabled == true,
                     chatPinnedConversationIds = restoredPinnedConversationIds(profile.id),
                     fileBackgroundTasks = backgroundTaskSnapshot?.toFileBackgroundTaskPage()
@@ -735,6 +742,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     supportsOfficialVirtualMachineSettings = repo.supportsOfficialVirtualMachineSettings(),
                     supportsOfficialVirtualMachineImageImport =
                         repo.supportsOfficialVirtualMachineImageImport(),
+                    virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                        supportsOfficialTasks = repo.supportsOfficialVirtualMachineTasks(),
+                    ),
+                    nasPerformance = NasPerformanceWorkspaceState(
+                        supportsPerformance = repo.supportsPerformance(),
+                    ),
                     photoBackupSourceEnabled = transferStore.photoBackupSource(profile.id)?.enabled == true,
                     chatPinnedConversationIds = restoredPinnedConversationIds(profile.id),
                     fileBackgroundTasks = backgroundTaskSnapshot?.toFileBackgroundTaskPage()
@@ -966,6 +979,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 containerRegistryTags = current.containerRegistryTags.takeIf {
                     module == Module.CONTAINERS && current.selectedModule == Module.CONTAINERS
                 } ?: Loadable.Idle,
+                virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                    selectedTab = VirtualMachineTab.MACHINES,
+                ),
+                nasPerformance = current.nasPerformance.copy(
+                    selectedTab = NasSettingsTab.OVERVIEW,
+                ),
                 message = null,
             )
         }
@@ -977,7 +996,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             chatRealtimeClient = null
             chatRealtimeConnected = false
         }
-        if (module != Module.NAS_SETTINGS) {
+        if (module != Module.NAS_SETTINGS ||
+            state.nasPerformance.selectedTab == NasSettingsTab.PERFORMANCE
+        ) {
             stopNasPerformanceSampling(resetPause = true)
         }
         val navigationResult = if (state.selectedModule == module) {
@@ -985,7 +1006,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             WorkspaceNavigationResult.APPLIED
         }
-        if (shouldStopVirtualMachineTaskPollingAfterNavigation(
+        if (state.virtualMachineMutationState.selectedTab == VirtualMachineTab.TASKS ||
+            shouldStopVirtualMachineTaskPollingAfterNavigation(
                 state.selectedModule,
                 module,
                 navigationResult,
@@ -995,6 +1017,122 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         load(module)
         navigationResult
+    }
+
+    /** 外部固定任务页仅在 VMM 模块和公开 Task.Info v1 都可用时进入。 */
+    internal fun navigateToVirtualMachineTasks(): WorkspaceNavigationResult {
+        val state = _workspace.value ?: return WorkspaceNavigationResult.DEFERRED
+        if (state.availability.firstOrNull { it.module == Module.VIRTUAL_MACHINES }?.isAvailable == false ||
+            !state.virtualMachineMutationState.supportsOfficialTasks
+        ) {
+            _workspace.value = state.copy(
+                message = getApplication<Application>().getString(R.string.module_unavailable_generic),
+            )
+            return WorkspaceNavigationResult.REJECTED
+        }
+        if (state.selectedModule == Module.VIRTUAL_MACHINES &&
+            state.virtualMachineMutationState.selectedTab == VirtualMachineTab.TASKS
+        ) return WorkspaceNavigationResult.ALREADY_SELECTED
+        val moduleResult = navigateTo(WorkspaceRoute.ModuleRoot(Module.VIRTUAL_MACHINES))
+        if (moduleResult == WorkspaceNavigationResult.DEFERRED ||
+            moduleResult == WorkspaceNavigationResult.REJECTED
+        ) return moduleResult
+        if (_workspace.value?.virtualMachineMutationState?.selectedTab == VirtualMachineTab.TASKS) {
+            return WorkspaceNavigationResult.ALREADY_SELECTED
+        }
+        selectVirtualMachineTab(VirtualMachineTab.TASKS)
+        return if (_workspace.value?.virtualMachineMutationState?.selectedTab == VirtualMachineTab.TASKS) {
+            WorkspaceNavigationResult.APPLIED
+        } else {
+            WorkspaceNavigationResult.REJECTED
+        }
+    }
+
+    /** 外部固定性能页仅在 System.Utilization v1 已发现时进入。 */
+    internal fun navigateToNasSettingsPerformance(): WorkspaceNavigationResult {
+        val state = _workspace.value ?: return WorkspaceNavigationResult.DEFERRED
+        if (state.availability.firstOrNull { it.module == Module.NAS_SETTINGS }?.isAvailable == false ||
+            !state.nasPerformance.supportsPerformance
+        ) {
+            _workspace.value = state.copy(
+                message = getApplication<Application>().getString(R.string.module_unavailable_generic),
+            )
+            return WorkspaceNavigationResult.REJECTED
+        }
+        if (state.selectedModule == Module.NAS_SETTINGS &&
+            state.nasPerformance.selectedTab == NasSettingsTab.PERFORMANCE
+        ) return WorkspaceNavigationResult.ALREADY_SELECTED
+        val moduleResult = navigateTo(WorkspaceRoute.ModuleRoot(Module.NAS_SETTINGS))
+        if (moduleResult == WorkspaceNavigationResult.DEFERRED ||
+            moduleResult == WorkspaceNavigationResult.REJECTED
+        ) return moduleResult
+        if (_workspace.value?.nasPerformance?.selectedTab == NasSettingsTab.PERFORMANCE) {
+            return WorkspaceNavigationResult.ALREADY_SELECTED
+        }
+        selectNasSettingsTab(NasSettingsTab.PERFORMANCE)
+        return if (_workspace.value?.nasPerformance?.selectedTab == NasSettingsTab.PERFORMANCE) {
+            WorkspaceNavigationResult.APPLIED
+        } else {
+            WorkspaceNavigationResult.REJECTED
+        }
+    }
+
+    internal fun selectVirtualMachineTab(tab: VirtualMachineTab) {
+        val state = _workspace.value ?: return
+        if (state.selectedModule != Module.VIRTUAL_MACHINES) return
+        if (state.virtualMachineMutationState.selectedTab == tab) {
+            if (tab != VirtualMachineTab.TASKS) stopVirtualMachineTaskPolling()
+            return
+        }
+        _workspace.update { current ->
+            current?.takeIf { it.selectedModule == Module.VIRTUAL_MACHINES }
+                ?.copy(
+                    virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                        selectedTab = tab,
+                    ),
+                ) ?: current
+        }
+        if (tab != VirtualMachineTab.TASKS) {
+            stopVirtualMachineTaskPolling()
+            return
+        }
+        val overview = (_workspace.value?.virtualMachines as? Loadable.Ready)?.value
+        val repo = repository
+        val current = _workspace.value
+        if (repo != null && current != null && shouldPollVirtualMachineTasks(
+                current.selectedModule,
+                current.virtualMachineMutationState.selectedTab,
+                overview,
+            )
+        ) {
+            startVirtualMachineTaskPolling(repo, current.profile.id)
+        }
+    }
+
+    internal fun selectNasSettingsTab(tab: NasSettingsTab) {
+        val state = _workspace.value ?: return
+        if (state.selectedModule != Module.NAS_SETTINGS) return
+        if (state.nasPerformance.selectedTab == tab) {
+            if (tab != NasSettingsTab.PERFORMANCE) stopNasPerformanceSampling(resetPause = true)
+            return
+        }
+        _workspace.update { current ->
+            current?.takeIf { it.selectedModule == Module.NAS_SETTINGS }
+                ?.copy(nasPerformance = current.nasPerformance.copy(selectedTab = tab)) ?: current
+        }
+        if (tab == NasSettingsTab.PERFORMANCE) {
+            setNasPerformanceVisible(true)
+        } else {
+            stopNasPerformanceSampling(resetPause = true)
+        }
+    }
+
+    internal fun closeVirtualMachineTasks() {
+        selectVirtualMachineTab(VirtualMachineTab.MACHINES)
+    }
+
+    internal fun closeNasSettingsPerformance() {
+        selectNasSettingsTab(NasSettingsTab.OVERVIEW)
     }
 
     /** 依据当前领域状态派生的强类型栈返回一级，不复制路径或会话标识。 */
@@ -1026,6 +1164,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             WorkspaceRoute.ContainerRegistry -> {
                 closeContainerRegistry()
+                true
+            }
+            WorkspaceRoute.VirtualMachineTasks -> {
+                closeVirtualMachineTasks()
+                true
+            }
+            WorkspaceRoute.NasSettingsPerformance -> {
+                closeNasSettingsPerformance()
                 true
             }
             is WorkspaceRoute.ModuleRoot, null -> false
@@ -1159,7 +1305,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 } ?: current
                             }
                             val overview = acceptedOverview
-                            if (shouldPollVirtualMachineTasks(Module.VIRTUAL_MACHINES, overview)) {
+                            val latest = _workspace.value
+                            if (latest != null && shouldPollVirtualMachineTasks(
+                                    latest.selectedModule,
+                                    latest.virtualMachineMutationState.selectedTab,
+                                    overview,
+                                )
+                            ) {
                                 startVirtualMachineTaskPolling(repo, token.profileId)
                             } else {
                                 stopVirtualMachineTaskPolling()
@@ -1268,7 +1420,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val repo = repository ?: return false
         val current = _workspace.value ?: return false
         val overview = (current.virtualMachines as? Loadable.Ready)?.value ?: return false
-        if (!shouldPollVirtualMachineTasks(current.selectedModule, overview)) return false
+        if (!shouldPollVirtualMachineTasks(
+                current.selectedModule,
+                current.virtualMachineMutationState.selectedTab,
+                overview,
+            )
+        ) return false
         startVirtualMachineTaskPolling(repo, current.profile.id, immediate = true)
         return true
     }
@@ -1288,14 +1445,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val beforeOverview = (before.virtualMachines as? Loadable.Ready)?.value
                         ?: return@launch
                     if (repository !== repo || before.profile.id != profileId ||
-                        before.selectedModule != Module.VIRTUAL_MACHINES ||
-                        generation != virtualMachineTaskPollingGeneration.get() ||
-                        beforeOverview.tasks.none { !it.isFinished }
+                        !shouldPollVirtualMachineTasks(
+                            before.selectedModule,
+                            before.virtualMachineMutationState.selectedTab,
+                            beforeOverview,
+                        ) ||
+                        generation != virtualMachineTaskPollingGeneration.get()
                     ) return@launch
                     _workspace.update { state ->
                         state?.takeIf {
-                            repository === repo && it.profile.id == profileId &&
+                                repository === repo && it.profile.id == profileId &&
                                 it.selectedModule == Module.VIRTUAL_MACHINES &&
+                                it.virtualMachineMutationState.selectedTab == VirtualMachineTab.TASKS &&
                                 generation == virtualMachineTaskPollingGeneration.get()
                         }?.copy(
                             virtualMachineMutationState = state.virtualMachineMutationState.copy(
@@ -1312,6 +1473,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             state?.takeIf {
                                 repository === repo && it.profile.id == profileId &&
                                     it.selectedModule == Module.VIRTUAL_MACHINES &&
+                                    it.virtualMachineMutationState.selectedTab == VirtualMachineTab.TASKS &&
                                     generation == virtualMachineTaskPollingGeneration.get()
                             }?.withVirtualMachineTaskPollingFailure(error.asDsmFailure()) ?: state
                         }
@@ -1323,6 +1485,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         state?.takeIf {
                             overview != null && repository === repo && it.profile.id == profileId &&
                                 it.selectedModule == Module.VIRTUAL_MACHINES &&
+                                it.virtualMachineMutationState.selectedTab == VirtualMachineTab.TASKS &&
                                 generation == virtualMachineTaskPollingGeneration.get()
                         }?.withVirtualMachineTaskPollingResult(tasks)?.also {
                             hasUnfinishedTasks = tasks.any { task -> !task.isFinished }
@@ -12258,22 +12421,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setNasPerformanceVisible(visible: Boolean) {
-        nasPerformanceVisible = visible
         if (!visible) {
             stopNasPerformanceSampling(resetPause = true)
             return
         }
+        val state = _workspace.value ?: return
+        if (state.selectedModule != Module.NAS_SETTINGS ||
+            state.nasPerformance.selectedTab != NasSettingsTab.PERFORMANCE
+        ) return
+        nasPerformanceVisible = true
         val repo = repository ?: return
-        if (_workspace.value?.selectedModule == Module.NAS_SETTINGS) {
-            startNasPerformanceSampling(repo)
-        }
+        startNasPerformanceSampling(repo)
     }
 
     fun toggleNasPerformancePause() {
         val state = _workspace.value ?: return
-        val pause = !state.nasPerformanceIsPaused
-        _workspace.update { it?.copy(nasPerformanceIsPaused = pause) }
+        val pause = !state.nasPerformance.isPaused
+        _workspace.update { current ->
+            current?.copy(nasPerformance = current.nasPerformance.copy(isPaused = pause))
+        }
         if (pause) {
+            nasPerformanceGeneration.incrementAndGet()
             nasPerformanceJob?.cancel()
             nasPerformanceJob = null
         } else {
@@ -12283,12 +12451,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun retryNasPerformance() {
         val repo = repository ?: return
-        if (!nasPerformanceVisible || _workspace.value?.selectedModule != Module.NAS_SETTINGS) return
+        if (!nasPerformanceVisible || _workspace.value?.selectedModule != Module.NAS_SETTINGS ||
+            _workspace.value?.nasPerformance?.selectedTab != NasSettingsTab.PERFORMANCE
+        ) return
         _workspace.update { state ->
             state?.copy(
-                nasPerformanceError = null,
-                nasPerformanceIsPaused = false,
-                nasPerformanceIsLoading = state.nasPerformanceHistory.isEmpty(),
+                nasPerformance = state.nasPerformance.copy(
+                    error = null,
+                    isPaused = false,
+                    isLoading = state.nasPerformance.history.isEmpty(),
+                ),
             )
         }
         startNasPerformanceSampling(repo)
@@ -12297,43 +12469,69 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun startNasPerformanceSampling(repo: DsmRepository) {
         val state = _workspace.value ?: return
         if (!nasPerformanceVisible || state.selectedModule != Module.NAS_SETTINGS ||
-            state.nasPerformanceIsPaused || nasPerformanceJob?.isActive == true
+            state.nasPerformance.selectedTab != NasSettingsTab.PERFORMANCE ||
+            state.nasPerformance.isPaused || nasPerformanceJob?.isActive == true
         ) return
+        val token = NasPerformanceRequestToken(
+            generation = nasPerformanceGeneration.incrementAndGet(),
+            profileId = state.profile.id,
+        )
         nasPerformanceJob = viewModelScope.launch {
             while (true) {
-                val current = _workspace.value
-                if (!nasPerformanceVisible || current?.selectedModule != Module.NAS_SETTINGS ||
-                    current.nasPerformanceIsPaused
-                ) break
-                _workspace.update {
-                    it?.copy(
-                        nasPerformanceIsLoading = it.nasPerformanceHistory.isEmpty() &&
-                            it.nasPerformanceError == null,
+                val current = _workspace.value ?: break
+                if (!current.matchesNasPerformanceRequest(
+                        token,
+                        nasPerformanceGeneration.get(),
+                        repository === repo,
+                        nasPerformanceVisible,
                     )
+                ) break
+                _workspace.update { workspace ->
+                    workspace?.takeIf { it.matchesNasPerformanceRequest(
+                        token,
+                        nasPerformanceGeneration.get(),
+                        repository === repo,
+                        nasPerformanceVisible,
+                    ) }?.copy(
+                        nasPerformance = workspace.nasPerformance.copy(
+                            isLoading = workspace.nasPerformance.history.isEmpty() &&
+                                workspace.nasPerformance.error == null,
+                        ),
+                    ) ?: workspace
                 }
                 runCatching { repo.performanceSample() }
                     .onSuccess { sample ->
                         _workspace.update { workspace ->
-                            workspace?.takeIf {
-                                nasPerformanceVisible && it.selectedModule == Module.NAS_SETTINGS
-                            }?.copy(
-                                nasPerformanceHistory = appendPerformanceSample(
-                                    workspace.nasPerformanceHistory,
-                                    sample,
+                            workspace?.takeIf { it.matchesNasPerformanceRequest(
+                                token,
+                                nasPerformanceGeneration.get(),
+                                repository === repo,
+                                nasPerformanceVisible,
+                            ) }?.copy(
+                                nasPerformance = workspace.nasPerformance.copy(
+                                    history = appendPerformanceSample(
+                                        workspace.nasPerformance.history,
+                                        sample,
+                                    ),
+                                    isLoading = false,
+                                    error = null,
                                 ),
-                                nasPerformanceIsLoading = false,
-                                nasPerformanceError = null,
                             ) ?: workspace
                         }
                     }
                     .onFailure { error ->
                         if (error is CancellationException) throw error
                         _workspace.update { workspace ->
-                            workspace?.takeIf {
-                                nasPerformanceVisible && it.selectedModule == Module.NAS_SETTINGS
-                            }?.copy(
-                                nasPerformanceIsLoading = false,
-                                nasPerformanceError = error.asDsmFailure(),
+                            workspace?.takeIf { it.matchesNasPerformanceRequest(
+                                token,
+                                nasPerformanceGeneration.get(),
+                                repository === repo,
+                                nasPerformanceVisible,
+                            ) }?.copy(
+                                nasPerformance = workspace.nasPerformance.copy(
+                                    isLoading = false,
+                                    error = error.asDsmFailure(),
+                                ),
                             ) ?: workspace
                         }
                     }
@@ -12344,12 +12542,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun stopNasPerformanceSampling(resetPause: Boolean) {
         nasPerformanceVisible = false
+        nasPerformanceGeneration.incrementAndGet()
         nasPerformanceJob?.cancel()
         nasPerformanceJob = null
         _workspace.update { state ->
             state?.copy(
-                nasPerformanceIsLoading = false,
-                nasPerformanceIsPaused = if (resetPause) false else state.nasPerformanceIsPaused,
+                nasPerformance = state.nasPerformance.copy(
+                    isLoading = false,
+                    isPaused = if (resetPause) false else state.nasPerformance.isPaused,
+                ),
             )
         }
     }
@@ -14026,6 +14227,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 isPerformingAction = true,
                 message = null,
                 virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                    selectedTab = state.selectedTab,
+                    supportsOfficialTasks = state.supportsOfficialTasks,
                     creationEditorVisible = state.creationEditorVisible,
                     target = target,
                     creationDraft = creationDraft,
@@ -14312,7 +14515,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (!canDismissVirtualMachineMutation(current.virtualMachineMutationState)) return false
         virtualMachineMutationGeneration.incrementAndGet()
         _workspace.value = current.copy(
-            virtualMachineMutationState = VirtualMachineMutationWorkspaceState(),
+            virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                selectedTab = current.virtualMachineMutationState.selectedTab,
+                supportsOfficialTasks = current.virtualMachineMutationState.supportsOfficialTasks,
+            ),
         )
         true
     }
@@ -16391,6 +16597,10 @@ internal fun WorkspaceState.workspaceRouteStack(): WorkspaceRouteStack =
             photoViewer.current.path == previewItem?.path,
         hasDownloadTaskDetails = selectedModule == Module.DOWNLOADS && downloadDetailsTask != null,
         hasContainerRegistry = selectedModule == Module.CONTAINERS && containerRegistryVisible,
+        hasVirtualMachineTasks = selectedModule == Module.VIRTUAL_MACHINES &&
+            virtualMachineMutationState.selectedTab == VirtualMachineTab.TASKS,
+        hasNasSettingsPerformance = selectedModule == Module.NAS_SETTINGS &&
+            nasPerformance.selectedTab == NasSettingsTab.PERFORMANCE,
     )
 
 internal fun WorkspaceState.withDownloads(

@@ -16,6 +16,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -91,11 +92,18 @@ class NasPerformanceRepositoryTest {
         val transport = PerformanceInterceptor("""{"success":true,"data":{}}""")
         val repository = repository(transport, includeCapability = false)
 
+        assertFalse(repository.supportsPerformance())
         val failure = runCatching { repository.performanceSample() }.exceptionOrNull()
 
         assertTrue(failure is DsmFailure)
         assertEquals(DsmErrorKind.FEATURE_UNSUPPORTED, (failure as DsmFailure).kind)
         assertNull(transport.request)
+    }
+
+    @Test
+    fun `性能固定页能力门禁只接受已发现的Utilization v1`() {
+        assertTrue(repository(PerformanceInterceptor("{}"), includeCapability = true).supportsPerformance())
+        assertFalse(repository(PerformanceInterceptor("{}"), includeCapability = false).supportsPerformance())
     }
 
     private fun repository(

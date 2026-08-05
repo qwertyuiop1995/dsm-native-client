@@ -46,16 +46,26 @@ python3 -m unittest discover -s tools/codex/tests -p 'test_check_android_motion_
   `Medium_Phone_API_35` 共 56/56 通过。静态表单、已加载实体详情和没有筛选器的列表
   只覆盖真实适用态，不制造虚假 loading/error/筛选空。
 - 严格按 `fontScale = 2f` 复核，不把 `Density(2f, 1f)` 的显示密度测试冒充大字体。
-  当前 21 个主页面/页根中 18 个已有生产 Composable 证据；缺口为
-  `TransfersScreen`、`NasPerformanceScreen` 和 NAS 日志页根。
+  当前 21 个主页面/页根均有生产 Composable 证据；第 76 批新增
+  `TransfersScreen`、`NasPerformanceScreen` 和 NAS 设置真实日志页签三项 360dp 宽度
+  证据，标题、错误说明和恢复操作均可到达。
 - 确认框按通用 `ConfirmDialog`、13 个专用确认组件以及文件上传覆盖确认、文本修改
-  丢弃确认统计；当前只有 `RemoteAccessConfirmationDialog` 有明确 2× 证据，其余保持
-  未完成。宿主 `Box` 的宽高不会约束独立 `Dialog` 窗口，因此只继承 `fontScale=2f`
-  的测试不得表述为已完成小屏对话框验收。
-- 持久反馈卡仍缺 `DownloadSettingsMutationFeedbackCard`、DDNS 反馈/失败卡、共享
-  `ManagementMutationFeedbackCard`、共享 `SettingsMutationFeedbackCard` 和
-  `PowerActionFeedbackCard` 的 2× 证据；既有 Chat、File Station、Download 创建/控制/RSS、
-  VMM、连接、区域、文件服务、终端、代理和 Ethernet 反馈卡已有局部证据。
+  丢弃确认统计；16 个确认场景均已在生产组件或真实生产父页面中以 `fontScale=2f`
+  核对标题、影响说明和两端操作。宿主 `Box` 的宽高不会约束独立 `Dialog` 窗口，
+  因此该结论只代表 2× 字体证据，不表述为小屏对话框验收。
+- 持久反馈按 15 个生产组件族核对。`PersistentFeedbackFontScaleMatrixTest` 的 12 个
+  测试方法直接覆盖 Chat、File Station、Download 设置/控制、DDNS、Management、
+  Connection、Region、File Service/Terminal/Proxy、结构 Settings、Ethernet 和 Power；
+  其中共享组件继续展开套件/目录/SMART、安全/硬件/远程访问及三个服务设置上下文。
+  Download 创建由 `DownloadCreationUiTest.深色两倍字体下异常与恢复操作仍可滚动显示`
+  覆盖，RSS 由 `DownloadRssMutationUiTest.未确认结果在窄屏深色两倍字体下只能再次核对且达到48dp`
+  覆盖，VMM 由 `VirtualMachineMutationFeedbackTest.异常与刷新失败在深色两倍字体下保持刷新门禁`
+  覆盖。所有反馈证据均核对说明、恢复/继续/关闭操作和播报语义；新增矩阵使用
+  320dp × 480dp 可滚动视口。
+- 第 76 批 API 35 最终联跑 `PageFontScaleMatrixTest`、
+  `ConfirmationFontScaleMatrixTest`、`PersistentFeedbackFontScaleMatrixTest` 及上述三个
+  既有反馈测试类，共 47/47、0 跳过、0 失败。
 
-因此“全部主页面、确认框和持久反馈卡完成 2× 字体矩阵”继续保持未勾选；真实 TalkBack、
-平板/折叠屏、键盘鼠标、OEM 字体/显示缩放和实体机设备矩阵也继续保持未验证。
+因此“全部主页面、确认框和持久反馈卡完成 2× 字体矩阵”已完成；真实 TalkBack、
+平板/折叠屏、键盘鼠标、OEM 字体/显示缩放和实体机设备矩阵仍保持未验证，不能由
+Compose 语义测试替代。

@@ -12,6 +12,12 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.PhotoTimelineProgress
 
 /** 仅使用公开 File Station API 的基础照片库适配器。 */
 class PhotoRepository(private val files: DsmRepository) {
+    /** 从公开 File Station 单项读取重新确认外链目标，并只投影照片模块支持的类型。 */
+    suspend fun item(space: PhotoSpace, path: String): PhotoItem? {
+        require(path.isWithin(space.rootPath)) { "Photo item is outside the selected space" }
+        return files.fileInfo(path)?.let(::photoItem)
+    }
+
     suspend fun page(
         space: PhotoSpace,
         folderPath: String,

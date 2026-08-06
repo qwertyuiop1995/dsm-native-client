@@ -41,6 +41,9 @@
     <string name="cancel">取消</string>
     <string name="open_navigation">打开导航</string>
     <string name="refresh">刷新</string>
+    <string name="copy_page_link">复制此页面的本机链接</string>
+    <string name="page_link_copied">链接已复制。只有在此设备登录对应 NAS 后才能打开。</string>
+    <string name="page_link_unavailable">此页面暂时无法通过链接打开。请返回并刷新后重试。</string>
     <string name="processing_action">正在处理操作</string>
     <string name="unavailable">不可用</string>
     <string name="events">事件</string>

@@ -39,7 +39,7 @@ FLAT_RESULT_COORDINATORS = {"action", "nasSettingsMutation"}
 # 数据流；任一文件内容、调用数量或调用所在文件变化都会要求重新审查并更新指纹。
 AUDITED_PRODUCTION_FILES = {
     "io/github/qwertyuiop1995/dsmnativeclient/AppViewModel.kt": (
-        "16691f3847572552c62646b95d4f422b5d53c477cbbf88facb81e44482d39ba1",
+        "55ebf2dc26640f046ffcbf1921b1fd3c9d8632c54c1ee41caeaf8527c2417db3",
         66,
     ),
     "io/github/qwertyuiop1995/dsmnativeclient/PhotoBackupWorker.kt": (
@@ -55,7 +55,7 @@ AUDITED_PRODUCTION_FILES = {
         6,
     ),
     "io/github/qwertyuiop1995/dsmnativeclient/data/DsmRepository.kt": (
-        "b0a9c7fbd7592f0ce2be8781d8a7801046d94847cc28b22fbaa1dced8230b7d1",
+        "778c161354b97da0aff2321f16041a6686b8fe4ad8e672274e7e4ccfeb2cbee1",
         1,
     ),
 }

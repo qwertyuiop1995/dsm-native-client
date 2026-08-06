@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Refresh
@@ -138,6 +139,8 @@ internal fun WorkspaceShell(
     onSwitchNas: () -> Unit = {},
     onLogout: () -> Unit,
     onMessageShown: () -> Unit,
+    canCopyPageLink: Boolean = false,
+    onCopyPageLink: () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -240,6 +243,17 @@ internal fun WorkspaceShell(
                             }
                         },
                         actions = {
+                            if (canCopyPageLink) {
+                                IconButton(
+                                    onClick = onCopyPageLink,
+                                    modifier = Modifier.size(48.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Link,
+                                        contentDescription = stringResource(R.string.copy_page_link),
+                                    )
+                                }
+                            }
                             IconButton(onClick = onRefresh) {
                                 Icon(
                                     Icons.Outlined.Refresh,

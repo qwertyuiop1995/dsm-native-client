@@ -114,4 +114,45 @@ data class FileBrowserState(
         }
         return filtered.sortedWith(if (sortAscending) comparator else comparator.reversed())
     }
+
+    companion object {
+        /**
+         * 从已签发的规范目录路径重建正常目录层级。
+         *
+         * 外链不恢复搜索、筛选、选择或视图偏好，只恢复用户需要查看的目录和逐级返回路径。
+         */
+        fun fromCanonicalDirectoryPath(canonicalPath: String): FileBrowserState? =
+            canonicalFileDirectoryLineage(canonicalPath)?.let { lineage ->
+                FileBrowserState(
+                    path = lineage.last(),
+                    pathHistory = lineage.dropLast(1),
+                )
+            }
+
+        /**
+         * 从已签发的规范文件路径重建其父目录层级，供单项预览的返回栈使用。
+         */
+        fun fromCanonicalFilePath(canonicalPath: String): FileBrowserState? {
+            val segments = canonicalFilePathSegments(canonicalPath) ?: return null
+            if (segments.size < 2) return null
+            return fromCanonicalDirectoryPath("/${segments.dropLast(1).joinToString("/")}")
+        }
+    }
+}
+
+private fun canonicalFileDirectoryLineage(path: String): List<String>? {
+    val segments = canonicalFilePathSegments(path) ?: return null
+    return buildList {
+        add("")
+        segments.indices.forEach { index ->
+            add("/${segments.take(index + 1).joinToString("/")}")
+        }
+    }
+}
+
+private fun canonicalFilePathSegments(path: String): List<String>? {
+    if (!path.startsWith('/') || path == "/" || path.endsWith('/')) return null
+    val segments = path.drop(1).split('/')
+    if (segments.any { it.isEmpty() || it == "." || it == ".." || it == "#recycle" }) return null
+    return segments
 }

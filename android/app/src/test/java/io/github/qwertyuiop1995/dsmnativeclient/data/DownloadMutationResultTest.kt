@@ -222,6 +222,20 @@ class DownloadMutationResultTest {
     }
 
     @Test
+    fun `对象外链任务会读取后续分页而不误判为不存在`() = runTest {
+        val firstPage = (0 until 1_000).map { task("task-$it", "downloading") }
+        val transport = DownloadMutationInterceptor(
+            ok(taskListWithTotal(1_001, *firstPage.toTypedArray())),
+            ok(taskListWithTotal(1_001, task("target-task", "waiting"))),
+        )
+
+        val target = repository(transport).downloadTask("target-task")
+
+        assertEquals("target-task", target?.id)
+        assertEquals(listOf("0", "1000"), transport.requests.map { it.formFields()["offset"] })
+    }
+
+    @Test
     fun `严格任务列表拒绝分页期间total变化`() = runTest {
         val firstPage = (0 until 1_000).map { task("task-$it", "downloading") }
         val failure = runCatching {

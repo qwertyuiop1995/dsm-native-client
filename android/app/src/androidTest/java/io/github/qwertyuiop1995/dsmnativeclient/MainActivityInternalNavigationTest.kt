@@ -63,11 +63,11 @@ class MainActivityInternalNavigationTest {
 
         assertTrue(pending.pendingOpenTransfers)
         assertEquals(pending, pending.receive(request))
-        assertEquals(pending, pending.receive(null))
+        assertEquals(pending, pending.receive(null as InternalRouteRequest?))
 
         val consumed = pending.consume(request)
         assertFalse(consumed.pendingOpenTransfers)
-        assertEquals(consumed, consumed.receive(null))
+        assertEquals(consumed, consumed.receive(null as InternalRouteRequest?))
     }
 
     @Test
@@ -147,6 +147,47 @@ class MainActivityInternalNavigationTest {
 
         assertEquals(InternalRouteRequest.OPEN_PHOTOS, moduleState.pendingInternalRouteRequest())
         assertEquals(InternalRouteRequest.OPEN_TRANSFERS, transferState.pendingInternalRouteRequest())
+    }
+
+    @Test
+    fun 不透明对象入口只把规范令牌保存到Activity状态() {
+        val token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        val intent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("lanstash://open/object/$token"),
+        )
+
+        assertEquals(
+            PendingNavigationRequest.OpaqueObject(token),
+            intent.pendingNavigationRequest(),
+        )
+        assertEquals(null, intent.internalRouteRequest())
+
+        val restored = android.os.Bundle().apply {
+            putString("pending_opaque_token", token)
+            putString("pending_route", InternalRouteRequest.OPEN_SETTINGS.name)
+        }.pendingInternalNavigationState()
+
+        assertEquals(token, restored.pendingOpaqueToken)
+        assertEquals(null, restored.pendingRequest)
+        assertEquals(
+            PendingNavigationRequest.OpaqueObject(token),
+            restored.currentRequest,
+        )
+    }
+
+    @Test
+    fun 最新固定入口与不透明对象入口相互覆盖且消费幂等() {
+        val token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        val opaque = PendingNavigationRequest.OpaqueObject(token)
+        val fixed = PendingNavigationRequest.Fixed(InternalRouteRequest.OPEN_PHOTOS)
+
+        val opaqueState = InternalNavigationState().receive(opaque)
+        assertEquals(opaque, opaqueState.currentRequest)
+        assertEquals(fixed, opaqueState.receive(fixed).currentRequest)
+        assertEquals(opaque, opaqueState.receive(fixed).receive(opaque).currentRequest)
+        assertEquals(InternalNavigationState(), opaqueState.consume(opaque))
+        assertEquals(opaqueState, opaqueState.consume(fixed))
     }
 
     @Test

@@ -13,6 +13,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.ui.LanStashApp
 import io.github.qwertyuiop1995.dsmnativeclient.ui.theme.LanStashTheme
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -24,8 +25,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        internalNavigation = savedInstanceState?.pendingInternalRouteRequest()
-            ?.let { request -> InternalNavigationState().receive(request) }
+        internalNavigation = savedInstanceState?.pendingInternalNavigationState()
             ?: InternalNavigationState()
         enableEdgeToEdge()
         setContent {
@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_PENDING_ROUTE, internalNavigation.pendingRequest?.name)
+        outState.putString(STATE_PENDING_OPAQUE_TOKEN, internalNavigation.pendingOpaqueToken)
         super.onSaveInstanceState(outState)
     }
 
@@ -48,7 +49,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        val request = intent.internalRouteRequest()
+        val request = intent.pendingNavigationRequest()
+        if (request is PendingNavigationRequest.Fixed) {
+            model.cancelOpaqueExternalNavigation()
+        }
         if (request == null && intent?.action == Intent.ACTION_VIEW) {
             intent.data = null
         }
@@ -59,17 +63,23 @@ class MainActivity : AppCompatActivity() {
         if (request != null) {
             pendingNavigationIntent = intent
         }
-        val pending = internalNavigation.pendingRequest ?: return
+        val pending = internalNavigation.currentRequest ?: return
         internalNavigationJob?.cancel()
         val job = lifecycleScope.launch {
-            model.workspace.filterNotNull().first {
-                if (internalNavigation.pendingRequest != pending) return@first true
+            combine(
+                model.workspace.filterNotNull(),
+                model.opaqueExternalNavigationRevision,
+            ) { _, _ -> Unit }.first {
+                if (internalNavigation.currentRequest != pending) return@first true
                 navigatePendingRequest(pending) != WorkspaceNavigationResult.DEFERRED
             }
-            if (internalNavigation.pendingRequest == pending) {
+            if (internalNavigation.currentRequest == pending) {
                 internalNavigation = internalNavigation.consume(pending)
                 clearConsumedNavigationIntent(pendingNavigationIntent, pending)
                 clearConsumedNavigationIntent(this@MainActivity.intent, pending)
+                if (pending is PendingNavigationRequest.OpaqueObject) {
+                    model.completeOpaqueExternalNavigation(pending.token)
+                }
                 pendingNavigationIntent = null
             }
         }
@@ -79,7 +89,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun navigatePendingRequest(request: InternalRouteRequest): WorkspaceNavigationResult {
+    private fun navigatePendingRequest(
+        pending: PendingNavigationRequest,
+    ): WorkspaceNavigationResult {
+        if (pending is PendingNavigationRequest.OpaqueObject) {
+            return model.navigateToOpaqueExternalRoute(pending.token)
+        }
+        val request = (pending as PendingNavigationRequest.Fixed).request
+        return model.navigateExternalRequest(request.module) {
+            navigateFixedRequest(request)
+        }
+    }
+
+    private fun navigateFixedRequest(request: InternalRouteRequest): WorkspaceNavigationResult {
         when (request) {
             InternalRouteRequest.OPEN_CONTAINER_REGISTRY -> return model.navigateToContainerRegistry()
             InternalRouteRequest.OPEN_VIRTUAL_MACHINE_TASKS -> {
@@ -107,9 +129,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun clearConsumedNavigationIntent(
         intent: Intent?,
-        request: InternalRouteRequest,
+        request: PendingNavigationRequest,
     ) {
-        if (intent.internalRouteRequest() != request) return
+        if (intent.pendingNavigationRequest() != request) return
         clearNavigationPayload(intent)
     }
 
@@ -120,6 +142,26 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val STATE_PENDING_ROUTE = "pending_route"
+        const val STATE_PENDING_OPAQUE_TOKEN = "pending_opaque_token"
+    }
+}
+
+/** Activity 与 ViewModel 之间只传固定枚举或不透明令牌，解密后的业务目标永不进入 Bundle。 */
+internal sealed interface PendingNavigationRequest {
+    data class Fixed(val request: InternalRouteRequest) : PendingNavigationRequest
+    data class OpaqueObject(val token: String) : PendingNavigationRequest
+}
+
+internal fun Bundle.pendingInternalNavigationState(): InternalNavigationState {
+    val opaqueToken = getString("pending_opaque_token")
+        ?.let(ExternalWorkspaceRoute.OpaqueObject::fromTokenOrNull)
+        ?.token
+    return if (opaqueToken != null) {
+        InternalNavigationState(pendingOpaqueToken = opaqueToken)
+    } else {
+        pendingInternalRouteRequest()
+            ?.let { request -> InternalNavigationState().receive(request) }
+            ?: InternalNavigationState()
     }
 }
 
@@ -170,7 +212,18 @@ internal enum class InternalRouteRequest(
 
 internal data class InternalNavigationState(
     val pendingRequest: InternalRouteRequest? = null,
+    val pendingOpaqueToken: String? = null,
 ) {
+    init {
+        require(pendingRequest == null || pendingOpaqueToken == null) {
+            "Only one pending navigation request may be retained"
+        }
+    }
+
+    val currentRequest: PendingNavigationRequest?
+        get() = pendingOpaqueToken?.let(PendingNavigationRequest::OpaqueObject)
+            ?: pendingRequest?.let(PendingNavigationRequest::Fixed)
+
     val pendingOpenTransfers: Boolean
         get() = pendingRequest == InternalRouteRequest.OPEN_TRANSFERS
 
@@ -178,23 +231,52 @@ internal data class InternalNavigationState(
         get() = pendingRequest?.module
 
     fun receive(request: InternalRouteRequest?): InternalNavigationState =
-        if (request != null) copy(pendingRequest = request) else this
+        if (request != null) copy(pendingRequest = request, pendingOpaqueToken = null) else this
+
+    fun receive(request: PendingNavigationRequest?): InternalNavigationState = when (request) {
+        is PendingNavigationRequest.Fixed -> receive(request.request)
+        is PendingNavigationRequest.OpaqueObject -> copy(
+            pendingRequest = null,
+            pendingOpaqueToken = request.token,
+        )
+        null -> this
+    }
 
     fun consume(request: InternalRouteRequest): InternalNavigationState =
         if (pendingRequest == request) copy(pendingRequest = null) else this
+
+    fun consume(request: PendingNavigationRequest): InternalNavigationState = when (request) {
+        is PendingNavigationRequest.Fixed -> consume(request.request)
+        is PendingNavigationRequest.OpaqueObject -> if (pendingOpaqueToken == request.token) {
+            copy(pendingOpaqueToken = null)
+        } else {
+            this
+        }
+    }
 }
 
-internal fun Intent?.internalRouteRequest(): InternalRouteRequest? = when {
+internal fun Intent?.pendingNavigationRequest(): PendingNavigationRequest? = when {
     this?.action == Intent.ACTION_VIEW ->
         when (val route = dataString.externalWorkspaceRoute()) {
-            is ExternalWorkspaceRoute.ModuleRoot -> InternalRouteRequest.openModule(route.module)
-            ExternalWorkspaceRoute.ContainerRegistry -> InternalRouteRequest.OPEN_CONTAINER_REGISTRY
-            ExternalWorkspaceRoute.VirtualMachineTasks -> InternalRouteRequest.OPEN_VIRTUAL_MACHINE_TASKS
+            is ExternalWorkspaceRoute.ModuleRoot -> PendingNavigationRequest.Fixed(
+                InternalRouteRequest.openModule(route.module),
+            )
+            ExternalWorkspaceRoute.ContainerRegistry -> PendingNavigationRequest.Fixed(
+                InternalRouteRequest.OPEN_CONTAINER_REGISTRY,
+            )
+            ExternalWorkspaceRoute.VirtualMachineTasks -> PendingNavigationRequest.Fixed(
+                InternalRouteRequest.OPEN_VIRTUAL_MACHINE_TASKS,
+            )
             ExternalWorkspaceRoute.NasSettingsPerformance ->
-                InternalRouteRequest.OPEN_NAS_SETTINGS_PERFORMANCE
+                PendingNavigationRequest.Fixed(InternalRouteRequest.OPEN_NAS_SETTINGS_PERFORMANCE)
+            is ExternalWorkspaceRoute.OpaqueObject -> PendingNavigationRequest.OpaqueObject(route.token)
             null -> null
         }
     this?.getBooleanExtra(TransferNotifications.EXTRA_OPEN_TRANSFERS, false) == true ->
-        InternalRouteRequest.OPEN_TRANSFERS
+        PendingNavigationRequest.Fixed(InternalRouteRequest.OPEN_TRANSFERS)
     else -> null
 }
+
+/** 保留固定路由测试和旧调用方语义；动态对象必须使用 [pendingNavigationRequest]。 */
+internal fun Intent?.internalRouteRequest(): InternalRouteRequest? =
+    (pendingNavigationRequest() as? PendingNavigationRequest.Fixed)?.request

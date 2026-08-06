@@ -181,6 +181,8 @@ private fun WorkspaceScreen(state: WorkspaceState, model: AppViewModel) {
         onSwitchNas = model::switchNas,
         onLogout = model::logout,
         onMessageShown = model::clearMessage,
+        canCopyPageLink = model.canCopyCurrentPageLink(),
+        onCopyPageLink = { model.copyCurrentPageLink() },
     ) {
         WorkspaceModuleSaveableState(
             profileId = state.profile.id,

@@ -81,6 +81,34 @@ class PhotoRepositoryTest {
     }
 
     @Test
+    fun `外链单项只从当前照片空间读取并映射支持的媒体`() = runBlocking {
+        val transport = PhotoListInterceptor(
+            listResponse(
+                1,
+                """{"name":"target.jpg","path":"/home/Photos/target.jpg","isdir":false}""",
+            ),
+        )
+
+        val item = PhotoRepository(repository(transport)).item(
+            PERSONAL_PHOTO_SPACE,
+            "/home/Photos/target.jpg",
+        )
+
+        assertEquals(PhotoItemKind.IMAGE, item?.kind)
+        assertEquals("getinfo", transport.requests.single().formFields()["method"])
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `外链单项拒绝越过照片空间边界`() {
+        runBlocking {
+            PhotoRepository(repository(PhotoListInterceptor())).item(
+                PERSONAL_PHOTO_SPACE,
+                "/photo/target.jpg",
+            )
+        }
+    }
+
+    @Test
     fun `时间轴递归扫描且子文件夹失败不遮蔽已有内容`() = runBlocking {
         val transport = PhotoListInterceptor(
             listResponse(

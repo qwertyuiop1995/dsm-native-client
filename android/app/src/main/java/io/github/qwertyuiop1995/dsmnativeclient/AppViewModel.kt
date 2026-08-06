@@ -112,6 +112,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.NasSystemUpdateInfo
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasDiskTestStatus
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasDiskTestType
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasStorageDisk
+import io.github.qwertyuiop1995.dsmnativeclient.domain.OpaqueWorkspaceTarget
 import io.github.qwertyuiop1995.dsmnativeclient.domain.PerformanceSample
 import io.github.qwertyuiop1995.dsmnativeclient.domain.StorageAnalysisProgress
 import io.github.qwertyuiop1995.dsmnativeclient.domain.StorageAnalysisSnapshot
@@ -326,6 +327,41 @@ private data class VirtualMachineLocalImagePreparation(
     val displayName: String,
 )
 
+/**
+ * 对象外链在 ViewModel 内短暂保留的解析上下文。
+ *
+ * URI 只携带令牌；这里的目标来自加密资料存储，绝不进入 Activity Bundle 或持久 UI 状态。
+ */
+private data class OpaqueExternalNavigationRequest(
+    val token: String,
+    val profileId: String,
+    val target: OpaqueWorkspaceTarget,
+    val repository: DsmRepository,
+    val generation: Long,
+    var phase: OpaqueExternalNavigationPhase,
+)
+
+private enum class OpaqueExternalNavigationPhase {
+    RESOLVING,
+    RETRYABLE,
+    WAITING_FOR_PREVIEW_DISCARD,
+    APPLIED,
+    REJECTED,
+}
+
+private enum class OpaqueExternalNavigationResolution {
+    APPLIED,
+    DEFERRED,
+    REJECTED,
+    STALE,
+}
+
+private sealed interface WorkspacePageLinkDestination {
+    data class Fixed(val uri: String) : WorkspacePageLinkDestination
+    data class Opaque(val target: OpaqueWorkspaceTarget) : WorkspacePageLinkDestination
+    data object Unavailable : WorkspacePageLinkDestination
+}
+
 
 
 
@@ -368,6 +404,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _virtualMachineLocalImageImports.asStateFlow()
     private var previewJob: Job? = null
     private var pendingModuleAfterPreviewDiscard: Module? = null
+    private var activeExternalNavigationModule: Module? = null
+    private var pendingExternalModuleAfterPreviewDiscard: Module? = null
+    private var cancelledExternalNavigationModule: Module? = null
+    private var cancelledOpaqueExternalNavigationToken: String? = null
+    private var opaqueExternalNavigationJob: Job? = null
+    private var opaqueExternalNavigation: OpaqueExternalNavigationRequest? = null
+    private val opaqueExternalNavigationGeneration = AtomicLong(0)
+    private val _opaqueExternalNavigationRevision = MutableStateFlow(0L)
+    internal val opaqueExternalNavigationRevision: StateFlow<Long> =
+        _opaqueExternalNavigationRevision.asStateFlow()
     private var photoTimelineJob: Job? = null
     private var chatRefreshJob: Job? = null
     private var chatRealtimeRefreshJob: Job? = null
@@ -879,7 +925,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun select(module: Module) {
+        cancelOpaqueExternalNavigation(consumePending = true)
         navigateTo(WorkspaceRoute.ModuleRoot(module))
+    }
+
+    internal fun navigateExternalRequest(
+        module: Module,
+        navigation: () -> WorkspaceNavigationResult,
+    ): WorkspaceNavigationResult {
+        if (cancelledExternalNavigationModule == module) {
+            cancelledExternalNavigationModule = null
+            return WorkspaceNavigationResult.REJECTED
+        }
+        activeExternalNavigationModule = module
+        return try {
+            navigation()
+        } finally {
+            activeExternalNavigationModule = null
+        }
     }
 
     /** 顶层模块导航只接受强类型根路由，不把模块切换误当成可返回的详情历史。 */
@@ -948,6 +1011,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (state.hasDirtyTextPreview()) {
                 pendingModuleAfterPreviewDiscard = module
+                if (activeExternalNavigationModule == module) {
+                    pendingExternalModuleAfterPreviewDiscard = module
+                }
                 _workspace.update {
                     it?.copy(
                         previewDiscardConfirmationVisible = true,
@@ -1049,6 +1115,466 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         load(module)
         navigationResult
+    }
+
+    /**
+     * 解析并恢复本机不透明对象外链。
+     *
+     * 令牌映射只在当前资料的加密存储中读取；不匹配当前登录资料时拒绝，而不是自动切换 NAS。
+     */
+    internal fun navigateToOpaqueExternalRoute(token: String): WorkspaceNavigationResult {
+        if (cancelledOpaqueExternalNavigationToken == token) {
+            cancelledOpaqueExternalNavigationToken = null
+            return WorkspaceNavigationResult.REJECTED
+        }
+        if (ExternalWorkspaceRoute.OpaqueObject.fromTokenOrNull(token) == null) {
+            return opaqueExternalNavigationUnavailable()
+        }
+        val state = _workspace.value ?: return WorkspaceNavigationResult.DEFERRED
+        val repo = repository ?: return WorkspaceNavigationResult.DEFERRED
+        val existing = opaqueExternalNavigation
+        if (existing != null && existing.token == token && existing.profileId == state.profile.id &&
+            existing.repository === repo
+        ) {
+            return when (existing.phase) {
+                OpaqueExternalNavigationPhase.RESOLVING,
+                OpaqueExternalNavigationPhase.WAITING_FOR_PREVIEW_DISCARD,
+                -> WorkspaceNavigationResult.DEFERRED
+
+                OpaqueExternalNavigationPhase.RETRYABLE -> {
+                    existing.phase = OpaqueExternalNavigationPhase.RESOLVING
+                    launchOpaqueExternalNavigation(existing)
+                    WorkspaceNavigationResult.DEFERRED
+                }
+
+                OpaqueExternalNavigationPhase.APPLIED -> WorkspaceNavigationResult.APPLIED
+                OpaqueExternalNavigationPhase.REJECTED -> WorkspaceNavigationResult.REJECTED
+            }
+        }
+        if (existing != null) clearOpaqueExternalNavigation()
+
+        val record = store.opaqueWorkspaceRoute(token) ?: return opaqueExternalNavigationUnavailable()
+        if (record.profileId != state.profile.id) return opaqueExternalNavigationUnavailable()
+
+        val request = OpaqueExternalNavigationRequest(
+            token = token,
+            profileId = record.profileId,
+            target = record.target,
+            repository = repo,
+            generation = opaqueExternalNavigationGeneration.incrementAndGet(),
+            phase = OpaqueExternalNavigationPhase.RESOLVING,
+        )
+        opaqueExternalNavigation = request
+        _workspace.update { current ->
+            current?.takeIf {
+                it.profile.id == request.profileId && repository === request.repository
+            }?.copy(message = null) ?: current
+        }
+        if (deferOpaqueExternalNavigationForDirtyPreview(request)) {
+            return WorkspaceNavigationResult.DEFERRED
+        }
+        launchOpaqueExternalNavigation(request)
+        return WorkspaceNavigationResult.DEFERRED
+    }
+
+    /** Activity 消费 URI 后清除仅用于本次解析的内存上下文。 */
+    internal fun completeOpaqueExternalNavigation(token: String) {
+        if (opaqueExternalNavigation?.token == token) clearOpaqueExternalNavigation()
+    }
+
+    /** 新的固定外链或 Activity 意图替换当前对象外链时主动取消旧请求。 */
+    internal fun cancelOpaqueExternalNavigation(consumePending: Boolean = false) {
+        val token = opaqueExternalNavigation?.token
+        clearOpaqueExternalNavigation()
+        if (consumePending && token != null) {
+            cancelledOpaqueExternalNavigationToken = token
+            _opaqueExternalNavigationRevision.update { it + 1L }
+        }
+    }
+
+    private fun clearOpaqueExternalNavigation() {
+        val request = opaqueExternalNavigation
+        val ownsPreviewDiscardConfirmation =
+            request?.phase == OpaqueExternalNavigationPhase.WAITING_FOR_PREVIEW_DISCARD
+        opaqueExternalNavigationGeneration.incrementAndGet()
+        opaqueExternalNavigationJob?.cancel()
+        opaqueExternalNavigationJob = null
+        opaqueExternalNavigation = null
+        if (ownsPreviewDiscardConfirmation) {
+            pendingModuleAfterPreviewDiscard = null
+            _workspace.update { current ->
+                current?.copy(previewDiscardConfirmationVisible = false) ?: current
+            }
+        }
+    }
+
+    private fun cancelOpaqueExternalNavigationAfterPreviewDiscard() {
+        val request = opaqueExternalNavigation
+            ?.takeIf { it.phase == OpaqueExternalNavigationPhase.WAITING_FOR_PREVIEW_DISCARD }
+            ?: return
+        opaqueExternalNavigationGeneration.incrementAndGet()
+        opaqueExternalNavigationJob?.cancel()
+        opaqueExternalNavigationJob = null
+        request.phase = OpaqueExternalNavigationPhase.REJECTED
+        pendingModuleAfterPreviewDiscard = null
+        _opaqueExternalNavigationRevision.update { it + 1L }
+    }
+
+    private fun opaqueExternalNavigationUnavailable(): WorkspaceNavigationResult {
+        _workspace.update { current ->
+            current?.copy(
+                message = getApplication<Application>().getString(R.string.page_link_unavailable),
+            ) ?: current
+        }
+        return WorkspaceNavigationResult.REJECTED
+    }
+
+    private fun opaqueExternalNavigationMatches(request: OpaqueExternalNavigationRequest): Boolean {
+        val state = _workspace.value ?: return false
+        return opaqueExternalNavigation === request &&
+            opaqueExternalNavigationGeneration.get() == request.generation &&
+            request.phase == OpaqueExternalNavigationPhase.RESOLVING &&
+            repository === request.repository &&
+            state.profile.id == request.profileId
+    }
+
+    private fun deferOpaqueExternalNavigationForDirtyPreview(
+        request: OpaqueExternalNavigationRequest,
+    ): Boolean {
+        val state = _workspace.value ?: return false
+        if (!opaqueExternalNavigationMatches(request) || !state.hasDirtyTextPreview()) return false
+        val preservesCurrentPreview = request.target is OpaqueWorkspaceTarget.FilePreview &&
+            state.selectedModule == Module.FILES &&
+            state.previewOwner == PreviewOwner.FILES &&
+            state.previewItem?.path == request.target.canonicalPath
+        if (preservesCurrentPreview) return false
+        request.phase = OpaqueExternalNavigationPhase.WAITING_FOR_PREVIEW_DISCARD
+        pendingModuleAfterPreviewDiscard = null
+        _workspace.update { current ->
+            current?.takeIf { it.profile.id == request.profileId }?.copy(
+                previewDiscardConfirmationVisible = true,
+                previewDiscardClosesPreview = true,
+            ) ?: current
+        }
+        return true
+    }
+
+    private fun launchOpaqueExternalNavigation(request: OpaqueExternalNavigationRequest) {
+        opaqueExternalNavigationJob?.cancel()
+        val job = viewModelScope.launch {
+            when (resolveOpaqueExternalNavigation(request)) {
+                OpaqueExternalNavigationResolution.APPLIED -> {
+                    if (opaqueExternalNavigationMatches(request)) {
+                        request.phase = OpaqueExternalNavigationPhase.APPLIED
+                        _opaqueExternalNavigationRevision.update { it + 1L }
+                    }
+                }
+
+                OpaqueExternalNavigationResolution.REJECTED -> {
+                    if (opaqueExternalNavigationMatches(request)) {
+                        request.phase = OpaqueExternalNavigationPhase.REJECTED
+                        _opaqueExternalNavigationRevision.update { it + 1L }
+                        _workspace.update { current ->
+                            current?.takeIf {
+                                it.profile.id == request.profileId && repository === request.repository
+                            }?.copy(
+                                message = getApplication<Application>().getString(
+                                    R.string.page_link_unavailable,
+                                ),
+                            ) ?: current
+                        }
+                    }
+                }
+
+                OpaqueExternalNavigationResolution.DEFERRED,
+                -> if (opaqueExternalNavigationMatches(request)) {
+                    request.phase = OpaqueExternalNavigationPhase.RETRYABLE
+                }
+
+                OpaqueExternalNavigationResolution.STALE -> Unit
+            }
+        }
+        opaqueExternalNavigationJob = job
+        job.invokeOnCompletion {
+            if (opaqueExternalNavigationJob === job) opaqueExternalNavigationJob = null
+        }
+    }
+
+    private suspend fun resolveOpaqueExternalNavigation(
+        request: OpaqueExternalNavigationRequest,
+    ): OpaqueExternalNavigationResolution {
+        return try {
+        if (!opaqueExternalNavigationMatches(request)) return OpaqueExternalNavigationResolution.STALE
+        when (val target = request.target) {
+            is OpaqueWorkspaceTarget.FileDirectory -> {
+                val browser = FileBrowserState.fromCanonicalDirectoryPath(target.canonicalPath)
+                    ?: return OpaqueExternalNavigationResolution.REJECTED
+                val item = request.repository.fileInfo(target.canonicalPath)
+                if (!opaqueExternalNavigationMatches(request)) {
+                    OpaqueExternalNavigationResolution.STALE
+                } else if (item == null || !item.isDirectory || !item.canRead) {
+                    OpaqueExternalNavigationResolution.REJECTED
+                } else {
+                    applyOpaqueFileDirectoryNavigation(request, browser, item)
+                }
+            }
+
+            is OpaqueWorkspaceTarget.FilePreview -> {
+                val browser = FileBrowserState.fromCanonicalFilePath(target.canonicalPath)
+                    ?: return OpaqueExternalNavigationResolution.REJECTED
+                val item = request.repository.fileInfo(target.canonicalPath)
+                if (!opaqueExternalNavigationMatches(request)) {
+                    OpaqueExternalNavigationResolution.STALE
+                } else if (item == null || item.isDirectory || !item.canRead ||
+                    item.previewKind() == FilePreviewKind.UNSUPPORTED
+                ) {
+                    OpaqueExternalNavigationResolution.REJECTED
+                } else {
+                    applyOpaqueFilePreviewNavigation(request, browser, item)
+                }
+            }
+
+            is OpaqueWorkspaceTarget.PhotoFolder -> {
+                val state = _workspace.value ?: return OpaqueExternalNavigationResolution.STALE
+                val browser = state.photoBrowser.restoreCanonicalFolder(
+                    target.spaceId,
+                    target.canonicalPath,
+                ) ?: return OpaqueExternalNavigationResolution.REJECTED
+                val space = state.photoBrowser.spaces.firstOrNull { it.id == target.spaceId }
+                    ?: return OpaqueExternalNavigationResolution.REJECTED
+                val item = PhotoRepository(request.repository).item(space, target.canonicalPath)
+                if (!opaqueExternalNavigationMatches(request)) {
+                    OpaqueExternalNavigationResolution.STALE
+                } else if (item == null || item.kind != PhotoItemKind.FOLDER || !item.file.canRead) {
+                    OpaqueExternalNavigationResolution.REJECTED
+                } else {
+                    applyOpaquePhotoFolderNavigation(request, browser)
+                }
+            }
+
+            is OpaqueWorkspaceTarget.PhotoViewer -> {
+                val state = _workspace.value ?: return OpaqueExternalNavigationResolution.STALE
+                val browser = state.photoBrowser.restoreCanonicalMediaParent(
+                    target.spaceId,
+                    target.canonicalPath,
+                ) ?: return OpaqueExternalNavigationResolution.REJECTED
+                val space = state.photoBrowser.spaces.firstOrNull { it.id == target.spaceId }
+                    ?: return OpaqueExternalNavigationResolution.REJECTED
+                val item = PhotoRepository(request.repository).item(space, target.canonicalPath)
+                if (!opaqueExternalNavigationMatches(request)) {
+                    OpaqueExternalNavigationResolution.STALE
+                } else if (item == null || item.kind !in setOf(
+                        PhotoItemKind.IMAGE,
+                        PhotoItemKind.VIDEO,
+                    ) || !item.file.canRead || item.file.previewKind() == FilePreviewKind.UNSUPPORTED
+                ) {
+                    OpaqueExternalNavigationResolution.REJECTED
+                } else {
+                    applyOpaquePhotoViewerNavigation(request, browser, item)
+                }
+            }
+
+            is OpaqueWorkspaceTarget.ChatConversation -> {
+                val conversationId = target.conversationId.takeIf {
+                    it.isNotBlank() && it == it.trim()
+                } ?: return OpaqueExternalNavigationResolution.REJECTED
+                val conversation = request.repository.chatConversations()
+                    .firstOrNull { it.id == conversationId }
+                if (!opaqueExternalNavigationMatches(request)) {
+                    OpaqueExternalNavigationResolution.STALE
+                } else if (conversation == null) {
+                    OpaqueExternalNavigationResolution.REJECTED
+                } else {
+                    applyOpaqueChatConversationNavigation(request, conversation)
+                }
+            }
+
+            is OpaqueWorkspaceTarget.DownloadTask -> {
+                val taskId = target.taskId.takeIf { it.isNotBlank() && it == it.trim() }
+                    ?: return OpaqueExternalNavigationResolution.REJECTED
+                val task = request.repository.downloadTask(taskId)
+                if (!opaqueExternalNavigationMatches(request)) {
+                    OpaqueExternalNavigationResolution.STALE
+                } else if (task == null) {
+                    OpaqueExternalNavigationResolution.REJECTED
+                } else {
+                    applyOpaqueDownloadTaskNavigation(request, task)
+                }
+            }
+        }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            OpaqueExternalNavigationResolution.DEFERRED
+        }
+    }
+
+    private fun prepareOpaqueObjectNavigation(
+        request: OpaqueExternalNavigationRequest,
+        module: Module,
+    ): OpaqueExternalNavigationResolution {
+        if (!opaqueExternalNavigationMatches(request)) {
+            return OpaqueExternalNavigationResolution.STALE
+        }
+        if (deferOpaqueExternalNavigationForDirtyPreview(request)) {
+            return OpaqueExternalNavigationResolution.DEFERRED
+        }
+        return when (navigateTo(WorkspaceRoute.ModuleRoot(module))) {
+            WorkspaceNavigationResult.APPLIED,
+            WorkspaceNavigationResult.ALREADY_SELECTED,
+            -> if (opaqueExternalNavigationMatches(request)) {
+                OpaqueExternalNavigationResolution.APPLIED
+            } else {
+                OpaqueExternalNavigationResolution.STALE
+            }
+
+            WorkspaceNavigationResult.DEFERRED -> OpaqueExternalNavigationResolution.DEFERRED
+            WorkspaceNavigationResult.REJECTED -> OpaqueExternalNavigationResolution.REJECTED
+        }
+    }
+
+    private fun applyOpaqueFileDirectoryNavigation(
+        request: OpaqueExternalNavigationRequest,
+        browser: FileBrowserState,
+        item: FileItem,
+    ): OpaqueExternalNavigationResolution {
+        val prepared = prepareOpaqueObjectNavigation(request, Module.FILES)
+        if (prepared != OpaqueExternalNavigationResolution.APPLIED) return prepared
+        if (_workspace.value?.previewItem != null) closePreviewImmediately()
+        if (!opaqueExternalNavigationMatches(request)) return OpaqueExternalNavigationResolution.STALE
+        _workspace.update { current ->
+            current?.takeIf {
+                it.profile.id == request.profileId && repository === request.repository
+            }?.copy(
+                fileBrowser = browser,
+                fileDirectoryBaselines = current.fileDirectoryBaselines + (item.path to item),
+                files = Loadable.Loading,
+                fileIsLoadingMore = false,
+            ) ?: current
+        }
+        if (!opaqueExternalNavigationMatches(request)) return OpaqueExternalNavigationResolution.STALE
+        load(Module.FILES)
+        return OpaqueExternalNavigationResolution.APPLIED
+    }
+
+    private fun applyOpaqueFilePreviewNavigation(
+        request: OpaqueExternalNavigationRequest,
+        browser: FileBrowserState,
+        item: FileItem,
+    ): OpaqueExternalNavigationResolution {
+        val current = _workspace.value
+        if (current?.selectedModule == Module.FILES && current.previewOwner == PreviewOwner.FILES &&
+            current.previewItem?.path == item.path && current.hasDirtyTextPreview()
+        ) {
+            // 当前就是同一对象，保留草稿；仅刷新目录读取以触发已消费外链的状态推进。
+            load(Module.FILES)
+            return OpaqueExternalNavigationResolution.APPLIED
+        }
+        val prepared = prepareOpaqueObjectNavigation(request, Module.FILES)
+        if (prepared != OpaqueExternalNavigationResolution.APPLIED) return prepared
+        if (_workspace.value?.previewItem != null) closePreviewImmediately()
+        if (!opaqueExternalNavigationMatches(request)) return OpaqueExternalNavigationResolution.STALE
+        _workspace.update { state ->
+            state?.takeIf {
+                it.profile.id == request.profileId && repository === request.repository
+            }?.copy(
+                fileBrowser = browser,
+                files = Loadable.Loading,
+                fileIsLoadingMore = false,
+                photoViewer = null,
+                filePreviewSequence = null,
+                previewOwner = PreviewOwner.FILES,
+            ) ?: state
+        }
+        if (!opaqueExternalNavigationMatches(request)) return OpaqueExternalNavigationResolution.STALE
+        startPreview(item, PreviewOwner.FILES)
+        load(Module.FILES)
+        return OpaqueExternalNavigationResolution.APPLIED
+    }
+
+    private fun applyOpaquePhotoFolderNavigation(
+        request: OpaqueExternalNavigationRequest,
+        browser: PhotoBrowserState,
+    ): OpaqueExternalNavigationResolution {
+        val prepared = prepareOpaqueObjectNavigation(request, Module.PHOTOS)
+        if (prepared != OpaqueExternalNavigationResolution.APPLIED) return prepared
+        if (_workspace.value?.previewItem != null) closePreviewImmediately()
+        if (!opaqueExternalNavigationMatches(request)) return OpaqueExternalNavigationResolution.STALE
+        photoTimelineJob?.cancel()
+        _workspace.update { current ->
+            current?.takeIf {
+                it.profile.id == request.profileId && repository === request.repository
+            }?.copy(
+                photoBrowser = browser,
+                photos = Loadable.Loading,
+                photoTimeline = Loadable.Idle,
+                photoViewer = null,
+            ) ?: current
+        }
+        if (!opaqueExternalNavigationMatches(request)) return OpaqueExternalNavigationResolution.STALE
+        load(Module.PHOTOS)
+        return OpaqueExternalNavigationResolution.APPLIED
+    }
+
+    private fun applyOpaquePhotoViewerNavigation(
+        request: OpaqueExternalNavigationRequest,
+        browser: PhotoBrowserState,
+        item: PhotoItem,
+    ): OpaqueExternalNavigationResolution {
+        val prepared = prepareOpaqueObjectNavigation(request, Module.PHOTOS)
+        if (prepared != OpaqueExternalNavigationResolution.APPLIED) return prepared
+        if (_workspace.value?.previewItem != null) closePreviewImmediately()
+        if (!opaqueExternalNavigationMatches(request)) return OpaqueExternalNavigationResolution.STALE
+        photoTimelineJob?.cancel()
+        _workspace.update { current ->
+            current?.takeIf {
+                it.profile.id == request.profileId && repository === request.repository
+            }?.copy(
+                photoBrowser = browser,
+                photos = Loadable.Loading,
+                photoTimeline = Loadable.Idle,
+                photoViewer = PhotoViewerState(listOf(item.file), 0),
+                filePreviewSequence = null,
+                previewOwner = PreviewOwner.PHOTOS,
+            ) ?: current
+        }
+        if (!opaqueExternalNavigationMatches(request)) return OpaqueExternalNavigationResolution.STALE
+        startPreview(item.file, PreviewOwner.PHOTOS)
+        load(Module.PHOTOS)
+        return OpaqueExternalNavigationResolution.APPLIED
+    }
+
+    private fun applyOpaqueChatConversationNavigation(
+        request: OpaqueExternalNavigationRequest,
+        conversation: ChatConversation,
+    ): OpaqueExternalNavigationResolution {
+        val prepared = prepareOpaqueObjectNavigation(request, Module.CHAT)
+        if (prepared != OpaqueExternalNavigationResolution.APPLIED) return prepared
+        if (!opaqueExternalNavigationMatches(request)) return OpaqueExternalNavigationResolution.STALE
+        openConversation(conversation, consumePendingOpaque = false)
+        return if (opaqueExternalNavigationMatches(request)) {
+            OpaqueExternalNavigationResolution.APPLIED
+        } else {
+            OpaqueExternalNavigationResolution.STALE
+        }
+    }
+
+    private fun applyOpaqueDownloadTaskNavigation(
+        request: OpaqueExternalNavigationRequest,
+        task: DownloadTask,
+    ): OpaqueExternalNavigationResolution {
+        val prepared = prepareOpaqueObjectNavigation(request, Module.DOWNLOADS)
+        if (prepared != OpaqueExternalNavigationResolution.APPLIED) return prepared
+        _workspace.update { current ->
+            current?.takeIf {
+                it.profile.id == request.profileId && repository === request.repository &&
+                    it.selectedModule == Module.DOWNLOADS
+            }?.copy(downloadDetailsTask = task) ?: current
+        }
+        return if (opaqueExternalNavigationMatches(request)) {
+            OpaqueExternalNavigationResolution.APPLIED
+        } else {
+            OpaqueExternalNavigationResolution.STALE
+        }
     }
 
     /** 外部固定任务页仅在 VMM 模块和公开 Task.Info v1 都可用时进入。 */
@@ -1169,6 +1695,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 依据当前领域状态派生的强类型栈返回一级，不复制路径或会话标识。 */
     internal fun navigateUp(): Boolean {
+        cancelOpaqueExternalNavigation(consumePending = true)
         return when (_workspace.value?.workspaceRouteStack()?.entries?.lastOrNull()) {
             WorkspaceRoute.FilePreview, WorkspaceRoute.PhotoViewer -> {
                 requestClosePreview()
@@ -1714,6 +2241,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openConversation(conversation: ChatConversation) {
+        openConversation(conversation, consumePendingOpaque = true)
+    }
+
+    private fun openConversation(
+        conversation: ChatConversation,
+        consumePendingOpaque: Boolean,
+    ) {
+        if (consumePendingOpaque) cancelOpaqueExternalNavigation(consumePending = true)
         val repo = repository ?: return
         if (_workspace.value?.selectedConversation?.id != conversation.id) {
             invalidateChatAttachmentPreflights()
@@ -3317,6 +3852,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openDirectory(item: FileItem) {
         if (!item.isDirectory) return
+        cancelOpaqueExternalNavigation(consumePending = true)
         val current = _workspace.value ?: return
         if (fileStationMutationBlocksOrdinaryLoad(current.fileStationMutationState)) return
         val nextBrowser = current.fileBrowser.enterDirectory(item.path)
@@ -3333,6 +3869,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun goBackDirectory() {
+        cancelOpaqueExternalNavigation(consumePending = true)
         val state = _workspace.value ?: return
         if (fileStationMutationBlocksOrdinaryLoad(state.fileStationMutationState)) return
         val previous = state.fileBrowser.navigateUp() ?: return
@@ -4264,6 +4801,43 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
         _workspace.update {
             it?.copy(message = application.getString(R.string.share_link_existing_copied))
+        }
+    }
+
+    /** 仅复制当前资料可恢复的固定页或已加密映射的不透明对象页。 */
+    internal fun canCopyCurrentPageLink(): Boolean = _workspace.value
+        ?.pageLinkDestination()
+        ?.let { it !is WorkspacePageLinkDestination.Unavailable }
+        ?: false
+
+    fun copyCurrentPageLink() {
+        val state = _workspace.value ?: return
+        val uri = when (val destination = state.pageLinkDestination()) {
+            is WorkspacePageLinkDestination.Fixed -> destination.uri
+            is WorkspacePageLinkDestination.Opaque -> store.issueOpaqueWorkspaceTarget(
+                profileId = state.profile.id,
+                target = destination.target,
+            )?.let(::opaqueObjectExternalWorkspaceUri)
+
+            WorkspacePageLinkDestination.Unavailable -> null
+        }
+        val application = getApplication<Application>()
+        if (uri == null) {
+            _workspace.update { current ->
+                current?.takeIf { it.profile.id == state.profile.id }?.copy(
+                    message = application.getString(R.string.page_link_unavailable),
+                ) ?: current
+            }
+            return
+        }
+        val clipboard = application.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(
+            ClipData.newPlainText(application.getString(R.string.copy_page_link), uri),
+        )
+        _workspace.update { current ->
+            current?.takeIf { it.profile.id == state.profile.id }?.copy(
+                message = application.getString(R.string.page_link_copied),
+            ) ?: current
         }
     }
 
@@ -5269,6 +5843,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _workspace.value?.profile?.id?.let(store::session) != null
 
     fun selectPhotoSpace(spaceId: String) {
+        cancelOpaqueExternalNavigation(consumePending = true)
         val state = _workspace.value ?: return
         val next = state.photoBrowser.selectSpace(spaceId)
         if (next == state.photoBrowser) return
@@ -5285,6 +5860,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openPhotoFolder(item: PhotoItem) {
         if (item.kind != PhotoItemKind.FOLDER) return
+        cancelOpaqueExternalNavigation(consumePending = true)
         val repo = repository ?: return
         _workspace.update {
             it?.copy(
@@ -5296,6 +5872,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun goBackPhotoFolder() {
+        cancelOpaqueExternalNavigation(consumePending = true)
         val browser = _workspace.value?.photoBrowser ?: return
         if (browser.mode != PhotoBrowseMode.FOLDERS) return
         val previous = browser.navigateUp() ?: return
@@ -5650,6 +6227,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openPreview(item: FileItem) {
+        cancelOpaqueExternalNavigation(consumePending = true)
         val state = _workspace.value ?: return
         if (state.selectedModule != Module.FILES) return
         if (state.previewOwner == PreviewOwner.FILES && state.previewItem?.path == item.path) return
@@ -5664,6 +6242,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openPreview(item: FileItem, visibleItems: List<FileItem>) {
+        cancelOpaqueExternalNavigation(consumePending = true)
         val state = _workspace.value ?: return
         if (state.selectedModule != Module.FILES) return
         if (state.previewOwner == PreviewOwner.FILES && state.previewItem?.path == item.path) return
@@ -5698,6 +6277,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openPhotoViewer(item: PhotoItem, visibleItems: List<PhotoItem>) {
+        cancelOpaqueExternalNavigation(consumePending = true)
         if (_workspace.value?.selectedModule != Module.PHOTOS) return
         val media = visibleItems
             .filter { it.kind in setOf(PhotoItemKind.IMAGE, PhotoItemKind.VIDEO) }
@@ -5869,6 +6449,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun dismissPreviewDiscardConfirmation() {
+        pendingExternalModuleAfterPreviewDiscard?.let { module ->
+            cancelledExternalNavigationModule = module
+            _opaqueExternalNavigationRevision.update { it + 1L }
+        }
+        pendingExternalModuleAfterPreviewDiscard = null
+        cancelOpaqueExternalNavigationAfterPreviewDiscard()
         pendingModuleAfterPreviewDiscard = null
         _workspace.update { it?.copy(previewDiscardConfirmationVisible = false) }
     }
@@ -5880,16 +6466,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         ) return
         val shouldClose = _workspace.value?.previewDiscardClosesPreview == true
         val pendingModule = pendingModuleAfterPreviewDiscard
+        pendingExternalModuleAfterPreviewDiscard = null
+        val opaqueRequest = opaqueExternalNavigation?.takeIf {
+            it.phase == OpaqueExternalNavigationPhase.WAITING_FOR_PREVIEW_DISCARD
+        }
         pendingModuleAfterPreviewDiscard = null
         if (shouldClose) {
             closePreviewImmediately()
-            if (pendingModule != null) navigateTo(WorkspaceRoute.ModuleRoot(pendingModule))
+            if (opaqueRequest != null) {
+                opaqueRequest.phase = OpaqueExternalNavigationPhase.RESOLVING
+                if (opaqueExternalNavigationMatches(opaqueRequest)) {
+                    launchOpaqueExternalNavigation(opaqueRequest)
+                }
+            } else if (pendingModule != null) {
+                navigateTo(WorkspaceRoute.ModuleRoot(pendingModule))
+            }
         } else {
             _workspace.update {
                 it?.copy(
                     textPreviewDraft = null,
                     previewDiscardConfirmationVisible = false,
                 )
+            }
+            if (opaqueRequest != null) {
+                opaqueRequest.phase = OpaqueExternalNavigationPhase.RESOLVING
+                if (opaqueExternalNavigationMatches(opaqueRequest)) {
+                    launchOpaqueExternalNavigation(opaqueRequest)
+                }
             }
         }
     }
@@ -7404,6 +8007,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openDownloadTaskDetails(task: DownloadTask) {
+        cancelOpaqueExternalNavigation(consumePending = true)
         _workspace.update { current ->
             val currentTask = current
                 ?.takeIf { it.selectedModule == Module.DOWNLOADS }
@@ -12705,6 +13309,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _workspace.value = null
             candidate
         }
+        cancelOpaqueExternalNavigation(consumePending = true)
         releasePendingVirtualMachineLocalImageGrant()
         store.saveWorkspaceUiState(state.profile.id, state.persistedUiState())
         chatPendingAttachmentUrisForRelease(state).forEach(::releasePersistedReadPermission)
@@ -12825,6 +13430,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _workspace.value = null
             candidate
         }
+        cancelOpaqueExternalNavigation(consumePending = true)
         releasePendingVirtualMachineLocalImageGrant()
         chatPendingAttachmentUrisForRelease(state).forEach(::releasePersistedReadPermission)
         transferJobs.values.forEach(Job::cancel)
@@ -16314,6 +16920,172 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
     }
 }
+
+
+private fun WorkspaceState.pageLinkDestination(): WorkspacePageLinkDestination = when (selectedModule) {
+    Module.FILES -> when {
+        previewDiscardConfirmationVisible ||
+            fileStationMutationBlocksWorkspaceExit(fileStationMutationState) -> {
+            WorkspacePageLinkDestination.Unavailable
+        }
+
+        previewOwner == PreviewOwner.FILES && previewItem != null -> {
+            val item = requireNotNull(previewItem)
+            if (!item.isDirectory && item.canRead &&
+                FileBrowserState.fromCanonicalFilePath(item.path) != null
+            ) {
+                WorkspacePageLinkDestination.Opaque(OpaqueWorkspaceTarget.FilePreview(item.path))
+            } else {
+                WorkspacePageLinkDestination.Unavailable
+            }
+        }
+
+        fileBrowser.selectedPaths.isNotEmpty() || fileCopyMove != null || pendingFileUploads != null ||
+            fileStationMutationState.editorVisible ||
+            fileStationMutationState.confirmationRequested ||
+            fileStationMutationState.target != null ||
+            fileFavorites !is Loadable.Idle || fileRemoteLocations !is Loadable.Idle ||
+            fileRecentLocations !is Loadable.Idle || fileShareLinks !is Loadable.Idle -> {
+            WorkspacePageLinkDestination.Unavailable
+        }
+
+        fileBrowser.path.isNotBlank() -> {
+            if (FileBrowserState.fromCanonicalDirectoryPath(fileBrowser.path) != null) {
+                WorkspacePageLinkDestination.Opaque(
+                    OpaqueWorkspaceTarget.FileDirectory(fileBrowser.path),
+                )
+            } else {
+                WorkspacePageLinkDestination.Unavailable
+            }
+        }
+
+        else -> WorkspacePageLinkDestination.Fixed(Module.FILES.fixedExternalWorkspaceUri())
+    }
+
+    Module.PHOTOS -> when {
+        photoMove != null -> WorkspacePageLinkDestination.Unavailable
+        previewOwner == PreviewOwner.PHOTOS && photoViewer != null &&
+            previewItem?.path == photoViewer.current.path -> {
+            val item = requireNotNull(previewItem)
+            if (item.canRead && photoBrowser.restoreCanonicalMediaParent(
+                    photoBrowser.selectedSpaceId,
+                    item.path,
+                ) != null
+            ) {
+                WorkspacePageLinkDestination.Opaque(
+                    OpaqueWorkspaceTarget.PhotoViewer(photoBrowser.selectedSpaceId, item.path),
+                )
+            } else {
+                WorkspacePageLinkDestination.Unavailable
+            }
+        }
+
+        photoBrowser.mode != PhotoBrowseMode.FOLDERS -> WorkspacePageLinkDestination.Unavailable
+        photoBrowser.folderPath != photoBrowser.selectedSpace.rootPath -> {
+            if (photoBrowser.restoreCanonicalFolder(
+                    photoBrowser.selectedSpaceId,
+                    photoBrowser.folderPath,
+                ) != null
+            ) {
+                WorkspacePageLinkDestination.Opaque(
+                    OpaqueWorkspaceTarget.PhotoFolder(
+                        photoBrowser.selectedSpaceId,
+                        photoBrowser.folderPath,
+                    ),
+                )
+            } else {
+                WorkspacePageLinkDestination.Unavailable
+            }
+        }
+
+        else -> WorkspacePageLinkDestination.Fixed(Module.PHOTOS.fixedExternalWorkspaceUri())
+    }
+
+    Module.CHAT -> when {
+        chatMutationBlocksWorkspaceExit(chatMutationState) -> WorkspacePageLinkDestination.Unavailable
+        chatNewConversationVisible || chatMembersVisible || chatRemindersVisible ||
+            chatScheduledMessagesVisible || chatScheduleComposerVisible || chatPollComposerVisible -> {
+            WorkspacePageLinkDestination.Unavailable
+        }
+
+        selectedConversation != null -> selectedConversation
+            ?.id
+            ?.takeIf { it.isNotBlank() && it == it.trim() }
+            ?.let { id ->
+                WorkspacePageLinkDestination.Opaque(OpaqueWorkspaceTarget.ChatConversation(id))
+            } ?: WorkspacePageLinkDestination.Unavailable
+
+        else -> WorkspacePageLinkDestination.Fixed(Module.CHAT.fixedExternalWorkspaceUri())
+    }
+
+    Module.DOWNLOADS -> when {
+        downloadCreationState.editorVisible || downloadCreationState.target != null ||
+            downloadControlState.target != null || downloadDestinationEditState.selectionTaskBaseline != null ||
+            downloadDestinationEditState.target != null || downloadSettingsState.editorVisible ||
+            downloadDestinationPicker != null || selectedDownloadRssSite != null ||
+            downloadRssRefreshState.target != null || downloadAdvancedRead.discoveryVisible -> {
+            WorkspacePageLinkDestination.Unavailable
+        }
+
+        downloadDetailsTask != null -> downloadDetailsTask
+            ?.id
+            ?.takeIf { it.isNotBlank() && it == it.trim() }
+            ?.let { id -> WorkspacePageLinkDestination.Opaque(OpaqueWorkspaceTarget.DownloadTask(id)) }
+            ?: WorkspacePageLinkDestination.Unavailable
+
+        else -> WorkspacePageLinkDestination.Fixed(Module.DOWNLOADS.fixedExternalWorkspaceUri())
+    }
+
+    Module.CONTAINERS -> when {
+        containerRegistryVisible && selectedContainerRegistryImage != null -> {
+            WorkspacePageLinkDestination.Unavailable
+        }
+
+        containerRegistryVisible -> WorkspacePageLinkDestination.Fixed(
+            "lanstash://open/containers/registry",
+        )
+
+        else -> WorkspacePageLinkDestination.Fixed(Module.CONTAINERS.fixedExternalWorkspaceUri())
+    }
+
+    Module.VIRTUAL_MACHINES -> when {
+        virtualMachineMutationState.creationEditorVisible ||
+            virtualMachineMutationState.imageImportEditorVisible ||
+            virtualMachineMutationState.settingsEditorVisible ||
+            virtualMachineMutationState.lifecycleConfirmationRequested ||
+            virtualMachineMutationState.taskCleanupConfirmationRequested ||
+            virtualMachineMutationState.target != null -> WorkspacePageLinkDestination.Unavailable
+
+        virtualMachineMutationState.selectedTab == VirtualMachineTab.TASKS -> {
+            WorkspacePageLinkDestination.Fixed("lanstash://open/virtual-machines/tasks")
+        }
+
+        virtualMachineMutationState.selectedTab == VirtualMachineTab.MACHINES -> {
+            WorkspacePageLinkDestination.Fixed(Module.VIRTUAL_MACHINES.fixedExternalWorkspaceUri())
+        }
+
+        else -> WorkspacePageLinkDestination.Unavailable
+    }
+
+    Module.NAS_SETTINGS -> when (nasPerformance.selectedTab) {
+        NasSettingsTab.PERFORMANCE -> WorkspacePageLinkDestination.Fixed(
+            "lanstash://open/nas-settings/performance",
+        )
+
+        NasSettingsTab.OVERVIEW -> WorkspacePageLinkDestination.Fixed(
+            Module.NAS_SETTINGS.fixedExternalWorkspaceUri(),
+        )
+
+        else -> WorkspacePageLinkDestination.Unavailable
+    }
+
+    Module.TRANSFERS,
+    Module.SETTINGS,
+    -> WorkspacePageLinkDestination.Fixed(selectedModule.fixedExternalWorkspaceUri())
+}
+
+private fun Module.fixedExternalWorkspaceUri(): String =
+    "lanstash://open/${externalWorkspaceSlug()}"
 
 
 /** EXIF 方向会交换横纵轴的四种情况；镜像不改变媒体详情中的尺寸。 */

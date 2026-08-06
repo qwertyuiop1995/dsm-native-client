@@ -41,6 +41,9 @@
     <string name="cancel">Cancel</string>
     <string name="open_navigation">Open navigation</string>
     <string name="refresh">Refresh</string>
+    <string name="copy_page_link">Copy a link to this page for this device</string>
+    <string name="page_link_copied">Link copied. It works only on this device while you are signed in to this NAS.</string>
+    <string name="page_link_unavailable">This page is not available from a link right now. Go back, refresh, and try again.</string>
     <string name="processing_action">Processing action</string>
     <string name="unavailable">Unavailable</string>
     <string name="events">Events</string>

@@ -3,6 +3,7 @@ package io.github.qwertyuiop1995.dsmnativeclient
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExternalWorkspaceRouteTest {
@@ -30,6 +31,62 @@ class ExternalWorkspaceRouteTest {
             assertEquals(expected, route.externalWorkspaceRoute())
             assertNull(route.externalWorkspaceModule())
         }
+    }
+
+    @Test
+    fun `不透明对象令牌可生成并解析唯一规范外链`() {
+        val token = validOpaqueObjectToken()
+        val expectedUri = "lanstash://open/object/$token"
+
+        assertEquals(expectedUri, opaqueObjectExternalWorkspaceUri(token))
+
+        val route = expectedUri.externalWorkspaceRoute()
+        assertTrue(route is ExternalWorkspaceRoute.OpaqueObject)
+        assertEquals(token, (route as ExternalWorkspaceRoute.OpaqueObject).token)
+        assertEquals(ExternalWorkspaceRoute.OpaqueObject.fromTokenOrNull(token), route)
+        assertNull(expectedUri.externalWorkspaceModule())
+    }
+
+    @Test
+    fun `不透明对象令牌拒绝非规范编码长度字符与URI载荷`() {
+        val token = validOpaqueObjectToken()
+        listOf(
+            "",
+            "a".repeat(42),
+            "a".repeat(44),
+            "a".repeat(42) + ".",
+            "a".repeat(42) + "%",
+            "a".repeat(42) + " ",
+            "a".repeat(42) + "+",
+        ).forEach { invalidToken ->
+            assertNull(opaqueObjectExternalWorkspaceUri(invalidToken))
+            assertNull("lanstash://open/object/$invalidToken".externalWorkspaceRoute())
+        }
+        listOf(
+            "lanstash://open/object",
+            "lanstash://open/object/",
+            "lanstash://open/object//$token",
+            "lanstash://open/object/$token/extra",
+            "lanstash://open/object/${token.dropLast(1)}%2D",
+            "lanstash://open/object/$token?target=private",
+            "lanstash://open/object/$token#target",
+            "lanstash://user@open/object/$token",
+            "lanstash://open:443/object/$token",
+            "lanstash://open/OBJECT/$token",
+            "LaNsTaSh://open/object/$token",
+            "lanstash://OPEN/object/$token",
+            "lanstash:open/object/$token",
+            "lanstash://open/object/$token%",
+        ).forEach { route -> assertNull(route.externalWorkspaceRoute()) }
+    }
+
+    @Test
+    fun `不透明对象令牌拒绝非零尾部比特的Base64URL变体`() {
+        val nonCanonicalToken = validOpaqueObjectToken().dropLast(1) + "B"
+
+        assertNull(ExternalWorkspaceRoute.OpaqueObject.fromTokenOrNull(nonCanonicalToken))
+        assertNull(opaqueObjectExternalWorkspaceUri(nonCanonicalToken))
+        assertNull("lanstash://open/object/$nonCanonicalToken".externalWorkspaceRoute())
     }
 
     @Test
@@ -74,4 +131,7 @@ class ExternalWorkspaceRouteTest {
             "not a uri",
         ).forEach { route -> assertNull(route.externalWorkspaceRoute()) }
     }
+
+    /** 32 字节 Base64URL 的最后一个字符必须有两个零尾部比特。 */
+    private fun validOpaqueObjectToken(): String = "a".repeat(40) + "_-A"
 }

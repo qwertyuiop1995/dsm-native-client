@@ -141,6 +141,63 @@ data class PhotoBrowserState(
     )
 
     fun selectMonth(month: Int?): PhotoBrowserState = copy(selectedMonth = month)
+
+    /**
+     * 从已签发的规范文件夹路径恢复照片空间与逐级父目录。
+     *
+     * 仅恢复用户要查看的文件夹；搜索、筛选、时间线位置和分页状态不会通过外链带回。
+     */
+    fun restoreCanonicalFolder(spaceId: String, canonicalPath: String): PhotoBrowserState? {
+        val space = spaces.firstOrNull { it.id == spaceId } ?: return null
+        val lineage = canonicalPhotoFolderLineage(space.rootPath, canonicalPath) ?: return null
+        return copy(
+            selectedSpaceId = space.id,
+            folderPath = lineage.last(),
+            pathHistory = lineage.dropLast(1),
+            searchQuery = "",
+            activeSearchQuery = null,
+            filter = PhotoMediaFilter.ALL,
+            mode = PhotoBrowseMode.FOLDERS,
+            selectedYear = null,
+            selectedMonth = null,
+            isLoadingMore = false,
+        )
+    }
+
+    /**
+     * 从已签发的规范媒体路径恢复其所属文件夹，供单项查看器的返回栈使用。
+     */
+    fun restoreCanonicalMediaParent(spaceId: String, canonicalPath: String): PhotoBrowserState? {
+        val space = spaces.firstOrNull { it.id == spaceId } ?: return null
+        val rootSegments = canonicalPhotoPathSegments(space.rootPath) ?: return null
+        val pathSegments = canonicalPhotoPathSegments(canonicalPath) ?: return null
+        if (pathSegments.size <= rootSegments.size || pathSegments.take(rootSegments.size) != rootSegments) {
+            return null
+        }
+        val parentPath = "/${pathSegments.dropLast(1).joinToString("/")}"
+        return restoreCanonicalFolder(spaceId, parentPath)
+    }
+}
+
+private fun canonicalPhotoFolderLineage(rootPath: String, path: String): List<String>? {
+    val rootSegments = canonicalPhotoPathSegments(rootPath) ?: return null
+    val pathSegments = canonicalPhotoPathSegments(path) ?: return null
+    if (pathSegments.size < rootSegments.size || pathSegments.take(rootSegments.size) != rootSegments) {
+        return null
+    }
+    return buildList {
+        add("/${rootSegments.joinToString("/")}")
+        for (index in rootSegments.size until pathSegments.size) {
+            add("/${pathSegments.take(index + 1).joinToString("/")}")
+        }
+    }
+}
+
+private fun canonicalPhotoPathSegments(path: String): List<String>? {
+    if (!path.startsWith('/') || path == "/" || path.endsWith('/')) return null
+    val segments = path.drop(1).split('/')
+    if (segments.any { it.isEmpty() || it == "." || it == ".." }) return null
+    return segments
 }
 
 data class PhotoViewerState(

@@ -4792,6 +4792,12 @@ class DsmRepository(
 
     suspend fun listDownloads(): List<DownloadTask> = downloadTaskList(strict = false)
 
+    /** 对象外链按完整稳定列表重新确认任务，避免把后续分页中的现存任务误判为已删除。 */
+    suspend fun downloadTask(taskId: String): DownloadTask? {
+        require(taskId.isNotBlank()) { "Download task ID is required" }
+        return strictDownloadTaskList().firstOrNull { it.id == taskId }
+    }
+
     /**
      * 写操作只能使用完整严格列表。带 `total` 的响应逐页读取并要求总数保持稳定；不带
      * `total` 时，只有不足一页的响应才能证明列表完整，满页必须失败关闭。

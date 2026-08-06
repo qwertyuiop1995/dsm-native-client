@@ -349,11 +349,14 @@ Chat 领域层不依赖平台 UI 和 HTTP 实现。Apple、Android、Windows 共
 
 出口：本计划定义的全部功能达到 macOS 发布门槛。
 
-### CH7：其他平台对齐
+### CH7：其他平台按各自范围交付
 
-- iPhone 和 iPad 复用 Apple Chat Core、Repository、同步与安全实现，使用平台原生触控和自适应布局。
-- Android 使用 Kotlin、Jetpack Compose、OkHttp 和 Android Keystore 实现共同契约。
-- Windows 使用 C#、WinUI 3、HttpClient 和 Credential Locker/DPAPI 实现共同契约。
+- iPhone 和 iPad 复用 Apple Chat Core、Repository、同步与安全实现，但只按 Apple 移动范围矩阵交付：会话、文字/Emoji、草稿、分页、失败恢复与前台实时为核心；单附件和少量常用消息动作受限实现。提醒、定时消息、投票、服务端置顶、语音和完整加密不作为当前 Apple 移动完成条件，也不能因 macOS 已有入口自动进入移动端。
+- iPhone 使用原生层级导航，iPad 使用当前范围的自适应双栏、键盘和指针体验；两者都不照搬桌面右键、独立窗口或高密度管理界面。
+- Android 使用 Kotlin、Jetpack Compose、OkHttp 和 Android Keystore，具体范围以 Android 专项计划和账本为准。
+- Windows 使用 C#、WinUI 3、HttpClient 和 Credential Locker/DPAPI，继续按 Windows 完整业务语义对齐计划实施。
+
+Apple 移动端被排除或后置的 Chat 能力应在 Mac App 或 DSM Web 中继续完成；文档不承诺深链、单点登录或自动携带会话。范围缩减不放松已纳入写操作的 capability、版本、权限、防重复和最终回读门禁。
 
 ## 9. 测试与验收
 

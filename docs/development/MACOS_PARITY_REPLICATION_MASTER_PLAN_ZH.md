@@ -1,4 +1,4 @@
-# macOS 功能对齐 Windows 与 Apple 移动端总控计划
+# macOS 基线下的 Windows 对齐与 Apple 移动端精选交付总控计划
 
 - 状态：规划基线，尚未开始本计划实施
 - 编制日期：2026-08-03
@@ -16,33 +16,42 @@ iPhone 与 iPad 不拆成两份计划。当前仓库已经使用同一个 `DsmMo
 
 ## 2. 目标与完成定义
 
-目标不是复制 macOS 截图，而是让 Windows、iPhone 和 iPad 获得相同的用户结果、权限边界、失败语义和恢复路径，同时使用各平台原生交互。
+目标不是复制 macOS 截图。Windows 继续获得 macOS 已承诺范围内相同的用户结果、权限边界、失败语义和恢复路径；iPhone/iPad 则以 macOS 作为业务与安全语义基线，只交付适合移动场景的明确范围。共享 Target 或共享 Repository 不代表两个移动设备必须承接全部桌面能力。
 
-一个功能只有同时满足以下六项才能标记为“平台对齐”：
+Windows 的功能只有同时满足以下六项才能标记为“平台对齐”；Apple 移动端只对专项范围矩阵中标为“核心”或“受限”的明确子集使用相同门槛，并称为“移动范围交付完成”，不能称为完整 macOS 对齐：
 
 1. **业务等价**：读写范围、排序分页、冲突处理、取消和最终状态与 macOS 基线一致。
 2. **安全等价**：能力与权限检查、危险确认、父子目标防重复、提交后不自动重放及写后复查均未弱化。
 3. **平台等价**：使用 WinUI/Fluent 或 SwiftUI/iOS/iPadOS 原生导航、选择器、分享、通知和辅助功能，而非移植桌面手势。
-4. **状态完整**：加载、空内容、筛选后为空、错误、正常内容五态，以及离线、会话过期、功能不可用和部分成功状态都有恢复动作。
+4. **状态完整**：对 macOS 基线、已记录契约、可复现故障或明确安全/数据完整性风险所要求的加载、空内容、筛选后为空、错误、正常内容，以及离线、会话过期、功能不可用和部分成功状态提供恢复动作；没有证据的情形不得为了清单完整性新增猜测性校验、平行降级、吞错或不可达分支。
 5. **质量完整**：英语与简体中文、浅色/深色、高对比度或系统对比度、键盘/触控、屏幕阅读器、动态文字或缩放、减少动态效果均有证据。
-6. **验证完整**：至少达到 `IMPLEMENTED`、`UNIT_TESTED` 和目标工程的 `BUILD_VERIFIED`；依赖签名、真实设备或 DSM 的能力继续明确标记为 `SIGNING_REQUIRED` 或“未验证”，不得提前称为完成。
+6. **验证完整**：至少达到 `IMPLEMENTED`、`UNIT_TESTED` 和目标工程的 `BUILD_VERIFIED`；依赖签名、真实设备或 DSM 的能力继续明确标记为 `SIGNING_REQUIRED` 或“未验证”，不得提前称为完成。移动端“后续”与“当前不做”不是验证缺口，不进入当前完成计算。
 
 验证等级以[功能实现与验证等级](../quality/VERIFICATION_LEVELS_ZH.md)为准，实时测试数量只写入[当前开发进度](../progress/STATUS.md)，不在本计划复制容易失效的数字。
+
+### 2.1 功能闭环与最终对齐分层
+
+实施按“用户可完成的主流程 → 必要错误处理与聚焦自动化 → 当前环境可执行的构建 → 后续用户真机/真实环境验证”推进。源码、合成 fixture、单元/集成测试和可用模拟器或 CI 构建达到切片出口后，即可继续不依赖外部验证的下一功能；不得为了罕见假设先扩张抽象、校验或 fallback，也不得把体验微调和极端场景放在主流程之前。
+
+真机、正式签名、entitlement、系统注册、特定硬件或真实 NAS 才能取得的证据写为 `PENDING_USER_VALIDATION`。这是账本待办标签，不是新的验证等级，也不替代 `SIGNING_REQUIRED`、`BUILD_VERIFIED` 或 `DEVICE_VERIFIED`。待办必须写明条件、用户操作步骤、预期结果、失败时需回收的日志类别和影响范围；缺少这些条件不能称“平台对齐”或“发布就绪”，但也不能把无依赖切片标为 `BLOCKED`。
+
+后置验证不得削弱凭据、证书、危险写和数据完整性门禁。若某项能力未验证就可能造成泄密、越权、数据损坏或不可逆副作用，只让该入口保持关闭、只读或受能力开关保护，直至用户回传结果；其余功能继续开发。
 
 ## 3. 范围边界
 
 ### 3.1 本计划包含
 
-- 以 macOS 已有源码入口为基线的登录、多 NAS、File Station、照片、Chat、Download Station、Container Manager、Virtual Machine Manager、NAS 管理、传输、应用设置和系统集成。
+- 以 macOS 已有源码入口为 Windows 完整对齐基线，并作为 Apple 移动端产品取舍、业务语义与安全门禁的证据来源。
 - Windows 对应的资源管理器 Cloud Files、通知区域常驻、窗口与键鼠体验。
-- iPhone/iPad 对应的 Files/Photos/分享入口、后台传输、状态恢复、触控与 iPad 生产力体验。
-- 为复刻所必需的目标平台领域模型、Repository、UI、合成 fixture、自动化测试和文档更新。
+- iPhone/iPad 当前范围中的登录、Files、Photos、Chat、活动、Download Station 受限任务、NAS 健康、Container/VMM 只读摘要、设置、系统分享与 iPad 生产力体验。
+- 为 Windows 对齐或 Apple 移动范围交付所必需的目标平台领域模型、Repository、UI、合成 fixture、自动化测试和文档更新。
 
 ### 3.2 本计划明确排除
 
 - 修改 `apple/Apps/DsmMac/**`。发现 macOS 缺陷时只记录证据并请求新的范围授权。
 - 修改 Android 源码、资源或测试。若公共契约变化，只记录 Android 影响并遵循五端评估规则。
 - 把 macOS 尚未实现的候选能力顺带加入目标端，例如完整 RSS 编辑、Container Compose 编辑/终端/日志流、VMM 迁移/克隆/高级磁盘、Chat 加密和其他尚未进入 macOS 的套件。
+- 把完整桌面运维、跨 NAS/大批量文件工作流、复杂归档、VMM 控制台、Container/VMM 高风险写、NAS 配置或电源写、全 NAS 存储分析、File Provider、多窗口和自动照片备份自动视为 Apple 移动端当前承诺；这些能力按 Apple 专项计划分别标为“后续”或“当前不做”。
 - 为了“看起来一致”自行猜测内部 API、改变安全策略或绕过目标平台限制。
 - 未经批准增加第三方依赖、提高最低系统版本、改变 Bundle ID/MSIX Identity、签名、entitlement、包格式、持久化结构或公开契约。
 - 本计划本身不授权在真实 NAS 上执行创建、修改、删除、断网、重启、关机或权限变更。
@@ -77,7 +86,7 @@ git diff -- apple windows contracts docs/development AGENTS.md
 git log -1 --oneline -- apple/Apps/DsmMac apple/Packages
 ```
 
-若 macOS 在计划编制后新增功能，主 agent 先把新增行为加入对齐账本，再决定插入当前波次还是后续增量波次；不得静默改变正在验收的范围。
+若 macOS 在计划编制后新增功能，主 agent 先把新增行为加入对齐账本。Windows 再决定插入当前波次还是后续增量波次；Apple 移动端默认标为“后续”，只有完成 iPhone/iPad 场景、交互与替代路径评审后才能升为“核心”或“受限”。不得静默改变正在验收的范围。
 
 ## 5. 对齐状态与账本格式
 
@@ -92,8 +101,19 @@ git log -1 --oneline -- apple/Apps/DsmMac apple/Packages
 | `CODE_COMPLETE` | 源码路径完整，但自动化或目标构建尚未全部通过 |
 | `AUTO_VERIFIED` | 单元/集成/UI 自动化及目标工程构建通过 |
 | `DEVICE_VERIFIED` | 目标设备和脱敏真实环境已验证 |
-| `BLOCKED` | 有具体外部条件、证据或用户决策阻塞 |
+| `BLOCKED` | 当前切片在安全范围内已无可继续的实现、测试或替代工作，且具体外部条件或用户决策直接阻塞；仅缺真机、签名或真实 NAS 不足以阻塞无依赖切片 |
 | `NOT_APPLICABLE` | 平台不存在同类用户目标，且主 agent 已记录理由与替代路径 |
+
+Apple 移动端另使用以下**产品范围标签**，它们不替代上述执行状态，也不是验证等级：
+
+| 移动范围 | 含义 |
+| --- | --- |
+| `MOBILE_CORE`（核心） | 当前交付必须完成的移动用户结果 |
+| `MOBILE_LIMITED`（受限） | 当前只交付明确列出的移动子集；未列出的桌面动作不是缺口 |
+| `MOBILE_FUTURE`（后续） | 有移动价值但不进入当前 DAG，需单独产品/权限/契约决策后再开启 |
+| `MOBILE_EXCLUDED`（当前不做） | 当前明确排除，必须记录不适合原因和 Mac App、DSM Web 或系统 App 替代路径 |
+
+只有在移动端不存在同类用户目标时才使用 `NOT_APPLICABLE`。有目标但主动延后或取舍时使用 `MOBILE_FUTURE` / `MOBILE_EXCLUDED`；`PENDING_USER_VALIDATION` 只属于已经进入 `MOBILE_CORE` 或 `MOBILE_LIMITED` 的实现，不能用来掩盖产品范围未决。
 
 每个切片必须记录：
 
@@ -101,12 +121,16 @@ git log -1 --oneline -- apple/Apps/DsmMac apple/Packages
 功能 ID：
 macOS 证据路径与验证等级：
 目标平台用户结果：
+Apple 移动范围：MOBILE_CORE / MOBILE_LIMITED / MOBILE_FUTURE / MOBILE_EXCLUDED；iPhone 与 iPad 分别记录
 原生交互转换：
+明确排除与替代路径：
 公开/内部 API 与能力开关：
 危险等级与重复提交策略：
 owner 与允许修改文件：
 自动化命令和结果：
-目标设备/签名/DSM 未验证项：
+功能闭环边界与当前证据：
+外部验证待办：无 / PENDING_USER_VALIDATION；条件、步骤、预期、失败证据与影响范围
+若包含真实或危险写：用户明确授权的专用测试环境、允许操作范围、确认方式与写后复查要求
 状态与下一出口：
 ```
 
@@ -133,43 +157,45 @@ owner 与允许修改文件：
 
 上述端点 ID 与证据等级以 `contracts/private-api/compatibility.json`、`docs/api/discovery/endpoints/INDEX.md` 和稳定端点记录为准。表中只写文件名时，App 类型位于 `apple/Apps/DsmMac/Sources/`，共享类型位于 `apple/Packages/*/Sources/`；请求证据位于 `contracts/request-fixtures/` 及 `apple/Packages/DsmNetwork/Tests/RequestFixtureContractTests.swift`，不得把类型名或“有 fixture”本身当作环境验证。
 
-| ID | macOS 用户能力基线 | Windows 等价目标 | iPhone/iPad 等价或转换 | 主要证据 |
+Apple 列只用于建立候选映射，是否进入当前开发以 [iPhone/iPad 专项范围矩阵](APPLE_MOBILE_MACOS_PARITY_DEVELOPMENT_PLAN_ZH.md#33-iphone--ipad-产品范围矩阵)为准。现有入口、共享契约或“可转换”都不能自动升级为移动承诺。
+
+| ID | macOS 用户能力基线 | Windows 等价目标 | Apple 移动候选映射（范围以专项矩阵为准） | 主要证据 |
 | --- | --- | --- | --- | --- |
-| FND-01 · A | 多 NAS 资料、新建/删除/重排、OTP、可选保存密码、自动登录、会话恢复与退出 | Credential Locker、资料选择与独立“切换 NAS/退出登录” | Keychain、资料选择器、独立切换与退出；切换时保留安全后台任务 | `LoginViewModel.swift`、`DsmAuthenticationService.swift` |
-| FND-02 · A/B | HTTPS 地址、可选端口、QuickConnect 直连/中继、连接方式提示 | 保持身份核对、官方中继域限制和路由提示 | 同一共享网络契约；在蜂窝/Wi-Fi 切换后重新确认路由 | `DsmQuickConnectResolver.swift`、`DsmCertificateTrust.swift` |
-| FND-03 · A | 自签名证书指纹复核、按 NAS 绑定、证书变化阻断 | Windows 原生证书对话与 Credential Locker 分离 | 触控友好的安全核对页；技术指纹置于次级详情 | `LoginView.swift`、安全基线 |
-| FND-04 · A/C | 模块能力发现、不可用提示、内部 API 按环境关闭 | 页面说明原因和可恢复动作，不静默隐藏 | 顶层入口保持可发现；详情解释套件/权限/版本条件 | `ApiCapability.swift`、私有 API 兼容矩阵 |
-| NAV-01 · A | 侧栏分组、详情区、模块返回后保持目录/筛选/历史 | `NavigationView` + 模块专用页 + BackStack；窗口缩放不丢状态 | iPhone 五入口 Tab/Stack；iPad SplitView；每个 NAS 与 Scene 隔离恢复 | `WorkspaceSection`、`WorkspaceNavigationTests.swift` |
-| FILE-01 · A | 共享目录、文件夹分页、列表/图标、排序/分组、面包屑、搜索 | 列表/网格切换、BreadcrumbBar、键盘搜索、多选 | iPhone 层级 Stack 与搜索；iPad 列表-详情三栏；返回恢复滚动/筛选 | `WorkspaceView.swift`、`DsmFileRepository.swift` |
-| FILE-02 · A/C | 收藏、最近位置、回收站、远程位置、分享链接入口；公开 VirtualFolder 只读浏览与内部挂载管理分开 | 左侧位置集合与上下文菜单；内部创建/修改/断开在未知环境关闭 | Files 首页分区；iPad 可拖入侧栏，iPhone 使用操作菜单；读取失败可降级 | `WorkspaceModel.swift`、`file-station-remote-mount` |
-| FILE-03 · A | 新建文件夹/空文件、重命名、详情、文件夹统计和 MD5 | 命令栏、F2、属性面板、触控菜单 | 表单 Sheet、长按菜单；iPad Inspector；不依赖双击/右键 | `WorkspaceModel.swift`、`FilePropertiesView` |
-| FILE-04 · A/B | 系统选择器上传、覆盖确认、文件/文件夹/批量下载、取消，以及有恢复元数据时的继续/重试；上传重启发送，已知大小普通下载才用严格 Range 分片继续 | FileOpenPicker/FileSavePicker、后台传输和系统通知 | Document/Photos Picker、分享导出、后台 URLSession；不支持安全后台时明确前台降级 | `WorkspaceModel.swift`、`DsmFileRepository.swift` |
-| FILE-05 · A/B | 同 NAS 复制/移动、跨 NAS 有界流、粘贴冲突、拖拽移动和限时撤销 | 剪贴板、拖放、键盘快捷键、Undo InfoBar | Edit 多选 + 目标选择器；iPad 拖放为快捷方式，iPhone 始终有可见替代操作 | `AppModel`、`WorkspaceModel.swift` |
-| FILE-06 · A | ZIP/7z 压缩、常见格式解压、密码、编码和覆盖确认 | 分步 ContentDialog/任务中心 | 分步 Sheet；长任务进入活动中心，可取消且提交后不重放 | `WorkspaceModel.swift`、请求 fixture |
-| FILE-07 · A | 创建/复制/列出/删除（撤销）分享链接，支持密码和有效期 | 系统剪贴板/分享、管理表格 | 系统 ShareLink/分享 Sheet；敏感链接不进通知或日志 | `WorkspaceModel.swift` |
-| FILE-08 · A/B | 缩略图、图片/PDF/文本/音频/视频预览、图片切换缩放、媒体 Range、文本编辑与格式整理 | 原生媒体/文档控件、可调整预览区或独立窗口 | 全屏查看器、捏合/分页/系统分享；iPad 并列预览；编辑离开前保护未保存内容 | `FilePreviewView.swift` |
-| FILE-09 · A/C | 安全删除、回收站发现与受兼容开关保护的恢复 | 权限摘要、强化确认、结果分级与刷新 | 底部危险操作与系统确认；永久删除加强提示；取消后只复查 | `WorkspaceModel.swift`、`MutationResult.swift` |
-| ACT-01 · B | App 传输与 NAS 后台任务分源、速度/剩余时间、筛选、分页、通知 | 活动中心、Toast/系统通知、托盘摘要 | Activity Tab、Live 状态与本地通知；后台受系统调度，不承诺常驻 | `ActivityTask.swift`、`WorkspaceView.swift` |
-| PHOTO-01 · A/D | 基于公开 File Station 扫描 `/home/Photos` 与 `/photo` 的个人/共享空间、文件夹、时间线、文件夹式相册、分页、搜索筛选、年/月定位；人物/地点/标签/真正相册实体未实现 | 自适应照片网格和时间线 | 内容优先网格；iPhone 全屏时间线，iPad 网格-详情；滚动按可见窗口取图 | `PhotoLibraryModel.swift`、`PhotoLibraryView.swift`、`photos-internal-candidate` |
-| PHOTO-02 · A/B | 缩略图缓存、完整查看、HEIC/MOV/Live Photo 兜底、EXIF 详情 | 查看器、键盘前后切换、元数据面板 | 手势查看、Live Photo、分享；iPad 元数据 Inspector；大图严格内存上限 | `PhotoLibraryModel.swift`、`FilePreviewView.swift` |
-| PHOTO-03 · A/C | 上传、导出、删除、分享、移动和照片页回收站恢复 | 多选命令栏、拖放导入导出 | Photos Picker/分享 Sheet、Edit 多选、目标文件夹 Sheet；系统照片图库删除不属于 parity | `PhotoLibraryModel.swift` |
-| CHAT-01 · C | 会话、用户、首次单聊、私人群聊、成员与未读/置顶/本地已读 | 会话-消息-详情布局、通知入口 | iPhone 会话到消息 Stack；iPad 双栏/三栏；徽标只表示可解释未读 | `ChatWorkspaceModel.swift`、`DsmChatRepository.swift` |
-| CHAT-02 · C | 消息分页、草稿、发送/失败重试、实时 Socket.IO 与轮询降级 | 键盘发送、连接状态与可恢复错误 | 安全区 Composer、系统返回保留草稿；前后台切换重新同步 | `ChatWorkspaceModel.swift`、`DsmChatRealtimeClient.swift` |
-| CHAT-03 · C | 单附件上传/保存、缩略图、图片预览；提醒、定时消息与投票第一阶段 | 文件选择器、详情窗格、任务反馈 | Photos/Files 选择器、分享保存、原生 Sheet；内部写能力继续按版本关闭 | `ChatWorkspaceView.swift`、Chat 请求 fixture |
-| CHAT-04 · C | 删除本人消息、关闭会话、消息转发、服务端消息置顶/取消置顶；语音发送和完整加密实现不存在 | 可发现的消息/会话菜单与结果回读 | 长按菜单和确认 Sheet；加密群创建继续拒绝，语音入口不冒充可发送 | `ChatWorkspaceModel.swift`、`DsmChatRepository.swift` |
-| DS-01 · A/C | 下载任务列表、详情、进度/速度、网址或任务文件创建、目标目录 | 专用任务页、筛选与多选命令 | Activity 内 Download Station 分区；文件导入和目标目录选择 | `ServiceManagementModel.swift`、`ServiceManagementView.swift` |
-| DS-02 · A/C | 暂停/继续/开始/删除，删除数据分支；官方基础设置 | 批量命令、设置页、结果回读 | Swipe 只用于可撤销低风险动作；删除数据必须显式确认 | 同上 |
-| CM-01 · C | 概览、容器、映像、网络、项目、事件 | 模块专用分页/详情、键盘与多选 | NAS 管理下分区；iPad 列表-详情，iPhone 分层导航 | `ContainerManagerPane`、服务管理 Repository |
-| CM-02 · C | 容器生命周期/删除、映像删除、网络创建/删除、Registry 搜索/标签/拉取 | 分步对话、后台任务状态 | 分步 Sheet、活动中心；内部写入口继续按能力与版本保护 | `ServiceManagementModel.swift` |
-| VM-01 · C | 虚拟机、主机、存储、网络、映像、保护与事件读取 | 数据视图、详情与多选操作 | NAS 管理分区；iPad 多栏，iPhone 摘要优先 | `VirtualMachineManagerPane` |
-| VM-02 · C | 基础创建/修改、电源/删除、网络修改/删除、映像删除、独立远程控制台 | 分步向导和可调整控制台窗口 | 分步 Sheet；控制台全屏、外接键盘和安全退出；不把桌面精确鼠标交互硬套到触屏 | `ServiceManagementModel.swift`、`ServiceManagementView.swift` |
-| NAS-01 · A/C | 系统概况、性能趋势、更新检查/发布说明、存储/硬盘/外接存储/ZRAM | Dashboard + 原生图表/数据表 | 摘要卡 + 下钻；图表提供精确值与屏幕阅读器摘要 | `NasAdministrationModel.swift` |
-| NAS-02 · A/C | 文件服务、终端、代理、接口、DDNS、区域时间、QuickConnect | 分类设置页、表单验证与写后回读 | Form 分组、渐进披露；可能断网/改时操作预告影响并提供恢复路径 | `NasAdministrationView.swift`、NAS Repository |
-| NAS-03 · A/C | 硬件/休眠、UPS、防火墙基础控制、电源操作 | 危险操作与普通设置空间分离 | 危险操作置于详情底部；权限、确认、防重复与最终状态全部保留 | 同上、私有 API 记录 |
-| NAS-04 · A/C | 套件、任务与运行记录、账号/群组、当前账号共享访问、进程、日志和连接 | 模块化表格、分页、筛选和详情 | 列表-详情、搜索筛选；隐私字段白名单不因屏幕小而放宽 | `NasSettingsPage`、NAS Repository |
-| NAS-05 · A/B | 容量健康与共享/类型/所有者/大文件/时间/重复内容的统一存储分析 | 可取消分析、表格/图表与导出 | 前台发起、可取消、后台只保留安全进度；手机摘要、iPad 分析工作台 | `StorageAnalysisEngine` |
-| SET-01 · A/B | 模块开关、语言、传输分块、本地占用与可再生缓存清理、诊断边界 | 设置页、系统主题、高对比与缓存管理 | Settings/Profile 入口、Dynamic Type、缓存清理；受保护数据永不列入清理 | `SettingsView`、本地化契约 |
-| SYS-01 · A/B | Finder 只读云盘、按需读取、离线保留、缓存与后台驻留；`createItem`、`modifyItem`、`deleteItem` 返回 `featureUnsupported`，`enumerateChanges` 不承诺远端增量 | Cloud Files/资源管理器等价，延续当前实现并完成实机出口 | Files App 中只读 File Provider 为等价目标；若可靠变更枚举或 entitlement 未通过则以 App 内离线区明确降级 | `apple/Apps/DsmMac/FileProviderExtension/` |
+| FND-01 · A | 多 NAS 资料、新建/删除/重排、OTP、可选保存密码、自动登录、会话恢复与退出 | Credential Locker、资料选择与独立“切换 NAS/退出登录” | **核心**：Keychain、资料选择器、独立切换与退出 | `LoginViewModel.swift`、`DsmAuthenticationService.swift` |
+| FND-02 · A/B | HTTPS 地址、可选端口、QuickConnect 直连/中继、连接方式提示 | 保持身份核对、官方中继域限制和路由提示 | **核心**：共享网络契约；网络变化后安全恢复 | `DsmQuickConnectResolver.swift`、`DsmCertificateTrust.swift` |
+| FND-03 · A | 自签名证书指纹复核、按 NAS 绑定、证书变化阻断 | Windows 原生证书对话与 Credential Locker 分离 | **核心**：触控友好安全核对；技术指纹置于次级详情 | `LoginView.swift`、安全基线 |
+| FND-04 · A/C | 模块能力发现、不可用提示、内部 API 按环境关闭 | 页面说明原因和可恢复动作，不静默隐藏 | **核心**：只对当前移动范围保持可发现并解释不可用原因 | `ApiCapability.swift`、私有 API 兼容矩阵 |
+| NAV-01 · A | 侧栏分组、详情区、模块返回后保持目录/筛选/历史 | `NavigationView` + 模块专用页 + BackStack；窗口缩放不丢状态 | **核心**：iPhone 五入口 Tab/Stack；iPad 自适应 SplitView；单窗口状态恢复 | `WorkspaceSection`、`WorkspaceNavigationTests.swift` |
+| FILE-01 · A | 共享目录、文件夹分页、列表/图标、排序/分组、面包屑、搜索 | 列表/网格切换、BreadcrumbBar、键盘搜索、多选 | **核心**：层级浏览、分页、排序/筛选、搜索与状态恢复 | `WorkspaceView.swift`、`DsmFileRepository.swift` |
+| FILE-02 · A/C | 收藏、最近位置、回收站、远程位置、分享链接入口；公开 VirtualFolder 只读浏览与内部挂载管理分开 | 左侧位置集合与上下文菜单；内部创建/修改/断开在未知环境关闭 | **受限**：收藏/最近/回收站和分享入口；远程挂载管理当前不做 | `WorkspaceModel.swift`、`file-station-remote-mount` |
+| FILE-03 · A | 新建文件夹/空文件、重命名、详情、文件夹统计和 MD5 | 命令栏、F2、属性面板、触控菜单 | **受限**：新建文件夹、重命名和详情；空文件、递归统计与 MD5 当前不做 | `WorkspaceModel.swift`、`FilePropertiesView` |
+| FILE-04 · A/B | 系统选择器上传、覆盖确认、文件/文件夹/批量下载、取消，以及有恢复元数据时的继续/重试；上传重启发送，已知大小普通下载才用严格 Range 分片继续 | FileOpenPicker/FileSavePicker、后台传输和系统通知 | **核心**：用户选择的单文件导入、导出、分享、取消；文件夹/大批量与常驻后台当前不做 | `WorkspaceModel.swift`、`DsmFileRepository.swift` |
+| FILE-05 · A/B | 同 NAS 复制/移动、跨 NAS 有界流、粘贴冲突、拖拽移动和限时撤销 | 剪贴板、拖放、键盘快捷键、Undo InfoBar | **受限**：有上限的同 NAS 复制/移动；跨 NAS 与大批量当前不做 | `AppModel`、`WorkspaceModel.swift` |
+| FILE-06 · A | ZIP/7z 压缩、常见格式解压、密码、编码和覆盖确认 | 分步 ContentDialog/任务中心 | **当前不做**：复杂归档交给 Mac App 或 DSM Web | `WorkspaceModel.swift`、请求 fixture |
+| FILE-07 · A | 创建/复制/列出/删除（撤销）分享链接，支持密码和有效期 | 系统剪贴板/分享、管理表格 | **核心/受限**：创建、复制和系统分享为核心；管理动作按已验证端点受限开放 | `WorkspaceModel.swift` |
+| FILE-08 · A/B | 缩略图、图片/PDF/文本/音频/视频预览、图片切换缩放、媒体 Range、文本编辑与格式整理 | 原生媒体/文档控件、可调整预览区或独立窗口 | **核心**：系统原生预览与分享；文本编辑/格式整理当前不做 | `FilePreviewView.swift` |
+| FILE-09 · A/C | 安全删除、回收站发现与受兼容开关保护的恢复 | 权限摘要、强化确认、结果分级与刷新 | **受限**：移入回收站和恢复；永久删除当前不做 | `WorkspaceModel.swift`、`MutationResult.swift` |
+| ACT-01 · B | App 传输与 NAS 后台任务分源、速度/剩余时间、筛选、分页、通知 | 活动中心、Toast/系统通知、托盘摘要 | **核心**：前台传输与 NAS 任务分源状态；系统后台与通知仅在后续获批时增强 | `ActivityTask.swift`、`WorkspaceView.swift` |
+| PHOTO-01 · A/D | 基于公开 File Station 扫描 `/home/Photos` 与 `/photo` 的个人/共享空间、文件夹、时间线、文件夹式相册、分页、搜索筛选、年/月定位；人物/地点/标签/真正相册实体未实现 | 自适应照片网格和时间线 | **核心**：内容优先网格、文件夹和用户主动时间线；不宣传智能相册 | `PhotoLibraryModel.swift`、`PhotoLibraryView.swift`、`photos-internal-candidate` |
+| PHOTO-02 · A/B | 缩略图缓存、完整查看、HEIC/MOV/Live Photo 兜底、EXIF 详情 | 查看器、键盘前后切换、元数据面板 | **核心**：沉浸查看、分享和基础元数据；iPad Inspector；受控内存上限 | `PhotoLibraryModel.swift`、`FilePreviewView.swift` |
+| PHOTO-03 · A/C | 上传、导出、删除、分享、移动和照片页回收站恢复 | 多选命令栏、拖放导入导出 | **受限**：主动导入/导出/分享和有上限的 NAS 内移动/回收站；不删除系统图库 | `PhotoLibraryModel.swift` |
+| CHAT-01 · C | 会话、用户、首次单聊、私人群聊、成员与未读/置顶/本地已读 | 会话-消息-详情布局、通知入口 | **核心**：会话、成员、可解释未读；iPhone Stack、iPad 双栏 | `ChatWorkspaceModel.swift`、`DsmChatRepository.swift` |
+| CHAT-02 · C | 消息分页、草稿、发送/失败重试、实时 Socket.IO 与轮询降级 | 键盘发送、连接状态与可恢复错误 | **核心**：文字/Emoji、草稿、分页、失败恢复与前台实时 | `ChatWorkspaceModel.swift`、`DsmChatRealtimeClient.swift` |
+| CHAT-03 · C | 单附件上传/保存、缩略图、图片预览；提醒、定时消息与投票第一阶段 | 文件选择器、详情窗格、任务反馈 | **受限**：单附件选择、上传/保存与预览；提醒、定时和投票不作为当前完成条件 | `ChatWorkspaceView.swift`、Chat 请求 fixture |
+| CHAT-04 · C | 删除本人消息、关闭会话、消息转发、服务端消息置顶/取消置顶；语音发送和完整加密实现不存在 | 可发现的消息/会话菜单与结果回读 | **受限**：少量常用消息动作按端点开放；高级管理、语音和加密当前不做 | `ChatWorkspaceModel.swift`、`DsmChatRepository.swift` |
+| DS-01 · A/C | 下载任务列表、详情、进度/速度、网址或任务文件创建、目标目录 | 专用任务页、筛选与多选命令 | **受限**：列表/详情和单任务创建；不承接复杂批量任务 | `ServiceManagementModel.swift`、`ServiceManagementView.swift` |
+| DS-02 · A/C | 暂停/继续/开始/删除，删除数据分支；官方基础设置 | 批量命令、设置页、结果回读 | **受限**：单任务暂停/继续；删除数据、批量与高级设置当前不做 | 同上 |
+| CM-01 · C | 概览、容器、映像、网络、项目、事件 | 模块专用分页/详情、键盘与多选 | **受限**：只读健康与资源摘要；iPad 列表-详情，iPhone 分层导航 | `ContainerManagerPane`、服务管理 Repository |
+| CM-02 · C | 容器生命周期/删除、映像删除、网络创建/删除、Registry 搜索/标签/拉取 | 分步对话、后台任务状态 | **当前不做**：生命周期、删除、拉取和网络写交给 Mac App 或 DSM Web | `ServiceManagementModel.swift` |
+| VM-01 · C | 虚拟机、主机、存储、网络、映像、保护与事件读取 | 数据视图、详情与多选操作 | **受限**：只读健康与资源摘要；iPad 多栏，iPhone 摘要优先 | `VirtualMachineManagerPane` |
+| VM-02 · C | 基础创建/修改、电源/删除、网络修改/删除、映像删除、独立远程控制台 | 分步向导和可调整控制台窗口 | **当前不做**：创建/编辑/删除/网络写/电源与控制台交给 Mac App 或 DSM Web | `ServiceManagementModel.swift`、`ServiceManagementView.swift` |
+| NAS-01 · A/C | 系统概况、性能趋势、更新检查/发布说明、存储/硬盘/外接存储/ZRAM | Dashboard + 原生图表/数据表 | **核心**：系统、连接、容量与健康只读摘要；更新仅查看说明 | `NasAdministrationModel.swift` |
+| NAS-02 · A/C | 文件服务、终端、代理、接口、DDNS、区域时间、QuickConnect | 分类设置页、表单验证与写后回读 | **受限**：只读连接/配置摘要；所有设置写当前不做 | `NasAdministrationView.swift`、NAS Repository |
+| NAS-03 · A/C | 硬件/休眠、UPS、防火墙基础控制、电源操作 | 危险操作与普通设置空间分离 | **当前不做**：硬件、防火墙与电源写交给 Mac App 或 DSM Web | 同上、私有 API 记录 |
+| NAS-04 · A/C | 套件、任务与运行记录、账号/群组、当前账号共享访问、进程、日志和连接 | 模块化表格、分页、筛选和详情 | **受限**：套件/任务/日志/连接的隐私白名单只读摘要；账号与 ACL 写当前不做 | `NasSettingsPage`、NAS Repository |
+| NAS-05 · A/B | 容量健康与共享/类型/所有者/大文件/时间/重复内容的统一存储分析 | 可取消分析、表格/图表与导出 | **当前不做**：长时全 NAS 分析交给 Mac App | `StorageAnalysisEngine` |
+| SET-01 · A/B | 模块开关、语言、传输分块、本地占用与可再生缓存清理、诊断边界 | 设置页、系统主题、高对比与缓存管理 | **核心**：Settings/Profile、语言、主题、可再生缓存与隐私诊断边界 | `SettingsView`、本地化契约 |
+| SYS-01 · A/B | Finder 只读云盘、按需读取、离线保留、缓存与后台驻留；`createItem`、`modifyItem`、`deleteItem` 返回 `featureUnsupported`，`enumerateChanges` 不承诺远端增量 | Cloud Files/资源管理器等价，延续当前实现并完成实机出口 | **后续**：当前使用 App 内浏览、Document Picker/Exporter 与分享；File Provider 需独立产品、契约、签名决策 | `apple/Apps/DsmMac/FileProviderExtension/` |
 
 ## 7. UI/UX 共同设计系统
 
@@ -189,14 +215,18 @@ owner 与允许修改文件：
 ```text
 P0 基线冻结与功能账本
   └─ P1 请求 fixture、结果模型、领域接口与安全门
-       ├─ P2 Windows / Apple 平台壳层和状态恢复
-       ├─ P3 Files + 预览 + 传输
-       │    └─ P4 Photos 文件系统照片库
-       ├─ P5 Chat
-       ├─ P6 Download / Container / VMM
-       └─ P7 NAS 设置与统一存储
-              └─ P8 系统集成（Cloud Files / File Provider / 后台 / 通知）
-                    └─ P9 无障碍、性能、安全、真实设备与发布验收
+       ├─ Windows：Shell → Files/Photos/Chat/Services/NAS → Cloud Files/系统集成
+       │                                      └─ Windows 完整语义对齐验收
+       └─ Apple：Session/Shell → 当前 MOBILE_CORE + MOBILE_LIMITED
+                               ├─ iPhone 随身伴侣出口
+                               └─ iPad 增强型移动工作台出口
+                                      └─ Apple 当前范围自动化收口
+
+Apple MOBILE_FUTURE / MOBILE_EXCLUDED
+  └─ 不进入当前 DAG；只有独立决策后才能建立新切片
+
+两轨已交付能力的 PENDING_USER_VALIDATION
+  └─ 后续用户真机 / 真实环境 / 发布验收
 ```
 
 依赖规则：
@@ -205,7 +235,9 @@ P0 基线冻结与功能账本
 - Files/传输先于 Photos、Chat 附件和 Download 任务文件，因为后三者复用二进制、选择器、缓存和任务语义。
 - 系统集成单独收口，不能和普通 UI 切片一起改 entitlement、工程文件或安装生命周期。
 - Windows 与 Apple 轨可以并行，但 `contracts/**`、公共文档和本地化完整性检查由单一集成 owner 处理。
-- 自动照片备份不是 macOS parity 依赖。它只能作为用户另行批准的移动增量，在 PhotoKit、后台模式和持久化迁移决策通过后实施；无论是否完成都不影响 P4 parity 状态。
+- Apple 当前出口只依赖专项矩阵中的 `MOBILE_CORE` 与明确列出的 `MOBILE_LIMITED` 子集；不能因共享 Repository 已存在而把 `MOBILE_FUTURE` / `MOBILE_EXCLUDED` 接回主 DAG。
+- 自动照片备份、多窗口、File Provider、复杂后台常驻能力属于移动后续候选；无论是否实现都不影响 Apple 当前范围交付。
+- 真机、签名、系统注册或真实 NAS 验证不是当前源码切片的全局前置条件。只有确定的代码/契约依赖可以阻塞下游实现；外部验证缺口进入后测账本，若涉及高风险能力则只阻塞该入口启用及最终发布声明。
 
 ## 9. Codex 多代理执行协议
 
@@ -218,6 +250,7 @@ P0 基线冻结与功能账本
 - 先验收共享接口，再放行上层实现；
 - 自己检查 `git diff`、请求 fixture、安全结果模型和所有测试输出；
 - 让未参与实现的 agent 复核高风险切片；
+- 优先验收当前功能的主流程和最小充分证据，不把推测性的防御分支、无关重构或后置真机调试塞入实现切片；
 - 只在证据满足完成定义时更新平台矩阵和状态。
 
 主 agent 可以直接修改组合根、路由、共享资源或处理集成冲突，但不应在可独立委派时同时承担大块功能实现。
@@ -241,29 +274,34 @@ P0 基线冻结与功能账本
 禁止修改：Mac、Android、共享热点及用户现有改动
 前置接口：已冻结的协议、模型、fixture 和资源键
 安全要求：确认/权限/防重复/回读/取消语义
-完成条件：代码、五态、双语、无障碍、测试
-必须运行：精确命令
+功能闭环：本切片必须可完成的用户主流程、必要状态与明确非目标
+完成条件：代码、相关五态、双语、可自动验证的无障碍和聚焦测试
+必须运行：当前环境可执行的精确命令
+待用户后测：无 / PENDING_USER_VALIDATION；条件、步骤、预期、失败证据与受影响入口
+若包含真实或危险写：用户明确授权的专用测试环境、允许操作范围、确认方式与写后复查要求
 交接：改动、决策、结果、失败、风险、下一步、git status
 ```
 
 ## 10. 跨端共同验收矩阵
 
+下表用于 Windows 最终对齐，以及 Apple **当前核心/受限范围**的发布验收；不要求在每个功能切片结束时一次跑完。移动后续/当前不做项不进入矩阵，也不能以缺少真机为由重新变成当前承诺。当前环境可自动验证的项目随切片完成；真机、签名、硬件和真实 NAS 项整理为 `PENDING_USER_VALIDATION` 清单，待用户集中测试后补证据和修复。
+
 | 维度 | Windows | iPhone | iPad |
 | --- | --- | --- | --- |
-| 构建 | Windows SDK 下 Debug/Release，x64/arm64 | 无签名模拟器 + 正式签名真机 | 同 iPhone，另含多窗口/分屏配置 |
+| 构建 | Windows SDK 下 Debug/Release，x64/arm64 | 无签名模拟器 + 正式签名真机 | 同 iPhone，另含当前范围在分屏/台前调度中的单窗口宽度适配；多窗口仅在未来获批后加入 |
 | 输入 | 鼠标、键盘、触控、快捷键、拖放 | 触控、系统返回、分享、旋转 | 触控、键盘、指针、拖放、分屏/台前调度 |
 | 可访问性 | Narrator、键盘焦点、高对比、100–200% 缩放、Accessibility Insights | VoiceOver、最大动态文字、按钮形状、减少动态效果 | 同 iPhone，另检查多栏焦点与硬件键盘 |
 | 视觉 | 浅色/深色、高对比、窄/宽窗口 | 小/大屏、浅/深色、纵/横屏、安全区 | 纵/横屏、紧凑/常规宽度、并列 App |
-| 生命周期 | 窗口隐藏/恢复、托盘、休眠、重启、安装/卸载 | 前后台、系统终止、低电量、网络切换 | 同 iPhone，另含多个 Scene 的隔离恢复 |
-| 网络 | 局域网、公网直连、QuickConnect 中继、证书变化 | Wi-Fi/蜂窝切换和后台调度 | 同 iPhone |
-| DSM | 普通/管理员、套件有/无、只读/可写、当前记录 build | 同 Windows | 同 Windows |
-| 写操作 | 成功、部分成功、权限拒绝、提交未确认、取消后复查 | 同 Windows | 同 Windows |
+| 生命周期 | 窗口隐藏/恢复、托盘、休眠、重启、安装/卸载 | 当前范围的前后台、系统终止、低电量、网络切换 | 同 iPhone；多个 Scene 仅在未来获批后加入 |
+| 网络 | 局域网、公网直连、QuickConnect 中继、证书变化 | 当前范围前台流程的 Wi-Fi/蜂窝切换；后台调度仅在未来纳入后验收 | 同 iPhone |
+| DSM | 普通/管理员、套件有/无、只读/可写、当前记录 build | 只验收专项矩阵当前核心/受限模块所需的账号、套件与 build | 同 iPhone |
+| 写操作 | 成功、部分成功、权限拒绝、提交未确认、取消后复查 | 只覆盖当前受限写子集，不包含 Container/VMM/NAS 管理写 | 同 iPhone，另验证键盘/拖放不能绕过确认 |
 
-任何平台通过都不能替代另一平台或另一 DSM build 的验证。实机记录只使用 `lab-a`、`lab-b` 等稳定别名并遵循最小披露。
+任何平台通过都不能替代另一平台或另一 DSM build 的验证。Apple 的验收以各设备被承诺的范围为准，iPad 输入增强不能把复杂桌面运维升级为移动必做。缺少某项外部证据只阻塞对应的 `DEVICE_VERIFIED`、能力开放或发布声明，不回溯阻塞无依赖的源码实现。实机记录只使用 `lab-a`、`lab-b` 等稳定别名并遵循最小披露。
 
 ## 11. 每阶段质量门
 
-每个功能波次合入下一阶段前，主 agent 至少执行并记录：
+每个功能切片进入下一代码切片前，主 agent 至少运行 `git diff --check`、与改动直接相关的聚焦测试和当前环境可执行的构建。下列共享命令是按影响选取的完整门禁清单；里程碑、公共契约或共享 Package 变更时再执行对应全量项，不为无关平台重复运行：
 
 ```bash
 git diff --check
@@ -272,7 +310,9 @@ swift test --package-path apple
 xcodebuild -project apple/Apps/DsmMac/DsmMac.xcodeproj -scheme DsmMac -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
 ```
 
-只改 Windows 时可以不执行 Apple 构建。仅改移动 App 且未触碰共享 Package 时，可不执行上面的 DsmMac 构建；公共契约或 `apple/Packages/**` 改动必须同时执行共享测试和 DsmMac App + File Provider Extension 的无签名构建。Windows 还必须在 Windows 环境执行专项计划中的 .NET/WinUI 命令；Apple 移动端必须分别使用 iPhone 与 iPad Simulator 执行构建/UI 状态检查。真实系统集成按专项签名出口执行。
+只改 Windows 时可以不执行 Apple 构建。仅改移动 App 且未触碰共享 Package 时，可不执行上面的 DsmMac 构建；公共契约或 `apple/Packages/**` 改动必须同时执行共享测试和 DsmMac App + File Provider Extension 的无签名构建。Windows 的 .NET/WinUI 构建优先交给可用 Windows 环境或 CI；Apple 移动端优先分别使用 iPhone 与 iPad Simulator。当前没有目标主机、模拟器、签名或真机时，如实记录 `PENDING_USER_VALIDATION` 或相应验证等级缺口并继续无依赖功能，不得用其他平台结果冒充，也不得跳过当前环境本可执行的相关测试。
+
+涉及用户可见文案、语言资源或界面状态的切片，无论是否为里程碑，都必须运行 `python3 tools/localization/check_localization.py` 及项目既有硬编码扫描；不得以 `PENDING_USER_VALIDATION` 代替当前环境可执行的本地化检查。
 
 质量门还包括：
 
@@ -281,11 +321,12 @@ xcodebuild -project apple/Apps/DsmMac/DsmMac.xcodeproj -scheme DsmMac -configura
 - 没有新增无限列表、无界缓存或主线程大文件解码；
 - 高风险操作没有自动重试，提交未确认时只刷新最终状态；
 - 内部只读失败不阻断无关模块，内部写在未知环境默认关闭；
+- 没有为未记录契约、可复现故障或明确风险添加推测性校验、重复 fallback 或平行实现；
 - 没有通过跳过测试、降低断言或删除回归来制造通过。
 
 ## 12. 文档同步与交付
 
-每个达到新验证等级的切片按实际影响更新：
+每个达到新验证等级，或新增/关闭 `PENDING_USER_VALIDATION` 的切片，按实际影响更新：
 
 - 本文的功能账本状态；
 - 对应 Windows 或 Apple 移动专项计划；
@@ -293,7 +334,7 @@ xcodebuild -project apple/Apps/DsmMac/DsmMac.xcodeproj -scheme DsmMac -configura
 - [当前开发进度](../progress/STATUS.md)中的实时结果；
 - 相关功能专项计划、请求 fixture、私有 API 兼容矩阵和 DSM 兼容矩阵。
 
-如果任务未完成需要交接，除根 `AGENTS.md` 规定内容外，还必须指出当前功能 ID、账本状态、已冻结接口、下一 owner 的允许文件和不能触碰的用户改动。
+如果任务未完成需要交接，除根 `AGENTS.md` 规定内容外，还必须指出当前功能 ID、功能闭环边界、账本状态、已冻结接口、待用户后测清单、下一 owner 的允许文件和不能触碰的用户改动。
 
 ## 13. 参考资料
 

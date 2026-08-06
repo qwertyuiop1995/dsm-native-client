@@ -60,7 +60,7 @@
 
 - 完成大图库、元数据、权限、弱网、缓存和危险写操作验收。
 - 补齐基础相册入口，再按版本化契约评估人物、主题、地点、标签等增强能力。
-- 达到 macOS 发布出口后，再推进 iPhone、iPad、Android 和 Windows 原生界面及移动照片备份。
+- 达到 macOS 发布出口后，Windows 按完整业务语义推进；iPhone/iPad 先交付精选照片浏览、查看、主动导入/分享和有限 NAS 管理，自动照片备份作为后续独立决策；Android 继续按其专项范围推进。
 
 详细范围见[照片管理开发计划](../development/NATIVE_DSM_PHOTOS_DEVELOPMENT_PLAN_ZH.md)。
 
@@ -81,15 +81,17 @@
 
 详细范围见[套件管理计划](../development/NATIVE_DSM_SERVICE_MANAGEMENT_PLAN_ZH.md)和[统一存储管理计划](../development/NATIVE_DSM_STORAGE_MANAGEMENT_PLAN_ZH.md)。
 
-## P2：五端能力对齐
+## P2：Windows 语义对齐与移动端范围交付
 
-- Apple 移动端复用共享领域层，按触控、小屏、后台任务和系统权限设计原生体验。
-- Android 使用 Kotlin 与 Jetpack Compose，Windows 使用 C# 与 WinUI 3。
-- 各端遵循共同契约、安全语义和兼容矩阵，不共享跨平台 UI 运行时。
-- 平台对齐范围根据[平台功能矩阵](PLATFORM_MATRIX.md)逐项确定，不以单个平台实现代替其他平台验收。
+- Windows 使用 C# 与 WinUI 3，继续以 macOS 已承诺业务范围为完整语义对齐目标。
+- Apple 移动端复用共享领域层，但按 iPhone 随身伴侣和 iPad 增强型移动工作台场景，只交付专项矩阵中的核心/受限能力；复杂运维、长流程和系统级集成不因共享代码存在而自动进入范围。
+- Android 使用 Kotlin 与 Jetpack Compose，具体范围由 Android 专项计划和范围账本独立决定。
+- 各端遵循共同契约、安全语义和兼容矩阵，不共享跨平台 UI 运行时；范围缩减不能削弱已纳入写操作的安全门禁。
+- Windows 对齐与各移动端范围根据[平台功能矩阵](PLATFORM_MATRIX.md)逐项确定，不以单个平台实现代替其他平台验收。
 
 ## P3：候选能力
 
+- Apple 移动端自动照片备份、后台常驻传输、iPad 多窗口与 File Provider；只有独立产品、权限、契约和验收决策通过后才进入活动里程碑。
 - File Station 后台任务、异步目录大小、MD5、VFS 扩展和更完整的恢复入口。
 - Download Station、Container Manager 和 Virtual Machine Manager 的剩余高级能力。
 - Audio Station、Video Station、Note Station、Synology Drive、Calendar、Contacts、Surveillance Station、Hyper Backup、Active Backup 和 Synology Office。

@@ -126,6 +126,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.PhotoSpace
 import io.github.qwertyuiop1995.dsmnativeclient.domain.PhotoSpaceAccess
 import io.github.qwertyuiop1995.dsmnativeclient.domain.PhotoTimelineProgress
 import io.github.qwertyuiop1995.dsmnativeclient.domain.PhotoViewerState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.SHARED_PHOTO_SPACE
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ResourceState
 import io.github.qwertyuiop1995.dsmnativeclient.domain.RecycleLocation
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferTask
@@ -17130,7 +17131,8 @@ private fun WorkspaceState.pageLinkDestination(): WorkspacePageLinkDestination =
         }
 
         photoBrowser.mode != PhotoBrowseMode.FOLDERS -> WorkspacePageLinkDestination.Unavailable
-        photoBrowser.folderPath != photoBrowser.selectedSpace.rootPath -> {
+        photoBrowser.selectedSpaceId == SHARED_PHOTO_SPACE.id ||
+            photoBrowser.folderPath != photoBrowser.selectedSpace.rootPath -> {
             if (photoBrowser.restoreCanonicalFolder(
                     photoBrowser.selectedSpaceId,
                     photoBrowser.folderPath,

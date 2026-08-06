@@ -14,6 +14,10 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.FilePreviewContent
 import io.github.qwertyuiop1995.dsmnativeclient.domain.Module
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
 import io.github.qwertyuiop1995.dsmnativeclient.domain.OpaqueWorkspaceTarget
+import io.github.qwertyuiop1995.dsmnativeclient.domain.PhotoBrowserState
+import io.github.qwertyuiop1995.dsmnativeclient.domain.PhotoBrowseMode
+import io.github.qwertyuiop1995.dsmnativeclient.domain.PERSONAL_PHOTO_SPACE
+import io.github.qwertyuiop1995.dsmnativeclient.domain.SHARED_PHOTO_SPACE
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmApiClient
 import io.github.qwertyuiop1995.dsmnativeclient.storage.SecureProfileStore
 import java.util.Collections
@@ -194,6 +198,99 @@ class OpaqueWorkspaceNavigationTest {
         }
     }
 
+    @Test
+    fun 共享照片根目录签发不透明链接并经重读恢复共享空间() {
+        val profile = syntheticProfile("shared-photo-root")
+        val root = FileItem(
+            path = "/photo",
+            name = "photo",
+            isDirectory = true,
+            canRead = true,
+        )
+        val transport = RecordingFileRepositoryInterceptor(root)
+        withProfiles(profile) { store ->
+            val model = model()
+            val workspace = workspace(model)
+            workspace.value = syntheticWorkspace(profile).copy(
+                selectedModule = Module.PHOTOS,
+                photoBrowser = PhotoBrowserState(
+                    selectedSpaceId = SHARED_PHOTO_SPACE.id,
+                    folderPath = SHARED_PHOTO_SPACE.rootPath,
+                ),
+            )
+            installRepository(model, repository(profile, transport))
+
+            model.copyCurrentPageLink()
+
+            val uri = clipboardText()
+            val route = requireNotNull(uri.externalWorkspaceRoute())
+            assertTrue(route is ExternalWorkspaceRoute.OpaqueObject)
+            val token = (route as ExternalWorkspaceRoute.OpaqueObject).token
+            assertFalse(uri.contains("shared"))
+            assertFalse(uri.contains("/photo"))
+            assertEquals(
+                OpaqueWorkspaceTarget.PhotoFolder(
+                    SHARED_PHOTO_SPACE.id,
+                    SHARED_PHOTO_SPACE.rootPath,
+                ),
+                store.opaqueWorkspaceRoute(token)?.target,
+            )
+
+            workspace.value = workspace.value?.copy(
+                selectedModule = Module.FILES,
+                photoBrowser = PhotoBrowserState(),
+            )
+
+            waitForOpaqueNavigationResult(model, token, WorkspaceNavigationResult.APPLIED)
+
+            assertEquals(Module.PHOTOS, workspace.value?.selectedModule)
+            assertEquals(SHARED_PHOTO_SPACE.id, workspace.value?.photoBrowser?.selectedSpaceId)
+            assertEquals(SHARED_PHOTO_SPACE.rootPath, workspace.value?.photoBrowser?.folderPath)
+            assertEquals(emptyList<String>(), workspace.value?.photoBrowser?.pathHistory)
+            assertEquals(PhotoBrowseMode.FOLDERS, workspace.value?.photoBrowser?.mode)
+            assertTrue(transport.fileInfoPaths.contains("[\"/photo\"]"))
+
+            workspace.value = workspace.value?.copy(
+                photoBrowser = PhotoBrowserState(),
+            )
+            model.copyCurrentPageLink()
+            assertEquals("lanstash://open/photos", clipboardText())
+        }
+    }
+
+    @Test
+    fun 共享照片根目录在重读为不可读时拒绝打开() {
+        val profile = syntheticProfile("shared-photo-root-unreadable")
+        val root = FileItem(
+            path = "/photo",
+            name = "photo",
+            isDirectory = true,
+            canRead = false,
+        )
+        val transport = RecordingFileRepositoryInterceptor(root)
+        withProfiles(profile) { store ->
+            val model = model()
+            val workspace = workspace(model)
+            workspace.value = syntheticWorkspace(profile)
+            installRepository(model, repository(profile, transport))
+            val token = requireNotNull(
+                store.issueOpaqueWorkspaceTarget(
+                    profile.id,
+                    OpaqueWorkspaceTarget.PhotoFolder(
+                        SHARED_PHOTO_SPACE.id,
+                        SHARED_PHOTO_SPACE.rootPath,
+                    ),
+                ),
+            )
+
+            waitForOpaqueNavigationResult(model, token, WorkspaceNavigationResult.REJECTED)
+
+            assertEquals(Module.FILES, workspace.value?.selectedModule)
+            assertEquals(PERSONAL_PHOTO_SPACE.id, workspace.value?.photoBrowser?.selectedSpaceId)
+            assertTrue(transport.fileInfoPaths.contains("[\"/photo\"]"))
+        }
+    }
+
     private fun waitForOpaqueNavigationResult(
         model: AppViewModel,
         token: String,
@@ -297,6 +394,7 @@ private class RecordingFileRepositoryInterceptor(
                 fileInfoResponse(fileInfoItem)
             }
 
+            "list" -> "{\"success\":true,\"data\":{\"offset\":0,\"total\":0,\"files\":[]}}"
             "list_share" -> "{\"success\":true,\"data\":{\"offset\":0,\"total\":0,\"shares\":[]}}"
             else -> error("Unexpected synthetic request: ${fields["method"]}")
         }

@@ -282,6 +282,9 @@ data class VirtualMachineMutationTarget(
 data class VirtualMachineMutationWorkspaceState(
     /** VMM 固定分区仅驻留内存，用于任务页可见性与无载荷路由投影。 */
     val selectedTab: VirtualMachineTab = VirtualMachineTab.MACHINES,
+    /** 独立只读 Guest 详情只驻留当前 Workspace，不恢复任何写操作状态。 */
+    val guestDetailsTargetId: String? = null,
+    val guestDetails: Loadable<VirtualMachineGuestDetails> = Loadable.Idle,
     /** 只投影已发现的公开 Task.Info v1 能力，不保存能力原始响应。 */
     val supportsOfficialTasks: Boolean = false,
     val creationEditorVisible: Boolean = false,
@@ -416,6 +419,14 @@ internal fun virtualMachineMutationBlocksWorkspaceExit(
     if (state.imageImportTaskId != null) return true
     return state.target != null && virtualMachineMutationRequiresRefreshBeforeDismiss(state)
 }
+
+/** 对象外链不能覆盖或暂时隐藏仍可恢复的 VMM 写流程。 */
+internal fun virtualMachineGuestExternalNavigationBlocked(
+    state: VirtualMachineMutationWorkspaceState,
+): Boolean = state.creationEditorVisible || state.imageImportEditorVisible ||
+    state.settingsEditorVisible || state.lifecycleConfirmationRequested ||
+    state.taskCleanupConfirmationRequested || state.target != null ||
+    state.mutationInProgress || state.mutationRefreshInProgress
 
 internal fun canDismissVirtualMachineMutation(
     state: VirtualMachineMutationWorkspaceState,

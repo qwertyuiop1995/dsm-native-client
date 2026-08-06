@@ -624,6 +624,16 @@ internal fun VirtualMachinesScreen(state: WorkspaceState, model: AppViewModel) {
             title = { Text(resource.name) },
             text = {
                 val actions: @Composable () -> Unit = {
+                    if (tab == 0 && state.supportsOfficialVirtualMachineSettings) {
+                        ActionRow(
+                            Icons.Outlined.Info,
+                            stringResource(R.string.view_virtual_machine_details),
+                        ) {
+                            if (model.openVirtualMachineGuestDetails(resource.id)) {
+                                selected = null
+                            }
+                        }
+                    }
                     if (writeBlocked) {
                         Text(stringResource(R.string.virtual_machine_action_in_progress))
                     } else {

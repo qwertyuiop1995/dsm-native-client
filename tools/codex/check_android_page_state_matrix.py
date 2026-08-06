@@ -42,6 +42,7 @@ EXPECTED_FILES = {
     "services/ServiceScreens.kt",
     "services/VirtualMachineCreationDialog.kt",
     "services/VirtualMachineImageImportDialog.kt",
+    "services/VirtualMachineGuestDetailsScreen.kt",
     "settings/SettingsScreen.kt",
     "transfers/TransfersScreen.kt",
 }

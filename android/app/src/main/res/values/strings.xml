@@ -1887,6 +1887,7 @@
     <string name="change_download_destination_changed">The task or selected folder changed. Refresh the task list and choose the location again.</string>
     <string name="confirm_change_download_destination">Change save location</string>
     <string name="virtual_machine_tasks">Tasks</string>
+    <string name="view_virtual_machine_details">View details</string>
     <string name="virtual_machine_hardware_configuration">Hardware configuration</string>
     <string name="virtual_machine_disks">Disks</string>
     <string name="virtual_machine_network_interfaces">Network interfaces</string>

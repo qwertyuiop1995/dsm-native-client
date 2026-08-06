@@ -118,6 +118,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineHardware
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineNetworkInterface
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineNetworkModel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSettings
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineGuestDetails
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTask
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTaskCenterState
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmApiClient
@@ -6976,6 +6977,21 @@ class DsmRepository(
         )
     }
 
+    /**
+     * 仅用公开 Guest.get v1 重新读取一个 Guest；不能用列表或内部 Guest 接口替代这个身份核对。
+     */
+    suspend fun virtualMachineGuestDetails(guestId: String): VirtualMachineGuestDetails {
+        val normalizedId = guestId.trim()
+        require(normalizedId.isNotEmpty()) { "Virtual machine guest ID is required" }
+        if (!supportsOfficialVirtualMachineGuestDetails()) throw DsmFailure(
+            null,
+            "Virtual machine guest details are unavailable",
+            "Refresh Virtual Machine Manager and try again.",
+            kind = DsmErrorKind.FEATURE_UNSUPPORTED,
+        )
+        return readOfficialVirtualMachineGuestDetails(normalizedId)
+    }
+
     fun supportsOfficialVirtualMachineCreation(): Boolean =
         supportsVersion("SYNO.Virtualization.API.Guest", 1) &&
             supportsVersion("SYNO.Virtualization.API.Task.Info", 1) &&
@@ -6983,6 +6999,10 @@ class DsmRepository(
 
     fun supportsOfficialVirtualMachineSettings(): Boolean =
         supportsVersion("SYNO.Virtualization.API.Guest", 1)
+
+    /** Guest 详情只接受官方 Guest v1，不能以内部同名接口代替。 */
+    fun supportsOfficialVirtualMachineGuestDetails(): Boolean =
+        supportsOfficialVirtualMachineSettings()
 
     fun supportsOfficialVirtualMachineTasks(): Boolean =
         supportsVersion("SYNO.Virtualization.API.Task.Info", 1)
@@ -7792,6 +7812,50 @@ class DsmRepository(
         "vms",
     )
 
+    private data class OfficialVirtualMachineGuest(
+        val id: String,
+        val payload: JsonObject,
+    )
+
+    private suspend fun readOfficialVirtualMachineGuest(
+        id: String,
+        responseScope: String,
+    ): OfficialVirtualMachineGuest {
+        val guest = call(
+            "SYNO.Virtualization.API.Guest",
+            "get",
+            mapOf("guest_id" to id, "additional" to "true"),
+            version = 1,
+        )
+        val responseId = guest["guest_id"].strictStringValue()?.takeIf(String::isNotBlank)
+            ?: throw invalidVirtualizationResponse("$responseScope-id")
+        if (responseId != id) throw invalidVirtualizationResponse("$responseScope-id-mismatch")
+        return OfficialVirtualMachineGuest(responseId, guest)
+    }
+
+    private suspend fun readOfficialVirtualMachineGuestDetails(
+        id: String,
+    ): VirtualMachineGuestDetails {
+        val guest = readOfficialVirtualMachineGuest(id, "guest-details")
+        val guestName = guest.payload["guest_name"].strictStringValue()
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: throw invalidVirtualizationResponse("guest-details-name")
+        val resource = genericResources(
+            JsonObject(mapOf("guests" to JsonArray(listOf(guest.payload)))),
+            "guests",
+        ).singleOrNull()?.takeIf { it.id == guest.id }?.copy(name = guestName)
+            ?: throw invalidVirtualizationResponse("guest-details-resource")
+        return VirtualMachineGuestDetails(
+            resource = resource,
+            hardware = officialVirtualMachineHardware(
+                guest.payload,
+                guest.id,
+                "guest-details-hardware",
+            ),
+        )
+    }
+
     private data class OfficialVirtualMachineRead(
         val machines: List<ManagedResource>,
         val hardware: List<VirtualMachineHardware>?,
@@ -7881,6 +7945,21 @@ class DsmRepository(
             else -> throw invalidVirtualizationResponse("guest-hardware-network-model")
         }
         return VirtualMachineNetworkInterface(id, networkId, networkName, model)
+    }
+
+    private fun officialVirtualMachineHardware(
+        guest: JsonObject,
+        machineId: String,
+        responseScope: String,
+    ): VirtualMachineHardware {
+        val disks = (guest["vdisks"] as? JsonArray)?.map(::officialVirtualMachineDisk)
+            ?: throw invalidVirtualizationResponse("$responseScope-disks")
+        val networks = (guest["vnics"] as? JsonArray)?.map(::officialVirtualMachineNetwork)
+            ?: throw invalidVirtualizationResponse("$responseScope-networks")
+        if (disks.map(VirtualMachineDisk::id).distinct().size != disks.size ||
+            networks.map(VirtualMachineNetworkInterface::id).distinct().size != networks.size
+        ) throw invalidVirtualizationResponse("$responseScope-duplicates")
+        return VirtualMachineHardware(machineId, disks, networks)
     }
 
     private data class VirtualMachineTaskCenterRead(
@@ -8233,15 +8312,7 @@ class DsmRepository(
     }
 
     private suspend fun readOfficialVirtualMachineSettings(id: String): VmmGuestSettingsSnapshot {
-        val guest = call(
-            "SYNO.Virtualization.API.Guest",
-            "get",
-            mapOf("guest_id" to id, "additional" to "true"),
-            version = 1,
-        )
-        val responseId = guest["guest_id"].strictStringValue()?.takeIf(String::isNotBlank)
-            ?: throw invalidVirtualizationResponse("guest-settings-id")
-        if (responseId != id) throw invalidVirtualizationResponse("guest-settings-id-mismatch")
+        val guest = readOfficialVirtualMachineGuest(id, "guest-settings").payload
         val autorun = guest["autorun"].strictIntValue()
             ?: throw invalidVirtualizationResponse("guest-settings-autorun")
         if (autorun !in setOf(0, 2)) throw invalidVirtualizationResponse("guest-settings-autorun")
@@ -8259,23 +8330,8 @@ class DsmRepository(
     }
 
     private suspend fun readOfficialVirtualMachineHardware(id: String): VirtualMachineHardware {
-        val guest = call(
-            "SYNO.Virtualization.API.Guest",
-            "get",
-            mapOf("guest_id" to id, "additional" to "true"),
-            version = 1,
-        )
-        val responseId = guest["guest_id"].strictStringValue()?.takeIf(String::isNotBlank)
-            ?: throw invalidVirtualizationResponse("guest-creation-hardware-id")
-        if (responseId != id) throw invalidVirtualizationResponse("guest-creation-hardware-id-mismatch")
-        val disks = (guest["vdisks"] as? JsonArray)?.map(::officialVirtualMachineDisk)
-            ?: throw invalidVirtualizationResponse("guest-creation-hardware-disks")
-        val networks = (guest["vnics"] as? JsonArray)?.map(::officialVirtualMachineNetwork)
-            ?: throw invalidVirtualizationResponse("guest-creation-hardware-networks")
-        if (disks.map(VirtualMachineDisk::id).distinct().size != disks.size ||
-            networks.map(VirtualMachineNetworkInterface::id).distinct().size != networks.size
-        ) throw invalidVirtualizationResponse("guest-creation-hardware-duplicates")
-        return VirtualMachineHardware(responseId, disks, networks)
+        val guest = readOfficialVirtualMachineGuest(id, "guest-creation-hardware")
+        return officialVirtualMachineHardware(guest.payload, guest.id, "guest-creation-hardware")
     }
 
     private fun VirtualMachineHardware.matchesCreatedHardware(

@@ -1,8 +1,12 @@
 package io.github.qwertyuiop1995.dsmnativeclient.data
 
 import io.github.qwertyuiop1995.dsmnativeclient.domain.ApiCapability
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmErrorKind
+import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmFailure
 import io.github.qwertyuiop1995.dsmnativeclient.domain.DsmSession
 import io.github.qwertyuiop1995.dsmnativeclient.domain.NasProfile
+import io.github.qwertyuiop1995.dsmnativeclient.domain.OpaqueWorkspaceRouteRecord
+import io.github.qwertyuiop1995.dsmnativeclient.domain.OpaqueWorkspaceTarget
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineDiskController
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineNetworkModel
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineSection
@@ -10,6 +14,9 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineTaskCenterS
 import io.github.qwertyuiop1995.dsmnativeclient.network.DsmApiClient
 import java.security.MessageDigest
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import okhttp3.FormBody
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -24,6 +31,103 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VirtualMachineReadOnlyRepositoryTest {
+    @Test
+    fun `Guest 单项重读只使用公开 get 并投影基础信息与硬件`() = runBlocking {
+        val transport = VirtualMachineReadOnlyInterceptor(
+            guestGet = """{"success":true,"data":{"guest_id":"guest-1","guest_name":"Focused VM","status":"running","vdisks":[{"controller":1,"unmap":true,"vdisk_id":"disk-1","vdisk_size":10240}],"vnics":[{"mac":"02:11:32:00:00:01","model":2,"network_id":"network-1","network_name":"Default Network","vnic_id":"nic-1"}]}}""",
+        )
+
+        val details = repository(transport, API_GUEST).virtualMachineGuestDetails(" guest-1 ")
+
+        assertEquals("guest-1", details.resource.id)
+        assertEquals("Focused VM", details.resource.name)
+        assertEquals("running", details.resource.detail)
+        assertEquals("guest-1", details.hardware.machineId)
+        assertEquals(10_240, details.hardware.disks.single().sizeMiB)
+        assertEquals("network-1", details.hardware.networkInterfaces.single().networkId)
+        assertFalse(details.toString().contains("02:11:32", ignoreCase = true))
+        assertEquals(1, transport.requests.size)
+        assertEquals(API_GUEST, transport.requests.single().fields()["api"])
+        assertEquals("get", transport.requests.single().fields()["method"])
+        assertEquals("1", transport.requests.single().fields()["version"])
+        assertEquals("guest-1", transport.requests.single().fields()["guest_id"])
+        assertEquals("true", transport.requests.single().fields()["additional"])
+    }
+
+    @Test
+    fun `Guest 单项重读在公开能力缺失时不发送请求`() = runBlocking {
+        val transport = VirtualMachineReadOnlyInterceptor()
+
+        val failure = runCatching {
+            repository(transport).virtualMachineGuestDetails("guest-1")
+        }.exceptionOrNull()
+
+        assertTrue(failure is DsmFailure)
+        assertEquals(DsmErrorKind.FEATURE_UNSUPPORTED, (failure as DsmFailure).kind)
+        assertTrue(transport.requests.isEmpty())
+    }
+
+    @Test
+    fun `Guest 单项重读拒绝响应 ID 不一致且不回退`() = runBlocking {
+        val transport = VirtualMachineReadOnlyInterceptor(
+            guestGet = """{"success":true,"data":{"guest_id":"other-guest","guest_name":"Wrong VM","status":"shutdown","vdisks":[],"vnics":[]}}""",
+        )
+
+        val failure = runCatching {
+            repository(transport, API_GUEST).virtualMachineGuestDetails("guest-1")
+        }.exceptionOrNull()
+
+        assertTrue(failure is DsmFailure)
+        assertEquals(DsmErrorKind.INVALID_RESPONSE, (failure as DsmFailure).kind)
+        assertEquals(1, transport.requests.size)
+        assertEquals("get", transport.requests.single().fields()["method"])
+        assertEquals("guest-1", transport.requests.single().fields()["guest_id"])
+    }
+
+    @Test
+    fun `Guest 单项重读拒绝缺失名称以免把内部 ID 显示给用户`() = runBlocking {
+        val transport = VirtualMachineReadOnlyInterceptor(
+            guestGet = """{"success":true,"data":{"guest_id":"guest-1","status":"running","vdisks":[],"vnics":[]}}""",
+        )
+
+        val failure = runCatching {
+            repository(transport, API_GUEST).virtualMachineGuestDetails("guest-1")
+        }.exceptionOrNull()
+
+        assertTrue(failure is DsmFailure)
+        assertEquals(DsmErrorKind.INVALID_RESPONSE, (failure as DsmFailure).kind)
+        assertEquals(1, transport.requests.size)
+    }
+
+    @Test
+    fun `Guest 单项重读拒绝空白 ID 且不发送请求`() = runBlocking {
+        val transport = VirtualMachineReadOnlyInterceptor()
+
+        val failure = runCatching {
+            repository(transport, API_GUEST).virtualMachineGuestDetails("  ")
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalArgumentException)
+        assertTrue(transport.requests.isEmpty())
+    }
+
+    @Test
+    fun `Guest 外链目标序列化新增类型且保留旧记录兼容`() {
+        val json = Json { ignoreUnknownKeys = true }
+        val legacy = json.decodeFromString<OpaqueWorkspaceRouteRecord>(
+            """{"token":"token-a","profileId":"profile-a","target":{"type":"download_task","taskId":"task-a"},"createdAtEpochMillis":1,"schemaVersion":1}""",
+        )
+        val guest = legacy.copy(
+            target = OpaqueWorkspaceTarget.VirtualMachineGuest("guest-1"),
+        )
+        val encoded = json.encodeToString(guest)
+
+        assertEquals(OpaqueWorkspaceTarget.DownloadTask("task-a"), legacy.target)
+        assertEquals(guest, json.decodeFromString<OpaqueWorkspaceRouteRecord>(encoded))
+        assertTrue(encoded.contains("\"type\":\"virtual_machine_guest\""))
+        assertTrue(encoded.contains("\"guestId\":\"guest-1\""))
+    }
+
     @Test
     fun `独立任务刷新只发送 Task Info list 与 get`() = runBlocking {
         val transport = VirtualMachineReadOnlyInterceptor(
@@ -242,6 +346,7 @@ private fun taskDigest(value: String): String = MessageDigest.getInstance("SHA-2
 private class VirtualMachineReadOnlyInterceptor(
     private val guestList: String = """{"success":true,"data":{"guests":[{"guest_id":"guest-1","guest_name":"Synthetic VM","status":"shutdown","vdisks":[{"controller":1,"unmap":true,"vdisk_id":"disk-1","vdisk_size":10240}],"vnics":[{"mac":"02:11:32:00:00:01","model":2,"network_id":"network-1","network_name":"Default Network","vnic_id":"nic-1"}]}]}}""",
     private val guestAdditionalList: String = guestList,
+    private val guestGet: String = """{"success":true,"data":{"guest_id":"guest-1","guest_name":"Synthetic VM","status":"shutdown","vdisks":[{"controller":1,"unmap":true,"vdisk_id":"disk-1","vdisk_size":10240}],"vnics":[{"mac":"02:11:32:00:00:01","model":2,"network_id":"network-1","network_name":"Default Network","vnic_id":"nic-1"}]}}""",
     private val taskList: String? = null,
     private val taskDetails: ArrayDeque<String> = ArrayDeque(),
 ) : Interceptor {
@@ -252,10 +357,10 @@ private class VirtualMachineReadOnlyInterceptor(
         requests += request
         val fields = request.fields()
         val body = when (fields["api"]) {
-            "SYNO.Virtualization.API.Guest" -> if (fields["additional"] == "true") {
-                guestAdditionalList
-            } else {
-                guestList
+            "SYNO.Virtualization.API.Guest" -> when (fields["method"]) {
+                "list" -> if (fields["additional"] == "true") guestAdditionalList else guestList
+                "get" -> guestGet
+                else -> error("只读测试不允许 Guest 写方法")
             }
             "SYNO.Virtualization.API.Task.Info" -> when (fields["method"]) {
                 "list" -> checkNotNull(taskList)

@@ -156,6 +156,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.ui.settings.LanguageMenu
 import io.github.qwertyuiop1995.dsmnativeclient.ui.settings.SettingsScreen
 import io.github.qwertyuiop1995.dsmnativeclient.ui.services.ContainersScreen
 import io.github.qwertyuiop1995.dsmnativeclient.ui.services.VirtualMachinesScreen
+import io.github.qwertyuiop1995.dsmnativeclient.ui.services.VirtualMachineGuestDetailsScreen
 import io.github.qwertyuiop1995.dsmnativeclient.ui.transfers.TransfersScreen
 import java.text.DateFormat
 import java.util.Date
@@ -223,7 +224,17 @@ private fun ModuleContent(state: WorkspaceState, model: AppViewModel) {
         Module.CHAT -> ChatScreen(state, model)
         Module.DOWNLOADS -> DownloadsScreen(state, model)
         Module.CONTAINERS -> ContainersScreen(state, model)
-        Module.VIRTUAL_MACHINES -> VirtualMachinesScreen(state, model)
+        Module.VIRTUAL_MACHINES -> if (
+            state.virtualMachineMutationState.guestDetailsTargetId != null
+        ) {
+            VirtualMachineGuestDetailsScreen(
+                guest = state.virtualMachineMutationState.guestDetails,
+                onRetry = model::retryVirtualMachineGuestDetails,
+                onNavigateUp = model::closeVirtualMachineGuestDetails,
+            )
+        } else {
+            VirtualMachinesScreen(state, model)
+        }
         Module.NAS_SETTINGS -> NasSettingsScreen(state, model)
         Module.TRANSFERS -> TransfersScreen(state, model)
         Module.SETTINGS -> SettingsScreen(state, model)

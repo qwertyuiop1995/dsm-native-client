@@ -1878,6 +1878,7 @@
     <string name="change_download_destination_changed">任务或所选文件夹已发生变化。请刷新任务列表并重新选择位置。</string>
     <string name="confirm_change_download_destination">更改保存位置</string>
     <string name="virtual_machine_tasks">任务</string>
+    <string name="view_virtual_machine_details">查看详情</string>
     <string name="virtual_machine_hardware_configuration">硬件配置</string>
     <string name="virtual_machine_disks">磁盘</string>
     <string name="virtual_machine_network_interfaces">网络接口</string>

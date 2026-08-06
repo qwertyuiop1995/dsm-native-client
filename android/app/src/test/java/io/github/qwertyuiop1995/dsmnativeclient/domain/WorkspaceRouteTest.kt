@@ -390,6 +390,43 @@ class WorkspaceRouteTest {
         }
     }
 
+    @Test
+    fun `虚拟机来宾详情派生独立无载荷路由`() {
+        assertEquals(
+            listOf(
+                WorkspaceRoute.ModuleRoot(Module.VIRTUAL_MACHINES),
+                WorkspaceRoute.VirtualMachineGuestDetails,
+            ),
+            derive(
+                module = Module.VIRTUAL_MACHINES,
+                hasVirtualMachineGuestDetails = true,
+            ).entries,
+        )
+    }
+
+    @Test
+    fun `虚拟机来宾详情与任务页互斥且拒绝挂到错误模块`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            deriveWorkspaceRouteStack(
+                module = Module.VIRTUAL_MACHINES,
+                fileHistoryDepth = 0,
+                photoHistoryDepth = 0,
+                hasConversation = false,
+                hasFileSelection = false,
+                hasVirtualMachineTasks = true,
+                hasVirtualMachineGuestDetails = true,
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            WorkspaceRouteStack(
+                entries = listOf(
+                    WorkspaceRoute.ModuleRoot(Module.DOWNLOADS),
+                    WorkspaceRoute.VirtualMachineGuestDetails,
+                ),
+            )
+        }
+    }
+
     private fun derive(
         module: Module,
         fileDepth: Int = 0,
@@ -400,6 +437,7 @@ class WorkspaceRouteTest {
         hasPhotoViewer: Boolean = false,
         hasDownloadTaskDetails: Boolean = false,
         hasContainerRegistry: Boolean = false,
+        hasVirtualMachineGuestDetails: Boolean = false,
     ): WorkspaceRouteStack = deriveWorkspaceRouteStack(
         module = module,
         fileHistoryDepth = fileDepth,
@@ -410,5 +448,6 @@ class WorkspaceRouteTest {
         hasPhotoViewer = hasPhotoViewer,
         hasDownloadTaskDetails = hasDownloadTaskDetails,
         hasContainerRegistry = hasContainerRegistry,
+        hasVirtualMachineGuestDetails = hasVirtualMachineGuestDetails,
     )
 }

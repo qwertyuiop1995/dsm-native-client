@@ -133,6 +133,7 @@ import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferDirection
 import io.github.qwertyuiop1995.dsmnativeclient.domain.TransferState
 import io.github.qwertyuiop1995.dsmnativeclient.domain.UploadMutationLifecycle
 import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineOverview
+import io.github.qwertyuiop1995.dsmnativeclient.domain.VirtualMachineGuestDetails
 import io.github.qwertyuiop1995.dsmnativeclient.domain.WorkspaceRoute
 import io.github.qwertyuiop1995.dsmnativeclient.domain.WorkspaceRouteStack
 import io.github.qwertyuiop1995.dsmnativeclient.domain.deriveWorkspaceRouteStack
@@ -432,6 +433,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var downloadDiscoverySearchJob: Job? = null
     private var downloadActivityJob: Job? = null
     private var virtualMachineTaskPollingJob: Job? = null
+    private var virtualMachineGuestDetailsJob: Job? = null
     private val fileBrowserRequestGeneration = AtomicLong(0)
     private val fileStationMutationGeneration = AtomicLong(0)
     private val fileServerMutationGeneration = AtomicLong(0)
@@ -447,6 +449,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadActivityGeneration = AtomicLong(0)
     private val virtualMachineMutationGeneration = AtomicLong(0)
     private val virtualMachineOverviewRequestGeneration = AtomicLong(0)
+    private val virtualMachineGuestDetailsGeneration = AtomicLong(0)
     private val virtualMachineTaskPollingGeneration = AtomicLong(0)
     private val virtualMachineImageBrowserGeneration = AtomicLong(0)
     private val chatMutationGeneration = AtomicLong(0)
@@ -1079,6 +1082,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 } ?: Loadable.Idle,
                 virtualMachineMutationState = current.virtualMachineMutationState.copy(
                     selectedTab = VirtualMachineTab.MACHINES,
+                    guestDetailsTargetId = null,
+                    guestDetails = Loadable.Idle,
                 ),
                 nasPerformance = current.nasPerformance.copy(
                     selectedTab = NasSettingsTab.OVERVIEW,
@@ -1401,6 +1406,41 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     applyOpaqueDownloadTaskNavigation(request, task)
                 }
             }
+
+            is OpaqueWorkspaceTarget.VirtualMachineGuest -> {
+                val guestId = target.guestId.takeIf { it.isNotBlank() && it == it.trim() }
+                    ?: return OpaqueExternalNavigationResolution.REJECTED
+                val mutation = _workspace.value?.virtualMachineMutationState
+                    ?: return OpaqueExternalNavigationResolution.STALE
+                if (virtualMachineGuestExternalNavigationBlocked(mutation)) {
+                    return OpaqueExternalNavigationResolution.REJECTED
+                }
+                if (!request.repository.supportsOfficialVirtualMachineGuestDetails()) {
+                    return OpaqueExternalNavigationResolution.REJECTED
+                }
+                val details = try {
+                    request.repository.virtualMachineGuestDetails(guestId)
+                } catch (error: DsmFailure) {
+                    if (error.kind in setOf(
+                            DsmErrorKind.FEATURE_UNSUPPORTED,
+                            DsmErrorKind.INVALID_RESPONSE,
+                        )
+                    ) return OpaqueExternalNavigationResolution.REJECTED
+                    throw error
+                }
+                if (!opaqueExternalNavigationMatches(request)) {
+                    OpaqueExternalNavigationResolution.STALE
+                } else if (_workspace.value?.virtualMachineMutationState?.let(
+                        ::virtualMachineGuestExternalNavigationBlocked,
+                    ) != false
+                ) {
+                    OpaqueExternalNavigationResolution.REJECTED
+                } else if (details.resource.id != guestId || details.hardware.machineId != guestId) {
+                    OpaqueExternalNavigationResolution.REJECTED
+                } else {
+                    applyOpaqueVirtualMachineGuestNavigation(request, guestId, details)
+                }
+            }
         }
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
@@ -1577,6 +1617,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun applyOpaqueVirtualMachineGuestNavigation(
+        request: OpaqueExternalNavigationRequest,
+        guestId: String,
+        details: VirtualMachineGuestDetails,
+    ): OpaqueExternalNavigationResolution {
+        val prepared = prepareOpaqueObjectNavigation(request, Module.VIRTUAL_MACHINES)
+        if (prepared != OpaqueExternalNavigationResolution.APPLIED) return prepared
+        _workspace.update { current ->
+            current?.takeIf {
+                it.profile.id == request.profileId && repository === request.repository &&
+                    it.selectedModule == Module.VIRTUAL_MACHINES
+            }?.copy(
+                virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                    selectedTab = VirtualMachineTab.MACHINES,
+                    guestDetailsTargetId = guestId,
+                    guestDetails = Loadable.Ready(details),
+                ),
+            ) ?: current
+        }
+        return if (opaqueExternalNavigationMatches(request)) {
+            OpaqueExternalNavigationResolution.APPLIED
+        } else {
+            OpaqueExternalNavigationResolution.STALE
+        }
+    }
+
     /** 外部固定任务页仅在 VMM 模块和公开 Task.Info v1 都可用时进入。 */
     internal fun navigateToVirtualMachineTasks(): WorkspaceNavigationResult {
         val state = _workspace.value ?: return WorkspaceNavigationResult.DEFERRED
@@ -1638,6 +1704,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     internal fun selectVirtualMachineTab(tab: VirtualMachineTab) {
         val state = _workspace.value ?: return
         if (state.selectedModule != Module.VIRTUAL_MACHINES) return
+        if (state.virtualMachineMutationState.guestDetailsTargetId != null) {
+            closeVirtualMachineGuestDetails()
+        }
         if (state.virtualMachineMutationState.selectedTab == tab) {
             if (tab != VirtualMachineTab.TASKS) stopVirtualMachineTaskPolling()
             return
@@ -1664,6 +1733,82 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             )
         ) {
             startVirtualMachineTaskPolling(repo, current.profile.id)
+        }
+    }
+
+    internal fun openVirtualMachineGuestDetails(guestId: String): Boolean {
+        val id = guestId.trim().takeIf { it.isNotEmpty() } ?: return false
+        val state = _workspace.value ?: return false
+        val repo = repository ?: return false
+        if (state.selectedModule != Module.VIRTUAL_MACHINES ||
+            !repo.supportsOfficialVirtualMachineGuestDetails()
+        ) return false
+        cancelOpaqueExternalNavigation(consumePending = true)
+        loadVirtualMachineGuestDetails(repo, state.profile.id, id)
+        return true
+    }
+
+    internal fun retryVirtualMachineGuestDetails() {
+        val state = _workspace.value ?: return
+        val id = state.virtualMachineMutationState.guestDetailsTargetId ?: return
+        val repo = repository ?: return
+        loadVirtualMachineGuestDetails(repo, state.profile.id, id)
+    }
+
+    internal fun closeVirtualMachineGuestDetails() {
+        virtualMachineGuestDetailsGeneration.incrementAndGet()
+        virtualMachineGuestDetailsJob?.cancel()
+        virtualMachineGuestDetailsJob = null
+        _workspace.update { current ->
+            current?.copy(
+                virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                    guestDetailsTargetId = null,
+                    guestDetails = Loadable.Idle,
+                ),
+            )
+        }
+    }
+
+    private fun loadVirtualMachineGuestDetails(
+        repo: DsmRepository,
+        profileId: String,
+        guestId: String,
+    ) {
+        val generation = virtualMachineGuestDetailsGeneration.incrementAndGet()
+        virtualMachineGuestDetailsJob?.cancel()
+        _workspace.update { current ->
+            current?.takeIf {
+                repository === repo && it.profile.id == profileId &&
+                    it.selectedModule == Module.VIRTUAL_MACHINES
+            }?.copy(
+                virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                    selectedTab = VirtualMachineTab.MACHINES,
+                    guestDetailsTargetId = guestId,
+                    guestDetails = Loadable.Loading,
+                ),
+            ) ?: current
+        }
+        val job = viewModelScope.launch {
+            val value = runCatching { repo.virtualMachineGuestDetails(guestId) }
+                .fold(
+                    onSuccess = { Loadable.Ready(it) },
+                    onFailure = { Loadable.Failed(it.asDsmFailure()) },
+                )
+            _workspace.update { current ->
+                current?.takeIf {
+                    repository === repo && it.profile.id == profileId &&
+                        virtualMachineGuestDetailsGeneration.get() == generation &&
+                        it.virtualMachineMutationState.guestDetailsTargetId == guestId
+                }?.copy(
+                    virtualMachineMutationState = current.virtualMachineMutationState.copy(
+                        guestDetails = value,
+                    ),
+                ) ?: current
+            }
+        }
+        virtualMachineGuestDetailsJob = job
+        job.invokeOnCompletion {
+            if (virtualMachineGuestDetailsJob === job) virtualMachineGuestDetailsJob = null
         }
     }
 
@@ -1727,6 +1872,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             WorkspaceRoute.VirtualMachineTasks -> {
                 closeVirtualMachineTasks()
+                true
+            }
+            WorkspaceRoute.VirtualMachineGuestDetails -> {
+                closeVirtualMachineGuestDetails()
                 true
             }
             WorkspaceRoute.NasSettingsPerformance -> {
@@ -17056,6 +17205,20 @@ private fun WorkspaceState.pageLinkDestination(): WorkspacePageLinkDestination =
             virtualMachineMutationState.taskCleanupConfirmationRequested ||
             virtualMachineMutationState.target != null -> WorkspacePageLinkDestination.Unavailable
 
+        virtualMachineMutationState.guestDetailsTargetId != null -> {
+            val id = virtualMachineMutationState.guestDetailsTargetId
+            val details = virtualMachineMutationState.guestDetails as? Loadable.Ready
+            if (id == id.trim() && id.isNotEmpty() &&
+                details?.value?.resource?.id == id
+            ) {
+                WorkspacePageLinkDestination.Opaque(
+                    OpaqueWorkspaceTarget.VirtualMachineGuest(id),
+                )
+            } else {
+                WorkspacePageLinkDestination.Unavailable
+            }
+        }
+
         virtualMachineMutationState.selectedTab == VirtualMachineTab.TASKS -> {
             WorkspacePageLinkDestination.Fixed("lanstash://open/virtual-machines/tasks")
         }
@@ -17964,6 +18127,8 @@ internal fun WorkspaceState.workspaceRouteStack(): WorkspaceRouteStack =
         hasContainerRegistry = selectedModule == Module.CONTAINERS && containerRegistryVisible,
         hasVirtualMachineTasks = selectedModule == Module.VIRTUAL_MACHINES &&
             virtualMachineMutationState.selectedTab == VirtualMachineTab.TASKS,
+        hasVirtualMachineGuestDetails = selectedModule == Module.VIRTUAL_MACHINES &&
+            virtualMachineMutationState.guestDetailsTargetId != null,
         hasNasSettingsPerformance = selectedModule == Module.NAS_SETTINGS &&
             nasPerformance.selectedTab == NasSettingsTab.PERFORMANCE,
     )

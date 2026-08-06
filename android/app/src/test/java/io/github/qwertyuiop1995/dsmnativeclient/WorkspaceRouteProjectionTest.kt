@@ -185,6 +185,31 @@ class WorkspaceRouteProjectionTest {
         assertEquals(filesRoot, stalePerformance.entries)
     }
 
+    @Test
+    fun `不同VMM来宾只投影同一个详情路由且跨模块不泄漏`() {
+        fun routes(module: Module, guestId: String) = state(emptySet()).copy(
+            selectedModule = module,
+            virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                guestDetailsTargetId = guestId,
+            ),
+        ).workspaceRouteStack()
+
+        val first = routes(Module.VIRTUAL_MACHINES, "private-guest-a")
+        val second = routes(Module.VIRTUAL_MACHINES, "private-guest-b")
+        val stale = routes(Module.FILES, "private-guest-a")
+
+        assertEquals(first, second)
+        assertEquals(
+            listOf(
+                WorkspaceRoute.ModuleRoot(Module.VIRTUAL_MACHINES),
+                WorkspaceRoute.VirtualMachineGuestDetails,
+            ),
+            first.entries,
+        )
+        assertFalse(stale.entries.contains(WorkspaceRoute.VirtualMachineGuestDetails))
+        assertFalse(first.entries.toString().contains("private-guest"))
+    }
+
     private fun state(selectedPaths: Set<String>) = WorkspaceState(
         profile = NasProfile(
             id = "synthetic",

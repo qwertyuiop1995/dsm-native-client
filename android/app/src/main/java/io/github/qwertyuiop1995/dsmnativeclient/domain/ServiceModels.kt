@@ -84,6 +84,12 @@ data class VirtualMachineHardware(
     val networkInterfaces: List<VirtualMachineNetworkInterface>,
 )
 
+/** 公开 Guest.get v1 的最小只读详情投影。 */
+data class VirtualMachineGuestDetails(
+    val resource: ManagedResource,
+    val hardware: VirtualMachineHardware,
+)
+
 /** Synology 官方 Virtual Machine Manager 规格：每台虚拟机最多 8 块虚拟磁盘。 */
 const val MAX_VIRTUAL_MACHINE_DISKS = 8
 

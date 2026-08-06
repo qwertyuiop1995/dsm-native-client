@@ -48,6 +48,12 @@ sealed interface OpaqueWorkspaceTarget {
     data class DownloadTask(
         val taskId: String,
     ) : OpaqueWorkspaceTarget
+
+    @Serializable
+    @SerialName("virtual_machine_guest")
+    data class VirtualMachineGuest(
+        val guestId: String,
+    ) : OpaqueWorkspaceTarget
 }
 
 /**

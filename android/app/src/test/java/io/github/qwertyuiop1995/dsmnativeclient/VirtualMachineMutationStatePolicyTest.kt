@@ -25,6 +25,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VirtualMachineMutationStatePolicyTest {
+    @Test
+    fun `Guest 外链在 VMM 编辑确认和在途写流程活跃时拒绝`() {
+        assertFalse(virtualMachineGuestExternalNavigationBlocked(VirtualMachineMutationWorkspaceState()))
+        listOf(
+            VirtualMachineMutationWorkspaceState(creationEditorVisible = true),
+            VirtualMachineMutationWorkspaceState(imageImportEditorVisible = true),
+            VirtualMachineMutationWorkspaceState(settingsEditorVisible = true),
+            VirtualMachineMutationWorkspaceState(lifecycleConfirmationRequested = true),
+            VirtualMachineMutationWorkspaceState(taskCleanupConfirmationRequested = true),
+            VirtualMachineMutationWorkspaceState(mutationInProgress = true),
+            VirtualMachineMutationWorkspaceState(mutationRefreshInProgress = true),
+        ).forEach { state ->
+            assertTrue(virtualMachineGuestExternalNavigationBlocked(state))
+        }
+    }
+
     private val target = virtualMachineMutationTarget(
         profileId = "profile-a",
         kind = VirtualMachineMutationKind.SETTINGS,

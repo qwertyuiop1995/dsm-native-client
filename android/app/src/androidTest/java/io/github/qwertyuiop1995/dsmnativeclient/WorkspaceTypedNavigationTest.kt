@@ -533,6 +533,31 @@ class WorkspaceTypedNavigationTest {
     }
 
     @Test
+    fun VMM来宾详情通过系统返回清除详情并回到机器根页() {
+        val model = model()
+        val workspace = workspace(model)
+        workspace.value = syntheticWorkspace(selectedModule = Module.VIRTUAL_MACHINES).copy(
+            virtualMachineMutationState = VirtualMachineMutationWorkspaceState(
+                selectedTab = VirtualMachineTab.MACHINES,
+                guestDetailsTargetId = "synthetic-guest",
+                guestDetails = Loadable.Loading,
+            ),
+        )
+
+        assertEquals(
+            WorkspaceRoute.VirtualMachineGuestDetails,
+            workspace.value?.workspaceRouteStack()?.entries?.last(),
+        )
+        assertTrue(model.navigateUp())
+        assertEquals(null, workspace.value?.virtualMachineMutationState?.guestDetailsTargetId)
+        assertEquals(Loadable.Idle, workspace.value?.virtualMachineMutationState?.guestDetails)
+        assertEquals(
+            listOf(WorkspaceRoute.ModuleRoot(Module.VIRTUAL_MACHINES)),
+            workspace.value?.workspaceRouteStack()?.entries,
+        )
+    }
+
+    @Test
     fun 性能固定入口受Utilization能力门禁并通过系统返回回根页() {
         val model = model()
         val workspace = workspace(model)

@@ -40,7 +40,7 @@ class OpaqueWorkspaceRouteStoreModelTest {
     }
 
     @Test
-    fun `六类最小目标均可加密记录往返且不引入完整领域对象字段`() {
+    fun `七类最小目标均可加密记录往返且不引入完整领域对象字段`() {
         val json = Json { ignoreUnknownKeys = true }
         val targets = listOf(
             OpaqueWorkspaceTarget.FileDirectory("/share/Projects"),
@@ -49,6 +49,7 @@ class OpaqueWorkspaceRouteStoreModelTest {
             OpaqueWorkspaceTarget.PhotoViewer("shared", "/photo/Trips/photo.jpg"),
             OpaqueWorkspaceTarget.ChatConversation("conversation-a"),
             OpaqueWorkspaceTarget.DownloadTask("task-a"),
+            OpaqueWorkspaceTarget.VirtualMachineGuest("guest-a"),
         )
 
         targets.forEachIndexed { index, target ->
